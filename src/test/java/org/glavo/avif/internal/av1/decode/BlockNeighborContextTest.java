@@ -261,10 +261,10 @@ final class BlockNeighborContextTest {
         BlockPosition position = new BlockPosition(4, 4);
         BlockNeighborContext.ProvisionalInterModeContext singleContext =
                 context.provisionalInterModeContext(position, false, 0, -1);
-        assertEquals(1, singleContext.singleNewMvContext());
+        assertEquals(5, singleContext.singleNewMvContext());
         assertEquals(0, singleContext.singleGlobalMvContext());
-        assertEquals(1, singleContext.singleReferenceMvContext());
-        assertEquals(1, singleContext.compoundInterModeContext());
+        assertEquals(5, singleContext.singleReferenceMvContext());
+        assertEquals(7, singleContext.compoundInterModeContext());
         assertEquals(4, singleContext.candidateCount());
         assertEquals(640, singleContext.candidateWeight(0));
         assertEquals(640, singleContext.candidateWeight(1));
@@ -285,10 +285,10 @@ final class BlockNeighborContextTest {
 
         BlockNeighborContext.ProvisionalInterModeContext compoundContext =
                 context.provisionalInterModeContext(position, true, 0, 4);
-        assertEquals(1, compoundContext.singleNewMvContext());
+        assertEquals(5, compoundContext.singleNewMvContext());
         assertEquals(0, compoundContext.singleGlobalMvContext());
-        assertEquals(1, compoundContext.singleReferenceMvContext());
-        assertEquals(1, compoundContext.compoundInterModeContext());
+        assertEquals(5, compoundContext.singleReferenceMvContext());
+        assertEquals(7, compoundContext.compoundInterModeContext());
         assertEquals(4, compoundContext.candidateCount());
         assertEquals(640, compoundContext.candidateWeight(0));
         assertEquals(640, compoundContext.candidateWeight(1));
@@ -308,6 +308,85 @@ final class BlockNeighborContextTest {
         assertEquals(0, compoundContext.drlContext(0));
         assertEquals(1, compoundContext.drlContext(1));
         assertEquals(2, compoundContext.drlContext(2));
+    }
+
+    /// Verifies that direct matching neighbors carrying `NEWMV` lower the `newmv` syntax context.
+    @Test
+    void provisionalInterModeContextsTrackNewMvMatches() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(4, 0),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                org.glavo.avif.internal.av1.model.SingleInterPredictionMode.NEWMV,
+                null,
+                1,
+                InterMotionVector.resolved(new MotionVector(8, -4)),
+                null,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(0, 4),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                4,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(12, 4)),
+                InterMotionVector.predicted(new MotionVector(-8, 16)),
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext singleContext =
+                context.provisionalInterModeContext(new BlockPosition(4, 4), false, 0, -1);
+
+        assertEquals(4, singleContext.singleNewMvContext());
+        assertEquals(5, singleContext.singleReferenceMvContext());
+        assertEquals(7, singleContext.compoundInterModeContext());
     }
 
     /// Verifies inter-frame initialization starts with non-intra neighbors.

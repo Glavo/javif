@@ -84,6 +84,12 @@ public final class BlockNeighborContext {
     /// The left-edge secondary motion vectors indexed in 4x4 units.
     private final InterMotionVector[] leftMotionVector1;
 
+    /// The above-edge `NEWMV` usage flags indexed in 4x4 units.
+    private final byte[] aboveUsesNewMotionVector;
+
+    /// The left-edge `NEWMV` usage flags indexed in 4x4 units.
+    private final byte[] leftUsesNewMotionVector;
+
     /// The above-edge segmentation-prediction flags indexed in 4x4 units.
     private final byte[] aboveSegmentPredicted;
 
@@ -146,6 +152,8 @@ public final class BlockNeighborContext {
     /// @param leftMotionVector0 the left-edge primary motion vectors indexed in 4x4 units
     /// @param aboveMotionVector1 the above-edge secondary motion vectors indexed in 4x4 units
     /// @param leftMotionVector1 the left-edge secondary motion vectors indexed in 4x4 units
+    /// @param aboveUsesNewMotionVector the above-edge `NEWMV` usage flags indexed in 4x4 units
+    /// @param leftUsesNewMotionVector the left-edge `NEWMV` usage flags indexed in 4x4 units
     /// @param aboveSegmentPredicted the above-edge segmentation-prediction flags indexed in 4x4 units
     /// @param leftSegmentPredicted the left-edge segmentation-prediction flags indexed in 4x4 units
     /// @param aboveSegmentId the above-edge segment identifiers indexed in 4x4 units
@@ -179,6 +187,8 @@ public final class BlockNeighborContext {
             InterMotionVector[] leftMotionVector0,
             InterMotionVector[] aboveMotionVector1,
             InterMotionVector[] leftMotionVector1,
+            byte[] aboveUsesNewMotionVector,
+            byte[] leftUsesNewMotionVector,
             byte[] aboveSegmentPredicted,
             byte[] leftSegmentPredicted,
             byte[] aboveSegmentId,
@@ -212,6 +222,8 @@ public final class BlockNeighborContext {
         this.leftMotionVector0 = Objects.requireNonNull(leftMotionVector0, "leftMotionVector0");
         this.aboveMotionVector1 = Objects.requireNonNull(aboveMotionVector1, "aboveMotionVector1");
         this.leftMotionVector1 = Objects.requireNonNull(leftMotionVector1, "leftMotionVector1");
+        this.aboveUsesNewMotionVector = Objects.requireNonNull(aboveUsesNewMotionVector, "aboveUsesNewMotionVector");
+        this.leftUsesNewMotionVector = Objects.requireNonNull(leftUsesNewMotionVector, "leftUsesNewMotionVector");
         this.aboveSegmentPredicted = Objects.requireNonNull(aboveSegmentPredicted, "aboveSegmentPredicted");
         this.leftSegmentPredicted = Objects.requireNonNull(leftSegmentPredicted, "leftSegmentPredicted");
         this.aboveSegmentId = Objects.requireNonNull(aboveSegmentId, "aboveSegmentId");
@@ -287,6 +299,8 @@ public final class BlockNeighborContext {
                 leftMotionVector0,
                 aboveMotionVector1,
                 leftMotionVector1,
+                new byte[tileWidth4],
+                new byte[tileHeight4],
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 new byte[tileWidth4],
@@ -565,10 +579,9 @@ public final class BlockNeighborContext {
 
     /// Builds a provisional inter-mode syntax context from already-decoded top and left neighbors.
     ///
-    /// This helper intentionally does not implement the full AV1 `refmvs` stack. Instead it
-    /// derives stable, bounded syntax contexts and a small provisional candidate-weight stack from
-    /// the currently available neighbor references, which is sufficient for early block-header
-    /// parsing before full motion-vector candidate derivation is implemented.
+    /// This helper intentionally implements only the direct-neighbor subset of AV1 `refmvs`.
+    /// It derives stable syntax contexts and a bounded candidate-weight stack from already-decoded
+    /// top and left neighbors, while still omitting the larger temporal and secondary scans.
     ///
     /// @param position the current block position
     /// @param compoundReference whether the current block uses compound references
@@ -594,10 +607,8 @@ public final class BlockNeighborContext {
 
         int x4 = nonNullPosition.x4();
         int y4 = nonNullPosition.y4();
-        int exactMatches = 0;
-        int partialMatches = 0;
-        int interNeighborCount = 0;
-        int compoundNeighborCount = 0;
+        int directReferenceMatches = 0;
+        boolean haveNewMotionVectorMatch = false;
         ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates =
                 new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[]{
                 new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
@@ -616,6 +627,14 @@ public final class BlockNeighborContext {
             int neighborReferenceFrame0 = aboveReferenceFrame0[x4];
             int neighborReferenceFrame1 = aboveReferenceFrame1[x4];
             boolean neighborCompound = aboveCompoundReference[x4] != 0;
+            boolean referenceMatch = sharesAnyReference(
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    neighborCompound,
+                    neighborReferenceFrame0,
+                    neighborReferenceFrame1
+            );
             int baseWeight = provisionalNeighborWeight(
                     compoundReference,
                     referenceFrame0,
@@ -639,20 +658,23 @@ public final class BlockNeighborContext {
                             baseWeight
                     )
             );
-            interNeighborCount++;
-            if (neighborCompound) {
-                compoundNeighborCount++;
-            }
-            if (baseWeight >= 640) {
-                exactMatches++;
-            } else if (baseWeight >= 384) {
-                partialMatches++;
+            if (referenceMatch) {
+                directReferenceMatches++;
+                haveNewMotionVectorMatch |= aboveUsesNewMotionVector[x4] != 0;
             }
         }
         if (hasLeftNeighbor(nonNullPosition) && leftIntra[y4] == 0) {
             int neighborReferenceFrame0 = leftReferenceFrame0[y4];
             int neighborReferenceFrame1 = leftReferenceFrame1[y4];
             boolean neighborCompound = leftCompoundReference[y4] != 0;
+            boolean referenceMatch = sharesAnyReference(
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    neighborCompound,
+                    neighborReferenceFrame0,
+                    neighborReferenceFrame1
+            );
             int baseWeight = provisionalNeighborWeight(
                     compoundReference,
                     referenceFrame0,
@@ -676,73 +698,20 @@ public final class BlockNeighborContext {
                             baseWeight
                     )
             );
-            interNeighborCount++;
-            if (neighborCompound) {
-                compoundNeighborCount++;
-            }
-            if (baseWeight >= 640) {
-                exactMatches++;
-            } else if (baseWeight >= 384) {
-                partialMatches++;
+            if (referenceMatch) {
+                directReferenceMatches++;
+                haveNewMotionVectorMatch |= leftUsesNewMotionVector[y4] != 0;
             }
         }
 
         sortDescending(candidates, candidateCount);
-
-        int singleNewMvContext;
-        if (exactMatches >= 2) {
-            singleNewMvContext = 0;
-        } else if (exactMatches == 1) {
-            singleNewMvContext = partialMatches > 0 ? 1 : 2;
-        } else if (partialMatches >= 2) {
-            singleNewMvContext = 3;
-        } else if (partialMatches == 1) {
-            singleNewMvContext = 4;
-        } else {
-            singleNewMvContext = 5;
-        }
-
-        int singleGlobalMvContext = exactMatches > 0 ? 0 : 1;
-
-        int singleReferenceMvContext;
-        if (exactMatches >= 2) {
-            singleReferenceMvContext = 0;
-        } else if (exactMatches == 1) {
-            singleReferenceMvContext = 1;
-        } else if (partialMatches >= 2) {
-            singleReferenceMvContext = 2;
-        } else if (partialMatches == 1) {
-            singleReferenceMvContext = 3;
-        } else if (interNeighborCount > 0) {
-            singleReferenceMvContext = 4;
-        } else {
-            singleReferenceMvContext = 5;
-        }
-
-        int compoundInterModeContext;
-        if (exactMatches >= 2) {
-            compoundInterModeContext = 0;
-        } else if (exactMatches == 1 && partialMatches > 0) {
-            compoundInterModeContext = 1;
-        } else if (exactMatches == 1) {
-            compoundInterModeContext = 2;
-        } else if (compoundNeighborCount >= 2) {
-            compoundInterModeContext = 3;
-        } else if (compoundNeighborCount == 1 && partialMatches > 0) {
-            compoundInterModeContext = 4;
-        } else if (partialMatches >= 2) {
-            compoundInterModeContext = 5;
-        } else if (partialMatches == 1 || interNeighborCount > 0) {
-            compoundInterModeContext = 6;
-        } else {
-            compoundInterModeContext = 7;
-        }
+        RefMvsContextSummary refMvsContextSummary = summarizeDirectRefMvsContexts(directReferenceMatches, haveNewMotionVectorMatch);
 
         return new ProvisionalInterModeContext(
-                singleNewMvContext,
-                singleGlobalMvContext,
-                singleReferenceMvContext,
-                compoundInterModeContext,
+                refMvsContextSummary.singleNewMvContext(),
+                refMvsContextSummary.singleGlobalMvContext(),
+                refMvsContextSummary.singleReferenceMvContext(),
+                refMvsContextSummary.compoundInterModeContext(),
                 Arrays.copyOf(candidates, candidateCount)
         );
     }
@@ -898,6 +867,7 @@ public final class BlockNeighborContext {
         byte referenceFrame1 = (byte) nonNullHeader.referenceFrame1();
         InterMotionVector motionVector0 = fallbackMotionVector(nonNullHeader.motionVector0());
         InterMotionVector motionVector1 = fallbackMotionVector(nonNullHeader.motionVector1());
+        byte usesNewMotionVector = (byte) (usesNewMotionVector(nonNullHeader) ? 1 : 0);
         LumaIntraPredictionMode mode = nonNullHeader.intra() ? nonNullHeader.yMode() : LumaIntraPredictionMode.DC;
         int endX4 = Math.min(tileWidth4, position.x4() + size.width4());
         int endY4 = Math.min(tileHeight4, position.y4() + size.height4());
@@ -910,6 +880,7 @@ public final class BlockNeighborContext {
             aboveReferenceFrame1[x4] = referenceFrame1;
             aboveMotionVector0[x4] = motionVector0;
             aboveMotionVector1[x4] = motionVector1;
+            aboveUsesNewMotionVector[x4] = usesNewMotionVector;
             aboveSegmentPredicted[x4] = segmentPredicted;
             aboveSegmentId[x4] = segmentId;
             abovePaletteSize[x4] = paletteSize;
@@ -931,6 +902,7 @@ public final class BlockNeighborContext {
             leftReferenceFrame1[y4] = referenceFrame1;
             leftMotionVector0[y4] = motionVector0;
             leftMotionVector1[y4] = motionVector1;
+            leftUsesNewMotionVector[y4] = usesNewMotionVector;
             leftSegmentPredicted[y4] = segmentPredicted;
             leftSegmentId[y4] = segmentId;
             leftPaletteSize[y4] = paletteSize;
@@ -951,6 +923,24 @@ public final class BlockNeighborContext {
     /// @return one stored edge motion vector, falling back to a provisional zero vector
     private static InterMotionVector fallbackMotionVector(@Nullable InterMotionVector motionVector) {
         return motionVector != null ? motionVector : InterMotionVector.predicted(MotionVector.zero());
+    }
+
+    /// Returns whether one decoded block used any `NEWMV`-carrying inter mode.
+    ///
+    /// @param header the decoded block header
+    /// @return whether the decoded block used any `NEWMV`-carrying inter mode
+    private static boolean usesNewMotionVector(TileBlockHeaderReader.BlockHeader header) {
+        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
+        if (nonNullHeader.singleInterMode() != null) {
+            return nonNullHeader.singleInterMode() == org.glavo.avif.internal.av1.model.SingleInterPredictionMode.NEWMV;
+        }
+        if (nonNullHeader.compoundInterMode() == null) {
+            return false;
+        }
+        return switch (nonNullHeader.compoundInterMode()) {
+            case NEARESTMV_NEARESTMV, NEARMV_NEARMV, GLOBALMV_GLOBALMV -> false;
+            case NEARESTMV_NEWMV, NEWMV_NEARESTMV, NEARMV_NEWMV, NEWMV_NEARMV, NEWMV_NEWMV -> true;
+        };
     }
 
     /// Returns whether one stored neighbor uses a unidirectional compound reference pair.
@@ -1232,6 +1222,44 @@ public final class BlockNeighborContext {
     /// @return `0` for forward references and `1` for backward references
     private static int referenceDirection(int referenceFrame) {
         return referenceFrame >= 4 ? 1 : 0;
+    }
+
+    /// Summarizes the direct-neighbor subset of AV1 `refmvs` syntax contexts.
+    ///
+    /// This summary mirrors `dav1d_refmvs_find()`'s direct-neighbor `nearest_match` / `have_newmv`
+    /// handling without yet implementing the larger temporal and secondary scans.
+    ///
+    /// @param directReferenceMatches the number of direct top/left neighbors that share a requested reference
+    /// @param haveNewMotionVectorMatch whether any direct matching neighbor used a `NEWMV`-carrying mode
+    /// @return the summarized direct-neighbor subset of AV1 `refmvs` syntax contexts
+    private static RefMvsContextSummary summarizeDirectRefMvsContexts(
+            int directReferenceMatches,
+            boolean haveNewMotionVectorMatch
+    ) {
+        int referenceMatchCount = directReferenceMatches;
+        int refmvContext;
+        int newmvContext;
+        switch (directReferenceMatches) {
+            case 0 -> {
+                refmvContext = Math.min(2, referenceMatchCount);
+                newmvContext = referenceMatchCount > 0 ? 1 : 0;
+            }
+            case 1 -> {
+                refmvContext = Math.min(referenceMatchCount * 3, 4);
+                newmvContext = 3 - (haveNewMotionVectorMatch ? 1 : 0);
+            }
+            default -> {
+                refmvContext = 5;
+                newmvContext = 5 - (haveNewMotionVectorMatch ? 1 : 0);
+            }
+        }
+
+        int compoundInterModeContext = switch (refmvContext >> 1) {
+            case 0 -> Math.min(newmvContext, 1);
+            case 1 -> 1 + Math.min(newmvContext, 3);
+            default -> Math.max(4, Math.min(7, 3 + newmvContext));
+        };
+        return new RefMvsContextSummary(newmvContext, 0, refmvContext, compoundInterModeContext);
     }
 
     /// Updates the partition edge state after a non-deferred partition decision.
@@ -1519,6 +1547,68 @@ public final class BlockNeighborContext {
             private ProvisionalMotionVectorCandidate withWeight(int newWeight) {
                 return new ProvisionalMotionVectorCandidate(newWeight, motionVector0, motionVector1, synthetic);
             }
+        }
+    }
+
+    /// The direct-neighbor subset of AV1 `refmvs` syntax contexts.
+    @NotNullByDefault
+    private static final class RefMvsContextSummary {
+        /// The zero-based `newmv` context index in `[0, 6)`.
+        private final int singleNewMvContext;
+
+        /// The zero-based `globalmv` context index in `[0, 2)`.
+        private final int singleGlobalMvContext;
+
+        /// The zero-based `refmv` context index in `[0, 6)`.
+        private final int singleReferenceMvContext;
+
+        /// The zero-based compound inter-mode context index in `[0, 8)`.
+        private final int compoundInterModeContext;
+
+        /// Creates one direct-neighbor `refmvs` syntax context summary.
+        ///
+        /// @param singleNewMvContext the zero-based `newmv` context index in `[0, 6)`
+        /// @param singleGlobalMvContext the zero-based `globalmv` context index in `[0, 2)`
+        /// @param singleReferenceMvContext the zero-based `refmv` context index in `[0, 6)`
+        /// @param compoundInterModeContext the zero-based compound inter-mode context index in `[0, 8)`
+        private RefMvsContextSummary(
+                int singleNewMvContext,
+                int singleGlobalMvContext,
+                int singleReferenceMvContext,
+                int compoundInterModeContext
+        ) {
+            this.singleNewMvContext = singleNewMvContext;
+            this.singleGlobalMvContext = singleGlobalMvContext;
+            this.singleReferenceMvContext = singleReferenceMvContext;
+            this.compoundInterModeContext = compoundInterModeContext;
+        }
+
+        /// Returns the zero-based `newmv` context index in `[0, 6)`.
+        ///
+        /// @return the zero-based `newmv` context index in `[0, 6)`
+        public int singleNewMvContext() {
+            return singleNewMvContext;
+        }
+
+        /// Returns the zero-based `globalmv` context index in `[0, 2)`.
+        ///
+        /// @return the zero-based `globalmv` context index in `[0, 2)`
+        public int singleGlobalMvContext() {
+            return singleGlobalMvContext;
+        }
+
+        /// Returns the zero-based `refmv` context index in `[0, 6)`.
+        ///
+        /// @return the zero-based `refmv` context index in `[0, 6)`
+        public int singleReferenceMvContext() {
+            return singleReferenceMvContext;
+        }
+
+        /// Returns the zero-based compound inter-mode context index in `[0, 8)`.
+        ///
+        /// @return the zero-based compound inter-mode context index in `[0, 8)`
+        public int compoundInterModeContext() {
+            return compoundInterModeContext;
         }
     }
 
