@@ -128,11 +128,50 @@ public final class FrameAssembly {
         return tileGroups.size();
     }
 
+    /// Returns the number of tiles collected so far across all tile groups.
+    ///
+    /// @return the number of tiles collected so far across all tile groups
+    public int collectedTileCount() {
+        return nextTileIndex;
+    }
+
     /// Returns a snapshot of the collected tile groups.
     ///
     /// @return a snapshot of the collected tile groups
     public TileGroup[] tileGroups() {
         return tileGroups.toArray(new TileGroup[0]);
+    }
+
+    /// Returns the collected tile bitstreams in frame order.
+    ///
+    /// @return the collected tile bitstreams in frame order
+    public TileBitstream[] collectedTiles() {
+        TileBitstream[] tiles = new TileBitstream[nextTileIndex];
+        int outputIndex = 0;
+        for (TileGroup tileGroup : tileGroups) {
+            for (TileBitstream tile : tileGroup.tiles) {
+                tiles[outputIndex++] = tile;
+            }
+        }
+        return tiles;
+    }
+
+    /// Returns a collected tile bitstream by tile index.
+    ///
+    /// @param tileIndex the zero-based tile index within the frame
+    /// @return the collected tile bitstream
+    public TileBitstream tileBitstream(int tileIndex) {
+        if (tileIndex < 0 || tileIndex >= nextTileIndex) {
+            throw new IllegalArgumentException("Tile index out of collected range: " + tileIndex);
+        }
+        for (TileGroup tileGroup : tileGroups) {
+            for (TileBitstream tile : tileGroup.tiles) {
+                if (tile.tileIndex() == tileIndex) {
+                    return tile;
+                }
+            }
+        }
+        throw new IllegalStateException("Collected tile index was not found: " + tileIndex);
     }
 
     /// Appends tile-group metadata and advances the expected tile cursor.
