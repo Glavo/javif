@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Reader for one leaf block header inside a tile partition tree.
@@ -105,6 +106,9 @@ public final class TileBlockHeaderReader {
         @Nullable UvIntraPredictionMode uvMode = null;
         int yPaletteSize = 0;
         int uvPaletteSize = 0;
+        int[] yPaletteColors = new int[0];
+        int[] uPaletteColors = new int[0];
+        int[] vPaletteColors = new int[0];
         @Nullable FilterIntraMode filterIntraMode = null;
         int yAngle = 0;
         int uvAngle = 0;
@@ -145,11 +149,14 @@ public final class TileBlockHeaderReader {
                             + (nonNullNeighborContext.leftPaletteSize(nonNullPosition.y4()) > 0 ? 1 : 0);
                     if (syntaxReader.readUseLumaPalette(paletteSizeContext, paletteContext)) {
                         yPaletteSize = syntaxReader.readPaletteSize(0, paletteSizeContext);
+                        yPaletteColors = readPalettePlane(0, yPaletteSize, nonNullPosition, nonNullNeighborContext);
                     }
                 }
                 if (hasChroma && uvMode == UvIntraPredictionMode.DC
                         && syntaxReader.readUseChromaPalette(yPaletteSize > 0 ? 1 : 0)) {
                     uvPaletteSize = syntaxReader.readPaletteSize(1, paletteSizeContext);
+                    uPaletteColors = readPalettePlane(1, uvPaletteSize, nonNullPosition, nonNullNeighborContext);
+                    vPaletteColors = readChromaVPalette(uvPaletteSize);
                 }
             }
             if (yPaletteSize == 0 && allowsFilterIntra(nonNullSize, yMode) && syntaxReader.readUseFilterIntra(nonNullSize)) {
@@ -170,6 +177,9 @@ public final class TileBlockHeaderReader {
                 uvMode,
                 yPaletteSize,
                 uvPaletteSize,
+                yPaletteColors,
+                uPaletteColors,
+                vPaletteColors,
                 filterIntraMode,
                 yAngle,
                 uvAngle,
@@ -227,6 +237,188 @@ public final class TileBlockHeaderReader {
         return tileContext.frameHeader().allowScreenContentTools()
                 && Math.max(size.width4(), size.height4()) <= 16
                 && size.width4() + size.height4() >= 4;
+    }
+
+    /// Decodes one sorted palette plane using the current above/left palette cache.
+    ///
+    /// AV1 palette entries for luma and U chroma reuse cached sorted entries from left and above
+    /// neighbors, then merge any newly coded values into a final sorted palette.
+    ///
+    /// @param plane the palette plane index, where `0` is Y and `1` is U
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @param position the local tile-relative block origin
+    /// @param neighborContext the mutable neighbor context that supplies palette caches
+    /// @return the decoded sorted palette entries
+    private int[] readPalettePlane(
+            int plane,
+            int paletteSize,
+            BlockPosition position,
+            BlockNeighborContext neighborContext
+    ) {
+        int x4 = position.x4();
+        int y4 = position.y4();
+        int leftCacheSize = plane == 0 ? neighborContext.leftPaletteSize(y4) : neighborContext.leftChromaPaletteSize(y4);
+        int aboveCacheSize = canReuseAbovePaletteCache(position)
+                ? plane == 0 ? neighborContext.abovePaletteSize(x4) : neighborContext.aboveChromaPaletteSize(x4)
+                : 0;
+        int[] cache = new int[16];
+        int cacheSize = mergePaletteCache(cache, plane, x4, y4, leftCacheSize, aboveCacheSize, neighborContext);
+        int[] usedCache = new int[8];
+        int usedCacheSize = 0;
+        for (int i = 0; i < cacheSize && usedCacheSize < paletteSize; i++) {
+            if (tileContext.msacDecoder().decodeBooleanEqui()) {
+                usedCache[usedCacheSize++] = cache[i];
+            }
+        }
+
+        int[] palette = new int[paletteSize];
+        int insertIndex = usedCacheSize;
+        if (insertIndex < paletteSize) {
+            int bitDepth = tileContext.sequenceHeader().colorConfig().bitDepth();
+            int max = (1 << bitDepth) - 1;
+            int step = plane == 0 ? 1 : 0;
+            int previous = tileContext.msacDecoder().decodeBools(bitDepth);
+            palette[insertIndex++] = previous;
+            if (insertIndex < paletteSize) {
+                int bits = bitDepth - 3 + tileContext.msacDecoder().decodeBools(2);
+                while (insertIndex < paletteSize) {
+                    int delta = tileContext.msacDecoder().decodeBools(bits);
+                    previous = Math.min(previous + delta + step, max);
+                    palette[insertIndex++] = previous;
+                    if (previous + step >= max) {
+                        Arrays.fill(palette, insertIndex, paletteSize, max);
+                        break;
+                    }
+                    bits = Math.min(bits, bitWidth(max - previous - step));
+                }
+            }
+        }
+
+        if (usedCacheSize == 0) {
+            return palette;
+        }
+
+        if (usedCacheSize == paletteSize) {
+            return Arrays.copyOf(usedCache, usedCacheSize);
+        }
+
+        int[] merged = new int[paletteSize];
+        int usedIndex = 0;
+        int newIndex = usedCacheSize;
+        for (int i = 0; i < paletteSize; i++) {
+            if (usedIndex < usedCacheSize && (newIndex >= paletteSize || usedCache[usedIndex] <= palette[newIndex])) {
+                merged[i] = usedCache[usedIndex++];
+            } else {
+                merged[i] = palette[newIndex++];
+            }
+        }
+        return merged;
+    }
+
+    /// Decodes one V chroma palette using the AV1 explicit chroma-V coding rules.
+    ///
+    /// @param paletteSize the decoded chroma palette size in `[2, 8]`
+    /// @return the decoded V chroma palette entries
+    private int[] readChromaVPalette(int paletteSize) {
+        int[] palette = new int[paletteSize];
+        int bitDepth = tileContext.sequenceHeader().colorConfig().bitDepth();
+        int max = (1 << bitDepth) - 1;
+        if (tileContext.msacDecoder().decodeBooleanEqui()) {
+            int bits = bitDepth - 4 + tileContext.msacDecoder().decodeBools(2);
+            int previous = tileContext.msacDecoder().decodeBools(bitDepth);
+            palette[0] = previous;
+            for (int i = 1; i < paletteSize; i++) {
+                int delta = tileContext.msacDecoder().decodeBools(bits);
+                if (delta != 0 && tileContext.msacDecoder().decodeBooleanEqui()) {
+                    delta = -delta;
+                }
+                previous = (previous + delta) & max;
+                palette[i] = previous;
+            }
+        } else {
+            for (int i = 0; i < paletteSize; i++) {
+                palette[i] = tileContext.msacDecoder().decodeBools(bitDepth);
+            }
+        }
+        return palette;
+    }
+
+    /// Returns whether the above palette cache may be reused for the supplied block position.
+    ///
+    /// AV1 does not reuse the above palette cache across 64x64 superblock row boundaries.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @return whether the above palette cache may be reused for the supplied block position
+    private boolean canReuseAbovePaletteCache(BlockPosition position) {
+        int frameY4 = (tileContext.startY() >> 2) + position.y4();
+        return (frameY4 & 15) != 0;
+    }
+
+    /// Merges the current left and above palette caches into one sorted unique cache.
+    ///
+    /// @param destination the destination array that receives the merged cache
+    /// @param plane the palette plane index, where `0` is Y and `1` is U
+    /// @param x4 the local X coordinate in 4x4 units
+    /// @param y4 the local Y coordinate in 4x4 units
+    /// @param leftCacheSize the left-edge palette size
+    /// @param aboveCacheSize the above-edge palette size
+    /// @param neighborContext the neighbor context that owns the palette caches
+    /// @return the merged cache size written into `destination`
+    private static int mergePaletteCache(
+            int[] destination,
+            int plane,
+            int x4,
+            int y4,
+            int leftCacheSize,
+            int aboveCacheSize,
+            BlockNeighborContext neighborContext
+    ) {
+        int leftIndex = 0;
+        int aboveIndex = 0;
+        int cacheSize = 0;
+        while (leftIndex < leftCacheSize && aboveIndex < aboveCacheSize) {
+            int left = neighborContext.leftPaletteEntry(plane, y4, leftIndex);
+            int above = neighborContext.abovePaletteEntry(plane, x4, aboveIndex);
+            if (left < above) {
+                cacheSize = appendUnique(destination, cacheSize, left);
+                leftIndex++;
+            } else {
+                if (above == left) {
+                    leftIndex++;
+                }
+                cacheSize = appendUnique(destination, cacheSize, above);
+                aboveIndex++;
+            }
+        }
+        while (leftIndex < leftCacheSize) {
+            cacheSize = appendUnique(destination, cacheSize, neighborContext.leftPaletteEntry(plane, y4, leftIndex++));
+        }
+        while (aboveIndex < aboveCacheSize) {
+            cacheSize = appendUnique(destination, cacheSize, neighborContext.abovePaletteEntry(plane, x4, aboveIndex++));
+        }
+        return cacheSize;
+    }
+
+    /// Appends one value to a sorted unique cache when it differs from the previous entry.
+    ///
+    /// @param destination the destination sorted unique cache
+    /// @param size the current number of written entries
+    /// @param value the next candidate palette value
+    /// @return the updated number of written entries
+    private static int appendUnique(int[] destination, int size, int value) {
+        if (size == 0 || destination[size - 1] != value) {
+            destination[size] = value;
+            return size + 1;
+        }
+        return size;
+    }
+
+    /// Returns the minimum bit width needed to code a positive unsigned integer range.
+    ///
+    /// @param value the positive unsigned integer range
+    /// @return the minimum bit width needed to code the supplied range
+    private static int bitWidth(int value) {
+        return Integer.SIZE - Integer.numberOfLeadingZeros(value);
     }
 
     /// Returns whether filter-intra syntax is available for the supplied block.
@@ -379,6 +571,15 @@ public final class TileBlockHeaderReader {
         /// The decoded chroma palette size in `[0, 8]`, or `0` when palette mode is disabled.
         private final int uvPaletteSize;
 
+        /// The decoded luma palette entries, or an empty array when palette mode is disabled.
+        private final int[] yPaletteColors;
+
+        /// The decoded U chroma palette entries, or an empty array when palette mode is disabled.
+        private final int[] uPaletteColors;
+
+        /// The decoded V chroma palette entries, or an empty array when palette mode is disabled.
+        private final int[] vPaletteColors;
+
         /// The decoded filter-intra mode, or `null` when filter intra is disabled.
         private final @Nullable FilterIntraMode filterIntraMode;
 
@@ -408,6 +609,9 @@ public final class TileBlockHeaderReader {
         /// @param uvMode the decoded chroma intra prediction mode, or `null`
         /// @param yPaletteSize the decoded luma palette size in `[0, 8]`, or `0`
         /// @param uvPaletteSize the decoded chroma palette size in `[0, 8]`, or `0`
+        /// @param yPaletteColors the decoded luma palette entries, or an empty array
+        /// @param uPaletteColors the decoded U chroma palette entries, or an empty array
+        /// @param vPaletteColors the decoded V chroma palette entries, or an empty array
         /// @param filterIntraMode the decoded filter-intra mode, or `null`
         /// @param yAngle the decoded signed luma angle delta in `[-3, 3]`
         /// @param uvAngle the decoded signed chroma angle delta in `[-3, 3]`
@@ -426,6 +630,9 @@ public final class TileBlockHeaderReader {
                 @Nullable UvIntraPredictionMode uvMode,
                 int yPaletteSize,
                 int uvPaletteSize,
+                int[] yPaletteColors,
+                int[] uPaletteColors,
+                int[] vPaletteColors,
                 @Nullable FilterIntraMode filterIntraMode,
                 int yAngle,
                 int uvAngle,
@@ -444,11 +651,23 @@ public final class TileBlockHeaderReader {
             this.uvMode = uvMode;
             this.yPaletteSize = yPaletteSize;
             this.uvPaletteSize = uvPaletteSize;
+            this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
+            this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
+            this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
             this.filterIntraMode = filterIntraMode;
             this.yAngle = yAngle;
             this.uvAngle = uvAngle;
             this.cflAlphaU = cflAlphaU;
             this.cflAlphaV = cflAlphaV;
+            if (this.yPaletteColors.length != yPaletteSize) {
+                throw new IllegalArgumentException("yPaletteColors length does not match yPaletteSize");
+            }
+            if (this.uPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("uPaletteColors length does not match uvPaletteSize");
+            }
+            if (this.vPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
+            }
         }
 
         /// Returns the local tile-relative block origin.
@@ -533,6 +752,27 @@ public final class TileBlockHeaderReader {
         /// @return the decoded chroma palette size in `[0, 8]`, or `0`
         public int uvPaletteSize() {
             return uvPaletteSize;
+        }
+
+        /// Returns the decoded luma palette entries, or an empty array when palette mode is disabled.
+        ///
+        /// @return the decoded luma palette entries, or an empty array
+        public int[] yPaletteColors() {
+            return Arrays.copyOf(yPaletteColors, yPaletteColors.length);
+        }
+
+        /// Returns the decoded U chroma palette entries, or an empty array when palette mode is disabled.
+        ///
+        /// @return the decoded U chroma palette entries, or an empty array
+        public int[] uPaletteColors() {
+            return Arrays.copyOf(uPaletteColors, uPaletteColors.length);
+        }
+
+        /// Returns the decoded V chroma palette entries, or an empty array when palette mode is disabled.
+        ///
+        /// @return the decoded V chroma palette entries, or an empty array
+        public int[] vPaletteColors() {
+            return Arrays.copyOf(vPaletteColors, vPaletteColors.length);
         }
 
         /// Returns the decoded filter-intra mode, or `null` when filter intra is disabled.

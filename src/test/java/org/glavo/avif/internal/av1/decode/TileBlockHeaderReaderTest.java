@@ -35,6 +35,7 @@ import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -401,9 +402,12 @@ final class TileBlockHeaderReaderTest {
         boolean expectedUseLumaPalette = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0));
         assertTrue(expectedUseLumaPalette);
         int expectedLumaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6) + 2;
+        int[] expectedLumaPalette = decodePalettePlaneWithoutCache(oracleDecoder, 8, 0, expectedLumaPaletteSize);
         boolean expectedUseChromaPalette = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1));
         assertTrue(expectedUseChromaPalette);
         int expectedChromaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(1, 0), 6) + 2;
+        int[] expectedChromaPaletteU = decodePalettePlaneWithoutCache(oracleDecoder, 8, 1, expectedChromaPaletteSize);
+        int[] expectedChromaPaletteV = decodeChromaVPaletteWithoutCache(oracleDecoder, 8, expectedChromaPaletteSize);
 
         TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
 
@@ -414,7 +418,14 @@ final class TileBlockHeaderReaderTest {
         assertEquals(UvIntraPredictionMode.DC, header.uvMode());
         assertEquals(expectedLumaPaletteSize, header.yPaletteSize());
         assertEquals(expectedChromaPaletteSize, header.uvPaletteSize());
+        assertArrayEquals(expectedLumaPalette, header.yPaletteColors());
+        assertArrayEquals(expectedChromaPaletteU, header.uPaletteColors());
+        assertArrayEquals(expectedChromaPaletteV, header.vPaletteColors());
         assertNull(header.filterIntraMode());
+        assertEquals(expectedLumaPaletteSize, neighborContext.abovePaletteSize(0));
+        assertEquals(expectedChromaPaletteSize, neighborContext.aboveChromaPaletteSize(0));
+        assertEquals(expectedLumaPalette[0], neighborContext.abovePaletteEntry(0, 0, 0));
+        assertEquals(expectedChromaPaletteU[0], neighborContext.abovePaletteEntry(1, 0, 0));
     }
 
     /// Decodes one signed CFL alpha value with the same sign rules as `TileSyntaxReader`.
@@ -427,6 +438,69 @@ final class TileBlockHeaderReaderTest {
     private static int decodeSignedCflAlpha(MsacDecoder decoder, CdfContext cdfContext, int context, boolean positive) {
         int alpha = decoder.decodeSymbolAdapt(cdfContext.mutableCflAlphaCdf(context), 15) + 1;
         return positive ? alpha : -alpha;
+    }
+
+    /// Decodes one palette plane without any cached entries, matching the first-block palette path.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param bitDepth the decoded bit depth
+    /// @param plane the palette plane index, where `0` is Y and `1` is U
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @return the decoded palette entries
+    private static int[] decodePalettePlaneWithoutCache(MsacDecoder decoder, int bitDepth, int plane, int paletteSize) {
+        int[] palette = new int[paletteSize];
+        int max = (1 << bitDepth) - 1;
+        int step = plane == 0 ? 1 : 0;
+        int previous = decoder.decodeBools(bitDepth);
+        palette[0] = previous;
+        if (paletteSize == 1) {
+            return palette;
+        }
+
+        int bits = bitDepth - 3 + decoder.decodeBools(2);
+        int index = 1;
+        while (index < paletteSize) {
+            int delta = decoder.decodeBools(bits);
+            previous = Math.min(previous + delta + step, max);
+            palette[index++] = previous;
+            if (previous + step >= max) {
+                for (; index < paletteSize; index++) {
+                    palette[index] = max;
+                }
+                break;
+            }
+            bits = Math.min(bits, Integer.SIZE - Integer.numberOfLeadingZeros(max - previous - step));
+        }
+        return palette;
+    }
+
+    /// Decodes one V chroma palette without cached entries, matching the first-block palette path.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param bitDepth the decoded bit depth
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @return the decoded V chroma palette entries
+    private static int[] decodeChromaVPaletteWithoutCache(MsacDecoder decoder, int bitDepth, int paletteSize) {
+        int[] palette = new int[paletteSize];
+        int max = (1 << bitDepth) - 1;
+        if (decoder.decodeBooleanEqui()) {
+            int bits = bitDepth - 4 + decoder.decodeBools(2);
+            int previous = decoder.decodeBools(bitDepth);
+            palette[0] = previous;
+            for (int i = 1; i < paletteSize; i++) {
+                int delta = decoder.decodeBools(bits);
+                if (delta != 0 && decoder.decodeBooleanEqui()) {
+                    delta = -delta;
+                }
+                previous = (previous + delta) & max;
+                palette[i] = previous;
+            }
+        } else {
+            for (int i = 0; i < paletteSize; i++) {
+                palette[i] = decoder.decodeBools(bitDepth);
+            }
+        }
+        return palette;
     }
 
     /// Finds a small payload whose first `intrabc` decision decodes to `true`.

@@ -63,6 +63,18 @@ public final class BlockNeighborContext {
     /// The left-edge luma palette sizes indexed in 4x4 units.
     private final byte[] leftPaletteSize;
 
+    /// The above-edge chroma palette sizes indexed in 4x4 units.
+    private final byte[] aboveChromaPaletteSize;
+
+    /// The left-edge chroma palette sizes indexed in 4x4 units.
+    private final byte[] leftChromaPaletteSize;
+
+    /// The above-edge palette entries indexed as plane/x4/palette index.
+    private final int[][][] abovePaletteEntries;
+
+    /// The left-edge palette entries indexed as plane/y4/palette index.
+    private final int[][][] leftPaletteEntries;
+
     /// The above-edge luma modes indexed in 4x4 units.
     private final LumaIntraPredictionMode[] aboveMode;
 
@@ -89,6 +101,10 @@ public final class BlockNeighborContext {
     /// @param leftSegmentId the left-edge segment identifiers indexed in 4x4 units
     /// @param abovePaletteSize the above-edge luma palette sizes indexed in 4x4 units
     /// @param leftPaletteSize the left-edge luma palette sizes indexed in 4x4 units
+    /// @param aboveChromaPaletteSize the above-edge chroma palette sizes indexed in 4x4 units
+    /// @param leftChromaPaletteSize the left-edge chroma palette sizes indexed in 4x4 units
+    /// @param abovePaletteEntries the above-edge palette entries indexed as plane/x4/palette index
+    /// @param leftPaletteEntries the left-edge palette entries indexed as plane/y4/palette index
     /// @param aboveMode the above-edge luma modes indexed in 4x4 units
     /// @param leftMode the left-edge luma modes indexed in 4x4 units
     /// @param abovePartition the above-edge partition context state indexed in 8x8 units
@@ -106,6 +122,10 @@ public final class BlockNeighborContext {
             byte[] leftSegmentId,
             byte[] abovePaletteSize,
             byte[] leftPaletteSize,
+            byte[] aboveChromaPaletteSize,
+            byte[] leftChromaPaletteSize,
+            int[][][] abovePaletteEntries,
+            int[][][] leftPaletteEntries,
             LumaIntraPredictionMode[] aboveMode,
             LumaIntraPredictionMode[] leftMode,
             byte[] abovePartition,
@@ -123,6 +143,10 @@ public final class BlockNeighborContext {
         this.leftSegmentId = Objects.requireNonNull(leftSegmentId, "leftSegmentId");
         this.abovePaletteSize = Objects.requireNonNull(abovePaletteSize, "abovePaletteSize");
         this.leftPaletteSize = Objects.requireNonNull(leftPaletteSize, "leftPaletteSize");
+        this.aboveChromaPaletteSize = Objects.requireNonNull(aboveChromaPaletteSize, "aboveChromaPaletteSize");
+        this.leftChromaPaletteSize = Objects.requireNonNull(leftChromaPaletteSize, "leftChromaPaletteSize");
+        this.abovePaletteEntries = Objects.requireNonNull(abovePaletteEntries, "abovePaletteEntries");
+        this.leftPaletteEntries = Objects.requireNonNull(leftPaletteEntries, "leftPaletteEntries");
         this.aboveMode = Objects.requireNonNull(aboveMode, "aboveMode");
         this.leftMode = Objects.requireNonNull(leftMode, "leftMode");
         this.abovePartition = Objects.requireNonNull(abovePartition, "abovePartition");
@@ -165,6 +189,10 @@ public final class BlockNeighborContext {
                 new byte[tileHeight4],
                 new byte[tileWidth4],
                 new byte[tileHeight4],
+                new byte[tileWidth4],
+                new byte[tileHeight4],
+                new int[3][tileWidth4][8],
+                new int[3][tileHeight4][8],
                 aboveMode,
                 leftMode,
                 new byte[tileWidth8],
@@ -303,6 +331,42 @@ public final class BlockNeighborContext {
         return leftPaletteSize[y4] & 0xFF;
     }
 
+    /// Returns the above-edge chroma palette size for the supplied X coordinate in 4x4 units.
+    ///
+    /// @param x4 the X coordinate in 4x4 units
+    /// @return the above-edge chroma palette size for the supplied X coordinate in 4x4 units
+    public int aboveChromaPaletteSize(int x4) {
+        return aboveChromaPaletteSize[x4] & 0xFF;
+    }
+
+    /// Returns the left-edge chroma palette size for the supplied Y coordinate in 4x4 units.
+    ///
+    /// @param y4 the Y coordinate in 4x4 units
+    /// @return the left-edge chroma palette size for the supplied Y coordinate in 4x4 units
+    public int leftChromaPaletteSize(int y4) {
+        return leftChromaPaletteSize[y4] & 0xFF;
+    }
+
+    /// Returns one above-edge palette entry for the supplied plane, X coordinate, and palette index.
+    ///
+    /// @param plane the plane index, where `0` is Y, `1` is U, and `2` is V
+    /// @param x4 the X coordinate in 4x4 units
+    /// @param index the zero-based palette entry index in `[0, 8)`
+    /// @return one above-edge palette entry for the supplied plane and coordinate
+    public int abovePaletteEntry(int plane, int x4, int index) {
+        return abovePaletteEntries[Objects.checkIndex(plane, abovePaletteEntries.length)][x4][Objects.checkIndex(index, 8)];
+    }
+
+    /// Returns one left-edge palette entry for the supplied plane, Y coordinate, and palette index.
+    ///
+    /// @param plane the plane index, where `0` is Y, `1` is U, and `2` is V
+    /// @param y4 the Y coordinate in 4x4 units
+    /// @param index the zero-based palette entry index in `[0, 8)`
+    /// @return one left-edge palette entry for the supplied plane and coordinate
+    public int leftPaletteEntry(int plane, int y4, int index) {
+        return leftPaletteEntries[Objects.checkIndex(plane, leftPaletteEntries.length)][y4][Objects.checkIndex(index, 8)];
+    }
+
     /// Returns the above-edge luma mode for the supplied X coordinate in 4x4 units.
     ///
     /// @param x4 the X coordinate in 4x4 units
@@ -343,6 +407,10 @@ public final class BlockNeighborContext {
         byte segmentPredicted = (byte) (nonNullHeader.segmentPredicted() ? 1 : 0);
         byte segmentId = (byte) nonNullHeader.segmentId();
         byte paletteSize = (byte) nonNullHeader.yPaletteSize();
+        byte chromaPaletteSize = (byte) nonNullHeader.uvPaletteSize();
+        int[] yPaletteColors = nonNullHeader.yPaletteColors();
+        int[] uPaletteColors = nonNullHeader.uPaletteColors();
+        int[] vPaletteColors = nonNullHeader.vPaletteColors();
         LumaIntraPredictionMode mode = nonNullHeader.intra() ? nonNullHeader.yMode() : LumaIntraPredictionMode.DC;
         int endX4 = Math.min(tileWidth4, position.x4() + size.width4());
         int endY4 = Math.min(tileHeight4, position.y4() + size.height4());
@@ -352,6 +420,13 @@ public final class BlockNeighborContext {
             aboveSegmentPredicted[x4] = segmentPredicted;
             aboveSegmentId[x4] = segmentId;
             abovePaletteSize[x4] = paletteSize;
+            aboveChromaPaletteSize[x4] = chromaPaletteSize;
+            Arrays.fill(abovePaletteEntries[0][x4], 0);
+            Arrays.fill(abovePaletteEntries[1][x4], 0);
+            Arrays.fill(abovePaletteEntries[2][x4], 0);
+            System.arraycopy(yPaletteColors, 0, abovePaletteEntries[0][x4], 0, yPaletteColors.length);
+            System.arraycopy(uPaletteColors, 0, abovePaletteEntries[1][x4], 0, uPaletteColors.length);
+            System.arraycopy(vPaletteColors, 0, abovePaletteEntries[2][x4], 0, vPaletteColors.length);
             aboveMode[x4] = mode;
         }
         for (int y4 = position.y4(); y4 < endY4; y4++) {
@@ -360,6 +435,13 @@ public final class BlockNeighborContext {
             leftSegmentPredicted[y4] = segmentPredicted;
             leftSegmentId[y4] = segmentId;
             leftPaletteSize[y4] = paletteSize;
+            leftChromaPaletteSize[y4] = chromaPaletteSize;
+            Arrays.fill(leftPaletteEntries[0][y4], 0);
+            Arrays.fill(leftPaletteEntries[1][y4], 0);
+            Arrays.fill(leftPaletteEntries[2][y4], 0);
+            System.arraycopy(yPaletteColors, 0, leftPaletteEntries[0][y4], 0, yPaletteColors.length);
+            System.arraycopy(uPaletteColors, 0, leftPaletteEntries[1][y4], 0, uPaletteColors.length);
+            System.arraycopy(vPaletteColors, 0, leftPaletteEntries[2][y4], 0, vPaletteColors.length);
             leftMode[y4] = mode;
         }
     }

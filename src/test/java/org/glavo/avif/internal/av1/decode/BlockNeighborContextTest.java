@@ -64,6 +64,9 @@ final class BlockNeighborContextTest {
                 UvIntraPredictionMode.PAETH,
                 4,
                 0,
+                new int[]{10, 20, 30, 40},
+                new int[0],
+                new int[0],
                 null,
                 0,
                 0,
@@ -81,6 +84,9 @@ final class BlockNeighborContextTest {
         assertEquals(2, prediction.context());
         assertEquals(4, context.abovePaletteSize(0));
         assertEquals(4, context.leftPaletteSize(0));
+        assertEquals(0, context.aboveChromaPaletteSize(0));
+        assertEquals(20, context.abovePaletteEntry(0, 0, 1));
+        assertEquals(30, context.leftPaletteEntry(0, 0, 2));
 
         context.updatePartition(position, 8, 0x10, 0x18);
         assertEquals(2, context.partitionContext(3, new BlockPosition(0, 8)));
