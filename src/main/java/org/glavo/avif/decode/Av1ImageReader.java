@@ -18,6 +18,8 @@ package org.glavo.avif.decode;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -36,6 +38,10 @@ public final class Av1ImageReader implements AutoCloseable {
     private final Av1DecoderConfig config;
     /// The sequential OBU reader used by this image reader.
     private final ObuStreamReader obuReader;
+    /// The parser used for sequence header OBUs.
+    private final SequenceHeaderParser sequenceHeaderParser;
+    /// The most recently parsed sequence header.
+    private @Nullable SequenceHeader sequenceHeader;
     /// Whether this reader has already been closed.
     private boolean closed;
 
@@ -47,6 +53,7 @@ public final class Av1ImageReader implements AutoCloseable {
         this.source = Objects.requireNonNull(source, "source");
         this.config = Objects.requireNonNull(config, "config");
         this.obuReader = new ObuStreamReader(source);
+        this.sequenceHeaderParser = new SequenceHeaderParser();
     }
 
     /// Opens an AV1 image reader using the default decoder configuration.
@@ -80,7 +87,21 @@ public final class Av1ImageReader implements AutoCloseable {
             }
 
             ObuType type = packet.header().type();
+            if (type == ObuType.SEQUENCE_HEADER) {
+                sequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
+                continue;
+            }
             if (type == ObuType.FRAME || type == ObuType.FRAME_HEADER || type == ObuType.TILE_GROUP) {
+                if (sequenceHeader == null) {
+                    throw new DecodeException(
+                            DecodeErrorCode.STATE_VIOLATION,
+                            DecodeStage.FRAME_ASSEMBLY,
+                            "Frame data appeared before a sequence header OBU",
+                            packet.streamOffset(),
+                            packet.obuIndex(),
+                            null
+                    );
+                }
                 throw new DecodeException(
                         DecodeErrorCode.NOT_IMPLEMENTED,
                         DecodeStage.FRAME_DECODE,
