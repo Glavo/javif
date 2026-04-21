@@ -190,6 +190,29 @@ public final class TileSyntaxReader {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableChromaPaletteCdf(paletteContext));
     }
 
+    /// Decodes the first palette index in one color-map using the AV1 uniform coding rule.
+    ///
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @return the decoded first palette index in `[0, paletteSize)`
+    public int readPaletteInitialIndex(int paletteSize) {
+        return msacDecoder.decodeUniform(paletteSize);
+    }
+
+    /// Decodes one palette color-map symbol for the supplied plane, palette size, and context.
+    ///
+    /// The returned symbol indexes the local palette-order permutation for the current pixel.
+    ///
+    /// @param plane the palette plane index, where `0` is luma and `1` is chroma
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @param context the zero-based color-map context in `[0, 5)`
+    /// @return the decoded palette color-map symbol in `[0, paletteSize)`
+    public int readPaletteColorMapSymbol(int plane, int paletteSize, int context) {
+        return msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableColorMapCdf(plane, paletteSize - 2, context),
+                paletteSize - 1
+        );
+    }
+
     /// Decodes one filter-intra mode after `use_filter_intra` signaled `true`.
     ///
     /// @return the decoded filter-intra mode

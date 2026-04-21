@@ -278,6 +278,23 @@ final class TileSyntaxReaderTest {
         assertArrayEquals(oracleCdf.mutablePaletteSizeCdf(1, 0), tileContext.cdfContext().mutablePaletteSizeCdf(1, 0));
     }
 
+    /// Verifies that palette color-map syntax uses the expected uniform and adaptive CDF paths.
+    @Test
+    void readsPaletteColorMapSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        int expectedInitialIndex = oracleDecoder.decodeUniform(5);
+        int expectedColorMapSymbol = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableColorMapCdf(1, 3, 2), 4);
+
+        assertEquals(expectedInitialIndex, reader.readPaletteInitialIndex(5));
+        assertEquals(expectedColorMapSymbol, reader.readPaletteColorMapSymbol(1, 5, 2));
+        assertArrayEquals(oracleCdf.mutableColorMapCdf(1, 3, 2), tileContext.cdfContext().mutableColorMapCdf(1, 3, 2));
+    }
+
     /// Decodes one signed CFL alpha value with the same sign rules as `TileSyntaxReader`.
     ///
     /// @param decoder the oracle arithmetic decoder

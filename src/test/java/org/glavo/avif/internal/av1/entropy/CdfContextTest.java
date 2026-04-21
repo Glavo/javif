@@ -62,6 +62,8 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{1092, 0}, context.mutableLumaPaletteCdf(0, 0));
         assertArrayEquals(new int[]{24816, 19768, 14619, 11290, 7241, 3527, 0}, context.mutablePaletteSizeCdf(0, 0));
         assertArrayEquals(new int[]{307, 0}, context.mutableChromaPaletteCdf(0));
+        assertArrayEquals(new int[]{4058, 0}, context.mutableColorMapCdf(0, 0, 0));
+        assertArrayEquals(new int[]{924, 724, 487, 250, 0}, context.mutableColorMapCdf(1, 3, 4));
     }
 
     /// Verifies that copying the context deep-copies all mutable tables.
@@ -78,6 +80,7 @@ final class CdfContextTest {
         assertNotSame(original.mutableLumaPaletteCdf(0, 0), copy.mutableLumaPaletteCdf(0, 0));
         assertNotSame(original.mutablePaletteSizeCdf(0, 0), copy.mutablePaletteSizeCdf(0, 0));
         assertNotSame(original.mutableChromaPaletteCdf(0), copy.mutableChromaPaletteCdf(0));
+        assertNotSame(original.mutableColorMapCdf(0, 0, 0), copy.mutableColorMapCdf(0, 0, 0));
         assertNotSame(original.mutableSegmentPredictionCdf(0), copy.mutableSegmentPredictionCdf(0));
         assertNotSame(original.mutableSegmentIdCdf(0), copy.mutableSegmentIdCdf(0));
         assertNotSame(original.mutableKeyFrameYModeCdf(0, 0), copy.mutableKeyFrameYModeCdf(0, 0));
@@ -90,6 +93,7 @@ final class CdfContextTest {
         copy.mutableLumaPaletteCdf(0, 0)[0] = 144;
         copy.mutablePaletteSizeCdf(0, 0)[0] = 155;
         copy.mutableChromaPaletteCdf(0)[0] = 166;
+        copy.mutableColorMapCdf(0, 0, 0)[0] = 177;
         copy.mutableSegmentPredictionCdf(0)[0] = 123;
         copy.mutableSegmentIdCdf(0)[0] = 321;
         copy.mutableKeyFrameYModeCdf(0, 0)[0] = 111;
@@ -102,6 +106,7 @@ final class CdfContextTest {
         assertEquals(1092, original.mutableLumaPaletteCdf(0, 0)[0]);
         assertEquals(24816, original.mutablePaletteSizeCdf(0, 0)[0]);
         assertEquals(307, original.mutableChromaPaletteCdf(0)[0]);
+        assertEquals(4058, original.mutableColorMapCdf(0, 0, 0)[0]);
         assertEquals(16384, original.mutableSegmentPredictionCdf(0)[0]);
         assertEquals(27146, original.mutableSegmentIdCdf(0)[0]);
         assertEquals(17180, original.mutableKeyFrameYModeCdf(0, 0)[0]);

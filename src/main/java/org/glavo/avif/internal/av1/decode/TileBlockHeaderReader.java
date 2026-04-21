@@ -109,6 +109,8 @@ public final class TileBlockHeaderReader {
         int[] yPaletteColors = new int[0];
         int[] uPaletteColors = new int[0];
         int[] vPaletteColors = new int[0];
+        byte[] yPaletteIndices = new byte[0];
+        byte[] uvPaletteIndices = new byte[0];
         @Nullable FilterIntraMode filterIntraMode = null;
         int yAngle = 0;
         int uvAngle = 0;
@@ -164,6 +166,13 @@ public final class TileBlockHeaderReader {
             }
         }
 
+        if (yPaletteSize > 0) {
+            yPaletteIndices = readPaletteIndices(0, yPaletteSize, nonNullPosition, nonNullSize);
+        }
+        if (uvPaletteSize > 0) {
+            uvPaletteIndices = readPaletteIndices(1, uvPaletteSize, nonNullPosition, nonNullSize);
+        }
+
         BlockHeader header = new BlockHeader(
                 nonNullPosition,
                 nonNullSize,
@@ -180,6 +189,8 @@ public final class TileBlockHeaderReader {
                 yPaletteColors,
                 uPaletteColors,
                 vPaletteColors,
+                yPaletteIndices,
+                uvPaletteIndices,
                 filterIntraMode,
                 yAngle,
                 uvAngle,
@@ -341,6 +352,207 @@ public final class TileBlockHeaderReader {
             }
         }
         return palette;
+    }
+
+    /// Decodes one packed palette index map for luma or chroma.
+    ///
+    /// AV1 signals palette indices in wave-front diagonal order, then packs the visible map to
+    /// two 4-bit entries per output byte while replicating invisible right and bottom edges.
+    ///
+    /// @param plane the palette plane index, where `0` is luma and `1` is chroma
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @param position the local tile-relative block origin
+    /// @param size the block size that owns the palette
+    /// @return the packed palette index map, or an empty array when palette mode is disabled
+    private byte[] readPaletteIndices(int plane, int paletteSize, BlockPosition position, BlockSize size) {
+        int visibleWidth4 = visibleWidth4(position, size);
+        int visibleHeight4 = visibleHeight4(position, size);
+        int fullWidth4 = size.width4();
+        int fullHeight4 = size.height4();
+        if (plane != 0) {
+            int subsamplingX = tileContext.sequenceHeader().colorConfig().chromaSubsamplingX() ? 1 : 0;
+            int subsamplingY = tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
+            visibleWidth4 = chromaSpan4(position.x4(), visibleWidth4, subsamplingX);
+            visibleHeight4 = chromaSpan4(position.y4(), visibleHeight4, subsamplingY);
+            fullWidth4 = chromaSpan4(position.x4(), fullWidth4, subsamplingX);
+            fullHeight4 = chromaSpan4(position.y4(), fullHeight4, subsamplingY);
+        }
+
+        return readPaletteIndices(plane, paletteSize, visibleWidth4 << 2, visibleHeight4 << 2, fullWidth4 << 2, fullHeight4 << 2);
+    }
+
+    /// Decodes one packed palette index map for the supplied visible and coded dimensions.
+    ///
+    /// @param plane the palette plane index, where `0` is luma and `1` is chroma
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @param visibleWidth the visible palette width in pixels
+    /// @param visibleHeight the visible palette height in pixels
+    /// @param fullWidth the coded palette width in pixels
+    /// @param fullHeight the coded palette height in pixels
+    /// @return the packed palette index map
+    private byte[] readPaletteIndices(
+            int plane,
+            int paletteSize,
+            int visibleWidth,
+            int visibleHeight,
+            int fullWidth,
+            int fullHeight
+    ) {
+        byte[] unpacked = new byte[fullWidth * fullHeight];
+        unpacked[0] = (byte) syntaxReader.readPaletteInitialIndex(paletteSize);
+        int[] order = new int[8];
+        for (int i = 1; i < visibleWidth + visibleHeight - 1; i++) {
+            int first = Math.min(i, visibleWidth - 1);
+            int last = Math.max(0, i - visibleHeight + 1);
+            for (int x = first; x >= last; x--) {
+                int y = i - x;
+                int context = buildPaletteOrder(unpacked, fullWidth, x, y, order);
+                int colorIndex = syntaxReader.readPaletteColorMapSymbol(plane, paletteSize, context);
+                unpacked[y * fullWidth + x] = (byte) order[colorIndex];
+            }
+        }
+        return finishPaletteIndices(unpacked, fullWidth, fullHeight, visibleWidth, visibleHeight);
+    }
+
+    /// Returns the visible block width in 4x4 units after clipping against the tile bounds.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the block size to clip
+    /// @return the visible block width in 4x4 units after clipping against the tile bounds
+    private int visibleWidth4(BlockPosition position, BlockSize size) {
+        int tileWidth4 = (tileContext.width() + 3) >> 2;
+        return Math.min(size.width4(), tileWidth4 - position.x4());
+    }
+
+    /// Returns the visible block height in 4x4 units after clipping against the tile bounds.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the block size to clip
+    /// @return the visible block height in 4x4 units after clipping against the tile bounds
+    private int visibleHeight4(BlockPosition position, BlockSize size) {
+        int tileHeight4 = (tileContext.height() + 3) >> 2;
+        return Math.min(size.height4(), tileHeight4 - position.y4());
+    }
+
+    /// Returns the covered chroma span in 4x4 units for one luma-aligned block span.
+    ///
+    /// @param start4 the luma start coordinate in 4x4 units
+    /// @param span4 the luma span in 4x4 units
+    /// @param subsampling the chroma subsampling shift for the axis
+    /// @return the covered chroma span in 4x4 units
+    private static int chromaSpan4(int start4, int span4, int subsampling) {
+        int chromaStart = start4 >> subsampling;
+        int chromaEnd = (start4 + span4 + (1 << subsampling) - 1) >> subsampling;
+        return Math.max(1, chromaEnd - chromaStart);
+    }
+
+    /// Builds the palette-order permutation and context for one palette color-map sample.
+    ///
+    /// @param indices the unpacked palette indices decoded so far
+    /// @param stride the unpacked palette row stride in pixels
+    /// @param x the current X coordinate in pixels
+    /// @param y the current Y coordinate in pixels
+    /// @param order the reusable destination array that receives the palette-order permutation
+    /// @return the zero-based palette color-map context in `[0, 5)`
+    private static int buildPaletteOrder(byte[] indices, int stride, int x, int y, int[] order) {
+        int count = 0;
+        int mask = 0;
+        int context;
+        if (x == 0) {
+            int top = indices[(y - 1) * stride] & 0xFF;
+            order[count++] = top;
+            mask |= 1 << top;
+            context = 0;
+        } else if (y == 0) {
+            int left = indices[x - 1] & 0xFF;
+            order[count++] = left;
+            mask |= 1 << left;
+            context = 0;
+        } else {
+            int left = indices[y * stride + x - 1] & 0xFF;
+            int top = indices[(y - 1) * stride + x] & 0xFF;
+            int topLeft = indices[(y - 1) * stride + x - 1] & 0xFF;
+            boolean sameTopLeft = top == left;
+            boolean sameTopTopLeft = top == topLeft;
+            boolean sameLeftTopLeft = left == topLeft;
+            if (sameTopLeft && sameTopTopLeft) {
+                order[count++] = top;
+                mask |= 1 << top;
+                context = 4;
+            } else if (sameTopLeft) {
+                order[count++] = top;
+                order[count++] = topLeft;
+                mask |= 1 << top;
+                mask |= 1 << topLeft;
+                context = 3;
+            } else if (sameTopTopLeft || sameLeftTopLeft) {
+                order[count++] = topLeft;
+                order[count++] = sameTopTopLeft ? left : top;
+                mask |= 1 << topLeft;
+                mask |= 1 << (sameTopTopLeft ? left : top);
+                context = 2;
+            } else {
+                int first = Math.min(top, left);
+                int second = Math.max(top, left);
+                order[count++] = first;
+                order[count++] = second;
+                order[count++] = topLeft;
+                mask |= 1 << first;
+                mask |= 1 << second;
+                mask |= 1 << topLeft;
+                context = 1;
+            }
+        }
+
+        for (int value = 0; value < 8; value++) {
+            if ((mask & (1 << value)) == 0) {
+                order[count++] = value;
+            }
+        }
+        return context;
+    }
+
+    /// Packs one unpacked palette map to two 4-bit entries per byte and fills invisible edges.
+    ///
+    /// @param unpacked the unpacked palette map in raster order
+    /// @param fullWidth the coded palette width in pixels
+    /// @param fullHeight the coded palette height in pixels
+    /// @param visibleWidth the visible palette width in pixels
+    /// @param visibleHeight the visible palette height in pixels
+    /// @return the packed palette map with invisible edges replicated
+    private static byte[] finishPaletteIndices(
+            byte[] unpacked,
+            int fullWidth,
+            int fullHeight,
+            int visibleWidth,
+            int visibleHeight
+    ) {
+        int packedStride = fullWidth >> 1;
+        int visiblePackedWidth = visibleWidth >> 1;
+        byte[] packed = new byte[packedStride * fullHeight];
+        for (int y = 0; y < visibleHeight; y++) {
+            int sourceRow = y * fullWidth;
+            int packedRow = y * packedStride;
+            for (int x = 0; x < visiblePackedWidth; x++) {
+                packed[packedRow + x] = (byte) ((unpacked[sourceRow + (x << 1)] & 0x0F)
+                        | ((unpacked[sourceRow + (x << 1) + 1] & 0x0F) << 4));
+            }
+            if (visiblePackedWidth < packedStride) {
+                Arrays.fill(
+                        packed,
+                        packedRow + visiblePackedWidth,
+                        packedRow + packedStride,
+                        (byte) ((unpacked[sourceRow + visibleWidth - 1] & 0xFF) * 0x11)
+                );
+            }
+        }
+        if (visibleHeight < fullHeight) {
+            int lastVisibleRow = (visibleHeight - 1) * packedStride;
+            for (int y = visibleHeight; y < fullHeight; y++) {
+                System.arraycopy(packed, lastVisibleRow, packed, y * packedStride, packedStride);
+            }
+        }
+        return packed;
     }
 
     /// Returns whether the above palette cache may be reused for the supplied block position.
@@ -580,6 +792,12 @@ public final class TileBlockHeaderReader {
         /// The decoded V chroma palette entries, or an empty array when palette mode is disabled.
         private final int[] vPaletteColors;
 
+        /// The packed luma palette indices with two 4-bit entries per byte.
+        private final byte[] yPaletteIndices;
+
+        /// The packed chroma palette indices with two 4-bit entries per byte.
+        private final byte[] uvPaletteIndices;
+
         /// The decoded filter-intra mode, or `null` when filter intra is disabled.
         private final @Nullable FilterIntraMode filterIntraMode;
 
@@ -612,6 +830,8 @@ public final class TileBlockHeaderReader {
         /// @param yPaletteColors the decoded luma palette entries, or an empty array
         /// @param uPaletteColors the decoded U chroma palette entries, or an empty array
         /// @param vPaletteColors the decoded V chroma palette entries, or an empty array
+        /// @param yPaletteIndices the packed luma palette indices, or an empty array
+        /// @param uvPaletteIndices the packed chroma palette indices, or an empty array
         /// @param filterIntraMode the decoded filter-intra mode, or `null`
         /// @param yAngle the decoded signed luma angle delta in `[-3, 3]`
         /// @param uvAngle the decoded signed chroma angle delta in `[-3, 3]`
@@ -633,6 +853,8 @@ public final class TileBlockHeaderReader {
                 int[] yPaletteColors,
                 int[] uPaletteColors,
                 int[] vPaletteColors,
+                byte[] yPaletteIndices,
+                byte[] uvPaletteIndices,
                 @Nullable FilterIntraMode filterIntraMode,
                 int yAngle,
                 int uvAngle,
@@ -654,6 +876,8 @@ public final class TileBlockHeaderReader {
             this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
             this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
             this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
+            this.yPaletteIndices = Arrays.copyOf(Objects.requireNonNull(yPaletteIndices, "yPaletteIndices"), yPaletteIndices.length);
+            this.uvPaletteIndices = Arrays.copyOf(Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices"), uvPaletteIndices.length);
             this.filterIntraMode = filterIntraMode;
             this.yAngle = yAngle;
             this.uvAngle = uvAngle;
@@ -667,6 +891,12 @@ public final class TileBlockHeaderReader {
             }
             if (this.vPaletteColors.length != uvPaletteSize) {
                 throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
+            }
+            if (yPaletteSize == 0 && this.yPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("yPaletteIndices must be empty when yPaletteSize == 0");
+            }
+            if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
             }
         }
 
@@ -773,6 +1003,24 @@ public final class TileBlockHeaderReader {
         /// @return the decoded V chroma palette entries, or an empty array
         public int[] vPaletteColors() {
             return Arrays.copyOf(vPaletteColors, vPaletteColors.length);
+        }
+
+        /// Returns the packed luma palette indices with two 4-bit entries per byte.
+        ///
+        /// Invisible right and bottom edges are already replicated to the coded block extent.
+        ///
+        /// @return the packed luma palette indices with two 4-bit entries per byte
+        public byte[] yPaletteIndices() {
+            return Arrays.copyOf(yPaletteIndices, yPaletteIndices.length);
+        }
+
+        /// Returns the packed chroma palette indices with two 4-bit entries per byte.
+        ///
+        /// Invisible right and bottom edges are already replicated to the coded block extent.
+        ///
+        /// @return the packed chroma palette indices with two 4-bit entries per byte
+        public byte[] uvPaletteIndices() {
+            return Arrays.copyOf(uvPaletteIndices, uvPaletteIndices.length);
         }
 
         /// Returns the decoded filter-intra mode, or `null` when filter intra is disabled.

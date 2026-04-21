@@ -377,7 +377,7 @@ final class TileBlockHeaderReaderTest {
         assertEquals(0, header.cflAlphaV());
     }
 
-    /// Verifies that screen-content palette syntax populates luma and chroma palette sizes.
+    /// Verifies that screen-content palette syntax populates luma/chroma palettes and packed palette indices.
     @Test
     void readsPaletteBlockHeaderSizes() {
         byte[] payload = findPayloadForPaletteBlock();
@@ -408,6 +408,26 @@ final class TileBlockHeaderReaderTest {
         int expectedChromaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(1, 0), 6) + 2;
         int[] expectedChromaPaletteU = decodePalettePlaneWithoutCache(oracleDecoder, 8, 1, expectedChromaPaletteSize);
         int[] expectedChromaPaletteV = decodeChromaVPaletteWithoutCache(oracleDecoder, 8, expectedChromaPaletteSize);
+        byte[] expectedLumaIndices = decodePaletteIndicesWithoutCache(
+                oracleDecoder,
+                oracleCdf,
+                0,
+                expectedLumaPaletteSize,
+                8,
+                8,
+                8,
+                8
+        );
+        byte[] expectedChromaIndices = decodePaletteIndicesWithoutCache(
+                oracleDecoder,
+                oracleCdf,
+                1,
+                expectedChromaPaletteSize,
+                4,
+                4,
+                4,
+                4
+        );
 
         TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
 
@@ -421,6 +441,8 @@ final class TileBlockHeaderReaderTest {
         assertArrayEquals(expectedLumaPalette, header.yPaletteColors());
         assertArrayEquals(expectedChromaPaletteU, header.uPaletteColors());
         assertArrayEquals(expectedChromaPaletteV, header.vPaletteColors());
+        assertArrayEquals(expectedLumaIndices, header.yPaletteIndices());
+        assertArrayEquals(expectedChromaIndices, header.uvPaletteIndices());
         assertNull(header.filterIntraMode());
         assertEquals(expectedLumaPaletteSize, neighborContext.abovePaletteSize(0));
         assertEquals(expectedChromaPaletteSize, neighborContext.aboveChromaPaletteSize(0));
@@ -501,6 +523,149 @@ final class TileBlockHeaderReaderTest {
             }
         }
         return palette;
+    }
+
+    /// Decodes one packed palette index map without palette-cache reuse, matching the first-block path.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param plane the palette plane index, where `0` is Y and `1` is UV
+    /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @param visibleWidth the visible palette width in pixels
+    /// @param visibleHeight the visible palette height in pixels
+    /// @param fullWidth the coded palette width in pixels
+    /// @param fullHeight the coded palette height in pixels
+    /// @return the packed palette indices with invisible edges replicated
+    private static byte[] decodePaletteIndicesWithoutCache(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            int plane,
+            int paletteSize,
+            int visibleWidth,
+            int visibleHeight,
+            int fullWidth,
+            int fullHeight
+    ) {
+        byte[] unpacked = new byte[fullWidth * fullHeight];
+        unpacked[0] = (byte) decoder.decodeUniform(paletteSize);
+        int[] order = new int[8];
+        for (int i = 1; i < visibleWidth + visibleHeight - 1; i++) {
+            int first = Math.min(i, visibleWidth - 1);
+            int last = Math.max(0, i - visibleHeight + 1);
+            for (int x = first; x >= last; x--) {
+                int y = i - x;
+                int context = buildPaletteOrder(unpacked, fullWidth, x, y, order);
+                int colorIndex = decoder.decodeSymbolAdapt(cdfContext.mutableColorMapCdf(plane, paletteSize - 2, context), paletteSize - 1);
+                unpacked[y * fullWidth + x] = (byte) order[colorIndex];
+            }
+        }
+        return finishPaletteIndices(unpacked, fullWidth, fullHeight, visibleWidth, visibleHeight);
+    }
+
+    /// Builds the AV1 palette-order permutation and context for one oracle palette index sample.
+    ///
+    /// @param indices the unpacked palette indices decoded so far
+    /// @param stride the unpacked palette row stride in pixels
+    /// @param x the current X coordinate in pixels
+    /// @param y the current Y coordinate in pixels
+    /// @param order the reusable destination array that receives the palette-order permutation
+    /// @return the zero-based palette color-map context
+    private static int buildPaletteOrder(byte[] indices, int stride, int x, int y, int[] order) {
+        int count = 0;
+        int mask = 0;
+        int context;
+        if (x == 0) {
+            int top = indices[(y - 1) * stride] & 0xFF;
+            order[count++] = top;
+            mask |= 1 << top;
+            context = 0;
+        } else if (y == 0) {
+            int left = indices[x - 1] & 0xFF;
+            order[count++] = left;
+            mask |= 1 << left;
+            context = 0;
+        } else {
+            int left = indices[y * stride + x - 1] & 0xFF;
+            int top = indices[(y - 1) * stride + x] & 0xFF;
+            int topLeft = indices[(y - 1) * stride + x - 1] & 0xFF;
+            boolean sameTopLeft = top == left;
+            boolean sameTopTopLeft = top == topLeft;
+            boolean sameLeftTopLeft = left == topLeft;
+            if (sameTopLeft && sameTopTopLeft) {
+                order[count++] = top;
+                mask |= 1 << top;
+                context = 4;
+            } else if (sameTopLeft) {
+                order[count++] = top;
+                order[count++] = topLeft;
+                mask |= 1 << top;
+                mask |= 1 << topLeft;
+                context = 3;
+            } else if (sameTopTopLeft || sameLeftTopLeft) {
+                order[count++] = topLeft;
+                order[count++] = sameTopTopLeft ? left : top;
+                mask |= 1 << topLeft;
+                mask |= 1 << (sameTopTopLeft ? left : top);
+                context = 2;
+            } else {
+                int first = Math.min(top, left);
+                int second = Math.max(top, left);
+                order[count++] = first;
+                order[count++] = second;
+                order[count++] = topLeft;
+                mask |= 1 << first;
+                mask |= 1 << second;
+                mask |= 1 << topLeft;
+                context = 1;
+            }
+        }
+
+        for (int value = 0; value < 8; value++) {
+            if ((mask & (1 << value)) == 0) {
+                order[count++] = value;
+            }
+        }
+        return context;
+    }
+
+    /// Packs one oracle palette map to two 4-bit entries per byte and replicates invisible edges.
+    ///
+    /// @param unpacked the unpacked palette map in raster order
+    /// @param fullWidth the coded palette width in pixels
+    /// @param fullHeight the coded palette height in pixels
+    /// @param visibleWidth the visible palette width in pixels
+    /// @param visibleHeight the visible palette height in pixels
+    /// @return the packed palette map with invisible edges replicated
+    private static byte[] finishPaletteIndices(
+            byte[] unpacked,
+            int fullWidth,
+            int fullHeight,
+            int visibleWidth,
+            int visibleHeight
+    ) {
+        int packedStride = fullWidth >> 1;
+        int visiblePackedWidth = visibleWidth >> 1;
+        byte[] packed = new byte[packedStride * fullHeight];
+        for (int y = 0; y < visibleHeight; y++) {
+            int sourceRow = y * fullWidth;
+            int packedRow = y * packedStride;
+            for (int x = 0; x < visiblePackedWidth; x++) {
+                packed[packedRow + x] = (byte) ((unpacked[sourceRow + (x << 1)] & 0x0F)
+                        | ((unpacked[sourceRow + (x << 1) + 1] & 0x0F) << 4));
+            }
+            if (visiblePackedWidth < packedStride) {
+                for (int x = visiblePackedWidth; x < packedStride; x++) {
+                    packed[packedRow + x] = (byte) ((unpacked[sourceRow + visibleWidth - 1] & 0xFF) * 0x11);
+                }
+            }
+        }
+        if (visibleHeight < fullHeight) {
+            int lastVisibleRow = (visibleHeight - 1) * packedStride;
+            for (int y = visibleHeight; y < fullHeight; y++) {
+                System.arraycopy(packed, lastVisibleRow, packed, y * packedStride, packedStride);
+            }
+        }
+        return packed;
     }
 
     /// Finds a small payload whose first `intrabc` decision decodes to `true`.
@@ -623,7 +788,7 @@ final class TileBlockHeaderReaderTest {
     private static byte[] findPayloadForPaletteBlock() {
         for (int first = 0; first < 256; first++) {
             for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x12, 0x34, 0x56, 0x78, (byte) 0x9A, (byte) 0xBC};
                 CdfContext oracleCdf = CdfContext.createDefault();
                 MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
                 oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
@@ -645,7 +810,8 @@ final class TileBlockHeaderReaderTest {
                 if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0))) {
                     continue;
                 }
-                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6);
+                int lumaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6) + 2;
+                decodePalettePlaneWithoutCache(oracleDecoder, 8, 0, lumaPaletteSize);
                 if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1))) {
                     return payload;
                 }

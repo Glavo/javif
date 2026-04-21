@@ -67,6 +67,8 @@ final class BlockNeighborContextTest {
                 new int[]{10, 20, 30, 40},
                 new int[0],
                 new int[0],
+                new byte[128],
+                new byte[0],
                 null,
                 0,
                 0,

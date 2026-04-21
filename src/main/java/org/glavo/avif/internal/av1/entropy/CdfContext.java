@@ -216,6 +216,56 @@ public final class CdfContext {
             {21488}
     });
 
+    /// The transformed default palette color-map CDFs for luma and chroma planes.
+    private static final int[][][][] DEFAULT_COLOR_MAP_CDFS = inverse4d(new int[][][][]{
+            {
+                    {
+                            {28710}, {16384}, {10553}, {27036}, {31603}
+                    },
+                    {
+                            {27877, 30490}, {11532, 25697}, {6544, 30234}, {23018, 28072}, {31915, 32385}
+                    },
+                    {
+                            {25572, 28046, 30045}, {9478, 21590, 27256}, {7248, 26837, 29824}, {19167, 24486, 28349}, {31400, 31825, 32250}
+                    },
+                    {
+                            {24779, 26955, 28576, 30282}, {8669, 20364, 24073, 28093}, {4255, 27565, 29377, 31067}, {19864, 23674, 26716, 29530}, {31646, 31893, 32147, 32426}
+                    },
+                    {
+                            {23132, 25407, 26970, 28435, 30073}, {7443, 17242, 20717, 24762, 27982}, {6300, 24862, 26944, 28784, 30671}, {18916, 22895, 25267, 27435, 29652}, {31270, 31550, 31808, 32059, 32353}
+                    },
+                    {
+                            {23105, 25199, 26464, 27684, 28931, 30318}, {6950, 15447, 18952, 22681, 25567, 28563}, {7560, 23474, 25490, 27203, 28921, 30708}, {18544, 22373, 24457, 26195, 28119, 30045}, {31198, 31451, 31670, 31882, 32123, 32391}
+                    },
+                    {
+                            {21689, 23883, 25163, 26352, 27506, 28827, 30195}, {6892, 15385, 17840, 21606, 24287, 26753, 29204}, {5651, 23182, 25042, 26518, 27982, 29392, 30900}, {19349, 22578, 24418, 25994, 27524, 29031, 30448}, {31028, 31270, 31504, 31705, 31927, 32153, 32392}
+                    }
+            },
+            {
+                    {
+                            {29089}, {16384}, {8713}, {29257}, {31610}
+                    },
+                    {
+                            {25257, 29145}, {12287, 27293}, {7033, 27960}, {20145, 25405}, {30608, 31639}
+                    },
+                    {
+                            {24210, 27175, 29903}, {9888, 22386, 27214}, {5901, 26053, 29293}, {18318, 22152, 28333}, {30459, 31136, 31926}
+                    },
+                    {
+                            {22980, 25479, 27781, 29986}, {8413, 21408, 24859, 28874}, {2257, 29449, 30594, 31598}, {19189, 21202, 25915, 28620}, {31844, 32044, 32281, 32518}
+                    },
+                    {
+                            {22217, 24567, 26637, 28683, 30548}, {7307, 16406, 19636, 24632, 28424}, {4441, 25064, 26879, 28942, 30919}, {17210, 20528, 23319, 26750, 29582}, {30674, 30953, 31396, 31735, 32207}
+                    },
+                    {
+                            {21239, 23168, 25044, 26962, 28705, 30506}, {6545, 15012, 18004, 21817, 25503, 28701}, {3448, 26295, 27437, 28704, 30126, 31442}, {15889, 18323, 21704, 24698, 26976, 29690}, {30988, 31204, 31479, 31734, 31983, 32325}
+                    },
+                    {
+                            {21442, 23288, 24758, 26246, 27649, 28980, 30563}, {5863, 14933, 17552, 20668, 23683, 26411, 29273}, {3415, 25810, 26877, 27990, 29223, 30394, 31618}, {17965, 20084, 22232, 23974, 26274, 28402, 30390}, {31190, 31329, 31516, 31679, 31825, 32026, 32322}
+                    }
+            }
+    });
+
     /// The transformed default segmentation-prediction CDFs.
     private static final int[][] DEFAULT_SEGMENT_PREDICTION_CDFS = inverse2d(new int[][]{
             {16384},
@@ -327,6 +377,9 @@ public final class CdfContext {
     /// The mutable chroma palette-use CDFs.
     private final int[][] chromaPaletteCdfs;
 
+    /// The mutable palette color-map CDFs for luma and chroma planes.
+    private final int[][][][] colorMapCdfs;
+
     /// The mutable segmentation-prediction CDFs.
     private final int[][] segmentPredictionCdfs;
 
@@ -358,6 +411,7 @@ public final class CdfContext {
     /// @param lumaPaletteCdfs the mutable luma palette-use CDFs
     /// @param paletteSizeCdfs the mutable palette-size CDFs
     /// @param chromaPaletteCdfs the mutable chroma palette-use CDFs
+    /// @param colorMapCdfs the mutable palette color-map CDFs
     /// @param segmentPredictionCdfs the mutable segmentation-prediction CDFs
     /// @param segmentIdCdfs the mutable segment-id CDFs
     /// @param keyFrameYModeCdfs the mutable key-frame luma intra-mode CDFs
@@ -376,6 +430,7 @@ public final class CdfContext {
             int[][][] lumaPaletteCdfs,
             int[][][] paletteSizeCdfs,
             int[][] chromaPaletteCdfs,
+            int[][][][] colorMapCdfs,
             int[][] segmentPredictionCdfs,
             int[][] segmentIdCdfs,
             int[][][] keyFrameYModeCdfs,
@@ -394,6 +449,7 @@ public final class CdfContext {
         this.lumaPaletteCdfs = Objects.requireNonNull(lumaPaletteCdfs, "lumaPaletteCdfs");
         this.paletteSizeCdfs = Objects.requireNonNull(paletteSizeCdfs, "paletteSizeCdfs");
         this.chromaPaletteCdfs = Objects.requireNonNull(chromaPaletteCdfs, "chromaPaletteCdfs");
+        this.colorMapCdfs = Objects.requireNonNull(colorMapCdfs, "colorMapCdfs");
         this.segmentPredictionCdfs = Objects.requireNonNull(segmentPredictionCdfs, "segmentPredictionCdfs");
         this.segmentIdCdfs = Objects.requireNonNull(segmentIdCdfs, "segmentIdCdfs");
         this.keyFrameYModeCdfs = Objects.requireNonNull(keyFrameYModeCdfs, "keyFrameYModeCdfs");
@@ -418,6 +474,7 @@ public final class CdfContext {
                 deepCopy(DEFAULT_LUMA_PALETTE_CDFS),
                 deepCopy(DEFAULT_PALETTE_SIZE_CDFS),
                 deepCopy(DEFAULT_CHROMA_PALETTE_CDFS),
+                deepCopy(DEFAULT_COLOR_MAP_CDFS),
                 deepCopy(DEFAULT_SEGMENT_PREDICTION_CDFS),
                 deepCopy(DEFAULT_SEGMENT_ID_CDFS),
                 deepCopy(DEFAULT_KEY_FRAME_Y_MODE_CDFS),
@@ -443,6 +500,7 @@ public final class CdfContext {
                 deepCopy(lumaPaletteCdfs),
                 deepCopy(paletteSizeCdfs),
                 deepCopy(chromaPaletteCdfs),
+                deepCopy(colorMapCdfs),
                 deepCopy(segmentPredictionCdfs),
                 deepCopy(segmentIdCdfs),
                 deepCopy(keyFrameYModeCdfs),
@@ -556,6 +614,18 @@ public final class CdfContext {
         return chromaPaletteCdfs[Objects.checkIndex(paletteContext, chromaPaletteCdfs.length)];
     }
 
+    /// Returns the live mutable palette color-map CDF for the supplied plane, palette size, and context.
+    ///
+    /// @param plane the palette plane index, where `0` is luma and `1` is chroma
+    /// @param paletteSizeIndex the zero-based palette-size-minus-two index in `[0, 7)`
+    /// @param context the zero-based color-map context in `[0, 5)`
+    /// @return the live mutable palette color-map CDF for the supplied inputs
+    public int[] mutableColorMapCdf(int plane, int paletteSizeIndex, int context) {
+        int[][][] planeTable = colorMapCdfs[Objects.checkIndex(plane, colorMapCdfs.length)];
+        int[][] sizeTable = planeTable[Objects.checkIndex(paletteSizeIndex, planeTable.length)];
+        return sizeTable[Objects.checkIndex(context, sizeTable.length)];
+    }
+
     /// Returns the live mutable segmentation-prediction CDF for the supplied context index.
     ///
     /// @param context the zero-based segmentation-prediction context index in `[0, 3)`
@@ -631,6 +701,18 @@ public final class CdfContext {
         return transformed;
     }
 
+    /// Converts a four-dimensional table of raw `dav1d` thresholds into inverse-ordered AV1 CDF arrays.
+    ///
+    /// @param rawCdfs the four-dimensional table of raw threshold values
+    /// @return the transformed inverse-ordered AV1 CDF arrays
+    private static int[][][][] inverse4d(int[][][][] rawCdfs) {
+        int[][][][] transformed = new int[rawCdfs.length][][][];
+        for (int i = 0; i < rawCdfs.length; i++) {
+            transformed[i] = inverse3d(rawCdfs[i]);
+        }
+        return transformed;
+    }
+
     /// Creates a deep copy of a two-dimensional integer table.
     ///
     /// @param source the source table to copy
@@ -649,6 +731,18 @@ public final class CdfContext {
     /// @return a deep copy of the supplied table
     private static int[][][] deepCopy(int[][][] source) {
         int[][][] copy = new int[source.length][][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = deepCopy(source[i]);
+        }
+        return copy;
+    }
+
+    /// Creates a deep copy of a four-dimensional integer table.
+    ///
+    /// @param source the source table to copy
+    /// @return a deep copy of the supplied table
+    private static int[][][][] deepCopy(int[][][][] source) {
+        int[][][][] copy = new int[source.length][][][];
         for (int i = 0; i < source.length; i++) {
             copy[i] = deepCopy(source[i]);
         }
