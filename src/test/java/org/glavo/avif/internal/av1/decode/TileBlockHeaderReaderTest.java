@@ -28,7 +28,9 @@ import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
@@ -206,6 +208,8 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.singleInterMode());
         assertEquals(CompoundInterPredictionMode.NEARESTMV_NEARESTMV, header.compoundInterMode());
         assertEquals(0, header.drlIndex());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), header.motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
         assertEquals(0, header.yAngle());
@@ -431,6 +435,8 @@ final class TileBlockHeaderReaderTest {
         assertEquals(SingleInterPredictionMode.GLOBALMV, header.singleInterMode());
         assertNull(header.compoundInterMode());
         assertEquals(0, header.drlIndex());
+        assertEquals(InterMotionVector.resolved(MotionVector.zero()), header.motionVector0());
+        assertNull(header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
     }
@@ -480,6 +486,8 @@ final class TileBlockHeaderReaderTest {
         assertEquals(expectedInterMode.singleInterMode(), header.singleInterMode());
         assertNull(header.compoundInterMode());
         assertEquals(expectedInterMode.drlIndex(), header.drlIndex());
+        assertEquals(expectedSingleMotionVector(provisionalContext, expectedInterMode), header.motionVector0());
+        assertNull(header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
     }
@@ -535,6 +543,8 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.singleInterMode());
         assertEquals(expectedInterMode.compoundInterMode(), header.compoundInterMode());
         assertEquals(expectedInterMode.drlIndex(), header.drlIndex());
+        assertEquals(expectedCompoundMotionVector0(provisionalContext, expectedInterMode), header.motionVector0());
+        assertEquals(expectedCompoundMotionVector1(provisionalContext, expectedInterMode), header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
     }
@@ -1894,6 +1904,84 @@ final class TileBlockHeaderReaderTest {
         return drlIndex;
     }
 
+    /// Resolves the expected single-reference motion vector from one provisional candidate stack.
+    ///
+    /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
+    /// @param expectation the decoded inter-mode expectation
+    /// @return the expected single-reference motion vector
+    private static InterMotionVector expectedSingleMotionVector(
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
+            InterModeExpectation expectation
+    ) {
+        SingleInterPredictionMode mode = expectation.singleInterMode();
+        if (mode == null) {
+            throw new IllegalArgumentException("Single-reference expectation required");
+        }
+        return switch (mode) {
+            case GLOBALMV -> InterMotionVector.resolved(MotionVector.zero());
+            case NEARESTMV -> provisionalContext.candidateMotionVector0(0);
+            case NEARMV -> provisionalContext.candidateMotionVector0(expectation.drlIndex());
+            case NEWMV -> provisionalContext.candidateMotionVector0(expectation.drlIndex()).asPredicted();
+        };
+    }
+
+    /// Resolves the expected first compound motion vector from one provisional candidate stack.
+    ///
+    /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
+    /// @param expectation the decoded inter-mode expectation
+    /// @return the expected first compound motion vector
+    private static InterMotionVector expectedCompoundMotionVector0(
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
+            InterModeExpectation expectation
+    ) {
+        CompoundInterPredictionMode mode = expectation.compoundInterMode();
+        if (mode == null) {
+            throw new IllegalArgumentException("Compound expectation required");
+        }
+        if (mode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV) {
+            return InterMotionVector.resolved(MotionVector.zero());
+        }
+        int candidateIndex = switch (mode) {
+            case NEARESTMV_NEARESTMV, NEARESTMV_NEWMV, NEWMV_NEARESTMV, GLOBALMV_GLOBALMV -> 0;
+            case NEARMV_NEARMV, NEARMV_NEWMV, NEWMV_NEARMV, NEWMV_NEWMV -> expectation.drlIndex();
+        };
+        InterMotionVector candidate = provisionalContext.candidateMotionVector0(candidateIndex);
+        return switch (mode) {
+            case NEWMV_NEARESTMV, NEWMV_NEARMV, NEWMV_NEWMV -> candidate.asPredicted();
+            default -> candidate;
+        };
+    }
+
+    /// Resolves the expected second compound motion vector from one provisional candidate stack.
+    ///
+    /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
+    /// @param expectation the decoded inter-mode expectation
+    /// @return the expected second compound motion vector
+    private static InterMotionVector expectedCompoundMotionVector1(
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
+            InterModeExpectation expectation
+    ) {
+        CompoundInterPredictionMode mode = expectation.compoundInterMode();
+        if (mode == null) {
+            throw new IllegalArgumentException("Compound expectation required");
+        }
+        if (mode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV) {
+            return InterMotionVector.resolved(MotionVector.zero());
+        }
+        int candidateIndex = switch (mode) {
+            case NEARESTMV_NEARESTMV, NEARESTMV_NEWMV, NEWMV_NEARESTMV, GLOBALMV_GLOBALMV -> 0;
+            case NEARMV_NEARMV, NEARMV_NEWMV, NEWMV_NEARMV, NEWMV_NEWMV -> expectation.drlIndex();
+        };
+        @org.jetbrains.annotations.Nullable InterMotionVector candidate = provisionalContext.candidateMotionVector1(candidateIndex);
+        if (candidate == null) {
+            throw new IllegalStateException("Compound provisional candidate must carry a secondary motion vector");
+        }
+        return switch (mode) {
+            case NEARESTMV_NEWMV, NEARMV_NEWMV, NEWMV_NEWMV -> candidate.asPredicted();
+            default -> candidate;
+        };
+    }
+
     /// Creates a simple tile context used by block-header tests.
     ///
     /// @param frameType the synthetic frame type
@@ -2272,6 +2360,11 @@ final class TileBlockHeaderReaderTest {
                 false,
                 0,
                 -1,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(8, -4)),
+                null,
                 false,
                 0,
                 null,
@@ -2300,6 +2393,11 @@ final class TileBlockHeaderReaderTest {
                 true,
                 0,
                 4,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(12, 4)),
+                InterMotionVector.predicted(new MotionVector(-8, 16)),
                 false,
                 0,
                 null,

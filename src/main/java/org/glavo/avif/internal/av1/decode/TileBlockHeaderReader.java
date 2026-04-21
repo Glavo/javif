@@ -22,7 +22,9 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -158,6 +160,8 @@ public final class TileBlockHeaderReader {
         @Nullable SingleInterPredictionMode singleInterMode = null;
         @Nullable CompoundInterPredictionMode compoundInterMode = null;
         int drlIndex = -1;
+        @Nullable InterMotionVector motionVector0 = null;
+        @Nullable InterMotionVector motionVector1 = null;
         if (!intra && !useIntrabc) {
             InterReferenceSelection selection = readInterReferenceSelection(
                     nonNullPosition,
@@ -172,6 +176,17 @@ public final class TileBlockHeaderReader {
             if (skipMode) {
                 compoundInterMode = CompoundInterPredictionMode.NEARESTMV_NEARESTMV;
                 drlIndex = 0;
+                BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                        nonNullNeighborContext.provisionalInterModeContext(
+                                nonNullPosition,
+                                compoundReference,
+                                referenceFrame0,
+                                referenceFrame1
+                        );
+                BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                        selectMotionVectorCandidate(provisionalContext, 0);
+                motionVector0 = resolveCompoundMotionVector0(compoundInterMode, candidate);
+                motionVector1 = resolveCompoundMotionVector1(compoundInterMode, candidate);
             } else {
                 InterModeSelection interModeSelection = readInterModeSelection(
                         nonNullPosition,
@@ -184,6 +199,8 @@ public final class TileBlockHeaderReader {
                 singleInterMode = interModeSelection.singleInterMode();
                 compoundInterMode = interModeSelection.compoundInterMode();
                 drlIndex = interModeSelection.drlIndex();
+                motionVector0 = interModeSelection.motionVector0();
+                motionVector1 = interModeSelection.motionVector1();
             }
         }
 
@@ -272,6 +289,8 @@ public final class TileBlockHeaderReader {
                 singleInterMode,
                 compoundInterMode,
                 drlIndex,
+                motionVector0,
+                motionVector1,
                 segmentPredicted,
                 segmentId,
                 yMode,
@@ -395,7 +414,9 @@ public final class TileBlockHeaderReader {
     /// Decodes the inter prediction mode and provisional dynamic-reference-list index for one block.
     ///
     /// This stage intentionally stops at syntax parsing. Full motion-vector candidate lookup and
-    /// residual decoding are deferred to a later refmvs-backed implementation.
+    /// residual decoding are deferred to a later refmvs-backed implementation. The returned motion
+    /// vectors therefore mirror the same bounded provisional candidate stack used for `inter_mode`
+    /// and `drl` decoding instead of a full AV1 `refmvs` walk.
     ///
     /// @param position the local tile-relative block origin
     /// @param neighborContext the mutable neighbor context that supplies syntax contexts
@@ -434,11 +455,20 @@ public final class TileBlockHeaderReader {
                     }
                 }
             }
-            return new InterModeSelection(null, compoundInterMode, drlIndex);
+            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                    selectMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(compoundInterMode, drlIndex));
+            return new InterModeSelection(
+                    null,
+                    compoundInterMode,
+                    drlIndex,
+                    resolveCompoundMotionVector0(compoundInterMode, candidate),
+                    resolveCompoundMotionVector1(compoundInterMode, candidate)
+            );
         }
 
         if (segmentData.globalMotion() || segmentData.skip()) {
-            return new InterModeSelection(SingleInterPredictionMode.GLOBALMV, null, 0);
+            InterMotionVector zeroMotionVector = InterMotionVector.resolved(MotionVector.zero());
+            return new InterModeSelection(SingleInterPredictionMode.GLOBALMV, null, 0, zeroMotionVector, null);
         }
 
         SingleInterPredictionMode singleInterMode = syntaxReader.readSingleInterMode(
@@ -453,7 +483,126 @@ public final class TileBlockHeaderReader {
             case NEARMV -> readNearDrlIndex(provisionalContext);
             case NEWMV -> readNewDrlIndex(provisionalContext);
         };
-        return new InterModeSelection(singleInterMode, null, drlIndex);
+        InterMotionVector motionVector0 = resolveSingleMotionVector(
+                singleInterMode,
+                selectMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(singleInterMode, drlIndex))
+        );
+        return new InterModeSelection(singleInterMode, null, drlIndex, motionVector0, null);
+    }
+
+    /// Returns the provisional motion-vector candidate index used by one single-reference mode.
+    ///
+    /// @param singleInterMode the decoded single-reference inter mode
+    /// @param drlIndex the decoded provisional dynamic-reference-list index
+    /// @return the provisional motion-vector candidate index used by one single-reference mode
+    private static int motionVectorCandidateIndex(SingleInterPredictionMode singleInterMode, int drlIndex) {
+        return switch (Objects.requireNonNull(singleInterMode, "singleInterMode")) {
+            case GLOBALMV, NEARESTMV -> 0;
+            case NEARMV, NEWMV -> drlIndex;
+        };
+    }
+
+    /// Returns the provisional motion-vector candidate index used by one compound mode.
+    ///
+    /// @param compoundInterMode the decoded compound inter mode
+    /// @param drlIndex the decoded provisional dynamic-reference-list index
+    /// @return the provisional motion-vector candidate index used by one compound mode
+    private static int motionVectorCandidateIndex(CompoundInterPredictionMode compoundInterMode, int drlIndex) {
+        CompoundInterPredictionMode nonNullCompoundInterMode = Objects.requireNonNull(compoundInterMode, "compoundInterMode");
+        if (nonNullCompoundInterMode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV
+                || nonNullCompoundInterMode == CompoundInterPredictionMode.NEARESTMV_NEARESTMV
+                || nonNullCompoundInterMode == CompoundInterPredictionMode.NEARESTMV_NEWMV
+                || nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEARESTMV) {
+            return 0;
+        }
+        return drlIndex;
+    }
+
+    /// Returns one provisional motion-vector candidate by index, clamped to the available range.
+    ///
+    /// @param provisionalContext the provisional inter-mode context derived from neighbors
+    /// @param index the preferred zero-based candidate index
+    /// @return one provisional motion-vector candidate by index, clamped to the available range
+    private static BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate selectMotionVectorCandidate(
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
+            int index
+    ) {
+        BlockNeighborContext.ProvisionalInterModeContext nonNullProvisionalContext =
+                Objects.requireNonNull(provisionalContext, "provisionalContext");
+        int candidateCount = nonNullProvisionalContext.candidateCount();
+        if (candidateCount == 0) {
+            throw new IllegalStateException("Provisional inter-mode contexts must expose at least one candidate");
+        }
+        return nonNullProvisionalContext.candidate(Math.min(index, candidateCount - 1));
+    }
+
+    /// Resolves the single-reference motion vector chosen for one decoded single inter mode.
+    ///
+    /// @param singleInterMode the decoded single-reference inter mode
+    /// @param candidate the provisional motion-vector candidate selected for that mode
+    /// @return the single-reference motion vector chosen for the decoded mode
+    private static InterMotionVector resolveSingleMotionVector(
+            SingleInterPredictionMode singleInterMode,
+            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+    ) {
+        SingleInterPredictionMode nonNullSingleInterMode = Objects.requireNonNull(singleInterMode, "singleInterMode");
+        BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate =
+                Objects.requireNonNull(candidate, "candidate");
+        return switch (nonNullSingleInterMode) {
+            case GLOBALMV -> InterMotionVector.resolved(MotionVector.zero());
+            case NEARESTMV, NEARMV -> nonNullCandidate.motionVector0();
+            case NEWMV -> nonNullCandidate.motionVector0().asPredicted();
+        };
+    }
+
+    /// Resolves the first compound-reference motion vector chosen for one decoded compound mode.
+    ///
+    /// @param compoundInterMode the decoded compound inter mode
+    /// @param candidate the provisional motion-vector candidate selected for that mode
+    /// @return the first compound-reference motion vector chosen for the decoded mode
+    private static InterMotionVector resolveCompoundMotionVector0(
+            CompoundInterPredictionMode compoundInterMode,
+            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+    ) {
+        CompoundInterPredictionMode nonNullCompoundInterMode = Objects.requireNonNull(compoundInterMode, "compoundInterMode");
+        BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate =
+                Objects.requireNonNull(candidate, "candidate");
+        if (nonNullCompoundInterMode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV) {
+            return InterMotionVector.resolved(MotionVector.zero());
+        }
+        if (nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEARESTMV
+                || nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEARMV
+                || nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
+            return nonNullCandidate.motionVector0().asPredicted();
+        }
+        return nonNullCandidate.motionVector0();
+    }
+
+    /// Resolves the second compound-reference motion vector chosen for one decoded compound mode.
+    ///
+    /// @param compoundInterMode the decoded compound inter mode
+    /// @param candidate the provisional motion-vector candidate selected for that mode
+    /// @return the second compound-reference motion vector chosen for the decoded mode
+    private static InterMotionVector resolveCompoundMotionVector1(
+            CompoundInterPredictionMode compoundInterMode,
+            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+    ) {
+        CompoundInterPredictionMode nonNullCompoundInterMode = Objects.requireNonNull(compoundInterMode, "compoundInterMode");
+        BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate =
+                Objects.requireNonNull(candidate, "candidate");
+        if (nonNullCompoundInterMode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV) {
+            return InterMotionVector.resolved(MotionVector.zero());
+        }
+        @Nullable InterMotionVector motionVector1 = nonNullCandidate.motionVector1();
+        if (motionVector1 == null) {
+            throw new IllegalStateException("Compound provisional motion-vector candidates must carry a secondary vector");
+        }
+        if (nonNullCompoundInterMode == CompoundInterPredictionMode.NEARESTMV_NEWMV
+                || nonNullCompoundInterMode == CompoundInterPredictionMode.NEARMV_NEWMV
+                || nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
+            return motionVector1.asPredicted();
+        }
+        return motionVector1;
     }
 
     /// Decodes the provisional dynamic-reference-list index for a `NEWMV` single-reference block.
@@ -1117,6 +1266,12 @@ public final class TileBlockHeaderReader {
         /// The decoded dynamic-reference-list index, or `-1` when not available.
         private final int drlIndex;
 
+        /// The primary motion vector chosen for the block, or `null` when not available.
+        private final @Nullable InterMotionVector motionVector0;
+
+        /// The secondary motion vector chosen for the block, or `null` when not available.
+        private final @Nullable InterMotionVector motionVector1;
+
         /// Whether the block used temporal segmentation prediction.
         private final boolean segmentPredicted;
 
@@ -1180,6 +1335,8 @@ public final class TileBlockHeaderReader {
         /// @param singleInterMode the decoded single-reference inter mode, or `null`
         /// @param compoundInterMode the decoded compound inter mode, or `null`
         /// @param drlIndex the decoded dynamic-reference-list index, or `-1`
+        /// @param motionVector0 the primary motion vector chosen for the block, or `null`
+        /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
         /// @param segmentPredicted whether the block used temporal segmentation prediction
         /// @param segmentId the decoded segment identifier for the block
         /// @param yMode the decoded luma intra prediction mode, or `null`
@@ -1210,6 +1367,8 @@ public final class TileBlockHeaderReader {
                 @Nullable SingleInterPredictionMode singleInterMode,
                 @Nullable CompoundInterPredictionMode compoundInterMode,
                 int drlIndex,
+                @Nullable InterMotionVector motionVector0,
+                @Nullable InterMotionVector motionVector1,
                 boolean segmentPredicted,
                 int segmentId,
                 @Nullable LumaIntraPredictionMode yMode,
@@ -1240,6 +1399,8 @@ public final class TileBlockHeaderReader {
             this.singleInterMode = singleInterMode;
             this.compoundInterMode = compoundInterMode;
             this.drlIndex = drlIndex;
+            this.motionVector0 = motionVector0;
+            this.motionVector1 = motionVector1;
             this.segmentPredicted = segmentPredicted;
             this.segmentId = segmentId;
             this.yMode = yMode;
@@ -1277,8 +1438,10 @@ public final class TileBlockHeaderReader {
             if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
                 throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
             }
-            if ((intra || useIntrabc) && (singleInterMode != null || compoundInterMode != null || drlIndex != -1)) {
-                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode state");
+            if ((intra || useIntrabc)
+                    && (singleInterMode != null || compoundInterMode != null || drlIndex != -1
+                    || motionVector0 != null || motionVector1 != null)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode or motion-vector state");
             }
             if (!intra && !useIntrabc) {
                 if (referenceFrame0 == NO_REFERENCE_FRAME) {
@@ -1297,11 +1460,17 @@ public final class TileBlockHeaderReader {
                 if (!compoundReference && compoundInterMode != null) {
                     throw new IllegalArgumentException("Single-reference blocks must not carry a compound inter mode");
                 }
+                if (!compoundReference && motionVector1 != null) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary motion vector");
+                }
                 if (compoundReference && compoundInterMode == null && drlIndex != -1) {
                     throw new IllegalArgumentException("Compound-reference blocks with DRL state must carry a compound inter mode");
                 }
                 if (!compoundReference && singleInterMode == null && drlIndex != -1) {
                     throw new IllegalArgumentException("Single-reference blocks with DRL state must carry a single inter mode");
+                }
+                if (motionVector1 != null && referenceFrame1 == NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Blocks without a secondary reference must not carry a secondary motion vector");
                 }
             }
         }
@@ -1376,6 +1545,8 @@ public final class TileBlockHeaderReader {
                     null,
                     null,
                     -1,
+                    null,
+                    null,
                     segmentPredicted,
                     segmentId,
                     yMode,
@@ -1484,6 +1655,20 @@ public final class TileBlockHeaderReader {
         /// @return the decoded dynamic-reference-list index, or `-1`
         public int drlIndex() {
             return drlIndex;
+        }
+
+        /// Returns the primary motion vector chosen for the block, or `null` when not available.
+        ///
+        /// @return the primary motion vector chosen for the block, or `null`
+        public @Nullable InterMotionVector motionVector0() {
+            return motionVector0;
+        }
+
+        /// Returns the secondary motion vector chosen for the block, or `null` when not available.
+        ///
+        /// @return the secondary motion vector chosen for the block, or `null`
+        public @Nullable InterMotionVector motionVector1() {
+            return motionVector1;
         }
 
         /// Returns whether the block used temporal segmentation prediction.
@@ -1693,19 +1878,31 @@ public final class TileBlockHeaderReader {
         /// The decoded provisional dynamic-reference-list index.
         private final int drlIndex;
 
+        /// The provisional primary motion vector chosen for the block.
+        private final InterMotionVector motionVector0;
+
+        /// The provisional secondary motion vector chosen for the block, or `null`.
+        private final @Nullable InterMotionVector motionVector1;
+
         /// Creates one decoded inter prediction-mode selection.
         ///
         /// @param singleInterMode the decoded single-reference inter mode, or `null`
         /// @param compoundInterMode the decoded compound inter mode, or `null`
         /// @param drlIndex the decoded provisional dynamic-reference-list index
+        /// @param motionVector0 the provisional primary motion vector chosen for the block
+        /// @param motionVector1 the provisional secondary motion vector chosen for the block, or `null`
         private InterModeSelection(
                 @Nullable SingleInterPredictionMode singleInterMode,
                 @Nullable CompoundInterPredictionMode compoundInterMode,
-                int drlIndex
+                int drlIndex,
+                InterMotionVector motionVector0,
+                @Nullable InterMotionVector motionVector1
         ) {
             this.singleInterMode = singleInterMode;
             this.compoundInterMode = compoundInterMode;
             this.drlIndex = drlIndex;
+            this.motionVector0 = Objects.requireNonNull(motionVector0, "motionVector0");
+            this.motionVector1 = motionVector1;
         }
 
         /// Returns the decoded single-reference inter mode, or `null` when the block is compound.
@@ -1727,6 +1924,20 @@ public final class TileBlockHeaderReader {
         /// @return the decoded provisional dynamic-reference-list index
         public int drlIndex() {
             return drlIndex;
+        }
+
+        /// Returns the provisional primary motion vector chosen for the block.
+        ///
+        /// @return the provisional primary motion vector chosen for the block
+        public InterMotionVector motionVector0() {
+            return motionVector0;
+        }
+
+        /// Returns the provisional secondary motion vector chosen for the block, or `null`.
+        ///
+        /// @return the provisional secondary motion vector chosen for the block, or `null`
+        public @Nullable InterMotionVector motionVector1() {
+            return motionVector1;
         }
     }
 }

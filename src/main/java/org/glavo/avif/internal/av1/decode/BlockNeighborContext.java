@@ -18,8 +18,11 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -68,6 +71,18 @@ public final class BlockNeighborContext {
 
     /// The left-edge secondary reference-frame indices indexed in 4x4 units.
     private final byte[] leftReferenceFrame1;
+
+    /// The above-edge primary motion vectors indexed in 4x4 units.
+    private final InterMotionVector[] aboveMotionVector0;
+
+    /// The left-edge primary motion vectors indexed in 4x4 units.
+    private final InterMotionVector[] leftMotionVector0;
+
+    /// The above-edge secondary motion vectors indexed in 4x4 units.
+    private final InterMotionVector[] aboveMotionVector1;
+
+    /// The left-edge secondary motion vectors indexed in 4x4 units.
+    private final InterMotionVector[] leftMotionVector1;
 
     /// The above-edge segmentation-prediction flags indexed in 4x4 units.
     private final byte[] aboveSegmentPredicted;
@@ -127,6 +142,10 @@ public final class BlockNeighborContext {
     /// @param leftReferenceFrame0 the left-edge primary reference-frame indices indexed in 4x4 units
     /// @param aboveReferenceFrame1 the above-edge secondary reference-frame indices indexed in 4x4 units
     /// @param leftReferenceFrame1 the left-edge secondary reference-frame indices indexed in 4x4 units
+    /// @param aboveMotionVector0 the above-edge primary motion vectors indexed in 4x4 units
+    /// @param leftMotionVector0 the left-edge primary motion vectors indexed in 4x4 units
+    /// @param aboveMotionVector1 the above-edge secondary motion vectors indexed in 4x4 units
+    /// @param leftMotionVector1 the left-edge secondary motion vectors indexed in 4x4 units
     /// @param aboveSegmentPredicted the above-edge segmentation-prediction flags indexed in 4x4 units
     /// @param leftSegmentPredicted the left-edge segmentation-prediction flags indexed in 4x4 units
     /// @param aboveSegmentId the above-edge segment identifiers indexed in 4x4 units
@@ -156,6 +175,10 @@ public final class BlockNeighborContext {
             byte[] leftReferenceFrame0,
             byte[] aboveReferenceFrame1,
             byte[] leftReferenceFrame1,
+            InterMotionVector[] aboveMotionVector0,
+            InterMotionVector[] leftMotionVector0,
+            InterMotionVector[] aboveMotionVector1,
+            InterMotionVector[] leftMotionVector1,
             byte[] aboveSegmentPredicted,
             byte[] leftSegmentPredicted,
             byte[] aboveSegmentId,
@@ -185,6 +208,10 @@ public final class BlockNeighborContext {
         this.leftReferenceFrame0 = Objects.requireNonNull(leftReferenceFrame0, "leftReferenceFrame0");
         this.aboveReferenceFrame1 = Objects.requireNonNull(aboveReferenceFrame1, "aboveReferenceFrame1");
         this.leftReferenceFrame1 = Objects.requireNonNull(leftReferenceFrame1, "leftReferenceFrame1");
+        this.aboveMotionVector0 = Objects.requireNonNull(aboveMotionVector0, "aboveMotionVector0");
+        this.leftMotionVector0 = Objects.requireNonNull(leftMotionVector0, "leftMotionVector0");
+        this.aboveMotionVector1 = Objects.requireNonNull(aboveMotionVector1, "aboveMotionVector1");
+        this.leftMotionVector1 = Objects.requireNonNull(leftMotionVector1, "leftMotionVector1");
         this.aboveSegmentPredicted = Objects.requireNonNull(aboveSegmentPredicted, "aboveSegmentPredicted");
         this.leftSegmentPredicted = Objects.requireNonNull(leftSegmentPredicted, "leftSegmentPredicted");
         this.aboveSegmentId = Objects.requireNonNull(aboveSegmentId, "aboveSegmentId");
@@ -219,12 +246,21 @@ public final class BlockNeighborContext {
         byte[] leftReferenceFrame0 = new byte[tileHeight4];
         byte[] aboveReferenceFrame1 = new byte[tileWidth4];
         byte[] leftReferenceFrame1 = new byte[tileHeight4];
+        InterMotionVector[] aboveMotionVector0 = new InterMotionVector[tileWidth4];
+        InterMotionVector[] leftMotionVector0 = new InterMotionVector[tileHeight4];
+        InterMotionVector[] aboveMotionVector1 = new InterMotionVector[tileWidth4];
+        InterMotionVector[] leftMotionVector1 = new InterMotionVector[tileHeight4];
         LumaIntraPredictionMode[] aboveMode = new LumaIntraPredictionMode[tileWidth4];
         LumaIntraPredictionMode[] leftMode = new LumaIntraPredictionMode[tileHeight4];
+        InterMotionVector defaultMotionVector = InterMotionVector.predicted(MotionVector.zero());
         Arrays.fill(aboveReferenceFrame0, (byte) -1);
         Arrays.fill(leftReferenceFrame0, (byte) -1);
         Arrays.fill(aboveReferenceFrame1, (byte) -1);
         Arrays.fill(leftReferenceFrame1, (byte) -1);
+        Arrays.fill(aboveMotionVector0, defaultMotionVector);
+        Arrays.fill(leftMotionVector0, defaultMotionVector);
+        Arrays.fill(aboveMotionVector1, defaultMotionVector);
+        Arrays.fill(leftMotionVector1, defaultMotionVector);
         Arrays.fill(aboveMode, LumaIntraPredictionMode.DC);
         Arrays.fill(leftMode, LumaIntraPredictionMode.DC);
         if (keyFrame) {
@@ -247,6 +283,10 @@ public final class BlockNeighborContext {
                 leftReferenceFrame0,
                 aboveReferenceFrame1,
                 leftReferenceFrame1,
+                aboveMotionVector0,
+                leftMotionVector0,
+                aboveMotionVector1,
+                leftMotionVector1,
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 new byte[tileWidth4],
@@ -558,7 +598,18 @@ public final class BlockNeighborContext {
         int partialMatches = 0;
         int interNeighborCount = 0;
         int compoundNeighborCount = 0;
-        int[] candidateWeights = new int[]{640, 0, 0, 0};
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates =
+                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[]{
+                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                        640,
+                        InterMotionVector.predicted(MotionVector.zero()),
+                        compoundReference ? InterMotionVector.predicted(MotionVector.zero()) : null,
+                        true
+                ),
+                null,
+                null,
+                null
+        };
         int candidateCount = 1;
 
         if (hasTopNeighbor(nonNullPosition) && aboveIntra[x4] == 0) {
@@ -573,7 +624,21 @@ public final class BlockNeighborContext {
                     neighborReferenceFrame0,
                     neighborReferenceFrame1
             );
-            candidateCount = appendProvisionalCandidateWeights(candidateWeights, candidateCount, baseWeight);
+            candidateCount = appendProvisionalCandidateWeights(
+                    candidates,
+                    candidateCount,
+                    provisionalMotionVectorCandidate(
+                            compoundReference,
+                            referenceFrame0,
+                            referenceFrame1,
+                            neighborCompound,
+                            neighborReferenceFrame0,
+                            neighborReferenceFrame1,
+                            aboveMotionVector0[x4],
+                            aboveMotionVector1[x4],
+                            baseWeight
+                    )
+            );
             interNeighborCount++;
             if (neighborCompound) {
                 compoundNeighborCount++;
@@ -596,7 +661,21 @@ public final class BlockNeighborContext {
                     neighborReferenceFrame0,
                     neighborReferenceFrame1
             );
-            candidateCount = appendProvisionalCandidateWeights(candidateWeights, candidateCount, baseWeight);
+            candidateCount = appendProvisionalCandidateWeights(
+                    candidates,
+                    candidateCount,
+                    provisionalMotionVectorCandidate(
+                            compoundReference,
+                            referenceFrame0,
+                            referenceFrame1,
+                            neighborCompound,
+                            neighborReferenceFrame0,
+                            neighborReferenceFrame1,
+                            leftMotionVector0[y4],
+                            leftMotionVector1[y4],
+                            baseWeight
+                    )
+            );
             interNeighborCount++;
             if (neighborCompound) {
                 compoundNeighborCount++;
@@ -608,7 +687,7 @@ public final class BlockNeighborContext {
             }
         }
 
-        sortDescending(candidateWeights, candidateCount);
+        sortDescending(candidates, candidateCount);
 
         int singleNewMvContext;
         if (exactMatches >= 2) {
@@ -664,7 +743,7 @@ public final class BlockNeighborContext {
                 singleGlobalMvContext,
                 singleReferenceMvContext,
                 compoundInterModeContext,
-                Arrays.copyOf(candidateWeights, candidateCount)
+                Arrays.copyOf(candidates, candidateCount)
         );
     }
 
@@ -817,6 +896,8 @@ public final class BlockNeighborContext {
         int[] vPaletteColors = nonNullHeader.vPaletteColors();
         byte referenceFrame0 = (byte) nonNullHeader.referenceFrame0();
         byte referenceFrame1 = (byte) nonNullHeader.referenceFrame1();
+        InterMotionVector motionVector0 = fallbackMotionVector(nonNullHeader.motionVector0());
+        InterMotionVector motionVector1 = fallbackMotionVector(nonNullHeader.motionVector1());
         LumaIntraPredictionMode mode = nonNullHeader.intra() ? nonNullHeader.yMode() : LumaIntraPredictionMode.DC;
         int endX4 = Math.min(tileWidth4, position.x4() + size.width4());
         int endY4 = Math.min(tileHeight4, position.y4() + size.height4());
@@ -827,6 +908,8 @@ public final class BlockNeighborContext {
             aboveCompoundReference[x4] = compoundReference;
             aboveReferenceFrame0[x4] = referenceFrame0;
             aboveReferenceFrame1[x4] = referenceFrame1;
+            aboveMotionVector0[x4] = motionVector0;
+            aboveMotionVector1[x4] = motionVector1;
             aboveSegmentPredicted[x4] = segmentPredicted;
             aboveSegmentId[x4] = segmentId;
             abovePaletteSize[x4] = paletteSize;
@@ -846,6 +929,8 @@ public final class BlockNeighborContext {
             leftCompoundReference[y4] = compoundReference;
             leftReferenceFrame0[y4] = referenceFrame0;
             leftReferenceFrame1[y4] = referenceFrame1;
+            leftMotionVector0[y4] = motionVector0;
+            leftMotionVector1[y4] = motionVector1;
             leftSegmentPredicted[y4] = segmentPredicted;
             leftSegmentId[y4] = segmentId;
             leftPaletteSize[y4] = paletteSize;
@@ -858,6 +943,14 @@ public final class BlockNeighborContext {
             System.arraycopy(vPaletteColors, 0, leftPaletteEntries[2][y4], 0, vPaletteColors.length);
             leftMode[y4] = mode;
         }
+    }
+
+    /// Returns one stored edge motion vector, falling back to a provisional zero vector.
+    ///
+    /// @param motionVector the stored motion vector, or `null`
+    /// @return one stored edge motion vector, falling back to a provisional zero vector
+    private static InterMotionVector fallbackMotionVector(@Nullable InterMotionVector motionVector) {
+        return motionVector != null ? motionVector : InterMotionVector.predicted(MotionVector.zero());
     }
 
     /// Returns whether one stored neighbor uses a unidirectional compound reference pair.
@@ -968,43 +1061,144 @@ public final class BlockNeighborContext {
         return referenceDirection(referenceFrame0) == referenceDirection(neighborReferenceFrame0) ? 384 : 256;
     }
 
-    /// Appends one provisional candidate weight and an optional weaker companion candidate.
+    /// Builds one provisional motion-vector candidate from one stored neighbor.
     ///
-    /// @param destination the destination candidate-weight array
-    /// @param count the number of valid weights currently stored in `destination`
-    /// @param baseWeight the base candidate weight to append
-    /// @return the updated candidate count after appending the provisional weight entries
-    private static int appendProvisionalCandidateWeights(int[] destination, int count, int baseWeight) {
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param neighborCompound whether the stored neighbor uses compound references
+    /// @param neighborReferenceFrame0 the neighbor primary reference
+    /// @param neighborReferenceFrame1 the neighbor secondary reference, or `-1`
+    /// @param neighborMotionVector0 the stored neighbor primary motion vector
+    /// @param neighborMotionVector1 the stored neighbor secondary motion vector
+    /// @param weight the provisional candidate weight to assign
+    /// @return one provisional motion-vector candidate from one stored neighbor
+    private static ProvisionalInterModeContext.ProvisionalMotionVectorCandidate provisionalMotionVectorCandidate(
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            boolean neighborCompound,
+            int neighborReferenceFrame0,
+            int neighborReferenceFrame1,
+            InterMotionVector neighborMotionVector0,
+            InterMotionVector neighborMotionVector1,
+            int weight
+    ) {
+        InterMotionVector motionVector0 = matchingMotionVector(
+                referenceFrame0,
+                neighborCompound,
+                neighborReferenceFrame0,
+                neighborReferenceFrame1,
+                Objects.requireNonNull(neighborMotionVector0, "neighborMotionVector0"),
+                Objects.requireNonNull(neighborMotionVector1, "neighborMotionVector1")
+        );
+        @Nullable InterMotionVector motionVector1 = compoundReference
+                ? matchingMotionVector(
+                referenceFrame1,
+                neighborCompound,
+                neighborReferenceFrame0,
+                neighborReferenceFrame1,
+                neighborMotionVector0,
+                neighborMotionVector1
+        )
+                : null;
+        return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(weight, motionVector0, motionVector1, false);
+    }
+
+    /// Returns the best provisional motion vector contributed by one stored neighbor for one reference.
+    ///
+    /// @param referenceFrame the requested current-block reference-frame index
+    /// @param neighborCompound whether the stored neighbor uses compound references
+    /// @param neighborReferenceFrame0 the neighbor primary reference-frame index
+    /// @param neighborReferenceFrame1 the neighbor secondary reference-frame index, or `-1`
+    /// @param neighborMotionVector0 the stored neighbor primary motion vector
+    /// @param neighborMotionVector1 the stored neighbor secondary motion vector
+    /// @return the best provisional motion vector contributed by one stored neighbor for one reference
+    private static InterMotionVector matchingMotionVector(
+            int referenceFrame,
+            boolean neighborCompound,
+            int neighborReferenceFrame0,
+            int neighborReferenceFrame1,
+            InterMotionVector neighborMotionVector0,
+            InterMotionVector neighborMotionVector1
+    ) {
+        if (referenceFrame == neighborReferenceFrame0) {
+            return neighborMotionVector0;
+        }
+        if (neighborCompound && referenceFrame == neighborReferenceFrame1) {
+            return neighborMotionVector1;
+        }
+        return InterMotionVector.predicted(MotionVector.zero());
+    }
+
+    /// Appends one provisional motion-vector candidate and an optional weaker companion candidate.
+    ///
+    /// @param destination the destination candidate array
+    /// @param count the number of valid candidates currently stored in `destination`
+    /// @param candidate the base candidate to append
+    /// @return the updated candidate count after appending the provisional candidate entries
+    private static int appendProvisionalCandidateWeights(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+    ) {
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate = Objects.requireNonNull(candidate, "candidate");
         if (count < destination.length) {
-            destination[count++] = baseWeight;
+            destination[count++] = nonNullCandidate;
         }
         int secondaryWeight;
-        if (baseWeight >= 640) {
+        if (nonNullCandidate.weight() >= 640) {
             secondaryWeight = 512;
-        } else if (baseWeight >= 512) {
+        } else if (nonNullCandidate.weight() >= 512) {
             secondaryWeight = 384;
-        } else if (baseWeight >= 384) {
+        } else if (nonNullCandidate.weight() >= 384) {
             secondaryWeight = 256;
         } else {
             secondaryWeight = -1;
         }
         if (secondaryWeight > 0 && count < destination.length) {
-            destination[count++] = secondaryWeight;
+            destination[count++] = nonNullCandidate.withWeight(secondaryWeight);
         }
         return count;
     }
 
-    /// Sorts a prefix of the supplied candidate-weight array in descending order.
+    /// Sorts a prefix of the supplied provisional candidate array in descending weight order.
     ///
-    /// @param values the candidate-weight array to sort
-    /// @param count the number of active values at the front of the array
-    private static void sortDescending(int[] values, int count) {
-        Arrays.sort(values, 0, count);
-        for (int left = 0, right = count - 1; left < right; left++, right--) {
-            int tmp = values[left];
-            values[left] = values[right];
-            values[right] = tmp;
+    /// Real neighbor-derived candidates win ties over the synthetic zero baseline.
+    ///
+    /// @param values the provisional candidate array to sort
+    /// @param count the number of active candidates at the front of the array
+    private static void sortDescending(ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] values, int count) {
+        for (int i = 1; i < count; i++) {
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate current = values[i];
+            int j = i - 1;
+            while (j >= 0 && compareCandidates(current, values[j]) < 0) {
+                values[j + 1] = values[j];
+                j--;
+            }
+            values[j + 1] = current;
         }
+    }
+
+    /// Compares two provisional motion-vector candidates for descending sort order.
+    ///
+    /// @param left the first candidate
+    /// @param right the second candidate
+    /// @return the comparison result used for descending sort order
+    private static int compareCandidates(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate left,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate right
+    ) {
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullLeft = Objects.requireNonNull(left, "left");
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullRight = Objects.requireNonNull(right, "right");
+        int weightCompare = Integer.compare(nonNullRight.weight(), nonNullLeft.weight());
+        if (weightCompare != 0) {
+            return weightCompare;
+        }
+        if (nonNullLeft.synthetic() != nonNullRight.synthetic()) {
+            return nonNullLeft.synthetic() ? 1 : -1;
+        }
+        return 0;
     }
 
     /// Returns whether two reference selections share at least one reference-frame index.
@@ -1075,8 +1269,8 @@ public final class BlockNeighborContext {
         /// The zero-based provisional compound inter-mode context index in `[0, 8)`.
         private final int compoundInterModeContext;
 
-        /// The provisional candidate weights sorted in descending order.
-        private final int[] candidateWeights;
+        /// The provisional motion-vector candidates sorted in descending weight order.
+        private final ProvisionalMotionVectorCandidate[] candidates;
 
         /// Creates one provisional inter-mode syntax context.
         ///
@@ -1084,19 +1278,19 @@ public final class BlockNeighborContext {
         /// @param singleGlobalMvContext the zero-based provisional `globalmv` context index in `[0, 2)`
         /// @param singleReferenceMvContext the zero-based provisional `refmv` context index in `[0, 6)`
         /// @param compoundInterModeContext the zero-based provisional compound inter-mode context index in `[0, 8)`
-        /// @param candidateWeights the provisional candidate weights sorted in descending order
+        /// @param candidates the provisional motion-vector candidates sorted in descending weight order
         public ProvisionalInterModeContext(
                 int singleNewMvContext,
                 int singleGlobalMvContext,
                 int singleReferenceMvContext,
                 int compoundInterModeContext,
-                int[] candidateWeights
+                ProvisionalMotionVectorCandidate[] candidates
         ) {
             this.singleNewMvContext = singleNewMvContext;
             this.singleGlobalMvContext = singleGlobalMvContext;
             this.singleReferenceMvContext = singleReferenceMvContext;
             this.compoundInterModeContext = compoundInterModeContext;
-            this.candidateWeights = Arrays.copyOf(Objects.requireNonNull(candidateWeights, "candidateWeights"), candidateWeights.length);
+            this.candidates = Arrays.copyOf(Objects.requireNonNull(candidates, "candidates"), candidates.length);
         }
 
         /// Returns the zero-based provisional `newmv` context index in `[0, 6)`.
@@ -1127,11 +1321,11 @@ public final class BlockNeighborContext {
             return compoundInterModeContext;
         }
 
-        /// Returns the number of provisional candidate weights currently available.
+        /// Returns the number of provisional motion-vector candidates currently available.
         ///
-        /// @return the number of provisional candidate weights currently available
+        /// @return the number of provisional motion-vector candidates currently available
         public int candidateCount() {
-            return candidateWeights.length;
+            return candidates.length;
         }
 
         /// Returns one provisional candidate weight by index.
@@ -1139,7 +1333,23 @@ public final class BlockNeighborContext {
         /// @param index the zero-based candidate index
         /// @return one provisional candidate weight by index
         public int candidateWeight(int index) {
-            return candidateWeights[Objects.checkIndex(index, candidateWeights.length)];
+            return candidate(Objects.checkIndex(index, candidates.length)).weight();
+        }
+
+        /// Returns one provisional primary motion vector by index.
+        ///
+        /// @param index the zero-based candidate index
+        /// @return one provisional primary motion vector by index
+        public InterMotionVector candidateMotionVector0(int index) {
+            return candidate(Objects.checkIndex(index, candidates.length)).motionVector0();
+        }
+
+        /// Returns one provisional secondary motion vector by index, or `null`.
+        ///
+        /// @param index the zero-based candidate index
+        /// @return one provisional secondary motion vector by index, or `null`
+        public @Nullable InterMotionVector candidateMotionVector1(int index) {
+            return candidate(Objects.checkIndex(index, candidates.length)).motionVector1();
         }
 
         /// Returns the provisional dynamic-reference-list context for one candidate boundary.
@@ -1150,11 +1360,89 @@ public final class BlockNeighborContext {
         /// @param referenceIndex the zero-based candidate boundary index
         /// @return the zero-based provisional dynamic-reference-list context in `[0, 3)`
         public int drlContext(int referenceIndex) {
-            int index = Objects.checkIndex(referenceIndex + 1, candidateWeights.length) - 1;
-            if (candidateWeights[index] >= 640) {
-                return candidateWeights[index + 1] < 640 ? 1 : 0;
+            int index = Objects.checkIndex(referenceIndex + 1, candidates.length) - 1;
+            if (candidates[index].weight() >= 640) {
+                return candidates[index + 1].weight() < 640 ? 1 : 0;
             }
-            return candidateWeights[index + 1] < 640 ? 2 : 0;
+            return candidates[index + 1].weight() < 640 ? 2 : 0;
+        }
+
+        /// Returns one stored provisional motion-vector candidate by index.
+        ///
+        /// @param index the zero-based candidate index
+        /// @return one stored provisional motion-vector candidate by index
+        public ProvisionalMotionVectorCandidate candidate(int index) {
+            return candidates[Objects.checkIndex(index, candidates.length)];
+        }
+
+        /// One provisional motion-vector candidate derived from one bounded neighbor source.
+        @NotNullByDefault
+        public static final class ProvisionalMotionVectorCandidate {
+            /// The candidate weight used for DRL-context derivation.
+            private final int weight;
+
+            /// The primary provisional motion vector carried by this candidate.
+            private final InterMotionVector motionVector0;
+
+            /// The secondary provisional motion vector carried by this candidate, or `null`.
+            private final @Nullable InterMotionVector motionVector1;
+
+            /// Whether this candidate is the synthetic zero baseline instead of a real neighbor.
+            private final boolean synthetic;
+
+            /// Creates one provisional motion-vector candidate.
+            ///
+            /// @param weight the candidate weight used for DRL-context derivation
+            /// @param motionVector0 the primary provisional motion vector carried by this candidate
+            /// @param motionVector1 the secondary provisional motion vector carried by this candidate, or `null`
+            /// @param synthetic whether this candidate is the synthetic zero baseline
+            private ProvisionalMotionVectorCandidate(
+                    int weight,
+                    InterMotionVector motionVector0,
+                    @Nullable InterMotionVector motionVector1,
+                    boolean synthetic
+            ) {
+                this.weight = weight;
+                this.motionVector0 = Objects.requireNonNull(motionVector0, "motionVector0");
+                this.motionVector1 = motionVector1;
+                this.synthetic = synthetic;
+            }
+
+            /// Returns the candidate weight used for DRL-context derivation.
+            ///
+            /// @return the candidate weight used for DRL-context derivation
+            public int weight() {
+                return weight;
+            }
+
+            /// Returns the primary provisional motion vector carried by this candidate.
+            ///
+            /// @return the primary provisional motion vector carried by this candidate
+            public InterMotionVector motionVector0() {
+                return motionVector0;
+            }
+
+            /// Returns the secondary provisional motion vector carried by this candidate, or `null`.
+            ///
+            /// @return the secondary provisional motion vector carried by this candidate, or `null`
+            public @Nullable InterMotionVector motionVector1() {
+                return motionVector1;
+            }
+
+            /// Returns whether this candidate is the synthetic zero baseline.
+            ///
+            /// @return whether this candidate is the synthetic zero baseline
+            public boolean synthetic() {
+                return synthetic;
+            }
+
+            /// Returns this candidate copied with a different weight.
+            ///
+            /// @param newWeight the replacement candidate weight
+            /// @return this candidate copied with a different weight
+            private ProvisionalMotionVectorCandidate withWeight(int newWeight) {
+                return new ProvisionalMotionVectorCandidate(newWeight, motionVector0, motionVector1, synthetic);
+            }
         }
     }
 

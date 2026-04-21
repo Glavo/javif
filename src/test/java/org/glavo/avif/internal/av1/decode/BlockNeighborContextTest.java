@@ -24,7 +24,9 @@ import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
@@ -33,6 +35,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `BlockNeighborContext`.
@@ -115,6 +118,11 @@ final class BlockNeighborContextTest {
                 false,
                 0,
                 -1,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(8, -4)),
+                null,
                 false,
                 0,
                 null,
@@ -143,6 +151,11 @@ final class BlockNeighborContextTest {
                 true,
                 0,
                 4,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(12, 4)),
+                InterMotionVector.predicted(new MotionVector(-8, 16)),
                 false,
                 0,
                 null,
@@ -189,6 +202,11 @@ final class BlockNeighborContextTest {
                 false,
                 0,
                 -1,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(8, -4)),
+                null,
                 false,
                 0,
                 null,
@@ -217,6 +235,11 @@ final class BlockNeighborContextTest {
                 true,
                 0,
                 4,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(12, 4)),
+                InterMotionVector.predicted(new MotionVector(-8, 16)),
                 false,
                 0,
                 null,
@@ -247,6 +270,11 @@ final class BlockNeighborContextTest {
         assertEquals(640, singleContext.candidateWeight(1));
         assertEquals(512, singleContext.candidateWeight(2));
         assertEquals(448, singleContext.candidateWeight(3));
+        assertEquals(InterMotionVector.resolved(new MotionVector(8, -4)), singleContext.candidateMotionVector0(0));
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), singleContext.candidateMotionVector0(1));
+        assertEquals(InterMotionVector.resolved(new MotionVector(8, -4)), singleContext.candidateMotionVector0(2));
+        assertEquals(InterMotionVector.resolved(new MotionVector(12, 4)), singleContext.candidateMotionVector0(3));
+        assertNull(singleContext.candidateMotionVector1(0));
         assertEquals(0, singleContext.drlContext(0));
         assertEquals(1, singleContext.drlContext(1));
         assertEquals(2, singleContext.drlContext(2));
@@ -262,6 +290,10 @@ final class BlockNeighborContextTest {
         assertEquals(640, compoundContext.candidateWeight(1));
         assertEquals(448, compoundContext.candidateWeight(2));
         assertEquals(256, compoundContext.candidateWeight(3));
+        assertEquals(InterMotionVector.resolved(new MotionVector(12, 4)), compoundContext.candidateMotionVector0(0));
+        assertEquals(InterMotionVector.predicted(new MotionVector(-8, 16)), compoundContext.candidateMotionVector1(0));
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), compoundContext.candidateMotionVector0(1));
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), compoundContext.candidateMotionVector1(1));
         assertEquals(0, compoundContext.drlContext(0));
         assertEquals(1, compoundContext.drlContext(1));
         assertEquals(2, compoundContext.drlContext(2));
