@@ -424,7 +424,7 @@ public final class TileBlockHeaderReader {
     /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
     /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
     /// @param segmentData the final segment data for the current block
-    /// @return the decoded inter prediction mode and provisional dynamic-reference-list index
+    /// @return the decoded inter prediction mode, dynamic-reference-list index, and motion-vector state
     private InterModeSelection readInterModeSelection(
             BlockPosition position,
             BlockNeighborContext neighborContext,
@@ -457,12 +457,24 @@ public final class TileBlockHeaderReader {
             }
             BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
                     selectReferenceMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(compoundInterMode, drlIndex));
+            InterMotionVector motionVector0 = resolveCompoundMotionVector0(compoundInterMode, candidate);
+            InterMotionVector motionVector1 = resolveCompoundMotionVector1(compoundInterMode, candidate);
+            if (compoundInterMode == CompoundInterPredictionMode.NEWMV_NEARESTMV
+                    || compoundInterMode == CompoundInterPredictionMode.NEWMV_NEARMV
+                    || compoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
+                motionVector0 = decodeNewMotionVectorResidual(motionVector0);
+            }
+            if (compoundInterMode == CompoundInterPredictionMode.NEARESTMV_NEWMV
+                    || compoundInterMode == CompoundInterPredictionMode.NEARMV_NEWMV
+                    || compoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
+                motionVector1 = decodeNewMotionVectorResidual(motionVector1);
+            }
             return new InterModeSelection(
                     null,
                     compoundInterMode,
                     drlIndex,
-                    resolveCompoundMotionVector0(compoundInterMode, candidate),
-                    resolveCompoundMotionVector1(compoundInterMode, candidate)
+                    motionVector0,
+                    motionVector1
             );
         }
 
@@ -487,6 +499,9 @@ public final class TileBlockHeaderReader {
                 singleInterMode,
                 selectReferenceMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(singleInterMode, drlIndex))
         );
+        if (singleInterMode == SingleInterPredictionMode.NEWMV) {
+            motionVector0 = decodeNewMotionVectorResidual(motionVector0);
+        }
         return new InterModeSelection(singleInterMode, null, drlIndex, motionVector0, null);
     }
 
@@ -536,11 +551,11 @@ public final class TileBlockHeaderReader {
         return nonNullProvisionalContext.motionVectorCandidate(Math.min(index, candidateCount - 1));
     }
 
-    /// Resolves the single-reference motion vector chosen for one decoded single inter mode.
+    /// Resolves the single-reference motion-vector predictor chosen for one decoded single inter mode.
     ///
     /// @param singleInterMode the decoded single-reference inter mode
     /// @param candidate the provisional motion-vector candidate selected for that mode
-    /// @return the single-reference motion vector chosen for the decoded mode
+    /// @return the single-reference motion-vector predictor chosen for the decoded mode
     private static InterMotionVector resolveSingleMotionVector(
             SingleInterPredictionMode singleInterMode,
             BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
@@ -555,11 +570,11 @@ public final class TileBlockHeaderReader {
         };
     }
 
-    /// Resolves the first compound-reference motion vector chosen for one decoded compound mode.
+    /// Resolves the first compound-reference motion-vector predictor chosen for one decoded compound mode.
     ///
     /// @param compoundInterMode the decoded compound inter mode
     /// @param candidate the provisional motion-vector candidate selected for that mode
-    /// @return the first compound-reference motion vector chosen for the decoded mode
+    /// @return the first compound-reference motion-vector predictor chosen for the decoded mode
     private static InterMotionVector resolveCompoundMotionVector0(
             CompoundInterPredictionMode compoundInterMode,
             BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
@@ -578,11 +593,11 @@ public final class TileBlockHeaderReader {
         return nonNullCandidate.motionVector0();
     }
 
-    /// Resolves the second compound-reference motion vector chosen for one decoded compound mode.
+    /// Resolves the second compound-reference motion-vector predictor chosen for one decoded compound mode.
     ///
     /// @param compoundInterMode the decoded compound inter mode
     /// @param candidate the provisional motion-vector candidate selected for that mode
-    /// @return the second compound-reference motion vector chosen for the decoded mode
+    /// @return the second compound-reference motion-vector predictor chosen for the decoded mode
     private static InterMotionVector resolveCompoundMotionVector1(
             CompoundInterPredictionMode compoundInterMode,
             BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
@@ -603,6 +618,16 @@ public final class TileBlockHeaderReader {
             return motionVector1.asPredicted();
         }
         return motionVector1;
+    }
+
+    /// Decodes one `NEWMV` residual around the supplied provisional motion-vector predictor.
+    ///
+    /// @param predictor the provisional motion-vector predictor selected for the block
+    /// @return the fully decoded motion-vector state for the block
+    private InterMotionVector decodeNewMotionVectorResidual(InterMotionVector predictor) {
+        InterMotionVector nonNullPredictor = Objects.requireNonNull(predictor, "predictor");
+        MotionVector decodedMotionVector = syntaxReader.readMotionVectorResidual(nonNullPredictor.vector());
+        return InterMotionVector.resolved(decodedMotionVector);
     }
 
     /// Decodes the provisional dynamic-reference-list index for a `NEWMV` single-reference block.
@@ -1878,10 +1903,10 @@ public final class TileBlockHeaderReader {
         /// The decoded provisional dynamic-reference-list index.
         private final int drlIndex;
 
-        /// The provisional primary motion vector chosen for the block.
+        /// The decoded primary motion-vector state chosen for the block.
         private final InterMotionVector motionVector0;
 
-        /// The provisional secondary motion vector chosen for the block, or `null`.
+        /// The decoded secondary motion-vector state chosen for the block, or `null`.
         private final @Nullable InterMotionVector motionVector1;
 
         /// Creates one decoded inter prediction-mode selection.
@@ -1889,8 +1914,8 @@ public final class TileBlockHeaderReader {
         /// @param singleInterMode the decoded single-reference inter mode, or `null`
         /// @param compoundInterMode the decoded compound inter mode, or `null`
         /// @param drlIndex the decoded provisional dynamic-reference-list index
-        /// @param motionVector0 the provisional primary motion vector chosen for the block
-        /// @param motionVector1 the provisional secondary motion vector chosen for the block, or `null`
+        /// @param motionVector0 the decoded primary motion-vector state chosen for the block
+        /// @param motionVector1 the decoded secondary motion-vector state chosen for the block, or `null`
         private InterModeSelection(
                 @Nullable SingleInterPredictionMode singleInterMode,
                 @Nullable CompoundInterPredictionMode compoundInterMode,
@@ -1926,16 +1951,16 @@ public final class TileBlockHeaderReader {
             return drlIndex;
         }
 
-        /// Returns the provisional primary motion vector chosen for the block.
+        /// Returns the decoded primary motion-vector state chosen for the block.
         ///
-        /// @return the provisional primary motion vector chosen for the block
+        /// @return the decoded primary motion-vector state chosen for the block
         public InterMotionVector motionVector0() {
             return motionVector0;
         }
 
-        /// Returns the provisional secondary motion vector chosen for the block, or `null`.
+        /// Returns the decoded secondary motion-vector state chosen for the block, or `null`.
         ///
-        /// @return the provisional secondary motion vector chosen for the block, or `null`
+        /// @return the decoded secondary motion-vector state chosen for the block, or `null`
         public @Nullable InterMotionVector motionVector1() {
             return motionVector1;
         }

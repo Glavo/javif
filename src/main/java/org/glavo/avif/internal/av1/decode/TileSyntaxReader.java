@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
@@ -34,9 +35,18 @@ import java.util.Objects;
 /// This reader is intentionally small and currently covers only syntax elements already backed by
 /// `CdfContext`: partitioning, skip, skip mode, intra/inter, compound and single-reference
 /// selection, inter prediction-mode symbols, `intrabc`, Y/UV intra prediction modes, palette
-/// presence and size signaling, filter intra, angle deltas, and CFL alpha.
+/// presence and size signaling, motion-vector residuals, filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
+    /// The `mv_joint` symbol that leaves both motion-vector components unchanged.
+    private static final int MOTION_VECTOR_JOINT_NONE = 0;
+
+    /// The `mv_joint` bit that signals a horizontal motion-vector residual.
+    private static final int MOTION_VECTOR_JOINT_HORIZONTAL = 1;
+
+    /// The `mv_joint` bit that signals a vertical motion-vector residual.
+    private static final int MOTION_VECTOR_JOINT_VERTICAL = 2;
+
     /// The tile-local decode state that owns the mutable decoder and CDF context.
     private final TileDecodeContext tileContext;
 
@@ -184,6 +194,38 @@ public final class TileSyntaxReader {
     public CompoundInterPredictionMode readCompoundInterMode(int context) {
         int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCompoundInterModeCdf(context), 7);
         return CompoundInterPredictionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one `NEWMV` residual around the supplied predictor.
+    ///
+    /// The active frame header supplies the motion-vector precision mode. The returned vector is
+    /// the fully decoded motion vector in quarter-pel units.
+    ///
+    /// @param referenceMotionVector the predictor that the residual is added to
+    /// @return the fully decoded motion vector in quarter-pel units
+    public MotionVector readMotionVectorResidual(MotionVector referenceMotionVector) {
+        MotionVector nonNullReferenceMotionVector = Objects.requireNonNull(referenceMotionVector, "referenceMotionVector");
+        FrameType frameType = tileContext.frameHeader().frameType();
+        if (frameType != FrameType.INTER && frameType != FrameType.SWITCH) {
+            throw new IllegalStateException("Motion-vector residuals are only available in inter and switch frames");
+        }
+
+        int motionVectorPrecision = (tileContext.frameHeader().allowHighPrecisionMotionVectors() ? 1 : 0)
+                - (tileContext.frameHeader().forceIntegerMotionVectors() ? 1 : 0);
+        int motionVectorJoint = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorJointCdf(), 3);
+        if (motionVectorJoint == MOTION_VECTOR_JOINT_NONE) {
+            return nonNullReferenceMotionVector;
+        }
+
+        int rowQuarterPel = nonNullReferenceMotionVector.rowQuarterPel();
+        int columnQuarterPel = nonNullReferenceMotionVector.columnQuarterPel();
+        if ((motionVectorJoint & MOTION_VECTOR_JOINT_VERTICAL) != 0) {
+            rowQuarterPel += readMotionVectorComponentDiff(0, motionVectorPrecision);
+        }
+        if ((motionVectorJoint & MOTION_VECTOR_JOINT_HORIZONTAL) != 0) {
+            columnQuarterPel += readMotionVectorComponentDiff(1, motionVectorPrecision);
+        }
+        return new MotionVector(rowQuarterPel, columnQuarterPel);
     }
 
     /// Decodes one single-reference inter prediction mode from the supplied contexts and already-forced segment flags.
@@ -414,6 +456,49 @@ public final class TileSyntaxReader {
     private int decodeSignedCflAlpha(int context, boolean positive) {
         int alpha = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCflAlphaCdf(context), 15) + 1;
         return positive ? alpha : -alpha;
+    }
+
+    /// Decodes one signed motion-vector component residual.
+    ///
+    /// @param component the zero-based motion-vector component index, where `0` is vertical and `1` is horizontal
+    /// @param motionVectorPrecision the active motion-vector precision mode: `-1` forces integer,
+    ///                              `0` disables high precision, and `1` allows high precision
+    /// @return the signed motion-vector component residual in quarter-pel units
+    private int readMotionVectorComponentDiff(int component, int motionVectorPrecision) {
+        boolean negative = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorSignCdf(component));
+        int motionVectorClass = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassCdf(component), 10);
+        int integerMagnitude;
+        int fractionalPart = 3;
+        int highPrecisionBit = 1;
+
+        if (motionVectorClass == 0) {
+            integerMagnitude = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0Cdf(component)) ? 1 : 0;
+            if (motionVectorPrecision >= 0) {
+                fractionalPart = msacDecoder.decodeSymbolAdapt(
+                        cdfContext.mutableMotionVectorClass0FpCdf(component, integerMagnitude),
+                        3
+                );
+                if (motionVectorPrecision > 0) {
+                    highPrecisionBit = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0HpCdf(component)) ? 1 : 0;
+                }
+            }
+        } else {
+            integerMagnitude = 1 << motionVectorClass;
+            for (int bitIndex = 0; bitIndex < motionVectorClass; bitIndex++) {
+                if (msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNCdf(component, bitIndex))) {
+                    integerMagnitude |= 1 << bitIndex;
+                }
+            }
+            if (motionVectorPrecision >= 0) {
+                fractionalPart = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassNFpCdf(component), 3);
+                if (motionVectorPrecision > 0) {
+                    highPrecisionBit = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNHpCdf(component)) ? 1 : 0;
+                }
+            }
+        }
+
+        int diff = ((integerMagnitude << 3) | (fractionalPart << 1) | highPrecisionBit) + 1;
+        return negative ? -diff : diff;
     }
 
     /// Decodes a partition decision when only a horizontal split or no split is allowed.

@@ -28,6 +28,7 @@ import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
@@ -167,6 +168,32 @@ final class TileSyntaxReaderTest {
         TileDecodeContext singleModeTileContext = createTileContext(FrameType.INTER, false, payload);
         TileSyntaxReader singleModeReader = new TileSyntaxReader(singleModeTileContext);
         assertEquals(expectedSingleInterMode, singleModeReader.readSingleInterMode(4, 1, 3, false, false));
+    }
+
+    /// Verifies that motion-vector residual syntax uses the expected tile-local CDF tables.
+    @Test
+    void readsMotionVectorResidualSyntax() {
+        byte[] payload = findPayloadForMotionVectorResidual();
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+        MotionVector predictor = new MotionVector(8, -4);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        MotionVector expectedMotionVector = decodeMotionVectorResidual(
+                oracleDecoder,
+                oracleCdf,
+                predictor,
+                tileContext.frameHeader().allowHighPrecisionMotionVectors(),
+                tileContext.frameHeader().forceIntegerMotionVectors()
+        );
+
+        assertEquals(expectedMotionVector, reader.readMotionVectorResidual(predictor));
+        assertArrayEquals(oracleCdf.mutableMotionVectorJointCdf(), tileContext.cdfContext().mutableMotionVectorJointCdf());
+        assertArrayEquals(oracleCdf.mutableMotionVectorClassCdf(0), tileContext.cdfContext().mutableMotionVectorClassCdf(0));
+        assertArrayEquals(oracleCdf.mutableMotionVectorClassCdf(1), tileContext.cdfContext().mutableMotionVectorClassCdf(1));
+        assertArrayEquals(oracleCdf.mutableMotionVectorSignCdf(0), tileContext.cdfContext().mutableMotionVectorSignCdf(0));
+        assertArrayEquals(oracleCdf.mutableMotionVectorSignCdf(1), tileContext.cdfContext().mutableMotionVectorSignCdf(1));
     }
 
     /// Verifies that key-frame intra decisions do not consume entropy-coded bits and that Y/UV modes use the expected CDFs.
@@ -436,6 +463,101 @@ final class TileSyntaxReaderTest {
             }
         }
         throw new IllegalStateException("No deterministic payload produced luma and chroma palette syntax");
+    }
+
+    /// Finds a small payload whose first motion-vector residual changes both motion-vector components.
+    ///
+    /// @return a small payload whose first motion-vector residual changes both motion-vector components
+    private static byte[] findPayloadForMotionVectorResidual() {
+        MotionVector predictor = new MotionVector(8, -4);
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
+                    CdfContext oracleCdf = CdfContext.createDefault();
+                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    MotionVector decodedMotionVector = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor, false, false);
+                    if (decodedMotionVector.rowQuarterPel() != predictor.rowQuarterPel()
+                            && decodedMotionVector.columnQuarterPel() != predictor.columnQuarterPel()) {
+                        return payload;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a two-dimensional motion-vector residual");
+    }
+
+    /// Decodes one motion-vector residual with the same syntax as `TileSyntaxReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param predictor the predictor that the residual is added to
+    /// @param allowHighPrecisionMotionVectors whether the active frame allows high-precision motion vectors
+    /// @param forceIntegerMotionVectors whether the active frame forces integer motion vectors
+    /// @return the decoded motion vector in quarter-pel units
+    private static MotionVector decodeMotionVectorResidual(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            MotionVector predictor,
+            boolean allowHighPrecisionMotionVectors,
+            boolean forceIntegerMotionVectors
+    ) {
+        int motionVectorPrecision = (allowHighPrecisionMotionVectors ? 1 : 0) - (forceIntegerMotionVectors ? 1 : 0);
+        int motionVectorJoint = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorJointCdf(), 3);
+        int rowQuarterPel = predictor.rowQuarterPel();
+        int columnQuarterPel = predictor.columnQuarterPel();
+        if ((motionVectorJoint & 2) != 0) {
+            rowQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 0, motionVectorPrecision);
+        }
+        if ((motionVectorJoint & 1) != 0) {
+            columnQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 1, motionVectorPrecision);
+        }
+        return new MotionVector(rowQuarterPel, columnQuarterPel);
+    }
+
+    /// Decodes one signed motion-vector component residual with the same syntax as `TileSyntaxReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param component the zero-based motion-vector component index, where `0` is vertical and `1` is horizontal
+    /// @param motionVectorPrecision the active motion-vector precision mode
+    /// @return the decoded signed motion-vector component residual in quarter-pel units
+    private static int decodeMotionVectorComponentDiff(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            int component,
+            int motionVectorPrecision
+    ) {
+        boolean negative = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorSignCdf(component));
+        int motionVectorClass = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassCdf(component), 10);
+        int integerMagnitude;
+        int fractionalPart = 3;
+        int highPrecisionBit = 1;
+        if (motionVectorClass == 0) {
+            integerMagnitude = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0Cdf(component)) ? 1 : 0;
+            if (motionVectorPrecision >= 0) {
+                fractionalPart = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClass0FpCdf(component, integerMagnitude), 3);
+                if (motionVectorPrecision > 0) {
+                    highPrecisionBit = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0HpCdf(component)) ? 1 : 0;
+                }
+            }
+        } else {
+            integerMagnitude = 1 << motionVectorClass;
+            for (int bitIndex = 0; bitIndex < motionVectorClass; bitIndex++) {
+                if (decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNCdf(component, bitIndex))) {
+                    integerMagnitude |= 1 << bitIndex;
+                }
+            }
+            if (motionVectorPrecision >= 0) {
+                fractionalPart = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassNFpCdf(component), 3);
+                if (motionVectorPrecision > 0) {
+                    highPrecisionBit = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNHpCdf(component)) ? 1 : 0;
+                }
+            }
+        }
+
+        int diff = ((integerMagnitude << 3) | (fractionalPart << 1) | highPrecisionBit) + 1;
+        return negative ? -diff : diff;
     }
 
     /// Creates a synthetic tile-local decode context backed by one collected tile payload.

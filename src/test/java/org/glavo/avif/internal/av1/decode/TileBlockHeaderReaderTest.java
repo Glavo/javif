@@ -441,7 +441,7 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.uvMode());
     }
 
-    /// Verifies that a non-fixed single-reference inter block decodes `inter_mode + drl`.
+    /// Verifies that a `NEWMV` single-reference inter block decodes `inter_mode + drl + mv_residual`.
     @Test
     void readsSingleInterModeBlockHeader() {
         byte[] payload = findPayloadForSingleInterModeBlock();
@@ -471,8 +471,14 @@ final class TileBlockHeaderReaderTest {
                 neighborContext.provisionalInterModeContext(position, false, expectedReferenceFrame0, -1);
         InterModeExpectation expectedInterMode =
                 decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
-        assertTrue(expectedInterMode.singleInterMode() == SingleInterPredictionMode.NEARMV
-                || expectedInterMode.singleInterMode() == SingleInterPredictionMode.NEWMV);
+        assertEquals(SingleInterPredictionMode.NEWMV, expectedInterMode.singleInterMode());
+        InterMotionVector expectedMotionVector = expectedSingleMotionVector(
+                oracleDecoder,
+                oracleCdf,
+                tileContext.frameHeader(),
+                provisionalContext,
+                expectedInterMode
+        );
 
         TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_16X16, neighborContext);
 
@@ -486,13 +492,13 @@ final class TileBlockHeaderReaderTest {
         assertEquals(expectedInterMode.singleInterMode(), header.singleInterMode());
         assertNull(header.compoundInterMode());
         assertEquals(expectedInterMode.drlIndex(), header.drlIndex());
-        assertEquals(expectedSingleMotionVector(provisionalContext, expectedInterMode), header.motionVector0());
+        assertEquals(expectedMotionVector, header.motionVector0());
         assertNull(header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
     }
 
-    /// Verifies that a non-fixed compound inter block decodes `comp_inter_mode + drl`.
+    /// Verifies that a `NEWMV_NEWMV` compound inter block decodes `comp_inter_mode + drl + mv_residual`.
     @Test
     void readsCompoundInterModeBlockHeader() {
         byte[] payload = findPayloadForCompoundInterModeBlock();
@@ -528,8 +534,21 @@ final class TileBlockHeaderReaderTest {
                 );
         InterModeExpectation expectedInterMode =
                 decodeCompoundInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
-        assertTrue(expectedInterMode.compoundInterMode() == CompoundInterPredictionMode.NEWMV_NEWMV
-                || expectedInterMode.compoundInterMode().usesNearMotionVector());
+        assertEquals(CompoundInterPredictionMode.NEWMV_NEWMV, expectedInterMode.compoundInterMode());
+        InterMotionVector expectedMotionVector0 = expectedCompoundMotionVector0(
+                oracleDecoder,
+                oracleCdf,
+                tileContext.frameHeader(),
+                provisionalContext,
+                expectedInterMode
+        );
+        InterMotionVector expectedMotionVector1 = expectedCompoundMotionVector1(
+                oracleDecoder,
+                oracleCdf,
+                tileContext.frameHeader(),
+                provisionalContext,
+                expectedInterMode
+        );
 
         TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_16X16, neighborContext);
 
@@ -543,8 +562,8 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.singleInterMode());
         assertEquals(expectedInterMode.compoundInterMode(), header.compoundInterMode());
         assertEquals(expectedInterMode.drlIndex(), header.drlIndex());
-        assertEquals(expectedCompoundMotionVector0(provisionalContext, expectedInterMode), header.motionVector0());
-        assertEquals(expectedCompoundMotionVector1(provisionalContext, expectedInterMode), header.motionVector1());
+        assertEquals(expectedMotionVector0, header.motionVector0());
+        assertEquals(expectedMotionVector1, header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
     }
@@ -1580,9 +1599,9 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced skip=false and intra=false");
     }
 
-    /// Finds a small payload whose first inter block decodes a non-fixed single-reference `inter_mode + drl` path.
+    /// Finds a small payload whose first inter block decodes a `NEWMV` single-reference path with a non-zero residual.
     ///
-    /// @return a small payload whose first inter block decodes a non-fixed single-reference `inter_mode + drl` path
+    /// @return a small payload whose first inter block decodes a `NEWMV` single-reference path with a non-zero residual
     private static byte[] findPayloadForSingleInterModeBlock() {
         BlockPosition position = new BlockPosition(4, 4);
         for (int first = 0; first < 256; first++) {
@@ -1617,20 +1636,23 @@ final class TileBlockHeaderReaderTest {
                             neighborContext.provisionalInterModeContext(position, false, referenceFrame0, -1);
                     InterModeExpectation expectation =
                             decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
-                    if ((expectation.singleInterMode() == SingleInterPredictionMode.NEARMV
-                            || expectation.singleInterMode() == SingleInterPredictionMode.NEWMV)
-                            && expectation.drlIndex() > 0) {
+                    if (expectation.singleInterMode() != SingleInterPredictionMode.NEWMV || expectation.drlIndex() <= 0) {
+                        continue;
+                    }
+                    MotionVector predictor = provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0().vector();
+                    MotionVector decodedMotionVector = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor, false, false);
+                    if (!decodedMotionVector.equals(predictor)) {
                         return payload;
                     }
                 }
             }
         }
-        throw new IllegalStateException("No deterministic payload produced a non-fixed single-reference inter-mode block");
+        throw new IllegalStateException("No deterministic payload produced a NEWMV single-reference block with a non-zero residual");
     }
 
-    /// Finds a small payload whose first inter block decodes a non-fixed compound `inter_mode + drl` path.
+    /// Finds a small payload whose first inter block decodes a `NEWMV_NEWMV` compound path with non-zero residuals.
     ///
-    /// @return a small payload whose first inter block decodes a non-fixed compound `inter_mode + drl` path
+    /// @return a small payload whose first inter block decodes a `NEWMV_NEWMV` compound path with non-zero residuals
     private static byte[] findPayloadForCompoundInterModeBlock() {
         BlockPosition position = new BlockPosition(4, 4);
         for (int first = 0; first < 256; first++) {
@@ -1671,15 +1693,26 @@ final class TileBlockHeaderReaderTest {
                             );
                     InterModeExpectation expectation =
                             decodeCompoundInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
-                    if ((expectation.compoundInterMode() == CompoundInterPredictionMode.NEWMV_NEWMV
-                            || expectation.compoundInterMode().usesNearMotionVector())
-                            && expectation.drlIndex() > 0) {
+                    if (expectation.compoundInterMode() != CompoundInterPredictionMode.NEWMV_NEWMV || expectation.drlIndex() <= 0) {
+                        continue;
+                    }
+                    BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                            provisionalContext.motionVectorCandidate(expectation.drlIndex());
+                    MotionVector predictor0 = candidate.motionVector0().vector();
+                    @org.jetbrains.annotations.Nullable InterMotionVector predictor1State = candidate.motionVector1();
+                    if (predictor1State == null) {
+                        throw new IllegalStateException("Compound provisional candidate must carry a secondary motion vector");
+                    }
+                    MotionVector predictor1 = predictor1State.vector();
+                    MotionVector decodedMotionVector0 = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor0, false, false);
+                    MotionVector decodedMotionVector1 = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor1, false, false);
+                    if (!decodedMotionVector0.equals(predictor0) && !decodedMotionVector1.equals(predictor1)) {
                         return payload;
                     }
                 }
             }
         }
-        throw new IllegalStateException("No deterministic payload produced a non-fixed compound inter-mode block");
+        throw new IllegalStateException("No deterministic payload produced a NEWMV_NEWMV compound block with non-zero residuals");
     }
 
     /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.
@@ -1906,13 +1939,22 @@ final class TileBlockHeaderReaderTest {
 
     /// Resolves the expected single-reference motion vector from one provisional candidate stack.
     ///
+    /// @param decoder the oracle arithmetic decoder positioned after the inter-mode syntax
+    /// @param cdfContext the oracle CDF context
+    /// @param frameHeader the synthetic frame header that supplies motion-vector precision flags
     /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
     /// @param expectation the decoded inter-mode expectation
     /// @return the expected single-reference motion vector
     private static InterMotionVector expectedSingleMotionVector(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            FrameHeader frameHeader,
             BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
             InterModeExpectation expectation
     ) {
+        MsacDecoder nonNullDecoder = java.util.Objects.requireNonNull(decoder, "decoder");
+        CdfContext nonNullCdfContext = java.util.Objects.requireNonNull(cdfContext, "cdfContext");
+        FrameHeader nonNullFrameHeader = java.util.Objects.requireNonNull(frameHeader, "frameHeader");
         SingleInterPredictionMode mode = expectation.singleInterMode();
         if (mode == null) {
             throw new IllegalArgumentException("Single-reference expectation required");
@@ -1921,19 +1963,34 @@ final class TileBlockHeaderReaderTest {
             case GLOBALMV -> InterMotionVector.resolved(MotionVector.zero());
             case NEARESTMV -> provisionalContext.motionVectorCandidate(0).motionVector0();
             case NEARMV -> provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0();
-            case NEWMV -> provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0().asPredicted();
+            case NEWMV -> InterMotionVector.resolved(decodeMotionVectorResidual(
+                    nonNullDecoder,
+                    nonNullCdfContext,
+                    provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0().vector(),
+                    nonNullFrameHeader.allowHighPrecisionMotionVectors(),
+                    nonNullFrameHeader.forceIntegerMotionVectors()
+            ));
         };
     }
 
     /// Resolves the expected first compound motion vector from one provisional candidate stack.
     ///
+    /// @param decoder the oracle arithmetic decoder positioned after the inter-mode syntax
+    /// @param cdfContext the oracle CDF context
+    /// @param frameHeader the synthetic frame header that supplies motion-vector precision flags
     /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
     /// @param expectation the decoded inter-mode expectation
     /// @return the expected first compound motion vector
     private static InterMotionVector expectedCompoundMotionVector0(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            FrameHeader frameHeader,
             BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
             InterModeExpectation expectation
     ) {
+        MsacDecoder nonNullDecoder = java.util.Objects.requireNonNull(decoder, "decoder");
+        CdfContext nonNullCdfContext = java.util.Objects.requireNonNull(cdfContext, "cdfContext");
+        FrameHeader nonNullFrameHeader = java.util.Objects.requireNonNull(frameHeader, "frameHeader");
         CompoundInterPredictionMode mode = expectation.compoundInterMode();
         if (mode == null) {
             throw new IllegalArgumentException("Compound expectation required");
@@ -1947,20 +2004,35 @@ final class TileBlockHeaderReaderTest {
         };
         InterMotionVector candidate = provisionalContext.motionVectorCandidate(candidateIndex).motionVector0();
         return switch (mode) {
-            case NEWMV_NEARESTMV, NEWMV_NEARMV, NEWMV_NEWMV -> candidate.asPredicted();
+            case NEWMV_NEARESTMV, NEWMV_NEARMV, NEWMV_NEWMV -> InterMotionVector.resolved(decodeMotionVectorResidual(
+                    nonNullDecoder,
+                    nonNullCdfContext,
+                    candidate.vector(),
+                    nonNullFrameHeader.allowHighPrecisionMotionVectors(),
+                    nonNullFrameHeader.forceIntegerMotionVectors()
+            ));
             default -> candidate;
         };
     }
 
     /// Resolves the expected second compound motion vector from one provisional candidate stack.
     ///
+    /// @param decoder the oracle arithmetic decoder positioned after the first compound motion-vector syntax
+    /// @param cdfContext the oracle CDF context
+    /// @param frameHeader the synthetic frame header that supplies motion-vector precision flags
     /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
     /// @param expectation the decoded inter-mode expectation
     /// @return the expected second compound motion vector
     private static InterMotionVector expectedCompoundMotionVector1(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            FrameHeader frameHeader,
             BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
             InterModeExpectation expectation
     ) {
+        MsacDecoder nonNullDecoder = java.util.Objects.requireNonNull(decoder, "decoder");
+        CdfContext nonNullCdfContext = java.util.Objects.requireNonNull(cdfContext, "cdfContext");
+        FrameHeader nonNullFrameHeader = java.util.Objects.requireNonNull(frameHeader, "frameHeader");
         CompoundInterPredictionMode mode = expectation.compoundInterMode();
         if (mode == null) {
             throw new IllegalArgumentException("Compound expectation required");
@@ -1977,9 +2049,88 @@ final class TileBlockHeaderReaderTest {
             throw new IllegalStateException("Compound provisional candidate must carry a secondary motion vector");
         }
         return switch (mode) {
-            case NEARESTMV_NEWMV, NEARMV_NEWMV, NEWMV_NEWMV -> candidate.asPredicted();
+            case NEARESTMV_NEWMV, NEARMV_NEWMV, NEWMV_NEWMV -> InterMotionVector.resolved(decodeMotionVectorResidual(
+                    nonNullDecoder,
+                    nonNullCdfContext,
+                    candidate.vector(),
+                    nonNullFrameHeader.allowHighPrecisionMotionVectors(),
+                    nonNullFrameHeader.forceIntegerMotionVectors()
+            ));
             default -> candidate;
         };
+    }
+
+    /// Decodes one motion-vector residual with the same syntax as `TileSyntaxReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param predictor the predictor that the residual is added to
+    /// @param allowHighPrecisionMotionVectors whether the active frame allows high-precision motion vectors
+    /// @param forceIntegerMotionVectors whether the active frame forces integer motion vectors
+    /// @return the decoded motion vector in quarter-pel units
+    private static MotionVector decodeMotionVectorResidual(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            MotionVector predictor,
+            boolean allowHighPrecisionMotionVectors,
+            boolean forceIntegerMotionVectors
+    ) {
+        int motionVectorPrecision = (allowHighPrecisionMotionVectors ? 1 : 0) - (forceIntegerMotionVectors ? 1 : 0);
+        int motionVectorJoint = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorJointCdf(), 3);
+        int rowQuarterPel = predictor.rowQuarterPel();
+        int columnQuarterPel = predictor.columnQuarterPel();
+        if ((motionVectorJoint & 2) != 0) {
+            rowQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 0, motionVectorPrecision);
+        }
+        if ((motionVectorJoint & 1) != 0) {
+            columnQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 1, motionVectorPrecision);
+        }
+        return new MotionVector(rowQuarterPel, columnQuarterPel);
+    }
+
+    /// Decodes one signed motion-vector component residual with the same syntax as `TileSyntaxReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param component the zero-based motion-vector component index, where `0` is vertical and `1` is horizontal
+    /// @param motionVectorPrecision the active motion-vector precision mode
+    /// @return the decoded signed motion-vector component residual in quarter-pel units
+    private static int decodeMotionVectorComponentDiff(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            int component,
+            int motionVectorPrecision
+    ) {
+        boolean negative = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorSignCdf(component));
+        int motionVectorClass = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassCdf(component), 10);
+        int integerMagnitude;
+        int fractionalPart = 3;
+        int highPrecisionBit = 1;
+        if (motionVectorClass == 0) {
+            integerMagnitude = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0Cdf(component)) ? 1 : 0;
+            if (motionVectorPrecision >= 0) {
+                fractionalPart = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClass0FpCdf(component, integerMagnitude), 3);
+                if (motionVectorPrecision > 0) {
+                    highPrecisionBit = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0HpCdf(component)) ? 1 : 0;
+                }
+            }
+        } else {
+            integerMagnitude = 1 << motionVectorClass;
+            for (int bitIndex = 0; bitIndex < motionVectorClass; bitIndex++) {
+                if (decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNCdf(component, bitIndex))) {
+                    integerMagnitude |= 1 << bitIndex;
+                }
+            }
+            if (motionVectorPrecision >= 0) {
+                fractionalPart = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassNFpCdf(component), 3);
+                if (motionVectorPrecision > 0) {
+                    highPrecisionBit = decoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNHpCdf(component)) ? 1 : 0;
+                }
+            }
+        }
+
+        int diff = ((integerMagnitude << 3) | (fractionalPart << 1) | highPrecisionBit) + 1;
+        return negative ? -diff : diff;
     }
 
     /// Creates a simple tile context used by block-header tests.
