@@ -1919,9 +1919,9 @@ final class TileBlockHeaderReaderTest {
         }
         return switch (mode) {
             case GLOBALMV -> InterMotionVector.resolved(MotionVector.zero());
-            case NEARESTMV -> provisionalContext.candidateMotionVector0(0);
-            case NEARMV -> provisionalContext.candidateMotionVector0(expectation.drlIndex());
-            case NEWMV -> provisionalContext.candidateMotionVector0(expectation.drlIndex()).asPredicted();
+            case NEARESTMV -> provisionalContext.motionVectorCandidate(0).motionVector0();
+            case NEARMV -> provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0();
+            case NEWMV -> provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0().asPredicted();
         };
     }
 
@@ -1945,7 +1945,7 @@ final class TileBlockHeaderReaderTest {
             case NEARESTMV_NEARESTMV, NEARESTMV_NEWMV, NEWMV_NEARESTMV, GLOBALMV_GLOBALMV -> 0;
             case NEARMV_NEARMV, NEARMV_NEWMV, NEWMV_NEARMV, NEWMV_NEWMV -> expectation.drlIndex();
         };
-        InterMotionVector candidate = provisionalContext.candidateMotionVector0(candidateIndex);
+        InterMotionVector candidate = provisionalContext.motionVectorCandidate(candidateIndex).motionVector0();
         return switch (mode) {
             case NEWMV_NEARESTMV, NEWMV_NEARMV, NEWMV_NEWMV -> candidate.asPredicted();
             default -> candidate;
@@ -1972,7 +1972,7 @@ final class TileBlockHeaderReaderTest {
             case NEARESTMV_NEARESTMV, NEARESTMV_NEWMV, NEWMV_NEARESTMV, GLOBALMV_GLOBALMV -> 0;
             case NEARMV_NEARMV, NEARMV_NEWMV, NEWMV_NEARMV, NEWMV_NEWMV -> expectation.drlIndex();
         };
-        @org.jetbrains.annotations.Nullable InterMotionVector candidate = provisionalContext.candidateMotionVector1(candidateIndex);
+        @org.jetbrains.annotations.Nullable InterMotionVector candidate = provisionalContext.motionVectorCandidate(candidateIndex).motionVector1();
         if (candidate == null) {
             throw new IllegalStateException("Compound provisional candidate must carry a secondary motion vector");
         }

@@ -184,7 +184,7 @@ public final class TileBlockHeaderReader {
                                 referenceFrame1
                         );
                 BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
-                        selectMotionVectorCandidate(provisionalContext, 0);
+                        selectReferenceMotionVectorCandidate(provisionalContext, 0);
                 motionVector0 = resolveCompoundMotionVector0(compoundInterMode, candidate);
                 motionVector1 = resolveCompoundMotionVector1(compoundInterMode, candidate);
             } else {
@@ -456,7 +456,7 @@ public final class TileBlockHeaderReader {
                 }
             }
             BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
-                    selectMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(compoundInterMode, drlIndex));
+                    selectReferenceMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(compoundInterMode, drlIndex));
             return new InterModeSelection(
                     null,
                     compoundInterMode,
@@ -485,7 +485,7 @@ public final class TileBlockHeaderReader {
         };
         InterMotionVector motionVector0 = resolveSingleMotionVector(
                 singleInterMode,
-                selectMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(singleInterMode, drlIndex))
+                selectReferenceMotionVectorCandidate(provisionalContext, motionVectorCandidateIndex(singleInterMode, drlIndex))
         );
         return new InterModeSelection(singleInterMode, null, drlIndex, motionVector0, null);
     }
@@ -523,17 +523,17 @@ public final class TileBlockHeaderReader {
     /// @param provisionalContext the provisional inter-mode context derived from neighbors
     /// @param index the preferred zero-based candidate index
     /// @return one provisional motion-vector candidate by index, clamped to the available range
-    private static BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate selectMotionVectorCandidate(
+    private static BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate selectReferenceMotionVectorCandidate(
             BlockNeighborContext.ProvisionalInterModeContext provisionalContext,
             int index
     ) {
         BlockNeighborContext.ProvisionalInterModeContext nonNullProvisionalContext =
                 Objects.requireNonNull(provisionalContext, "provisionalContext");
-        int candidateCount = nonNullProvisionalContext.candidateCount();
+        int candidateCount = nonNullProvisionalContext.motionVectorCandidateCount();
         if (candidateCount == 0) {
-            throw new IllegalStateException("Provisional inter-mode contexts must expose at least one candidate");
+            throw new IllegalStateException("Provisional inter-mode contexts must expose at least one motion-vector candidate");
         }
-        return nonNullProvisionalContext.candidate(Math.min(index, candidateCount - 1));
+        return nonNullProvisionalContext.motionVectorCandidate(Math.min(index, candidateCount - 1));
     }
 
     /// Resolves the single-reference motion vector chosen for one decoded single inter mode.

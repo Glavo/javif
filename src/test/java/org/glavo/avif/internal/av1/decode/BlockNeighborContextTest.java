@@ -275,6 +275,10 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.resolved(new MotionVector(8, -4)), singleContext.candidateMotionVector0(2));
         assertEquals(InterMotionVector.resolved(new MotionVector(12, 4)), singleContext.candidateMotionVector0(3));
         assertNull(singleContext.candidateMotionVector1(0));
+        assertEquals(3, singleContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.resolved(new MotionVector(8, -4)), singleContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(InterMotionVector.resolved(new MotionVector(12, 4)), singleContext.motionVectorCandidate(1).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), singleContext.motionVectorCandidate(2).motionVector0());
         assertEquals(0, singleContext.drlContext(0));
         assertEquals(1, singleContext.drlContext(1));
         assertEquals(2, singleContext.drlContext(2));
@@ -294,6 +298,13 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(new MotionVector(-8, 16)), compoundContext.candidateMotionVector1(0));
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), compoundContext.candidateMotionVector0(1));
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), compoundContext.candidateMotionVector1(1));
+        assertEquals(3, compoundContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.resolved(new MotionVector(12, 4)), compoundContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(InterMotionVector.predicted(new MotionVector(-8, 16)), compoundContext.motionVectorCandidate(0).motionVector1());
+        assertEquals(InterMotionVector.resolved(new MotionVector(8, -4)), compoundContext.motionVectorCandidate(1).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), compoundContext.motionVectorCandidate(1).motionVector1());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), compoundContext.motionVectorCandidate(2).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), compoundContext.motionVectorCandidate(2).motionVector1());
         assertEquals(0, compoundContext.drlContext(0));
         assertEquals(1, compoundContext.drlContext(1));
         assertEquals(2, compoundContext.drlContext(2));

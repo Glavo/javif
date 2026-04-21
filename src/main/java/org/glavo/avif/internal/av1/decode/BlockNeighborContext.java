@@ -1272,6 +1272,9 @@ public final class BlockNeighborContext {
         /// The provisional motion-vector candidates sorted in descending weight order.
         private final ProvisionalMotionVectorCandidate[] candidates;
 
+        /// The de-duplicated spatial motion-vector candidates used for nearest/near/new prediction.
+        private final ProvisionalMotionVectorCandidate[] referenceMotionVectorCandidates;
+
         /// Creates one provisional inter-mode syntax context.
         ///
         /// @param singleNewMvContext the zero-based provisional `newmv` context index in `[0, 6)`
@@ -1291,6 +1294,7 @@ public final class BlockNeighborContext {
             this.singleReferenceMvContext = singleReferenceMvContext;
             this.compoundInterModeContext = compoundInterModeContext;
             this.candidates = Arrays.copyOf(Objects.requireNonNull(candidates, "candidates"), candidates.length);
+            this.referenceMotionVectorCandidates = buildReferenceMotionVectorCandidates(this.candidates);
         }
 
         /// Returns the zero-based provisional `newmv` context index in `[0, 6)`.
@@ -1373,6 +1377,78 @@ public final class BlockNeighborContext {
         /// @return one stored provisional motion-vector candidate by index
         public ProvisionalMotionVectorCandidate candidate(int index) {
             return candidates[Objects.checkIndex(index, candidates.length)];
+        }
+
+        /// Returns the number of de-duplicated spatial motion-vector candidates currently available.
+        ///
+        /// The returned stack keeps real neighbor-derived candidates first and appends at most one
+        /// synthetic zero fallback at the end.
+        ///
+        /// @return the number of de-duplicated spatial motion-vector candidates currently available
+        public int motionVectorCandidateCount() {
+            return referenceMotionVectorCandidates.length;
+        }
+
+        /// Returns one de-duplicated spatial motion-vector candidate by index.
+        ///
+        /// @param index the zero-based spatial motion-vector candidate index
+        /// @return one de-duplicated spatial motion-vector candidate by index
+        public ProvisionalMotionVectorCandidate motionVectorCandidate(int index) {
+            return referenceMotionVectorCandidates[Objects.checkIndex(index, referenceMotionVectorCandidates.length)];
+        }
+
+        /// Builds the de-duplicated spatial motion-vector candidate stack used by motion prediction.
+        ///
+        /// @param weightedCandidates the full weighted candidate list used by syntax contexts
+        /// @return the de-duplicated spatial motion-vector candidate stack used by motion prediction
+        private static ProvisionalMotionVectorCandidate[] buildReferenceMotionVectorCandidates(
+                ProvisionalMotionVectorCandidate[] weightedCandidates
+        ) {
+            ProvisionalMotionVectorCandidate[] realCandidates = new ProvisionalMotionVectorCandidate[weightedCandidates.length];
+            int realCount = 0;
+            @Nullable ProvisionalMotionVectorCandidate syntheticCandidate = null;
+            for (ProvisionalMotionVectorCandidate candidate : weightedCandidates) {
+                if (candidate.synthetic()) {
+                    if (syntheticCandidate == null) {
+                        syntheticCandidate = candidate;
+                    }
+                    continue;
+                }
+                if (!containsEquivalentMotionVectorCandidate(realCandidates, realCount, candidate)) {
+                    realCandidates[realCount++] = candidate;
+                }
+            }
+            ProvisionalMotionVectorCandidate[] result =
+                    new ProvisionalMotionVectorCandidate[realCount + (syntheticCandidate != null ? 1 : 0)];
+            System.arraycopy(realCandidates, 0, result, 0, realCount);
+            if (syntheticCandidate != null) {
+                result[realCount] = syntheticCandidate;
+            }
+            return result;
+        }
+
+        /// Returns whether one candidate list prefix already contains an equivalent motion-vector candidate.
+        ///
+        /// Two candidates are considered equivalent when they carry the same primary and secondary
+        /// motion vectors, regardless of weight.
+        ///
+        /// @param candidates the candidate array prefix to scan
+        /// @param count the number of active candidates at the front of the array
+        /// @param expected the candidate to search for
+        /// @return whether the candidate list prefix already contains an equivalent motion-vector candidate
+        private static boolean containsEquivalentMotionVectorCandidate(
+                ProvisionalMotionVectorCandidate[] candidates,
+                int count,
+                ProvisionalMotionVectorCandidate expected
+        ) {
+            for (int i = 0; i < count; i++) {
+                ProvisionalMotionVectorCandidate candidate = candidates[i];
+                if (candidate.motionVector0().equals(expected.motionVector0())
+                        && Objects.equals(candidate.motionVector1(), expected.motionVector1())) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// One provisional motion-vector candidate derived from one bounded neighbor source.
