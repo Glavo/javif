@@ -326,6 +326,36 @@ final class TileBlockHeaderReaderTest {
         assertEquals(expectedCflAlphaV, header.cflAlphaV());
     }
 
+    /// Verifies that preskip temporal segmentation prediction can reuse the neighbor-predicted segment id.
+    @Test
+    void readsTemporallyPredictedPreskipSegmentId() {
+        byte[] payload = findPayloadForTemporalPreskipPrediction();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[1] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, true, false);
+        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(true, true, 1, segments, new boolean[8], new int[8]);
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedTemporalSegmentPrediction(neighborContext, 1);
+
+        assertEquals(2, neighborContext.segmentPredictionContext(position));
+        assertEquals(1, neighborContext.currentSegmentPrediction(position).predictedSegmentId());
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSegmentPredicted = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSegmentPredictionCdf(2));
+        assertTrue(expectedSegmentPredicted);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_8X8, neighborContext);
+
+        assertTrue(header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertTrue(header.segmentPredicted());
+        assertEquals(1, header.segmentId());
+    }
+
     /// Verifies that postskip segmentation uses the per-segment lossless state to disable CFL.
     @Test
     void readsPostskipSegmentIdBeforeUvCflGating() {
@@ -375,6 +405,36 @@ final class TileBlockHeaderReaderTest {
         assertEquals(expectedUvAngle, header.uvAngle());
         assertEquals(0, header.cflAlphaU());
         assertEquals(0, header.cflAlphaV());
+    }
+
+    /// Verifies that postskip temporal segmentation prediction can reuse the neighbor-predicted segment id.
+    @Test
+    void readsTemporallyPredictedPostskipSegmentId() {
+        byte[] payload = findPayloadForTemporalPostskipPrediction();
+        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, true, 1, defaultSegments(), new boolean[8], new int[8]);
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedTemporalSegmentPrediction(neighborContext, 1);
+
+        assertEquals(2, neighborContext.segmentPredictionContext(position));
+        assertEquals(1, neighborContext.currentSegmentPrediction(position).predictedSegmentId());
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean expectedSegmentPredicted = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSegmentPredictionCdf(2));
+        assertFalse(expectedSkip);
+        assertTrue(expectedSegmentPredicted);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_8X8, neighborContext);
+
+        assertFalse(header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertTrue(header.segmentPredicted());
+        assertEquals(1, header.segmentId());
     }
 
     /// Verifies that screen-content palette syntax populates luma/chroma palettes and packed palette indices.
@@ -782,6 +842,41 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced seg_id=1 with CFL-eligible UV mode");
     }
 
+    /// Finds a small payload whose first temporal segmentation-prediction flag decodes to `true`.
+    ///
+    /// @return a small payload whose first temporal segmentation-prediction flag decodes to `true`
+    private static byte[] findPayloadForTemporalPreskipPrediction() {
+        for (int first = 0; first < 256; first++) {
+            byte[] payload = new byte[]{(byte) first, 0x00, 0x00, 0x00, 0x00};
+            CdfContext oracleCdf = CdfContext.createDefault();
+            MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+            if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSegmentPredictionCdf(2))) {
+                return payload;
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced seg_id_predicted=true for the preskip path");
+    }
+
+    /// Finds a small payload whose first block decodes `skip = false` and `seg_id_predicted = true`.
+    ///
+    /// @return a small payload whose first block decodes `skip = false` and `seg_id_predicted = true`
+    private static byte[] findPayloadForTemporalPostskipPrediction() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                    continue;
+                }
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSegmentPredictionCdf(2))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced seg_id_predicted=true for the postskip path");
+    }
+
     /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.
     ///
     /// @return a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled
@@ -1019,10 +1114,30 @@ final class TileBlockHeaderReaderTest {
             boolean[] losslessBySegment,
             int[] qIndexBySegment
     ) {
+        return createSegmentationInfo(preskip, false, lastActiveSegmentId, segments, losslessBySegment, qIndexBySegment);
+    }
+
+    /// Creates enabled segmentation info used by block-header tests.
+    ///
+    /// @param preskip whether the synthetic segmentation features require preskip decoding
+    /// @param temporalUpdate whether the synthetic segmentation map uses temporal prediction
+    /// @param lastActiveSegmentId the highest active segment identifier
+    /// @param segments the synthetic per-segment feature data
+    /// @param losslessBySegment the synthetic per-segment lossless flags
+    /// @param qIndexBySegment the synthetic per-segment qindex values
+    /// @return enabled segmentation info used by block-header tests
+    private static FrameHeader.SegmentationInfo createSegmentationInfo(
+            boolean preskip,
+            boolean temporalUpdate,
+            int lastActiveSegmentId,
+            FrameHeader.SegmentData[] segments,
+            boolean[] losslessBySegment,
+            int[] qIndexBySegment
+    ) {
         return new FrameHeader.SegmentationInfo(
                 true,
                 true,
-                false,
+                temporalUpdate,
                 true,
                 preskip,
                 lastActiveSegmentId,
@@ -1030,6 +1145,61 @@ final class TileBlockHeaderReaderTest {
                 losslessBySegment,
                 qIndexBySegment
         );
+    }
+
+    /// Seeds one neighbor context so the block at `(4, 4)` predicts the supplied segment identifier.
+    ///
+    /// @param neighborContext the mutable neighbor context to seed
+    /// @param segmentId the predicted segment identifier to seed
+    private static void seedTemporalSegmentPrediction(BlockNeighborContext neighborContext, int segmentId) {
+        neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(4, 0),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                true,
+                false,
+                true,
+                segmentId,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+        neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(0, 4),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                true,
+                false,
+                true,
+                segmentId,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
     }
 
     /// Creates default per-segment data with all features disabled.

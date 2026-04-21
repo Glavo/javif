@@ -426,10 +426,23 @@ public final class FrameHeaderParser {
 
         FrameHeader.TilingInfo tiling = parseTiling(reader, sequenceHeader, frameSizeResult.frameSize);
         FrameHeader.QuantizationInfo quantization = parseQuantization(reader, sequenceHeader);
-        FrameHeader.SegmentationInfo segmentation = parseSegmentation(reader, primaryRefFrame);
+        FrameHeader.SegmentationInfo segmentation = parseSegmentation(
+                reader,
+                primaryRefFrame,
+                referenceFrameHeaders,
+                referenceFrameIndices
+        );
         FrameHeader.DeltaInfo delta = parseDelta(reader, quantization.baseQIndex(), allowIntrabc);
         DerivedLosslessState losslessState = deriveLosslessState(quantization, segmentation);
-        FrameHeader.LoopFilterInfo loopFilter = parseLoopFilter(reader, sequenceHeader, allowIntrabc, losslessState.allLossless);
+        FrameHeader.LoopFilterInfo loopFilter = parseLoopFilter(
+                reader,
+                sequenceHeader,
+                primaryRefFrame,
+                referenceFrameHeaders,
+                referenceFrameIndices,
+                allowIntrabc,
+                losslessState.allLossless
+        );
         FrameHeader.CdefInfo cdef = parseCdef(reader, sequenceHeader, allowIntrabc, losslessState.allLossless);
         FrameHeader.RestorationInfo restoration = parseRestoration(reader, sequenceHeader, frameSizeResult.superResolution, allowIntrabc, losslessState.allLossless);
         FrameHeader.TransformMode transformMode = losslessState.allLossless
@@ -896,13 +909,46 @@ public final class FrameHeaderParser {
         );
     }
 
-    /// Parses segmentation parameters for currently supported primary-reference modes.
+    /// Resolves the refreshed frame header addressed by `primary_ref_frame`.
+    ///
+    /// @param primaryRefFrame the primary reference-frame position, or `7` when none is used
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceFrameIndices the decoded LAST..ALTREF slot indices
+    /// @return the refreshed frame header addressed by `primary_ref_frame`, or `null` when none is used
+    /// @throws IOException if `primary_ref_frame` requires a missing reference header
+    private static @Nullable FrameHeader resolvePrimaryReferenceFrameHeader(
+            int primaryRefFrame,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices
+    ) throws IOException {
+        if (primaryRefFrame == PRIMARY_REF_NONE) {
+            return null;
+        }
+        int referenceSlot = referenceFrameIndices[primaryRefFrame];
+        if (referenceSlot < 0 || referenceSlot >= TOTAL_REFERENCE_FRAMES) {
+            fail("primary_ref_frame does not resolve to a valid reference slot");
+        }
+        @Nullable FrameHeader referenceFrameHeader = referenceFrameHeaders[referenceSlot];
+        if (referenceFrameHeader == null) {
+            fail("primary_ref_frame requires an available refreshed reference header");
+        }
+        return referenceFrameHeader;
+    }
+
+    /// Parses segmentation parameters, optionally inheriting segment data from the primary reference frame.
     ///
     /// @param reader the payload bit reader
     /// @param primaryRefFrame the primary reference frame index
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceFrameIndices the decoded LAST..ALTREF slot indices
     /// @return the parsed segmentation parameters
     /// @throws IOException if the payload is truncated or invalid
-    private static FrameHeader.SegmentationInfo parseSegmentation(BitReader reader, int primaryRefFrame) throws IOException {
+    private static FrameHeader.SegmentationInfo parseSegmentation(
+            BitReader reader,
+            int primaryRefFrame,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices
+    ) throws IOException {
         boolean enabled = reader.readFlag();
         FrameHeader.SegmentData[] segments = defaultSegments();
         boolean[] losslessBySegment = new boolean[MAX_SEGMENTS];
@@ -919,12 +965,18 @@ public final class FrameHeaderParser {
             updateMap = true;
             updateData = true;
         } else {
-            throw unsupported("Frame headers that copy segmentation state from reference frames are not implemented yet");
+            updateMap = reader.readFlag();
+            if (updateMap) {
+                temporalUpdate = reader.readFlag();
+            }
+            updateData = reader.readFlag();
         }
 
-        boolean preskip = false;
-        int lastActiveSegmentId = -1;
+        boolean preskip;
+        int lastActiveSegmentId;
         if (updateData) {
+            preskip = false;
+            lastActiveSegmentId = -1;
             for (int i = 0; i < MAX_SEGMENTS; i++) {
                 int deltaQ = reader.readFlag() ? reader.readSignedBits(9) : 0;
                 int deltaLfYVertical = reader.readFlag() ? reader.readSignedBits(7) : 0;
@@ -954,6 +1006,19 @@ public final class FrameHeaderParser {
                         globalMotion
                 );
             }
+        } else {
+            @Nullable FrameHeader referenceFrameHeader = resolvePrimaryReferenceFrameHeader(
+                    primaryRefFrame,
+                    referenceFrameHeaders,
+                    referenceFrameIndices
+            );
+            if (referenceFrameHeader == null) {
+                fail("Segmentation data cannot be inherited without a primary reference frame");
+            }
+            FrameHeader.SegmentationInfo referencedSegmentation = referenceFrameHeader.segmentation();
+            preskip = referencedSegmentation.preskip();
+            lastActiveSegmentId = referencedSegmentation.lastActiveSegmentId();
+            segments = referencedSegmentation.segments();
         }
 
         return new FrameHeader.SegmentationInfo(
@@ -1046,6 +1111,9 @@ public final class FrameHeaderParser {
     ///
     /// @param reader the payload bit reader
     /// @param sequenceHeader the active sequence header
+    /// @param primaryRefFrame the primary reference-frame position, or `7` when none is used
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceFrameIndices the decoded LAST..ALTREF slot indices
     /// @param allowIntrabc whether `allow_intrabc` is enabled
     /// @param allLossless whether all segments are lossless
     /// @return the parsed loop filter parameters
@@ -1053,6 +1121,9 @@ public final class FrameHeaderParser {
     private static FrameHeader.LoopFilterInfo parseLoopFilter(
             BitReader reader,
             SequenceHeader sequenceHeader,
+            int primaryRefFrame,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices,
             boolean allowIntrabc,
             boolean allLossless
     ) throws IOException {
@@ -1074,6 +1145,19 @@ public final class FrameHeaderParser {
                 levelV = readInt(reader, 6);
             }
             sharpness = readInt(reader, 3);
+
+            if (primaryRefFrame != PRIMARY_REF_NONE) {
+                @Nullable FrameHeader referenceFrameHeader = resolvePrimaryReferenceFrameHeader(
+                        primaryRefFrame,
+                        referenceFrameHeaders,
+                        referenceFrameIndices
+                );
+                if (referenceFrameHeader == null) {
+                    fail("Loop-filter state cannot be inherited without a primary reference frame");
+                }
+                referenceDeltas = referenceFrameHeader.loopFilter().referenceDeltas();
+                modeDeltas = referenceFrameHeader.loopFilter().modeDeltas();
+            }
 
             modeRefDeltaEnabled = reader.readFlag();
             modeRefDeltaUpdate = false;

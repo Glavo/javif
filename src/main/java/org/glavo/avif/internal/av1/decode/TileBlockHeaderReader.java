@@ -657,11 +657,14 @@ public final class TileBlockHeaderReader {
         if (!segmentation.enabled() || !segmentation.updateMap()) {
             return new SegmentReadResult(false, 0);
         }
+        BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
         if (segmentation.temporalUpdate()) {
-            throw new IllegalStateException("Temporal segmentation prediction is not implemented yet");
+            boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
+            if (segmentPredicted) {
+                return new SegmentReadResult(true, prediction.predictedSegmentId());
+            }
         }
 
-        BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
         int segmentId = decodeSegmentId(prediction, segmentation.lastActiveSegmentId());
         return new SegmentReadResult(false, segmentId);
     }
@@ -681,11 +684,14 @@ public final class TileBlockHeaderReader {
         if (!segmentation.enabled() || !segmentation.updateMap()) {
             return new SegmentReadResult(false, 0);
         }
+        BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
         if (segmentation.temporalUpdate()) {
-            throw new IllegalStateException("Temporal segmentation prediction is not implemented yet");
+            boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
+            if (segmentPredicted || skip) {
+                return new SegmentReadResult(segmentPredicted, prediction.predictedSegmentId());
+            }
         }
 
-        BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
         if (skip) {
             return new SegmentReadResult(false, prediction.predictedSegmentId());
         }

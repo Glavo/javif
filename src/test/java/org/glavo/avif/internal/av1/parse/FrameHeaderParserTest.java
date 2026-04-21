@@ -133,6 +133,43 @@ final class FrameHeaderParserTest {
         assertFalse(header.filmGrainPresent());
     }
 
+    /// Verifies that segmentation and loop-filter delta state can be inherited from the primary reference frame.
+    ///
+    /// @throws IOException if the test payload cannot be parsed
+    @Test
+    void parsesInterFrameHeaderWithPrimaryReferenceStateCopy() throws IOException {
+        SequenceHeader sequenceHeader = fullInterSequenceHeader();
+        FrameHeader[] references = createInterReferenceFramesWithInheritedState();
+
+        FrameHeader header = new FrameHeaderParser().parse(
+                frameHeaderObu(interFrameHeaderPayloadWithPrimaryReferenceCopy()),
+                sequenceHeader,
+                false,
+                references
+        );
+
+        assertEquals(FrameType.INTER, header.frameType());
+        assertEquals(0, header.primaryRefFrame());
+        assertTrue(header.segmentation().enabled());
+        assertFalse(header.segmentation().updateMap());
+        assertFalse(header.segmentation().temporalUpdate());
+        assertFalse(header.segmentation().updateData());
+        assertTrue(header.segmentation().preskip());
+        assertEquals(2, header.segmentation().lastActiveSegmentId());
+        assertEquals(11, header.segmentation().segment(2).deltaQ());
+        assertEquals(3, header.segmentation().segment(2).referenceFrame());
+        assertTrue(header.segmentation().segment(2).skip());
+        assertEquals(31, header.segmentation().qIndex(2));
+        assertTrue(header.loopFilter().modeRefDeltaEnabled());
+        assertFalse(header.loopFilter().modeRefDeltaUpdate());
+        assertArrayEquals(new int[]{2, 1, 0, -1, -2, 0, 1, 2}, header.loopFilter().referenceDeltas());
+        assertArrayEquals(new int[]{3, -3}, header.loopFilter().modeDeltas());
+        assertFalse(header.switchableCompoundReferences());
+        assertFalse(header.skipModeAllowed());
+        assertFalse(header.skipModeEnabled());
+        assertFalse(header.warpedMotion());
+    }
+
     /// Wraps a payload in a synthetic sequence header OBU packet.
     ///
     /// @param payload the raw sequence header payload
@@ -192,6 +229,7 @@ final class FrameHeaderParserTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeBits(0, 8);
+        writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
@@ -273,6 +311,44 @@ final class FrameHeaderParserTest {
         return references;
     }
 
+    /// Creates refreshed reference-frame headers where slot `0` carries non-default inherited parser state.
+    ///
+    /// @return refreshed reference-frame headers with inherited segmentation and loop-filter state
+    private static FrameHeader[] createInterReferenceFramesWithInheritedState() {
+        FrameHeader[] references = createInterReferenceFrames();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[2] = new FrameHeader.SegmentData(11, 0, 0, 0, 0, 3, true, false);
+        references[0] = createReferenceFrameHeader(
+                9,
+                64,
+                64,
+                66,
+                68,
+                new FrameHeader.SegmentationInfo(
+                        true,
+                        true,
+                        false,
+                        true,
+                        true,
+                        2,
+                        segments,
+                        new boolean[8],
+                        new int[8]
+                ),
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        false,
+                        new int[]{2, 1, 0, -1, -2, 0, 1, 2},
+                        new int[]{3, -3}
+                )
+        );
+        return references;
+    }
+
     /// Creates a refreshed reference-frame header with deterministic geometry and order hint.
     ///
     /// @param frameOffset the order hint stored in the refreshed reference
@@ -287,6 +363,36 @@ final class FrameHeaderParserTest {
             int height,
             int renderWidth,
             int renderHeight
+    ) {
+        return createReferenceFrameHeader(
+                frameOffset,
+                upscaledWidth,
+                height,
+                renderWidth,
+                renderHeight,
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0})
+        );
+    }
+
+    /// Creates a refreshed reference-frame header with deterministic geometry and explicit inherited parser state.
+    ///
+    /// @param frameOffset the order hint stored in the refreshed reference
+    /// @param upscaledWidth the frame width before super-resolution downscaling
+    /// @param height the frame height
+    /// @param renderWidth the render width
+    /// @param renderHeight the render height
+    /// @param segmentation the segmentation state stored in the refreshed reference
+    /// @param loopFilter the loop-filter state stored in the refreshed reference
+    /// @return a refreshed reference-frame header
+    private static FrameHeader createReferenceFrameHeader(
+            int frameOffset,
+            int upscaledWidth,
+            int height,
+            int renderWidth,
+            int renderHeight,
+            FrameHeader.SegmentationInfo segmentation,
+            FrameHeader.LoopFilterInfo loopFilter
     ) {
         return new FrameHeader(
                 0,
@@ -312,10 +418,10 @@ final class FrameHeaderParserTest {
                 true,
                 new FrameHeader.TilingInfo(false, 0, 0, 0, 0, 1, 0, 0, 0, 1, new int[]{0, 1}, new int[]{0, 1}, 0),
                 new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
-                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                segmentation,
                 new FrameHeader.DeltaInfo(false, 0, false, 0, false),
                 true,
-                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                loopFilter,
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
                         new FrameHeader.RestorationType[]{
@@ -381,6 +487,68 @@ final class FrameHeaderParserTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a standalone inter frame header payload that inherits segmentation and loop-filter state from `primary_ref_frame = 0`.
+    ///
+    /// @return a standalone inter frame header payload that copies primary-reference state
+    private static byte[] interFrameHeaderPayloadWithPrimaryReferenceCopy() {
+        BitWriter writer = new BitWriter();
+        writer.writeFlag(false);
+        writer.writeBits(1, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(10, 4);
+        writer.writeBits(0, 3);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeBits(0, 3);
+        writer.writeBits(1, 3);
+        writer.writeBits(2, 3);
+        writer.writeBits(3, 3);
+        writer.writeBits(4, 3);
+        writer.writeBits(5, 3);
+        writer.writeBits(6, 3);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(20, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 6);
+        writer.writeBits(0, 6);
+        writer.writeBits(0, 3);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeBits(0, 2);
+        writer.writeBits(0, 6);
+        writer.writeBits(0, 6);
+        writer.writeBits(0, 2);
+        writer.writeBits(0, 2);
+        writer.writeBits(0, 2);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeTrailingBits();
         return writer.toByteArray();
