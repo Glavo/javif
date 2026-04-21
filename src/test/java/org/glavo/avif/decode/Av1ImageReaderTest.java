@@ -100,7 +100,7 @@ final class Av1ImageReaderTest {
     void readFrameReportsNotImplementedAfterSequenceHeader() {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
-                obu(3, new byte[]{0})
+                obu(6, new byte[]{0})
         );
         DecodeException exception = assertThrows(DecodeException.class, () -> {
             try (Av1ImageReader reader = Av1ImageReader.open(
@@ -110,6 +110,24 @@ final class Av1ImageReaderTest {
             }
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
+    }
+
+    /// Verifies that a parsed standalone frame header still reaches the decode-not-implemented boundary.
+    @Test
+    void readFrameParsesStandaloneFrameHeaderBeforeReportingNotImplemented() {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(3, reducedStillPictureFrameHeaderPayload())
+        );
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
+        assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
     }
 
     /// Verifies that the reader exposes the supplied immutable configuration.
@@ -195,6 +213,29 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeBits(1, 2);
         writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a reduced still-picture key frame header payload.
+    ///
+    /// @return the reduced still-picture key frame header payload
+    private static byte[] reducedStillPictureFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeTrailingBits();
         return writer.toByteArray();

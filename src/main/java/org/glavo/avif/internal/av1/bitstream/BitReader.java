@@ -109,6 +109,21 @@ public final class BitReader {
         return value;
     }
 
+    /// Reads up to thirty-two bits as a signed literal with sign extension.
+    ///
+    /// @param bitCount the number of bits to read, in the range `1..32`
+    /// @return the decoded signed literal
+    /// @throws IOException if the payload is truncated
+    public int readSignedBits(int bitCount) throws IOException {
+        if (bitCount <= 0 || bitCount > Integer.SIZE) {
+            throw new IllegalArgumentException("bitCount out of range: " + bitCount);
+        }
+
+        long value = readBits(bitCount);
+        long shift = Long.SIZE - bitCount;
+        return (int) ((value << shift) >> shift);
+    }
+
     /// Reads an unsigned exponential-Golomb style value used by AV1 headers.
     ///
     /// @return the decoded unsigned value

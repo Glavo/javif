@@ -18,7 +18,9 @@ package org.glavo.avif.decode;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
+import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -40,6 +42,8 @@ public final class Av1ImageReader implements AutoCloseable {
     private final ObuStreamReader obuReader;
     /// The parser used for sequence header OBUs.
     private final SequenceHeaderParser sequenceHeaderParser;
+    /// The parser used for standalone frame header OBUs.
+    private final FrameHeaderParser frameHeaderParser;
     /// The most recently parsed sequence header.
     private @Nullable SequenceHeader sequenceHeader;
     /// Whether this reader has already been closed.
@@ -54,6 +58,7 @@ public final class Av1ImageReader implements AutoCloseable {
         this.config = Objects.requireNonNull(config, "config");
         this.obuReader = new ObuStreamReader(source);
         this.sequenceHeaderParser = new SequenceHeaderParser();
+        this.frameHeaderParser = new FrameHeaderParser();
     }
 
     /// Opens an AV1 image reader using the default decoder configuration.
@@ -91,7 +96,29 @@ public final class Av1ImageReader implements AutoCloseable {
                 sequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
                 continue;
             }
-            if (type == ObuType.FRAME || type == ObuType.FRAME_HEADER || type == ObuType.TILE_GROUP) {
+            if (type == ObuType.FRAME_HEADER) {
+                if (sequenceHeader == null) {
+                    throw new DecodeException(
+                            DecodeErrorCode.STATE_VIOLATION,
+                            DecodeStage.FRAME_ASSEMBLY,
+                            "Frame data appeared before a sequence header OBU",
+                            packet.streamOffset(),
+                            packet.obuIndex(),
+                            null
+                    );
+                }
+                FrameHeader frameHeader = frameHeaderParser.parse(packet, sequenceHeader, config.strictStdCompliance());
+                enforceFrameSizeLimit(frameHeader, packet);
+                throw new DecodeException(
+                        DecodeErrorCode.NOT_IMPLEMENTED,
+                        DecodeStage.FRAME_DECODE,
+                        "AV1 frame decoding is not implemented yet",
+                        packet.streamOffset(),
+                        packet.obuIndex(),
+                        null
+                );
+            }
+            if (type == ObuType.FRAME || type == ObuType.TILE_GROUP) {
                 if (sequenceHeader == null) {
                     throw new DecodeException(
                             DecodeErrorCode.STATE_VIOLATION,
@@ -105,7 +132,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 throw new DecodeException(
                         DecodeErrorCode.NOT_IMPLEMENTED,
                         DecodeStage.FRAME_DECODE,
-                        "AV1 frame decoding is not implemented yet",
+                        "Combined frame OBUs and tile group decoding are not implemented yet",
                         packet.streamOffset(),
                         packet.obuIndex(),
                         null
@@ -156,6 +183,31 @@ public final class Av1ImageReader implements AutoCloseable {
     private void ensureOpen() throws IOException {
         if (closed) {
             throw new IOException("Av1ImageReader is closed");
+        }
+    }
+
+    /// Enforces the configured frame size limit against a parsed frame header.
+    ///
+    /// @param frameHeader the parsed frame header
+    /// @param packet the source OBU packet
+    /// @throws DecodeException if the configured frame size limit is exceeded
+    private void enforceFrameSizeLimit(FrameHeader frameHeader, ObuPacket packet) throws DecodeException {
+        long frameSizeLimit = config.frameSizeLimit();
+        if (frameSizeLimit == 0 || frameHeader.showExistingFrame()) {
+            return;
+        }
+
+        long pixelCount = (long) frameHeader.frameSize().upscaledWidth() * frameHeader.frameSize().height();
+        if (pixelCount > frameSizeLimit) {
+            throw new DecodeException(
+                    DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED,
+                    DecodeStage.FRAME_HEADER_PARSE,
+                    "Frame size exceeds the configured limit: " + frameHeader.frameSize().upscaledWidth()
+                            + "x" + frameHeader.frameSize().height(),
+                    packet.streamOffset(),
+                    packet.obuIndex(),
+                    null
+            );
         }
     }
 }
