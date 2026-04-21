@@ -1,0 +1,58 @@
+/*
+ * Copyright 2026 Glavo
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.glavo.avif.decode;
+
+import org.jetbrains.annotations.NotNullByDefault;
+
+import java.util.Objects;
+
+/// Decoded frame backed by packed `int` ARGB pixels.
+@NotNullByDefault
+public final class ArgbIntFrame extends DecodedFrame {
+    /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
+    private final int[] pixels;
+
+    /// Creates a decoded `int`-backed ARGB frame.
+    ///
+    /// @param width the output frame width in pixels
+    /// @param height the output frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the chroma layout
+    /// @param frameType the AV1 frame type
+    /// @param visible whether the frame is visible
+    /// @param presentationIndex the zero-based presentation index
+    /// @param pixels the packed non-premultiplied ARGB pixels
+    public ArgbIntFrame(
+            int width,
+            int height,
+            int bitDepth,
+            PixelFormat pixelFormat,
+            FrameType frameType,
+            boolean visible,
+            long presentationIndex,
+            int[] pixels
+    ) {
+        super(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex);
+        this.pixels = Objects.requireNonNull(pixels, "pixels");
+    }
+
+    /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
+    ///
+    /// @return the packed ARGB pixels
+    public int[] pixels() {
+        return pixels;
+    }
+}
