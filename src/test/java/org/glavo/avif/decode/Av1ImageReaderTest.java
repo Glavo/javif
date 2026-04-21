@@ -95,12 +95,12 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
     }
 
-    /// Verifies that frame OBUs still report `NOT_IMPLEMENTED` after a valid sequence header.
+    /// Verifies that a combined frame OBU is assembled before reporting `NOT_IMPLEMENTED`.
     @Test
-    void readFrameReportsNotImplementedAfterSequenceHeader() {
+    void readFrameParsesCombinedFrameObuBeforeReportingNotImplemented() {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
-                obu(6, new byte[]{0})
+                obu(6, reducedStillPictureCombinedFramePayload())
         );
         DecodeException exception = assertThrows(DecodeException.class, () -> {
             try (Av1ImageReader reader = Av1ImageReader.open(
@@ -110,11 +110,12 @@ final class Av1ImageReaderTest {
             }
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
+        assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
     }
 
-    /// Verifies that a parsed standalone frame header still reaches the decode-not-implemented boundary.
+    /// Verifies that an incomplete standalone frame assembly is rejected at end-of-stream.
     @Test
-    void readFrameParsesStandaloneFrameHeaderBeforeReportingNotImplemented() {
+    void readFrameRejectsEndOfStreamWithIncompleteFrameAssembly() {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(3, reducedStillPictureFrameHeaderPayload())
@@ -126,8 +127,45 @@ final class Av1ImageReaderTest {
                 reader.readFrame();
             }
         });
+        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+    }
+
+    /// Verifies that a standalone frame header followed by a tile group reaches the decode-not-implemented boundary.
+    @Test
+    void readFrameParsesStandaloneTileGroupBeforeReportingNotImplemented() {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(3, reducedStillPictureFrameHeaderPayload()),
+                obu(4, singleTileGroupPayload())
+        );
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+            )) {
+                reader.readFrame();
+            }
+        });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+    }
+
+    /// Verifies that tile-group OBUs are rejected when no standalone or combined frame header is active.
+    @Test
+    void readFrameRejectsTileGroupBeforeFrameHeader() {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(4, singleTileGroupPayload())
+        );
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
+        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
     }
 
     /// Verifies that the reader exposes the supplied immutable configuration.
@@ -223,6 +261,33 @@ final class Av1ImageReaderTest {
     /// @return the reduced still-picture key frame header payload
     private static byte[] reducedStillPictureFrameHeaderPayload() {
         BitWriter writer = new BitWriter();
+        writeReducedStillPictureFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a reduced still-picture combined frame payload with a single tile group.
+    ///
+    /// @return the reduced still-picture combined frame payload
+    private static byte[] reducedStillPictureCombinedFramePayload() {
+        BitWriter writer = new BitWriter();
+        writeReducedStillPictureFrameHeaderBits(writer);
+        writer.padToByteBoundary();
+        writer.writeBytes(singleTileGroupPayload());
+        return writer.toByteArray();
+    }
+
+    /// Creates a minimal single-tile tile-group payload.
+    ///
+    /// @return a minimal single-tile tile-group payload
+    private static byte[] singleTileGroupPayload() {
+        return new byte[]{0x12, 0x34};
+    }
+
+    /// Writes the reduced still-picture key frame header syntax without standalone trailing bits.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeReducedStillPictureFrameHeaderBits(BitWriter writer) {
         writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeFlag(false);
@@ -237,8 +302,6 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
-        writer.writeTrailingBits();
-        return writer.toByteArray();
     }
 
     /// Small MSB-first bit writer used to build AV1 test payloads.
@@ -274,6 +337,23 @@ final class Av1ImageReaderTest {
             while (bitCount != 0) {
                 writeBit(0);
             }
+        }
+
+        /// Pads the current byte with zero bits until the next byte boundary.
+        private void padToByteBoundary() {
+            while (bitCount != 0) {
+                writeBit(0);
+            }
+        }
+
+        /// Writes raw bytes after the current bitstream has been byte aligned.
+        ///
+        /// @param bytes the raw bytes to append
+        private void writeBytes(byte[] bytes) {
+            if (bitCount != 0) {
+                throw new IllegalStateException("BitWriter is not byte aligned");
+            }
+            output.writeBytes(bytes);
         }
 
         /// Returns the written bytes.

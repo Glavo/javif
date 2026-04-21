@@ -51,9 +51,11 @@ final class BitReaderTest {
         BitReader reader = new BitReader(new byte[]{(byte) 0xFF, 0x55});
 
         assertEquals(0b111, reader.readBits(3));
+        assertEquals(3, reader.bitOffset());
         assertFalse(reader.isByteAligned());
         reader.byteAlign();
         assertTrue(reader.isByteAligned());
+        assertEquals(1, reader.byteOffset());
         assertEquals(0x55, reader.readBits(8));
     }
 

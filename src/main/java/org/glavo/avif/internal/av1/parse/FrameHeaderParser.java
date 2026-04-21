@@ -32,7 +32,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Parser for standalone AV1 frame header OBUs.
+/// Parser for AV1 frame headers carried by standalone or combined frame OBUs.
 @NotNullByDefault
 public final class FrameHeaderParser {
     /// The AV1 `primary_ref_none` sentinel value.
@@ -65,16 +65,64 @@ public final class FrameHeaderParser {
         }
 
         BitReader reader = new BitReader(obu.payload());
-
+        FrameHeader header = parseFramePayload(reader, obu, sequenceHeader, strictStdCompliance);
         try {
-            FrameHeader header = parse(reader, obu, sequenceHeader, strictStdCompliance);
             checkTrailingBits(reader, strictStdCompliance);
             return header;
         } catch (EOFException ex) {
             throw new DecodeException(
                     DecodeErrorCode.UNEXPECTED_EOF,
                     DecodeStage.FRAME_HEADER_PARSE,
-                    "Unexpected end of frame header OBU",
+                    "Unexpected end of frame header payload",
+                    obu.streamOffset(),
+                    obu.obuIndex(),
+                    null,
+                    ex
+            );
+        } catch (DecodeException ex) {
+            throw ex;
+        } catch (IOException ex) {
+            throw new DecodeException(
+                    DecodeErrorCode.INVALID_BITSTREAM,
+                    DecodeStage.FRAME_HEADER_PARSE,
+                    ex.getMessage(),
+                    obu.streamOffset(),
+                    obu.obuIndex(),
+                    null,
+                    ex
+            );
+        }
+    }
+
+    /// Parses a frame header payload from a `FRAME_HEADER` or `FRAME` OBU.
+    ///
+    /// @param reader the payload bit reader positioned at the frame header
+    /// @param obu the source OBU packet
+    /// @param sequenceHeader the active sequence header
+    /// @param strictStdCompliance whether strict standards compliance should be enforced
+    /// @return the parsed frame header
+    /// @throws IOException if the payload is truncated, unreadable, or invalid
+    public FrameHeader parseFramePayload(
+            BitReader reader,
+            ObuPacket obu,
+            SequenceHeader sequenceHeader,
+            boolean strictStdCompliance
+    ) throws IOException {
+        Objects.requireNonNull(reader, "reader");
+        Objects.requireNonNull(obu, "obu");
+        Objects.requireNonNull(sequenceHeader, "sequenceHeader");
+        ObuType type = obu.header().type();
+        if (type != ObuType.FRAME_HEADER && type != ObuType.FRAME) {
+            throw new IllegalArgumentException("OBU type does not carry a frame header payload: " + type);
+        }
+
+        try {
+            return parse(reader, obu, sequenceHeader, strictStdCompliance);
+        } catch (EOFException ex) {
+            throw new DecodeException(
+                    DecodeErrorCode.UNEXPECTED_EOF,
+                    DecodeStage.FRAME_HEADER_PARSE,
+                    "Unexpected end of frame header payload",
                     obu.streamOffset(),
                     obu.obuIndex(),
                     null,

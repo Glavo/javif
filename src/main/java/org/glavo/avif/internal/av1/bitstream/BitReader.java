@@ -43,11 +43,28 @@ public final class BitReader {
         return data.length * Byte.SIZE - bitOffset;
     }
 
+    /// Returns the next unread bit offset from the start of the payload.
+    ///
+    /// @return the next unread bit offset
+    public int bitOffset() {
+        return bitOffset;
+    }
+
     /// Returns whether the current position is aligned to the next byte boundary.
     ///
     /// @return whether the current position is byte aligned
     public boolean isByteAligned() {
         return (bitOffset & 7) == 0;
+    }
+
+    /// Returns the next unread byte offset when the reader is byte aligned.
+    ///
+    /// @return the next unread byte offset
+    public int byteOffset() {
+        if (!isByteAligned()) {
+            throw new IllegalStateException("BitReader is not byte aligned");
+        }
+        return bitOffset >>> 3;
     }
 
     /// Advances the reader to the next byte boundary.
