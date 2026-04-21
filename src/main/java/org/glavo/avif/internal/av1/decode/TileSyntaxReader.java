@@ -147,6 +147,56 @@ public final class TileSyntaxReader {
         return PartitionType.fromSymbolIndex(symbol);
     }
 
+    /// Decodes a partition decision when only a horizontal split or no split is allowed.
+    ///
+    /// @param blockLevel the partition block level that selects the CDF shape
+    /// @param context the zero-based partition context index in `[0, 4)`
+    /// @return `true` when the block splits into two square children, otherwise `false`
+    public boolean readHorizontalSplitOnly(PartitionBlockLevel blockLevel, int context) {
+        PartitionBlockLevel nonNullBlockLevel = Objects.requireNonNull(blockLevel, "blockLevel");
+        int[] cdf = cdfContext.mutablePartitionCdf(nonNullBlockLevel.cdfIndex(), context);
+        return msacDecoder.decodeBoolean(gatherTopPartitionProbability(cdf, nonNullBlockLevel));
+    }
+
+    /// Decodes a partition decision when only a vertical split or no split is allowed.
+    ///
+    /// @param blockLevel the partition block level that selects the CDF shape
+    /// @param context the zero-based partition context index in `[0, 4)`
+    /// @return `true` when the block splits into two square children, otherwise `false`
+    public boolean readVerticalSplitOnly(PartitionBlockLevel blockLevel, int context) {
+        PartitionBlockLevel nonNullBlockLevel = Objects.requireNonNull(blockLevel, "blockLevel");
+        int[] cdf = cdfContext.mutablePartitionCdf(nonNullBlockLevel.cdfIndex(), context);
+        return msacDecoder.decodeBoolean(gatherLeftPartitionProbability(cdf, nonNullBlockLevel));
+    }
+
+    /// Gathers the effective split probability from a partition CDF when only horizontal splitting is legal.
+    ///
+    /// @param cdf the active partition CDF
+    /// @param blockLevel the partition block level that constrains the symbol set
+    /// @return the effective split probability in AV1 Q15 form
+    private static int gatherTopPartitionProbability(int[] cdf, PartitionBlockLevel blockLevel) {
+        int probability = cdf[PartitionType.VERTICAL.symbolIndex() - 1] - cdf[PartitionType.T_TOP_SPLIT.symbolIndex()];
+        probability += cdf[PartitionType.T_LEFT_SPLIT.symbolIndex() - 1];
+        if (blockLevel != PartitionBlockLevel.BLOCK_128X128) {
+            probability += cdf[PartitionType.VERTICAL_4.symbolIndex() - 1] - cdf[PartitionType.T_RIGHT_SPLIT.symbolIndex()];
+        }
+        return probability;
+    }
+
+    /// Gathers the effective split probability from a partition CDF when only vertical splitting is legal.
+    ///
+    /// @param cdf the active partition CDF
+    /// @param blockLevel the partition block level that constrains the symbol set
+    /// @return the effective split probability in AV1 Q15 form
+    private static int gatherLeftPartitionProbability(int[] cdf, PartitionBlockLevel blockLevel) {
+        int probability = cdf[PartitionType.HORIZONTAL.symbolIndex() - 1] - cdf[PartitionType.HORIZONTAL.symbolIndex()];
+        probability += cdf[PartitionType.SPLIT.symbolIndex() - 1] - cdf[PartitionType.T_LEFT_SPLIT.symbolIndex()];
+        if (blockLevel != PartitionBlockLevel.BLOCK_128X128) {
+            probability += cdf[PartitionType.HORIZONTAL_4.symbolIndex() - 1] - cdf[PartitionType.HORIZONTAL_4.symbolIndex()];
+        }
+        return probability;
+    }
+
     /// Partition block levels that select one of the five AV1 partition CDF groups.
     @NotNullByDefault
     public enum PartitionBlockLevel {
