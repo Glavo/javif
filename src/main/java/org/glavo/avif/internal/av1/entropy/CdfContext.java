@@ -33,6 +33,13 @@ public final class CdfContext {
             {4576}
     });
 
+    /// The transformed default skip-mode CDFs.
+    private static final int[][] DEFAULT_SKIP_MODE_CDFS = inverse2d(new int[][]{
+            {32621},
+            {20708},
+            {8127}
+    });
+
     /// The transformed default intra/inter decision CDFs.
     private static final int[][] DEFAULT_INTRA_CDFS = inverse2d(new int[][]{
             {806},
@@ -347,6 +354,9 @@ public final class CdfContext {
     /// The mutable skip CDFs for skip-flag decoding.
     private final int[][] skipCdfs;
 
+    /// The mutable skip-mode CDFs for skip-mode decoding.
+    private final int[][] skipModeCdfs;
+
     /// The mutable intra/inter decision CDFs.
     private final int[][] intraCdfs;
 
@@ -401,6 +411,7 @@ public final class CdfContext {
     /// Creates a mutable CDF context from already-copied arrays.
     ///
     /// @param skipCdfs the mutable skip CDFs
+    /// @param skipModeCdfs the mutable skip-mode CDFs
     /// @param intraCdfs the mutable intra/inter decision CDFs
     /// @param intrabcCdf the mutable `intrabc` CDF
     /// @param yModeCdfs the mutable luma intra-mode CDFs
@@ -420,6 +431,7 @@ public final class CdfContext {
     /// @param cflAlphaCdfs the mutable CFL-alpha CDFs
     private CdfContext(
             int[][] skipCdfs,
+            int[][] skipModeCdfs,
             int[][] intraCdfs,
             int[] intrabcCdf,
             int[][] yModeCdfs,
@@ -439,6 +451,7 @@ public final class CdfContext {
             int[][] cflAlphaCdfs
     ) {
         this.skipCdfs = Objects.requireNonNull(skipCdfs, "skipCdfs");
+        this.skipModeCdfs = Objects.requireNonNull(skipModeCdfs, "skipModeCdfs");
         this.intraCdfs = Objects.requireNonNull(intraCdfs, "intraCdfs");
         this.intrabcCdf = Objects.requireNonNull(intrabcCdf, "intrabcCdf");
         this.yModeCdfs = Objects.requireNonNull(yModeCdfs, "yModeCdfs");
@@ -464,6 +477,7 @@ public final class CdfContext {
     public static CdfContext createDefault() {
         return new CdfContext(
                 deepCopy(DEFAULT_SKIP_CDFS),
+                deepCopy(DEFAULT_SKIP_MODE_CDFS),
                 deepCopy(DEFAULT_INTRA_CDFS),
                 Arrays.copyOf(DEFAULT_INTRABC_CDF, DEFAULT_INTRABC_CDF.length),
                 deepCopy(DEFAULT_Y_MODE_CDFS),
@@ -490,6 +504,7 @@ public final class CdfContext {
     public CdfContext copy() {
         return new CdfContext(
                 deepCopy(skipCdfs),
+                deepCopy(skipModeCdfs),
                 deepCopy(intraCdfs),
                 Arrays.copyOf(intrabcCdf, intrabcCdf.length),
                 deepCopy(yModeCdfs),
@@ -516,6 +531,14 @@ public final class CdfContext {
     /// @return the live mutable skip CDF for the supplied context index
     public int[] mutableSkipCdf(int context) {
         return skipCdfs[Objects.checkIndex(context, skipCdfs.length)];
+    }
+
+    /// Returns the live mutable skip-mode CDF for the supplied context index.
+    ///
+    /// @param context the zero-based skip-mode context index
+    /// @return the live mutable skip-mode CDF for the supplied context index
+    public int[] mutableSkipModeCdf(int context) {
+        return skipModeCdfs[Objects.checkIndex(context, skipModeCdfs.length)];
     }
 
     /// Returns the live mutable intra/inter decision CDF for the supplied context index.

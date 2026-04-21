@@ -45,6 +45,12 @@ public final class BlockNeighborContext {
     /// The left-edge skip flags indexed in 4x4 units.
     private final byte[] leftSkip;
 
+    /// The above-edge skip-mode flags indexed in 4x4 units.
+    private final byte[] aboveSkipMode;
+
+    /// The left-edge skip-mode flags indexed in 4x4 units.
+    private final byte[] leftSkipMode;
+
     /// The above-edge segmentation-prediction flags indexed in 4x4 units.
     private final byte[] aboveSegmentPredicted;
 
@@ -95,6 +101,8 @@ public final class BlockNeighborContext {
     /// @param leftIntra the left-edge intra flags indexed in 4x4 units
     /// @param aboveSkip the above-edge skip flags indexed in 4x4 units
     /// @param leftSkip the left-edge skip flags indexed in 4x4 units
+    /// @param aboveSkipMode the above-edge skip-mode flags indexed in 4x4 units
+    /// @param leftSkipMode the left-edge skip-mode flags indexed in 4x4 units
     /// @param aboveSegmentPredicted the above-edge segmentation-prediction flags indexed in 4x4 units
     /// @param leftSegmentPredicted the left-edge segmentation-prediction flags indexed in 4x4 units
     /// @param aboveSegmentId the above-edge segment identifiers indexed in 4x4 units
@@ -116,6 +124,8 @@ public final class BlockNeighborContext {
             byte[] leftIntra,
             byte[] aboveSkip,
             byte[] leftSkip,
+            byte[] aboveSkipMode,
+            byte[] leftSkipMode,
             byte[] aboveSegmentPredicted,
             byte[] leftSegmentPredicted,
             byte[] aboveSegmentId,
@@ -137,6 +147,8 @@ public final class BlockNeighborContext {
         this.leftIntra = Objects.requireNonNull(leftIntra, "leftIntra");
         this.aboveSkip = Objects.requireNonNull(aboveSkip, "aboveSkip");
         this.leftSkip = Objects.requireNonNull(leftSkip, "leftSkip");
+        this.aboveSkipMode = Objects.requireNonNull(aboveSkipMode, "aboveSkipMode");
+        this.leftSkipMode = Objects.requireNonNull(leftSkipMode, "leftSkipMode");
         this.aboveSegmentPredicted = Objects.requireNonNull(aboveSegmentPredicted, "aboveSegmentPredicted");
         this.leftSegmentPredicted = Objects.requireNonNull(leftSegmentPredicted, "leftSegmentPredicted");
         this.aboveSegmentId = Objects.requireNonNull(aboveSegmentId, "aboveSegmentId");
@@ -181,6 +193,8 @@ public final class BlockNeighborContext {
                 tileHeight4,
                 aboveIntra,
                 leftIntra,
+                new byte[tileWidth4],
+                new byte[tileHeight4],
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 new byte[tileWidth4],
@@ -262,6 +276,22 @@ public final class BlockNeighborContext {
         }
         if (hasLeftNeighbor(nonNullPosition)) {
             context += leftSkip[nonNullPosition.y4()];
+        }
+        return context;
+    }
+
+    /// Returns the skip-mode context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the skip-mode context for the supplied block position
+    public int skipModeContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int context = 0;
+        if (hasTopNeighbor(nonNullPosition)) {
+            context += aboveSkipMode[nonNullPosition.x4()];
+        }
+        if (hasLeftNeighbor(nonNullPosition)) {
+            context += leftSkipMode[nonNullPosition.y4()];
         }
         return context;
     }
@@ -404,6 +434,7 @@ public final class BlockNeighborContext {
         BlockSize size = nonNullHeader.size();
         byte intra = (byte) (nonNullHeader.intra() ? 1 : 0);
         byte skip = (byte) (nonNullHeader.skip() ? 1 : 0);
+        byte skipMode = (byte) (nonNullHeader.skipMode() ? 1 : 0);
         byte segmentPredicted = (byte) (nonNullHeader.segmentPredicted() ? 1 : 0);
         byte segmentId = (byte) nonNullHeader.segmentId();
         byte paletteSize = (byte) nonNullHeader.yPaletteSize();
@@ -417,6 +448,7 @@ public final class BlockNeighborContext {
         for (int x4 = position.x4(); x4 < endX4; x4++) {
             aboveIntra[x4] = intra;
             aboveSkip[x4] = skip;
+            aboveSkipMode[x4] = skipMode;
             aboveSegmentPredicted[x4] = segmentPredicted;
             aboveSegmentId[x4] = segmentId;
             abovePaletteSize[x4] = paletteSize;
@@ -432,6 +464,7 @@ public final class BlockNeighborContext {
         for (int y4 = position.y4(); y4 < endY4; y4++) {
             leftIntra[y4] = intra;
             leftSkip[y4] = skip;
+            leftSkipMode[y4] = skipMode;
             leftSegmentPredicted[y4] = segmentPredicted;
             leftSegmentId[y4] = segmentId;
             leftPaletteSize[y4] = paletteSize;

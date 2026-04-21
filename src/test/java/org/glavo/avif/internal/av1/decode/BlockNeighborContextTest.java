@@ -57,6 +57,7 @@ final class BlockNeighborContextTest {
                 true,
                 true,
                 true,
+                true,
                 false,
                 true,
                 3,
@@ -77,6 +78,7 @@ final class BlockNeighborContextTest {
         ));
 
         assertEquals(1, context.skipContext(new BlockPosition(0, 4)));
+        assertEquals(2, context.skipModeContext(new BlockPosition(2, 2)));
         assertEquals(2, context.intraContext(new BlockPosition(0, 4)));
         assertEquals(LumaIntraPredictionMode.VERTICAL, context.aboveMode(0));
         assertEquals(LumaIntraPredictionMode.VERTICAL, context.leftMode(0));

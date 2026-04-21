@@ -74,6 +74,21 @@ final class TileSyntaxReaderTest {
         );
     }
 
+    /// Verifies that inter-frame skip-mode symbols use the expected tile-local CDF tables.
+    @Test
+    void readsInterFrameSkipModeSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkipMode = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipModeCdf(1));
+
+        assertEquals(expectedSkipMode, reader.readSkipModeFlag(1));
+        assertArrayEquals(oracleCdf.mutableSkipModeCdf(1), tileContext.cdfContext().mutableSkipModeCdf(1));
+    }
+
     /// Verifies that key-frame intra decisions do not consume entropy-coded bits and that Y/UV modes use the expected CDFs.
     @Test
     void readsKeyFrameYAndUvModes() {

@@ -32,8 +32,8 @@ import java.util.Objects;
 /// Reader for one leaf block header inside a tile partition tree.
 ///
 /// This implementation intentionally covers only the syntax elements already backed by
-/// `TileSyntaxReader`, including palette size signaling, `intrabc`, directional angle deltas,
-/// and block-size-aware CFL gating.
+/// `TileSyntaxReader`, including skip mode, palette size signaling, `intrabc`, directional angle
+/// deltas, and block-size-aware CFL gating.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
     /// The AV1 segment reference-frame code that forces intra block syntax.
@@ -72,6 +72,7 @@ public final class TileBlockHeaderReader {
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
         FrameHeader.SegmentationInfo segmentation = tileContext.frameHeader().segmentation();
+        FrameType frameType = tileContext.frameHeader().frameType();
         boolean hasChroma = hasChroma(nonNullPosition, nonNullSize);
         int segmentId = 0;
         boolean segmentPredicted = false;
@@ -81,21 +82,34 @@ public final class TileBlockHeaderReader {
             segmentPredicted = segmentReadResult.segmentPredicted();
         }
 
-        FrameHeader.SegmentData segmentData = segmentation.segment(segmentId);
-        boolean skip = segmentData.skip() || syntaxReader.readSkipFlag(nonNullNeighborContext.skipContext(nonNullPosition));
-        if (segmentData.skip()) {
-            skip = true;
+        @Nullable FrameHeader.SegmentData segmentDataBeforeSkip =
+                segmentation.enabled() && segmentation.updateMap() && !segmentation.preskip()
+                        ? null
+                        : segmentation.segment(segmentId);
+        boolean skipMode = false;
+        if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH)
+                && canDecodeSkipMode(nonNullSize, segmentDataBeforeSkip)) {
+            skipMode = syntaxReader.readSkipModeFlag(nonNullNeighborContext.skipModeContext(nonNullPosition));
         }
+        boolean skip = skipMode || (segmentDataBeforeSkip != null && segmentDataBeforeSkip.skip());
+        if (!skip) {
+            skip = syntaxReader.readSkipFlag(nonNullNeighborContext.skipContext(nonNullPosition));
+        }
+        FrameHeader.SegmentData segmentData;
         if (segmentation.enabled() && segmentation.updateMap() && !segmentation.preskip()) {
             SegmentReadResult segmentReadResult = readSegmentIdAfterSkip(nonNullPosition, nonNullNeighborContext, skip);
             segmentId = segmentReadResult.segmentId();
             segmentPredicted = segmentReadResult.segmentPredicted();
             segmentData = segmentation.segment(segmentId);
+        } else {
+            if (segmentDataBeforeSkip == null) {
+                throw new IllegalStateException("Segment data must be known before skip when postskip decoding is disabled");
+            }
+            segmentData = segmentDataBeforeSkip;
         }
 
         boolean useIntrabc = false;
         boolean intra;
-        FrameType frameType = tileContext.frameHeader().frameType();
         if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH) && skip) {
             intra = false;
         } else if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
@@ -105,8 +119,6 @@ public final class TileBlockHeaderReader {
             } else {
                 intra = syntaxReader.readIntraBlockFlag(nonNullNeighborContext.intraContext(nonNullPosition));
             }
-        } else if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
-            throw new IllegalStateException("Inter block syntax fell through the expected branch structure");
         } else if (tileContext.frameHeader().allowIntrabc()) {
             useIntrabc = syntaxReader.readUseIntrabcFlag();
             intra = !useIntrabc;
@@ -190,6 +202,7 @@ public final class TileBlockHeaderReader {
                 nonNullSize,
                 hasChroma,
                 skip,
+                skipMode,
                 intra,
                 useIntrabc,
                 segmentPredicted,
@@ -247,6 +260,23 @@ public final class TileBlockHeaderReader {
         int chromaWidth4 = Math.max(1, size.width4() >> subsamplingX);
         int chromaHeight4 = Math.max(1, size.height4() >> subsamplingY);
         return chromaWidth4 == 1 && chromaHeight4 == 1;
+    }
+
+    /// Returns whether skip-mode syntax is available for the supplied block and segment state.
+    ///
+    /// Postskip segmentation does not know the final segment features yet, so a `null` segment
+    /// state means the skip-mode gate should rely only on frame-level constraints.
+    ///
+    /// @param size the block size to test
+    /// @param segmentData the already-known segment data, or `null` when postskip segmentation has
+    ///                    not decoded the final segment id yet
+    /// @return whether skip-mode syntax is available for the supplied block and segment state
+    private boolean canDecodeSkipMode(BlockSize size, @Nullable FrameHeader.SegmentData segmentData) {
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        return tileContext.frameHeader().skipModeEnabled()
+                && Math.min(nonNullSize.width4(), nonNullSize.height4()) > 1
+                && (segmentData == null
+                || (!segmentData.globalMotion() && segmentData.referenceFrame() < 0 && !segmentData.skip()));
     }
 
     /// Returns whether palette syntax is available for the supplied block size.
@@ -697,15 +727,14 @@ public final class TileBlockHeaderReader {
             return new SegmentReadResult(false, 0);
         }
         BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
-        if (segmentation.temporalUpdate()) {
-            boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
-            if (segmentPredicted || skip) {
-                return new SegmentReadResult(segmentPredicted, prediction.predictedSegmentId());
-            }
-        }
-
         if (skip) {
             return new SegmentReadResult(false, prediction.predictedSegmentId());
+        }
+        if (segmentation.temporalUpdate()) {
+            boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
+            if (segmentPredicted) {
+                return new SegmentReadResult(true, prediction.predictedSegmentId());
+            }
         }
         int segmentId = decodeSegmentId(prediction, segmentation.lastActiveSegmentId());
         return new SegmentReadResult(false, segmentId);
@@ -777,6 +806,9 @@ public final class TileBlockHeaderReader {
         /// The decoded skip flag.
         private final boolean skip;
 
+        /// The decoded skip-mode flag.
+        private final boolean skipMode;
+
         /// Whether the block is intra-coded.
         private final boolean intra;
 
@@ -837,6 +869,7 @@ public final class TileBlockHeaderReader {
         /// @param size the decoded block size
         /// @param hasChroma whether the block has chroma samples in the active frame layout
         /// @param skip the decoded skip flag
+        /// @param skipMode the decoded skip-mode flag
         /// @param intra whether the block is intra-coded
         /// @param useIntrabc whether the block uses `intrabc`
         /// @param segmentPredicted whether the block used temporal segmentation prediction
@@ -860,6 +893,7 @@ public final class TileBlockHeaderReader {
                 BlockSize size,
                 boolean hasChroma,
                 boolean skip,
+                boolean skipMode,
                 boolean intra,
                 boolean useIntrabc,
                 boolean segmentPredicted,
@@ -883,6 +917,7 @@ public final class TileBlockHeaderReader {
             this.size = Objects.requireNonNull(size, "size");
             this.hasChroma = hasChroma;
             this.skip = skip;
+            this.skipMode = skipMode;
             this.intra = intra;
             this.useIntrabc = useIntrabc;
             this.segmentPredicted = segmentPredicted;
@@ -944,6 +979,13 @@ public final class TileBlockHeaderReader {
         /// @return the decoded skip flag
         public boolean skip() {
             return skip;
+        }
+
+        /// Returns the decoded skip-mode flag.
+        ///
+        /// @return the decoded skip-mode flag
+        public boolean skipMode() {
+            return skipMode;
         }
 
         /// Returns whether the block is intra-coded.

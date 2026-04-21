@@ -30,8 +30,8 @@ import java.util.Objects;
 /// Typed reader for the first block-level AV1 syntax elements inside one tile bitstream.
 ///
 /// This reader is intentionally small and currently covers only syntax elements already backed by
-/// `CdfContext`: partitioning, skip, intra/inter, `intrabc`, Y/UV intra prediction modes,
-/// palette presence and size signaling, filter intra, angle deltas, and CFL alpha.
+/// `CdfContext`: partitioning, skip, skip mode, intra/inter, `intrabc`, Y/UV intra prediction
+/// modes, palette presence and size signaling, filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
     /// The tile-local decode state that owns the mutable decoder and CDF context.
@@ -65,6 +65,14 @@ public final class TileSyntaxReader {
     /// @return the decoded skip flag
     public boolean readSkipFlag(int context) {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableSkipCdf(context));
+    }
+
+    /// Decodes one skip-mode flag using the supplied skip-mode context index.
+    ///
+    /// @param context the zero-based skip-mode context index in `[0, 3)`
+    /// @return the decoded skip-mode flag
+    public boolean readSkipModeFlag(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableSkipModeCdf(context));
     }
 
     /// Decodes one intra/inter decision for inter and switch frames.

@@ -31,6 +31,9 @@ final class CdfContextTest {
         CdfContext context = CdfContext.createDefault();
 
         assertArrayEquals(new int[]{1097, 0}, context.mutableSkipCdf(0));
+        assertArrayEquals(new int[]{147, 0}, context.mutableSkipModeCdf(0));
+        assertArrayEquals(new int[]{12060, 0}, context.mutableSkipModeCdf(1));
+        assertArrayEquals(new int[]{24641, 0}, context.mutableSkipModeCdf(2));
         assertArrayEquals(new int[]{16106, 0}, context.mutableIntraCdf(1));
         assertArrayEquals(new int[]{2237, 0}, context.mutableIntrabcCdf());
         assertArrayEquals(new int[]{16384, 0}, context.mutableSegmentPredictionCdf(0));
@@ -73,6 +76,7 @@ final class CdfContextTest {
         CdfContext copy = original.copy();
 
         assertNotSame(original.mutableSkipCdf(0), copy.mutableSkipCdf(0));
+        assertNotSame(original.mutableSkipModeCdf(0), copy.mutableSkipModeCdf(0));
         assertNotSame(original.mutableUseFilterIntraCdf(0), copy.mutableUseFilterIntraCdf(0));
         assertNotSame(original.mutableFilterIntraCdf(), copy.mutableFilterIntraCdf());
         assertNotSame(original.mutableUvModeCdf(true, 0), copy.mutableUvModeCdf(true, 0));
@@ -86,9 +90,10 @@ final class CdfContextTest {
         assertNotSame(original.mutableKeyFrameYModeCdf(0, 0), copy.mutableKeyFrameYModeCdf(0, 0));
 
         copy.mutableSkipCdf(0)[0] = 77;
+        copy.mutableSkipModeCdf(0)[0] = 88;
         copy.mutableUseFilterIntraCdf(0)[0] = 66;
         copy.mutableFilterIntraCdf()[0] = 55;
-        copy.mutableUvModeCdf(true, 0)[0] = 88;
+        copy.mutableUvModeCdf(true, 0)[0] = 99;
         copy.mutablePartitionCdf(0, 0)[0] = 99;
         copy.mutableLumaPaletteCdf(0, 0)[0] = 144;
         copy.mutablePaletteSizeCdf(0, 0)[0] = 155;
@@ -99,6 +104,7 @@ final class CdfContextTest {
         copy.mutableKeyFrameYModeCdf(0, 0)[0] = 111;
 
         assertEquals(1097, original.mutableSkipCdf(0)[0]);
+        assertEquals(147, original.mutableSkipModeCdf(0)[0]);
         assertEquals(28147, original.mutableUseFilterIntraCdf(0)[0]);
         assertEquals(23819, original.mutableFilterIntraCdf()[0]);
         assertEquals(22361, original.mutableUvModeCdf(true, 0)[0]);

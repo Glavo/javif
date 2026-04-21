@@ -165,6 +165,46 @@ final class TileBlockHeaderReaderTest {
         assertEquals(0, header.cflAlphaV());
     }
 
+    /// Verifies that skip mode short-circuits both skip-flag and intra/inter syntax in inter blocks.
+    @Test
+    void readsSkipModeBlockHeaderWithoutSkipSyntax() {
+        byte[] payload = findPayloadForSkipModeInterBlock();
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                true,
+                true
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkipMode = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipModeCdf(0));
+        boolean skipIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean intraIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        assertTrue(expectedSkipMode);
+        assertFalse(skipIfConsumed);
+        assertTrue(intraIfConsumed);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertTrue(header.skipMode());
+        assertTrue(header.skip());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
+        assertEquals(0, header.yAngle());
+        assertEquals(0, header.uvAngle());
+        assertEquals(0, header.cflAlphaU());
+        assertEquals(0, header.cflAlphaV());
+    }
+
     /// Verifies that `segment_reference_frame = INTRA_FRAME` forces inter blocks down the intra syntax path.
     @Test
     void readsInterBlockForcedIntraBySegmentReference() {
@@ -547,6 +587,58 @@ final class TileBlockHeaderReaderTest {
         assertFalse(header.useIntrabc());
         assertTrue(header.segmentPredicted());
         assertEquals(1, header.segmentId());
+    }
+
+    /// Verifies that skipped postskip segmentation reuses the predicted segment id without consuming
+    /// a temporal prediction flag.
+    @Test
+    void readsSkippedPostskipTemporalSegmentIdWithoutPredictionFlag() {
+        byte[] payload = findPayloadForSkippedPostskipTemporalPrediction();
+        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, true, 1, defaultSegments(), new boolean[8], new int[8]);
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedTemporalSegmentPrediction(neighborContext, 1);
+
+        assertEquals(2, neighborContext.segmentPredictionContext(position));
+        assertEquals(1, neighborContext.currentSegmentPrediction(position).predictedSegmentId());
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        assertTrue(expectedSkip);
+        LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(
+                        oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                        12
+                )
+        );
+        UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, expectedYMode.symbolIndex()), 13)
+        );
+
+        CdfContext shiftedCdf = CdfContext.createDefault();
+        MsacDecoder shiftedDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        shiftedDecoder.decodeBooleanAdapt(shiftedCdf.mutableSkipCdf(0));
+        shiftedDecoder.decodeBooleanAdapt(shiftedCdf.mutableSegmentPredictionCdf(2));
+        LumaIntraPredictionMode shiftedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                shiftedDecoder.decodeSymbolAdapt(
+                        shiftedCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                        12
+                )
+        );
+        assertFalse(expectedYMode == shiftedYMode);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_8X8, neighborContext);
+
+        assertTrue(header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertFalse(header.segmentPredicted());
+        assertEquals(1, header.segmentId());
+        assertEquals(expectedYMode, header.yMode());
+        assertEquals(expectedUvMode, header.uvMode());
     }
 
     /// Verifies that screen-content palette syntax populates luma/chroma palettes and packed palette indices.
@@ -989,6 +1081,52 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced seg_id_predicted=true for the postskip path");
     }
 
+    /// Finds a small payload whose first skipped postskip block would produce a different key-frame
+    /// Y mode if a temporal prediction flag were consumed incorrectly.
+    ///
+    /// @return a small payload whose first skipped postskip block exposes the temporal prediction bug
+    private static byte[] findPayloadForSkippedPostskipTemporalPrediction() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
+                    CdfContext oracleCdf = CdfContext.createDefault();
+                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                        continue;
+                    }
+                    LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                            oracleDecoder.decodeSymbolAdapt(
+                                    oracleCdf.mutableKeyFrameYModeCdf(
+                                            LumaIntraPredictionMode.DC.contextIndex(),
+                                            LumaIntraPredictionMode.DC.contextIndex()
+                                    ),
+                                    12
+                            )
+                    );
+
+                    CdfContext shiftedCdf = CdfContext.createDefault();
+                    MsacDecoder shiftedDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    shiftedDecoder.decodeBooleanAdapt(shiftedCdf.mutableSkipCdf(0));
+                    shiftedDecoder.decodeBooleanAdapt(shiftedCdf.mutableSegmentPredictionCdf(2));
+                    LumaIntraPredictionMode shiftedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                            shiftedDecoder.decodeSymbolAdapt(
+                                    shiftedCdf.mutableKeyFrameYModeCdf(
+                                            LumaIntraPredictionMode.DC.contextIndex(),
+                                            LumaIntraPredictionMode.DC.contextIndex()
+                                    ),
+                                    12
+                            )
+                    );
+                    if (expectedYMode != shiftedYMode) {
+                        return payload;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload exposed the skipped postskip temporal prediction bug");
+    }
+
     /// Finds a small payload whose first inter block decodes `skip = true` and whose skipped
     /// intra/inter decision would decode to `intra = true` if it were consumed.
     ///
@@ -1008,6 +1146,32 @@ final class TileBlockHeaderReaderTest {
             }
         }
         throw new IllegalStateException("No deterministic payload produced skip=true with a skipped intra=true decision");
+    }
+
+    /// Finds a small payload whose first inter block decodes `skip_mode = true`, whose skipped
+    /// skip flag would decode to `false`, and whose skipped intra/inter bit would decode to `true`.
+    ///
+    /// @return a small payload whose first inter block exposes skip-mode short-circuiting
+    private static byte[] findPayloadForSkipModeInterBlock() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00};
+                    CdfContext oracleCdf = CdfContext.createDefault();
+                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipModeCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                        return payload;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced skip_mode=true with skipped skip=false and intra=true");
     }
 
     /// Finds a small payload whose first inter block decodes `skip = false` and whose consumed
@@ -1142,6 +1306,39 @@ final class TileBlockHeaderReaderTest {
             boolean allowScreenContentTools,
             boolean allLossless
     ) {
+        return createTileContext(
+                frameType,
+                allowIntrabc,
+                payload,
+                filterIntra,
+                segmentation,
+                allowScreenContentTools,
+                allLossless,
+                false
+        );
+    }
+
+    /// Creates a simple tile context used by block-header tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param allowIntrabc whether the synthetic frame allows `intrabc`
+    /// @param payload the collected tile entropy payload
+    /// @param filterIntra whether the synthetic sequence enables filter intra
+    /// @param segmentation the synthetic frame segmentation state
+    /// @param allowScreenContentTools whether the synthetic frame enables screen-content tools
+    /// @param allLossless whether all segments in the synthetic frame are lossless
+    /// @param skipModeEnabled whether skip mode is enabled for the synthetic frame
+    /// @return a simple tile context used by block-header tests
+    private static TileDecodeContext createTileContext(
+            FrameType frameType,
+            boolean allowIntrabc,
+            byte[] payload,
+            boolean filterIntra,
+            FrameHeader.SegmentationInfo segmentation,
+            boolean allowScreenContentTools,
+            boolean allLossless,
+            boolean skipModeEnabled
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -1209,9 +1406,15 @@ final class TileBlockHeaderReaderTest {
                 7,
                 0,
                 0xFF,
+                false,
+                new int[]{-1, -1, -1, -1, -1, -1, -1},
                 new FrameHeader.FrameSize(64, 64, 64, 64, 64),
                 new FrameHeader.SuperResolutionInfo(false, 8),
                 allowIntrabc,
+                false,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                false,
+                false,
                 true,
                 new FrameHeader.TilingInfo(
                         true,
@@ -1253,6 +1456,11 @@ final class TileBlockHeaderReaderTest {
                         0
                 ),
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                false,
+                skipModeEnabled,
+                skipModeEnabled,
+                skipModeEnabled ? new int[]{0, 1} : new int[]{-1, -1},
+                false,
                 false,
                 false
         );
@@ -1350,6 +1558,7 @@ final class TileBlockHeaderReaderTest {
                 BlockSize.SIZE_8X8,
                 true,
                 false,
+                false,
                 true,
                 false,
                 true,
@@ -1373,6 +1582,7 @@ final class TileBlockHeaderReaderTest {
                 new BlockPosition(0, 4),
                 BlockSize.SIZE_8X8,
                 true,
+                false,
                 false,
                 true,
                 false,
