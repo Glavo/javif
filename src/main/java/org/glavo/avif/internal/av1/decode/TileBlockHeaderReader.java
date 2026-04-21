@@ -19,9 +19,11 @@ import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -153,6 +155,9 @@ public final class TileBlockHeaderReader {
         boolean compoundReference = false;
         int referenceFrame0 = NO_REFERENCE_FRAME;
         int referenceFrame1 = NO_REFERENCE_FRAME;
+        @Nullable SingleInterPredictionMode singleInterMode = null;
+        @Nullable CompoundInterPredictionMode compoundInterMode = null;
+        int drlIndex = -1;
         if (!intra && !useIntrabc) {
             InterReferenceSelection selection = readInterReferenceSelection(
                     nonNullPosition,
@@ -164,6 +169,13 @@ public final class TileBlockHeaderReader {
             compoundReference = selection.compoundReference();
             referenceFrame0 = selection.referenceFrame0();
             referenceFrame1 = selection.referenceFrame1();
+            if (skipMode) {
+                compoundInterMode = CompoundInterPredictionMode.NEARESTMV_NEARESTMV;
+                drlIndex = 0;
+            } else if (!compoundReference && (segmentData.globalMotion() || segmentData.skip())) {
+                singleInterMode = SingleInterPredictionMode.GLOBALMV;
+                drlIndex = 0;
+            }
         }
 
         @Nullable LumaIntraPredictionMode yMode = null;
@@ -248,6 +260,9 @@ public final class TileBlockHeaderReader {
                 compoundReference,
                 referenceFrame0,
                 referenceFrame1,
+                singleInterMode,
+                compoundInterMode,
+                drlIndex,
                 segmentPredicted,
                 segmentId,
                 yMode,
@@ -990,6 +1005,15 @@ public final class TileBlockHeaderReader {
         /// The secondary inter reference in internal LAST..ALTREF order, or `-1`.
         private final int referenceFrame1;
 
+        /// The decoded single-reference inter mode, or `null` when not available.
+        private final @Nullable SingleInterPredictionMode singleInterMode;
+
+        /// The decoded compound inter mode, or `null` when not available.
+        private final @Nullable CompoundInterPredictionMode compoundInterMode;
+
+        /// The decoded dynamic-reference-list index, or `-1` when not available.
+        private final int drlIndex;
+
         /// Whether the block used temporal segmentation prediction.
         private final boolean segmentPredicted;
 
@@ -1050,6 +1074,141 @@ public final class TileBlockHeaderReader {
         /// @param compoundReference whether the block uses compound inter references
         /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order, or `-1`
         /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param singleInterMode the decoded single-reference inter mode, or `null`
+        /// @param compoundInterMode the decoded compound inter mode, or `null`
+        /// @param drlIndex the decoded dynamic-reference-list index, or `-1`
+        /// @param segmentPredicted whether the block used temporal segmentation prediction
+        /// @param segmentId the decoded segment identifier for the block
+        /// @param yMode the decoded luma intra prediction mode, or `null`
+        /// @param uvMode the decoded chroma intra prediction mode, or `null`
+        /// @param yPaletteSize the decoded luma palette size in `[0, 8]`, or `0`
+        /// @param uvPaletteSize the decoded chroma palette size in `[0, 8]`, or `0`
+        /// @param yPaletteColors the decoded luma palette entries, or an empty array
+        /// @param uPaletteColors the decoded U chroma palette entries, or an empty array
+        /// @param vPaletteColors the decoded V chroma palette entries, or an empty array
+        /// @param yPaletteIndices the packed luma palette indices, or an empty array
+        /// @param uvPaletteIndices the packed chroma palette indices, or an empty array
+        /// @param filterIntraMode the decoded filter-intra mode, or `null`
+        /// @param yAngle the decoded signed luma angle delta in `[-3, 3]`
+        /// @param uvAngle the decoded signed chroma angle delta in `[-3, 3]`
+        /// @param cflAlphaU the decoded signed CFL alpha for chroma U
+        /// @param cflAlphaV the decoded signed CFL alpha for chroma V
+        public BlockHeader(
+                BlockPosition position,
+                BlockSize size,
+                boolean hasChroma,
+                boolean skip,
+                boolean skipMode,
+                boolean intra,
+                boolean useIntrabc,
+                boolean compoundReference,
+                int referenceFrame0,
+                int referenceFrame1,
+                @Nullable SingleInterPredictionMode singleInterMode,
+                @Nullable CompoundInterPredictionMode compoundInterMode,
+                int drlIndex,
+                boolean segmentPredicted,
+                int segmentId,
+                @Nullable LumaIntraPredictionMode yMode,
+                @Nullable UvIntraPredictionMode uvMode,
+                int yPaletteSize,
+                int uvPaletteSize,
+                int[] yPaletteColors,
+                int[] uPaletteColors,
+                int[] vPaletteColors,
+                byte[] yPaletteIndices,
+                byte[] uvPaletteIndices,
+                @Nullable FilterIntraMode filterIntraMode,
+                int yAngle,
+                int uvAngle,
+                int cflAlphaU,
+                int cflAlphaV
+        ) {
+            this.position = Objects.requireNonNull(position, "position");
+            this.size = Objects.requireNonNull(size, "size");
+            this.hasChroma = hasChroma;
+            this.skip = skip;
+            this.skipMode = skipMode;
+            this.intra = intra;
+            this.useIntrabc = useIntrabc;
+            this.compoundReference = compoundReference;
+            this.referenceFrame0 = referenceFrame0;
+            this.referenceFrame1 = referenceFrame1;
+            this.singleInterMode = singleInterMode;
+            this.compoundInterMode = compoundInterMode;
+            this.drlIndex = drlIndex;
+            this.segmentPredicted = segmentPredicted;
+            this.segmentId = segmentId;
+            this.yMode = yMode;
+            this.uvMode = uvMode;
+            this.yPaletteSize = yPaletteSize;
+            this.uvPaletteSize = uvPaletteSize;
+            this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
+            this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
+            this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
+            this.yPaletteIndices = Arrays.copyOf(Objects.requireNonNull(yPaletteIndices, "yPaletteIndices"), yPaletteIndices.length);
+            this.uvPaletteIndices = Arrays.copyOf(Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices"), uvPaletteIndices.length);
+            this.filterIntraMode = filterIntraMode;
+            this.yAngle = yAngle;
+            this.uvAngle = uvAngle;
+            this.cflAlphaU = cflAlphaU;
+            this.cflAlphaV = cflAlphaV;
+            if (this.yPaletteColors.length != yPaletteSize) {
+                throw new IllegalArgumentException("yPaletteColors length does not match yPaletteSize");
+            }
+            if (this.uPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("uPaletteColors length does not match uvPaletteSize");
+            }
+            if (this.vPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
+            }
+            if (yPaletteSize == 0 && this.yPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("yPaletteIndices must be empty when yPaletteSize == 0");
+            }
+            if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
+            }
+            if (drlIndex < -1 || drlIndex > 3) {
+                throw new IllegalArgumentException("drlIndex out of range: " + drlIndex);
+            }
+            if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
+            }
+            if ((intra || useIntrabc) && (singleInterMode != null || compoundInterMode != null || drlIndex != -1)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode state");
+            }
+            if (!intra && !useIntrabc) {
+                if (referenceFrame0 == NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Inter blocks must carry a primary reference");
+                }
+                if (compoundReference) {
+                    if (referenceFrame1 == NO_REFERENCE_FRAME) {
+                        throw new IllegalArgumentException("Compound-reference blocks must carry a secondary reference");
+                    }
+                    if (singleInterMode != null) {
+                        throw new IllegalArgumentException("Compound-reference blocks must not carry a single inter mode");
+                    }
+                } else if (referenceFrame1 != NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary reference");
+                }
+                if (!compoundReference && compoundInterMode != null) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a compound inter mode");
+                }
+            }
+        }
+
+        /// Creates one decoded leaf block header with inter-mode state defaulted to unavailable.
+        ///
+        /// @param position the local tile-relative block origin
+        /// @param size the decoded block size
+        /// @param hasChroma whether the block has chroma samples in the active frame layout
+        /// @param skip the decoded skip flag
+        /// @param skipMode the decoded skip-mode flag
+        /// @param intra whether the block is intra-coded
+        /// @param useIntrabc whether the block uses `intrabc`
+        /// @param compoundReference whether the block uses compound inter references
+        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
         /// @param segmentPredicted whether the block used temporal segmentation prediction
         /// @param segmentId the decoded segment identifier for the block
         /// @param yMode the decoded luma intra prediction mode, or `null`
@@ -1094,62 +1253,37 @@ public final class TileBlockHeaderReader {
                 int cflAlphaU,
                 int cflAlphaV
         ) {
-            this.position = Objects.requireNonNull(position, "position");
-            this.size = Objects.requireNonNull(size, "size");
-            this.hasChroma = hasChroma;
-            this.skip = skip;
-            this.skipMode = skipMode;
-            this.intra = intra;
-            this.useIntrabc = useIntrabc;
-            this.compoundReference = compoundReference;
-            this.referenceFrame0 = referenceFrame0;
-            this.referenceFrame1 = referenceFrame1;
-            this.segmentPredicted = segmentPredicted;
-            this.segmentId = segmentId;
-            this.yMode = yMode;
-            this.uvMode = uvMode;
-            this.yPaletteSize = yPaletteSize;
-            this.uvPaletteSize = uvPaletteSize;
-            this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
-            this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
-            this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
-            this.yPaletteIndices = Arrays.copyOf(Objects.requireNonNull(yPaletteIndices, "yPaletteIndices"), yPaletteIndices.length);
-            this.uvPaletteIndices = Arrays.copyOf(Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices"), uvPaletteIndices.length);
-            this.filterIntraMode = filterIntraMode;
-            this.yAngle = yAngle;
-            this.uvAngle = uvAngle;
-            this.cflAlphaU = cflAlphaU;
-            this.cflAlphaV = cflAlphaV;
-            if (this.yPaletteColors.length != yPaletteSize) {
-                throw new IllegalArgumentException("yPaletteColors length does not match yPaletteSize");
-            }
-            if (this.uPaletteColors.length != uvPaletteSize) {
-                throw new IllegalArgumentException("uPaletteColors length does not match uvPaletteSize");
-            }
-            if (this.vPaletteColors.length != uvPaletteSize) {
-                throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
-            }
-            if (yPaletteSize == 0 && this.yPaletteIndices.length != 0) {
-                throw new IllegalArgumentException("yPaletteIndices must be empty when yPaletteSize == 0");
-            }
-            if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
-                throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
-            }
-            if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
-                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
-            }
-            if (!intra && !useIntrabc) {
-                if (referenceFrame0 == NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Inter blocks must carry a primary reference");
-                }
-                if (compoundReference) {
-                    if (referenceFrame1 == NO_REFERENCE_FRAME) {
-                        throw new IllegalArgumentException("Compound-reference blocks must carry a secondary reference");
-                    }
-                } else if (referenceFrame1 != NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary reference");
-                }
-            }
+            this(
+                    position,
+                    size,
+                    hasChroma,
+                    skip,
+                    skipMode,
+                    intra,
+                    useIntrabc,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    null,
+                    null,
+                    -1,
+                    segmentPredicted,
+                    segmentId,
+                    yMode,
+                    uvMode,
+                    yPaletteSize,
+                    uvPaletteSize,
+                    yPaletteColors,
+                    uPaletteColors,
+                    vPaletteColors,
+                    yPaletteIndices,
+                    uvPaletteIndices,
+                    filterIntraMode,
+                    yAngle,
+                    uvAngle,
+                    cflAlphaU,
+                    cflAlphaV
+            );
         }
 
         /// Returns the local tile-relative block origin.
@@ -1220,6 +1354,27 @@ public final class TileBlockHeaderReader {
         /// @return the secondary inter reference in internal LAST..ALTREF order, or `-1`
         public int referenceFrame1() {
             return referenceFrame1;
+        }
+
+        /// Returns the decoded single-reference inter mode, or `null` when not available.
+        ///
+        /// @return the decoded single-reference inter mode, or `null`
+        public @Nullable SingleInterPredictionMode singleInterMode() {
+            return singleInterMode;
+        }
+
+        /// Returns the decoded compound inter mode, or `null` when not available.
+        ///
+        /// @return the decoded compound inter mode, or `null`
+        public @Nullable CompoundInterPredictionMode compoundInterMode() {
+            return compoundInterMode;
+        }
+
+        /// Returns the decoded dynamic-reference-list index, or `-1` when not available.
+        ///
+        /// @return the decoded dynamic-reference-list index, or `-1`
+        public int drlIndex() {
+            return drlIndex;
         }
 
         /// Returns whether the block used temporal segmentation prediction.

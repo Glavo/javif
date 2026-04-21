@@ -23,12 +23,14 @@ import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
@@ -128,6 +130,43 @@ final class TileSyntaxReaderTest {
                 oracleCdf.mutableCompoundUnidirectionalReferenceCdf(2, 1),
                 tileContext.cdfContext().mutableCompoundUnidirectionalReferenceCdf(2, 1)
         );
+    }
+
+    /// Verifies that inter prediction-mode syntax uses the expected tile-local CDF tables.
+    @Test
+    void readsInterPredictionModeSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedNewMv = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSingleInterNewMvCdf(4));
+        boolean expectedGlobalMv = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSingleInterGlobalMvCdf(1));
+        boolean expectedReferenceMv = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSingleInterReferenceMvCdf(3));
+        boolean expectedDrlBit = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableDrlCdf(2));
+        CompoundInterPredictionMode expectedCompoundInterMode = CompoundInterPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCompoundInterModeCdf(5), 7)
+        );
+        SingleInterPredictionMode expectedSingleInterMode = expectedNewMv
+                ? (!expectedGlobalMv ? SingleInterPredictionMode.GLOBALMV
+                : expectedReferenceMv ? SingleInterPredictionMode.NEARMV : SingleInterPredictionMode.NEARESTMV)
+                : SingleInterPredictionMode.NEWMV;
+
+        assertEquals(expectedNewMv, reader.readSingleInterNewMvFlag(4));
+        assertArrayEquals(oracleCdf.mutableSingleInterNewMvCdf(4), tileContext.cdfContext().mutableSingleInterNewMvCdf(4));
+        assertEquals(expectedGlobalMv, reader.readSingleInterGlobalMvFlag(1));
+        assertArrayEquals(oracleCdf.mutableSingleInterGlobalMvCdf(1), tileContext.cdfContext().mutableSingleInterGlobalMvCdf(1));
+        assertEquals(expectedReferenceMv, reader.readSingleInterReferenceMvFlag(3));
+        assertArrayEquals(oracleCdf.mutableSingleInterReferenceMvCdf(3), tileContext.cdfContext().mutableSingleInterReferenceMvCdf(3));
+        assertEquals(expectedDrlBit, reader.readDrlBit(2));
+        assertArrayEquals(oracleCdf.mutableDrlCdf(2), tileContext.cdfContext().mutableDrlCdf(2));
+        assertEquals(expectedCompoundInterMode, reader.readCompoundInterMode(5));
+        assertArrayEquals(oracleCdf.mutableCompoundInterModeCdf(5), tileContext.cdfContext().mutableCompoundInterModeCdf(5));
+
+        TileDecodeContext singleModeTileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader singleModeReader = new TileSyntaxReader(singleModeTileContext);
+        assertEquals(expectedSingleInterMode, singleModeReader.readSingleInterMode(4, 1, 3, false, false));
     }
 
     /// Verifies that key-frame intra decisions do not consume entropy-coded bits and that Y/UV modes use the expected CDFs.

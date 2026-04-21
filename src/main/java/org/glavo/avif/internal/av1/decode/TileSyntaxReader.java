@@ -19,9 +19,11 @@ import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.PartitionType;
+import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -31,8 +33,8 @@ import java.util.Objects;
 ///
 /// This reader is intentionally small and currently covers only syntax elements already backed by
 /// `CdfContext`: partitioning, skip, skip mode, intra/inter, compound and single-reference
-/// selection, `intrabc`, Y/UV intra prediction modes, palette presence and size signaling,
-/// filter intra, angle deltas, and CFL alpha.
+/// selection, inter prediction-mode symbols, `intrabc`, Y/UV intra prediction modes, palette
+/// presence and size signaling, filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
     /// The tile-local decode state that owns the mutable decoder and CDF context.
@@ -141,6 +143,76 @@ public final class TileSyntaxReader {
     /// @return the decoded compound unidirectional-reference selection flag
     public boolean readCompoundUnidirectionalReferenceFlag(int tableIndex, int context) {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableCompoundUnidirectionalReferenceCdf(tableIndex, context));
+    }
+
+    /// Decodes one single-reference inter-mode `newmv` flag from the supplied context index.
+    ///
+    /// @param context the zero-based `newmv` context index in `[0, 6)`
+    /// @return whether the block follows the global/ref-mv branch instead of the new-mv branch
+    public boolean readSingleInterNewMvFlag(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableSingleInterNewMvCdf(context));
+    }
+
+    /// Decodes one single-reference inter-mode `globalmv` flag from the supplied context index.
+    ///
+    /// @param context the zero-based `globalmv` context index in `[0, 2)`
+    /// @return whether the block uses nearest/ref-mv instead of global motion
+    public boolean readSingleInterGlobalMvFlag(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableSingleInterGlobalMvCdf(context));
+    }
+
+    /// Decodes one single-reference inter-mode `refmv` flag from the supplied context index.
+    ///
+    /// @param context the zero-based `refmv` context index in `[0, 6)`
+    /// @return whether the block uses near motion vectors instead of the nearest candidate
+    public boolean readSingleInterReferenceMvFlag(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableSingleInterReferenceMvCdf(context));
+    }
+
+    /// Decodes one dynamic-reference-list selection bit from the supplied context index.
+    ///
+    /// @param context the zero-based dynamic-reference-list context index in `[0, 3)`
+    /// @return the decoded dynamic-reference-list selection bit
+    public boolean readDrlBit(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableDrlCdf(context));
+    }
+
+    /// Decodes one compound inter prediction mode from the supplied context index.
+    ///
+    /// @param context the zero-based compound inter-mode context index in `[0, 8)`
+    /// @return the decoded compound inter prediction mode
+    public CompoundInterPredictionMode readCompoundInterMode(int context) {
+        int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCompoundInterModeCdf(context), 7);
+        return CompoundInterPredictionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one single-reference inter prediction mode from the supplied contexts and already-forced segment flags.
+    ///
+    /// This method covers only the mode symbol itself. Motion-vector candidate lookup and residual
+    /// decoding remain the responsibility of higher decode layers.
+    ///
+    /// @param newMvContext the zero-based `newmv` context index in `[0, 6)`
+    /// @param globalMvContext the zero-based `globalmv` context index in `[0, 2)`
+    /// @param referenceMvContext the zero-based `refmv` context index in `[0, 6)`
+    /// @param segmentGlobalMotion whether segment features force `GLOBALMV`
+    /// @param segmentSkip whether segment features force the global/nearest-ref branch
+    /// @return the decoded single-reference inter prediction mode
+    public SingleInterPredictionMode readSingleInterMode(
+            int newMvContext,
+            int globalMvContext,
+            int referenceMvContext,
+            boolean segmentGlobalMotion,
+            boolean segmentSkip
+    ) {
+        if (segmentGlobalMotion || segmentSkip || readSingleInterNewMvFlag(newMvContext)) {
+            if (segmentGlobalMotion || segmentSkip || !readSingleInterGlobalMvFlag(globalMvContext)) {
+                return SingleInterPredictionMode.GLOBALMV;
+            }
+            return readSingleInterReferenceMvFlag(referenceMvContext)
+                    ? SingleInterPredictionMode.NEARMV
+                    : SingleInterPredictionMode.NEARESTMV;
+        }
+        return SingleInterPredictionMode.NEWMV;
     }
 
     /// Decodes one `use_intrabc` flag when the active frame allows it.

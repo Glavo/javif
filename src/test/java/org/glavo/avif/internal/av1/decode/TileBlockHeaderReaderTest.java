@@ -24,11 +24,13 @@ import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
@@ -201,6 +203,9 @@ final class TileBlockHeaderReaderTest {
         assertTrue(header.compoundReference());
         assertEquals(0, header.referenceFrame0());
         assertEquals(1, header.referenceFrame1());
+        assertNull(header.singleInterMode());
+        assertEquals(CompoundInterPredictionMode.NEARESTMV_NEARESTMV, header.compoundInterMode());
+        assertEquals(0, header.drlIndex());
         assertNull(header.yMode());
         assertNull(header.uvMode());
         assertEquals(0, header.yAngle());
@@ -381,12 +386,49 @@ final class TileBlockHeaderReaderTest {
         assertFalse(header.compoundReference());
         assertEquals(0, header.referenceFrame0());
         assertEquals(-1, header.referenceFrame1());
+        assertNull(header.singleInterMode());
+        assertNull(header.compoundInterMode());
+        assertEquals(-1, header.drlIndex());
         assertNull(header.yMode());
         assertNull(header.uvMode());
         assertEquals(0, header.yAngle());
         assertEquals(0, header.uvAngle());
         assertEquals(0, header.cflAlphaU());
         assertEquals(0, header.cflAlphaV());
+    }
+
+    /// Verifies that segment-level global motion exposes a fixed `GLOBALMV` single-reference mode.
+    @Test
+    void readsGlobalMotionSegmentBlockHeader() {
+        byte[] payload = findPayloadForInterBlockWithoutSkipOrIntra();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, true);
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                createFixedSegmentationInfo(segments),
+                false,
+                false
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertFalse(header.skipMode());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertFalse(header.compoundReference());
+        assertEquals(0, header.referenceFrame0());
+        assertEquals(-1, header.referenceFrame1());
+        assertEquals(SingleInterPredictionMode.GLOBALMV, header.singleInterMode());
+        assertNull(header.compoundInterMode());
+        assertEquals(0, header.drlIndex());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
     }
 
     /// Verifies that `intrabc` blocks keep their implicit DC/DC prediction modes.
@@ -1398,6 +1440,26 @@ final class TileBlockHeaderReaderTest {
             }
         }
         throw new IllegalStateException("No deterministic payload produced skip=false with a skipped intra=true decision");
+    }
+
+    /// Finds a small payload whose first inter block decodes `skip = false` and `intra = false`.
+    ///
+    /// @return a small payload whose first inter block decodes `skip = false` and `intra = false`
+    private static byte[] findPayloadForInterBlockWithoutSkipOrIntra() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                    continue;
+                }
+                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced skip=false and intra=false");
     }
 
     /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.

@@ -96,6 +96,51 @@ public final class CdfContext {
             {{3128}, {15270}, {26710}}
     });
 
+    /// The transformed default single-reference new-motion-vector CDFs.
+    private static final int[][] DEFAULT_SINGLE_INTER_NEWMV_CDFS = inverse2d(new int[][]{
+            {24035},
+            {16630},
+            {15339},
+            {8386},
+            {12222},
+            {4676}
+    });
+
+    /// The transformed default single-reference global-motion CDFs.
+    private static final int[][] DEFAULT_SINGLE_INTER_GLOBALMV_CDFS = inverse2d(new int[][]{
+            {2175},
+            {1054}
+    });
+
+    /// The transformed default single-reference reference-motion-vector CDFs.
+    private static final int[][] DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS = inverse2d(new int[][]{
+            {23974},
+            {24188},
+            {17848},
+            {28622},
+            {24312},
+            {19923}
+    });
+
+    /// The transformed default dynamic-reference-list selection CDFs.
+    private static final int[][] DEFAULT_DRL_CDFS = inverse2d(new int[][]{
+            {13104},
+            {24560},
+            {18945}
+    });
+
+    /// The transformed default compound inter-mode CDFs.
+    private static final int[][] DEFAULT_COMPOUND_INTER_MODE_CDFS = inverse2d(new int[][]{
+            {7760, 13823, 15808, 17641, 19156, 20666, 26891},
+            {10730, 19452, 21145, 22749, 24039, 25131, 28724},
+            {10664, 20221, 21588, 22906, 24295, 25387, 28436},
+            {13298, 16984, 20471, 24182, 25067, 25736, 26422},
+            {18904, 23325, 25242, 27432, 27898, 28258, 30758},
+            {10725, 17454, 20124, 22820, 24195, 25168, 26046},
+            {17125, 24273, 25814, 27492, 28214, 28704, 30592},
+            {13046, 23214, 24505, 25942, 27435, 28442, 29330}
+    });
+
     /// The transformed default `intrabc` CDF.
     private static final int[] DEFAULT_INTRABC_CDF = inverse(30531);
 
@@ -426,6 +471,21 @@ public final class CdfContext {
     /// The mutable compound unidirectional-reference selection CDFs.
     private final int[][][] compoundUnidirectionalReferenceCdfs;
 
+    /// The mutable single-reference new-motion-vector CDFs.
+    private final int[][] singleInterNewMvCdfs;
+
+    /// The mutable single-reference global-motion CDFs.
+    private final int[][] singleInterGlobalMvCdfs;
+
+    /// The mutable single-reference reference-motion-vector CDFs.
+    private final int[][] singleInterReferenceMvCdfs;
+
+    /// The mutable dynamic-reference-list selection CDFs.
+    private final int[][] drlCdfs;
+
+    /// The mutable compound inter-mode CDFs.
+    private final int[][] compoundInterModeCdfs;
+
     /// The mutable `intrabc` CDF.
     private final int[] intrabcCdf;
 
@@ -485,6 +545,11 @@ public final class CdfContext {
     /// @param compoundForwardReferenceCdfs the mutable compound forward-reference selection CDFs
     /// @param compoundBackwardReferenceCdfs the mutable compound backward-reference selection CDFs
     /// @param compoundUnidirectionalReferenceCdfs the mutable compound unidirectional-reference selection CDFs
+    /// @param singleInterNewMvCdfs the mutable single-reference new-motion-vector CDFs
+    /// @param singleInterGlobalMvCdfs the mutable single-reference global-motion CDFs
+    /// @param singleInterReferenceMvCdfs the mutable single-reference reference-motion-vector CDFs
+    /// @param drlCdfs the mutable dynamic-reference-list selection CDFs
+    /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
     /// @param intrabcCdf the mutable `intrabc` CDF
     /// @param yModeCdfs the mutable luma intra-mode CDFs
     /// @param useFilterIntraCdfs the mutable `use_filter_intra` CDFs
@@ -511,6 +576,11 @@ public final class CdfContext {
             int[][][] compoundForwardReferenceCdfs,
             int[][][] compoundBackwardReferenceCdfs,
             int[][][] compoundUnidirectionalReferenceCdfs,
+            int[][] singleInterNewMvCdfs,
+            int[][] singleInterGlobalMvCdfs,
+            int[][] singleInterReferenceMvCdfs,
+            int[][] drlCdfs,
+            int[][] compoundInterModeCdfs,
             int[] intrabcCdf,
             int[][] yModeCdfs,
             int[][] useFilterIntraCdfs,
@@ -537,6 +607,11 @@ public final class CdfContext {
         this.compoundForwardReferenceCdfs = Objects.requireNonNull(compoundForwardReferenceCdfs, "compoundForwardReferenceCdfs");
         this.compoundBackwardReferenceCdfs = Objects.requireNonNull(compoundBackwardReferenceCdfs, "compoundBackwardReferenceCdfs");
         this.compoundUnidirectionalReferenceCdfs = Objects.requireNonNull(compoundUnidirectionalReferenceCdfs, "compoundUnidirectionalReferenceCdfs");
+        this.singleInterNewMvCdfs = Objects.requireNonNull(singleInterNewMvCdfs, "singleInterNewMvCdfs");
+        this.singleInterGlobalMvCdfs = Objects.requireNonNull(singleInterGlobalMvCdfs, "singleInterGlobalMvCdfs");
+        this.singleInterReferenceMvCdfs = Objects.requireNonNull(singleInterReferenceMvCdfs, "singleInterReferenceMvCdfs");
+        this.drlCdfs = Objects.requireNonNull(drlCdfs, "drlCdfs");
+        this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
         this.intrabcCdf = Objects.requireNonNull(intrabcCdf, "intrabcCdf");
         this.yModeCdfs = Objects.requireNonNull(yModeCdfs, "yModeCdfs");
         this.useFilterIntraCdfs = Objects.requireNonNull(useFilterIntraCdfs, "useFilterIntraCdfs");
@@ -569,6 +644,11 @@ public final class CdfContext {
                 deepCopy(DEFAULT_COMPOUND_FORWARD_REFERENCE_CDFS),
                 deepCopy(DEFAULT_COMPOUND_BACKWARD_REFERENCE_CDFS),
                 deepCopy(DEFAULT_COMPOUND_UNIDIRECTIONAL_REFERENCE_CDFS),
+                deepCopy(DEFAULT_SINGLE_INTER_NEWMV_CDFS),
+                deepCopy(DEFAULT_SINGLE_INTER_GLOBALMV_CDFS),
+                deepCopy(DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS),
+                deepCopy(DEFAULT_DRL_CDFS),
+                deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
                 Arrays.copyOf(DEFAULT_INTRABC_CDF, DEFAULT_INTRABC_CDF.length),
                 deepCopy(DEFAULT_Y_MODE_CDFS),
                 deepCopy(DEFAULT_USE_FILTER_INTRA_CDFS),
@@ -602,6 +682,11 @@ public final class CdfContext {
                 deepCopy(compoundForwardReferenceCdfs),
                 deepCopy(compoundBackwardReferenceCdfs),
                 deepCopy(compoundUnidirectionalReferenceCdfs),
+                deepCopy(singleInterNewMvCdfs),
+                deepCopy(singleInterGlobalMvCdfs),
+                deepCopy(singleInterReferenceMvCdfs),
+                deepCopy(drlCdfs),
+                deepCopy(compoundInterModeCdfs),
                 Arrays.copyOf(intrabcCdf, intrabcCdf.length),
                 deepCopy(yModeCdfs),
                 deepCopy(useFilterIntraCdfs),
@@ -699,6 +784,46 @@ public final class CdfContext {
     public int[] mutableCompoundUnidirectionalReferenceCdf(int tableIndex, int context) {
         int[][] table = compoundUnidirectionalReferenceCdfs[Objects.checkIndex(tableIndex, compoundUnidirectionalReferenceCdfs.length)];
         return table[Objects.checkIndex(context, table.length)];
+    }
+
+    /// Returns the live mutable single-reference new-motion-vector CDF for the supplied context index.
+    ///
+    /// @param context the zero-based single-reference new-motion-vector context index in `[0, 6)`
+    /// @return the live mutable single-reference new-motion-vector CDF for the supplied context index
+    public int[] mutableSingleInterNewMvCdf(int context) {
+        return singleInterNewMvCdfs[Objects.checkIndex(context, singleInterNewMvCdfs.length)];
+    }
+
+    /// Returns the live mutable single-reference global-motion CDF for the supplied context index.
+    ///
+    /// @param context the zero-based single-reference global-motion context index in `[0, 2)`
+    /// @return the live mutable single-reference global-motion CDF for the supplied context index
+    public int[] mutableSingleInterGlobalMvCdf(int context) {
+        return singleInterGlobalMvCdfs[Objects.checkIndex(context, singleInterGlobalMvCdfs.length)];
+    }
+
+    /// Returns the live mutable single-reference reference-motion-vector CDF for the supplied context index.
+    ///
+    /// @param context the zero-based single-reference reference-motion-vector context index in `[0, 6)`
+    /// @return the live mutable single-reference reference-motion-vector CDF for the supplied context index
+    public int[] mutableSingleInterReferenceMvCdf(int context) {
+        return singleInterReferenceMvCdfs[Objects.checkIndex(context, singleInterReferenceMvCdfs.length)];
+    }
+
+    /// Returns the live mutable dynamic-reference-list selection CDF for the supplied context index.
+    ///
+    /// @param context the zero-based dynamic-reference-list context index in `[0, 3)`
+    /// @return the live mutable dynamic-reference-list selection CDF for the supplied context index
+    public int[] mutableDrlCdf(int context) {
+        return drlCdfs[Objects.checkIndex(context, drlCdfs.length)];
+    }
+
+    /// Returns the live mutable compound inter-mode CDF for the supplied context index.
+    ///
+    /// @param context the zero-based compound inter-mode context index in `[0, 8)`
+    /// @return the live mutable compound inter-mode CDF for the supplied context index
+    public int[] mutableCompoundInterModeCdf(int context) {
+        return compoundInterModeCdfs[Objects.checkIndex(context, compoundInterModeCdfs.length)];
     }
 
     /// Returns the live mutable `intrabc` CDF.
