@@ -1,0 +1,3 @@
+module org.glavo.avif {
+
+}
