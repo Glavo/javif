@@ -33,6 +33,8 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{1097, 0}, context.mutableSkipCdf(0));
         assertArrayEquals(new int[]{16106, 0}, context.mutableIntraCdf(1));
         assertArrayEquals(new int[]{2237, 0}, context.mutableIntrabcCdf());
+        assertArrayEquals(new int[]{16384, 0}, context.mutableSegmentPredictionCdf(0));
+        assertArrayEquals(new int[]{27146, 24875, 16675, 14535, 4959, 4395, 235, 0}, context.mutableSegmentIdCdf(0));
 
         assertEquals(13, context.mutableYModeCdf(0).length);
         assertEquals(9967, context.mutableYModeCdf(0)[0]);
@@ -56,6 +58,10 @@ final class CdfContextTest {
         assertEquals(12631, context.mutablePartitionCdf(1, 0)[0]);
         assertEquals(4, context.mutablePartitionCdf(4, 3).length);
         assertEquals(22872, context.mutablePartitionCdf(4, 3)[0]);
+
+        assertArrayEquals(new int[]{1092, 0}, context.mutableLumaPaletteCdf(0, 0));
+        assertArrayEquals(new int[]{24816, 19768, 14619, 11290, 7241, 3527, 0}, context.mutablePaletteSizeCdf(0, 0));
+        assertArrayEquals(new int[]{307, 0}, context.mutableChromaPaletteCdf(0));
     }
 
     /// Verifies that copying the context deep-copies all mutable tables.
@@ -69,6 +75,11 @@ final class CdfContextTest {
         assertNotSame(original.mutableFilterIntraCdf(), copy.mutableFilterIntraCdf());
         assertNotSame(original.mutableUvModeCdf(true, 0), copy.mutableUvModeCdf(true, 0));
         assertNotSame(original.mutablePartitionCdf(0, 0), copy.mutablePartitionCdf(0, 0));
+        assertNotSame(original.mutableLumaPaletteCdf(0, 0), copy.mutableLumaPaletteCdf(0, 0));
+        assertNotSame(original.mutablePaletteSizeCdf(0, 0), copy.mutablePaletteSizeCdf(0, 0));
+        assertNotSame(original.mutableChromaPaletteCdf(0), copy.mutableChromaPaletteCdf(0));
+        assertNotSame(original.mutableSegmentPredictionCdf(0), copy.mutableSegmentPredictionCdf(0));
+        assertNotSame(original.mutableSegmentIdCdf(0), copy.mutableSegmentIdCdf(0));
         assertNotSame(original.mutableKeyFrameYModeCdf(0, 0), copy.mutableKeyFrameYModeCdf(0, 0));
 
         copy.mutableSkipCdf(0)[0] = 77;
@@ -76,6 +87,11 @@ final class CdfContextTest {
         copy.mutableFilterIntraCdf()[0] = 55;
         copy.mutableUvModeCdf(true, 0)[0] = 88;
         copy.mutablePartitionCdf(0, 0)[0] = 99;
+        copy.mutableLumaPaletteCdf(0, 0)[0] = 144;
+        copy.mutablePaletteSizeCdf(0, 0)[0] = 155;
+        copy.mutableChromaPaletteCdf(0)[0] = 166;
+        copy.mutableSegmentPredictionCdf(0)[0] = 123;
+        copy.mutableSegmentIdCdf(0)[0] = 321;
         copy.mutableKeyFrameYModeCdf(0, 0)[0] = 111;
 
         assertEquals(1097, original.mutableSkipCdf(0)[0]);
@@ -83,6 +99,11 @@ final class CdfContextTest {
         assertEquals(23819, original.mutableFilterIntraCdf()[0]);
         assertEquals(22361, original.mutableUvModeCdf(true, 0)[0]);
         assertEquals(4869, original.mutablePartitionCdf(0, 0)[0]);
+        assertEquals(1092, original.mutableLumaPaletteCdf(0, 0)[0]);
+        assertEquals(24816, original.mutablePaletteSizeCdf(0, 0)[0]);
+        assertEquals(307, original.mutableChromaPaletteCdf(0)[0]);
+        assertEquals(16384, original.mutableSegmentPredictionCdf(0)[0]);
+        assertEquals(27146, original.mutableSegmentIdCdf(0)[0]);
         assertEquals(17180, original.mutableKeyFrameYModeCdf(0, 0)[0]);
     }
 }

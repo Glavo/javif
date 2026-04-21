@@ -31,7 +31,7 @@ import java.util.Objects;
 ///
 /// This reader is intentionally small and currently covers only syntax elements already backed by
 /// `CdfContext`: partitioning, skip, intra/inter, `intrabc`, Y/UV intra prediction modes,
-/// filter intra, angle deltas, and CFL alpha.
+/// palette presence and size signaling, filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
     /// The tile-local decode state that owns the mutable decoder and CDF context.
@@ -143,6 +143,51 @@ public final class TileSyntaxReader {
     public boolean readUseFilterIntra(BlockSize size) {
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableUseFilterIntraCdf(nonNullSize.cdfIndex()));
+    }
+
+    /// Decodes one temporal segmentation-prediction flag.
+    ///
+    /// @param context the zero-based segmentation-prediction context index in `[0, 3)`
+    /// @return whether the block uses temporal segmentation prediction
+    public boolean readSegmentPredictionFlag(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableSegmentPredictionCdf(context));
+    }
+
+    /// Decodes one segment-id diff symbol for the supplied segment context.
+    ///
+    /// @param context the zero-based segment-id context index in `[0, 3)`
+    /// @return the decoded segment-id diff symbol
+    public int readSegmentId(int context) {
+        return msacDecoder.decodeSymbolAdapt(cdfContext.mutableSegmentIdCdf(context), 7);
+    }
+
+    /// Decodes one luma palette-use flag for the supplied size and above/left palette contexts.
+    ///
+    /// @param sizeContext the zero-based palette size context in `[0, 7)`
+    /// @param paletteContext the zero-based above/left palette context in `[0, 3)`
+    /// @return whether the current block uses a luma palette
+    public boolean readUseLumaPalette(int sizeContext, int paletteContext) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableLumaPaletteCdf(sizeContext, paletteContext));
+    }
+
+    /// Decodes one palette size for the supplied plane and size context.
+    ///
+    /// AV1 codes palette sizes as `palette_size_minus_2`, so this method returns the decoded
+    /// palette size in `[2, 8]`.
+    ///
+    /// @param plane the palette plane index, where `0` is luma and `1` is chroma
+    /// @param sizeContext the zero-based palette size context in `[0, 7)`
+    /// @return the decoded palette size in `[2, 8]`
+    public int readPaletteSize(int plane, int sizeContext) {
+        return msacDecoder.decodeSymbolAdapt(cdfContext.mutablePaletteSizeCdf(plane, sizeContext), 6) + 2;
+    }
+
+    /// Decodes one chroma palette-use flag for the supplied luma-palette context.
+    ///
+    /// @param paletteContext the zero-based chroma palette context in `[0, 2)`
+    /// @return whether the current block uses a chroma palette
+    public boolean readUseChromaPalette(int paletteContext) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableChromaPaletteCdf(paletteContext));
     }
 
     /// Decodes one filter-intra mode after `use_filter_intra` signaled `true`.

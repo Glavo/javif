@@ -149,6 +149,87 @@ public final class CdfContext {
             }
     });
 
+    /// The transformed default luma palette-use CDFs.
+    private static final int[][][] DEFAULT_LUMA_PALETTE_CDFS = inverse3d(new int[][][]{
+            {
+                    {31676},
+                    {3419},
+                    {1261}
+            },
+            {
+                    {31912},
+                    {2859},
+                    {980}
+            },
+            {
+                    {31823},
+                    {3400},
+                    {781}
+            },
+            {
+                    {32030},
+                    {3561},
+                    {904}
+            },
+            {
+                    {32309},
+                    {7337},
+                    {1462}
+            },
+            {
+                    {32265},
+                    {4015},
+                    {1521}
+            },
+            {
+                    {32450},
+                    {7946},
+                    {129}
+            }
+    });
+
+    /// The transformed default palette-size CDFs for luma and chroma planes.
+    private static final int[][][] DEFAULT_PALETTE_SIZE_CDFS = inverse3d(new int[][][]{
+            {
+                    {7952, 13000, 18149, 21478, 25527, 29241},
+                    {7139, 11421, 16195, 19544, 23666, 28073},
+                    {7788, 12741, 17325, 20500, 24315, 28530},
+                    {8271, 14064, 18246, 21564, 25071, 28533},
+                    {12725, 19180, 21863, 24839, 27535, 30120},
+                    {9711, 14888, 16923, 21052, 25661, 27875},
+                    {14940, 20797, 21678, 24186, 27033, 28999}
+            },
+            {
+                    {8713, 19979, 27128, 29609, 31331, 32272},
+                    {5839, 15573, 23581, 26947, 29848, 31700},
+                    {4426, 11260, 17999, 21483, 25863, 29430},
+                    {3228, 9464, 14993, 18089, 22523, 27420},
+                    {3768, 8886, 13091, 17852, 22495, 27207},
+                    {2464, 8451, 12861, 21632, 25525, 28555},
+                    {1269, 5435, 10433, 18963, 21700, 25865}
+            }
+    });
+
+    /// The transformed default chroma palette-use CDFs.
+    private static final int[][] DEFAULT_CHROMA_PALETTE_CDFS = inverse2d(new int[][]{
+            {32461},
+            {21488}
+    });
+
+    /// The transformed default segmentation-prediction CDFs.
+    private static final int[][] DEFAULT_SEGMENT_PREDICTION_CDFS = inverse2d(new int[][]{
+            {16384},
+            {16384},
+            {16384}
+    });
+
+    /// The transformed default segment-id CDFs.
+    private static final int[][] DEFAULT_SEGMENT_ID_CDFS = inverse2d(new int[][]{
+            {5622, 7893, 16093, 18233, 27809, 28373, 32533},
+            {14274, 18230, 22557, 24935, 29980, 30851, 32344},
+            {27527, 28487, 28723, 28890, 32397, 32647, 32679}
+    });
+
     /// The transformed default key-frame luma intra-mode CDFs.
     private static final int[][][] DEFAULT_KEY_FRAME_Y_MODE_CDFS = inverse3d(new int[][][]{
             {
@@ -237,6 +318,21 @@ public final class CdfContext {
     /// The mutable partition CDFs.
     private final int[][][] partitionCdfs;
 
+    /// The mutable luma palette-use CDFs.
+    private final int[][][] lumaPaletteCdfs;
+
+    /// The mutable palette-size CDFs for luma and chroma planes.
+    private final int[][][] paletteSizeCdfs;
+
+    /// The mutable chroma palette-use CDFs.
+    private final int[][] chromaPaletteCdfs;
+
+    /// The mutable segmentation-prediction CDFs.
+    private final int[][] segmentPredictionCdfs;
+
+    /// The mutable segment-id CDFs.
+    private final int[][] segmentIdCdfs;
+
     /// The mutable key-frame luma intra-mode CDFs.
     private final int[][][] keyFrameYModeCdfs;
 
@@ -259,6 +355,11 @@ public final class CdfContext {
     /// @param filterIntraCdf the mutable filter-intra-mode CDF
     /// @param uvModeCdfs the mutable chroma intra-mode CDFs
     /// @param partitionCdfs the mutable partition CDFs
+    /// @param lumaPaletteCdfs the mutable luma palette-use CDFs
+    /// @param paletteSizeCdfs the mutable palette-size CDFs
+    /// @param chromaPaletteCdfs the mutable chroma palette-use CDFs
+    /// @param segmentPredictionCdfs the mutable segmentation-prediction CDFs
+    /// @param segmentIdCdfs the mutable segment-id CDFs
     /// @param keyFrameYModeCdfs the mutable key-frame luma intra-mode CDFs
     /// @param angleDeltaCdfs the mutable directional angle-delta CDFs
     /// @param cflSignCdf the mutable CFL-sign CDF
@@ -272,6 +373,11 @@ public final class CdfContext {
             int[] filterIntraCdf,
             int[][][] uvModeCdfs,
             int[][][] partitionCdfs,
+            int[][][] lumaPaletteCdfs,
+            int[][][] paletteSizeCdfs,
+            int[][] chromaPaletteCdfs,
+            int[][] segmentPredictionCdfs,
+            int[][] segmentIdCdfs,
             int[][][] keyFrameYModeCdfs,
             int[][] angleDeltaCdfs,
             int[] cflSignCdf,
@@ -285,6 +391,11 @@ public final class CdfContext {
         this.filterIntraCdf = Objects.requireNonNull(filterIntraCdf, "filterIntraCdf");
         this.uvModeCdfs = Objects.requireNonNull(uvModeCdfs, "uvModeCdfs");
         this.partitionCdfs = Objects.requireNonNull(partitionCdfs, "partitionCdfs");
+        this.lumaPaletteCdfs = Objects.requireNonNull(lumaPaletteCdfs, "lumaPaletteCdfs");
+        this.paletteSizeCdfs = Objects.requireNonNull(paletteSizeCdfs, "paletteSizeCdfs");
+        this.chromaPaletteCdfs = Objects.requireNonNull(chromaPaletteCdfs, "chromaPaletteCdfs");
+        this.segmentPredictionCdfs = Objects.requireNonNull(segmentPredictionCdfs, "segmentPredictionCdfs");
+        this.segmentIdCdfs = Objects.requireNonNull(segmentIdCdfs, "segmentIdCdfs");
         this.keyFrameYModeCdfs = Objects.requireNonNull(keyFrameYModeCdfs, "keyFrameYModeCdfs");
         this.angleDeltaCdfs = Objects.requireNonNull(angleDeltaCdfs, "angleDeltaCdfs");
         this.cflSignCdf = Objects.requireNonNull(cflSignCdf, "cflSignCdf");
@@ -304,6 +415,11 @@ public final class CdfContext {
                 Arrays.copyOf(DEFAULT_FILTER_INTRA_CDF, DEFAULT_FILTER_INTRA_CDF.length),
                 deepCopy(DEFAULT_UV_MODE_CDFS),
                 deepCopy(DEFAULT_PARTITION_CDFS),
+                deepCopy(DEFAULT_LUMA_PALETTE_CDFS),
+                deepCopy(DEFAULT_PALETTE_SIZE_CDFS),
+                deepCopy(DEFAULT_CHROMA_PALETTE_CDFS),
+                deepCopy(DEFAULT_SEGMENT_PREDICTION_CDFS),
+                deepCopy(DEFAULT_SEGMENT_ID_CDFS),
                 deepCopy(DEFAULT_KEY_FRAME_Y_MODE_CDFS),
                 deepCopy(DEFAULT_ANGLE_DELTA_CDFS),
                 Arrays.copyOf(DEFAULT_CFL_SIGN_CDF, DEFAULT_CFL_SIGN_CDF.length),
@@ -324,6 +440,11 @@ public final class CdfContext {
                 Arrays.copyOf(filterIntraCdf, filterIntraCdf.length),
                 deepCopy(uvModeCdfs),
                 deepCopy(partitionCdfs),
+                deepCopy(lumaPaletteCdfs),
+                deepCopy(paletteSizeCdfs),
+                deepCopy(chromaPaletteCdfs),
+                deepCopy(segmentPredictionCdfs),
+                deepCopy(segmentIdCdfs),
                 deepCopy(keyFrameYModeCdfs),
                 deepCopy(angleDeltaCdfs),
                 Arrays.copyOf(cflSignCdf, cflSignCdf.length),
@@ -405,6 +526,50 @@ public final class CdfContext {
     public int[] mutablePartitionCdf(int blockLevel, int context) {
         int[][] level = partitionCdfs[Objects.checkIndex(blockLevel, partitionCdfs.length)];
         return level[Objects.checkIndex(context, level.length)];
+    }
+
+    /// Returns the live mutable luma palette-use CDF for the supplied size and palette contexts.
+    ///
+    /// @param sizeContext the zero-based palette size context in `[0, 7)`
+    /// @param paletteContext the zero-based above/left palette context in `[0, 3)`
+    /// @return the live mutable luma palette-use CDF for the supplied contexts
+    public int[] mutableLumaPaletteCdf(int sizeContext, int paletteContext) {
+        int[][] level = lumaPaletteCdfs[Objects.checkIndex(sizeContext, lumaPaletteCdfs.length)];
+        return level[Objects.checkIndex(paletteContext, level.length)];
+    }
+
+    /// Returns the live mutable palette-size CDF for the supplied plane and size context.
+    ///
+    /// @param plane the palette plane index, where `0` is luma and `1` is chroma
+    /// @param sizeContext the zero-based palette size context in `[0, 7)`
+    /// @return the live mutable palette-size CDF for the supplied plane and size context
+    public int[] mutablePaletteSizeCdf(int plane, int sizeContext) {
+        int[][] table = paletteSizeCdfs[Objects.checkIndex(plane, paletteSizeCdfs.length)];
+        return table[Objects.checkIndex(sizeContext, table.length)];
+    }
+
+    /// Returns the live mutable chroma palette-use CDF for the supplied context index.
+    ///
+    /// @param paletteContext the zero-based chroma palette context in `[0, 2)`
+    /// @return the live mutable chroma palette-use CDF for the supplied context index
+    public int[] mutableChromaPaletteCdf(int paletteContext) {
+        return chromaPaletteCdfs[Objects.checkIndex(paletteContext, chromaPaletteCdfs.length)];
+    }
+
+    /// Returns the live mutable segmentation-prediction CDF for the supplied context index.
+    ///
+    /// @param context the zero-based segmentation-prediction context index in `[0, 3)`
+    /// @return the live mutable segmentation-prediction CDF for the supplied context index
+    public int[] mutableSegmentPredictionCdf(int context) {
+        return segmentPredictionCdfs[Objects.checkIndex(context, segmentPredictionCdfs.length)];
+    }
+
+    /// Returns the live mutable segment-id CDF for the supplied segment context.
+    ///
+    /// @param context the zero-based segment-id context index in `[0, 3)`
+    /// @return the live mutable segment-id CDF for the supplied segment context
+    public int[] mutableSegmentIdCdf(int context) {
+        return segmentIdCdfs[Objects.checkIndex(context, segmentIdCdfs.length)];
     }
 
     /// Returns the live mutable directional angle-delta CDF for the supplied directional mode index.

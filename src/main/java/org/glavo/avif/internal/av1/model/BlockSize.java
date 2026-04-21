@@ -132,6 +132,16 @@ public enum BlockSize {
         return cdfIndex;
     }
 
+    /// Returns the palette size context used by AV1 screen-content palette syntax.
+    ///
+    /// This context is defined as `log2(width4) + log2(height4) - 2` for palette-eligible
+    /// blocks whose 4x4 dimensions are powers of two.
+    ///
+    /// @return the palette size context used by AV1 screen-content palette syntax
+    public int paletteSizeContext() {
+        return Integer.numberOfTrailingZeros(width4) + Integer.numberOfTrailingZeros(height4) - 2;
+    }
+
     /// Returns whether the block is square.
     ///
     /// @return whether the block is square

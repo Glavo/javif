@@ -266,6 +266,157 @@ final class TileBlockHeaderReaderTest {
         assertEquals(expectedCflAlphaV, header.cflAlphaV());
     }
 
+    /// Verifies that preskip segmentation decodes `seg_id` before the skip short-circuit takes effect.
+    @Test
+    void readsPreskipSegmentIdBeforeSkipSyntax() {
+        byte[] payload = findPayloadForPreskipSegmentOne();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[1] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, true, false);
+        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(true, 1, segments, new boolean[8], new int[8]);
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        int expectedSegmentDiff = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableSegmentIdCdf(0), 7);
+        assertEquals(1, expectedSegmentDiff);
+        LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(
+                        oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                        12
+                )
+        );
+        int expectedYAngle = expectedYMode.isDirectional()
+                ? oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedYMode.angleDeltaContextIndex()), 6) - 3
+                : 0;
+        UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, expectedYMode.symbolIndex()), 13)
+        );
+        int expectedUvAngle = 0;
+        int expectedCflAlphaU = 0;
+        int expectedCflAlphaV = 0;
+        if (expectedUvMode == UvIntraPredictionMode.CFL) {
+            int signSymbol = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCflSignCdf(), 7) + 1;
+            int signU = signSymbol / 3;
+            int signV = signSymbol - signU * 3;
+            expectedCflAlphaU = signU == 0
+                    ? 0
+                    : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signU == 2 ? 3 : 0) + signV, signU == 2);
+            expectedCflAlphaV = signV == 0
+                    ? 0
+                    : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signV == 2 ? 3 : 0) + signU, signV == 2);
+        } else if (expectedUvMode.isDirectional()) {
+            expectedUvAngle = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedUvMode.angleDeltaContextIndex()), 6) - 3;
+        }
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
+
+        assertTrue(header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertFalse(header.segmentPredicted());
+        assertEquals(1, header.segmentId());
+        assertEquals(expectedYMode, header.yMode());
+        assertEquals(expectedUvMode, header.uvMode());
+        assertEquals(expectedYAngle, header.yAngle());
+        assertEquals(expectedUvAngle, header.uvAngle());
+        assertEquals(expectedCflAlphaU, header.cflAlphaU());
+        assertEquals(expectedCflAlphaV, header.cflAlphaV());
+    }
+
+    /// Verifies that postskip segmentation uses the per-segment lossless state to disable CFL.
+    @Test
+    void readsPostskipSegmentIdBeforeUvCflGating() {
+        byte[] payload = findPayloadForPostskipLosslessSegment();
+        boolean[] losslessBySegment = new boolean[8];
+        losslessBySegment[1] = true;
+        int[] qIndexBySegment = new int[8];
+        qIndexBySegment[0] = 1;
+        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, 1, defaultSegments(), losslessBySegment, qIndexBySegment);
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        assertFalse(expectedSkip);
+        int expectedSegmentDiff = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableSegmentIdCdf(0), 7);
+        assertEquals(1, expectedSegmentDiff);
+        LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(
+                        oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                        12
+                )
+        );
+        int expectedYAngle = expectedYMode.isDirectional()
+                ? oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedYMode.angleDeltaContextIndex()), 6) - 3
+                : 0;
+        UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(false, expectedYMode.symbolIndex()), 12)
+        );
+        int expectedUvAngle = expectedUvMode.isDirectional()
+                ? oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedUvMode.angleDeltaContextIndex()), 6) - 3
+                : 0;
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertFalse(header.segmentPredicted());
+        assertEquals(1, header.segmentId());
+        assertEquals(expectedYMode, header.yMode());
+        assertEquals(expectedUvMode, header.uvMode());
+        assertFalse(header.uvMode() == UvIntraPredictionMode.CFL);
+        assertEquals(expectedYAngle, header.yAngle());
+        assertEquals(expectedUvAngle, header.uvAngle());
+        assertEquals(0, header.cflAlphaU());
+        assertEquals(0, header.cflAlphaV());
+    }
+
+    /// Verifies that screen-content palette syntax populates luma and chroma palette sizes.
+    @Test
+    void readsPaletteBlockHeaderSizes() {
+        byte[] payload = findPayloadForPaletteBlock();
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, defaultDisabledSegmentation(), true, true);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(
+                        oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                        12
+                )
+        );
+        assertEquals(LumaIntraPredictionMode.DC, expectedYMode);
+        UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, expectedYMode.symbolIndex()), 13)
+        );
+        assertEquals(UvIntraPredictionMode.DC, expectedUvMode);
+        boolean expectedUseLumaPalette = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0));
+        assertTrue(expectedUseLumaPalette);
+        int expectedLumaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6) + 2;
+        boolean expectedUseChromaPalette = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1));
+        assertTrue(expectedUseChromaPalette);
+        int expectedChromaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(1, 0), 6) + 2;
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
+
+        assertEquals(expectedSkip, header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertEquals(LumaIntraPredictionMode.DC, header.yMode());
+        assertEquals(UvIntraPredictionMode.DC, header.uvMode());
+        assertEquals(expectedLumaPaletteSize, header.yPaletteSize());
+        assertEquals(expectedChromaPaletteSize, header.uvPaletteSize());
+        assertNull(header.filterIntraMode());
+    }
+
     /// Decodes one signed CFL alpha value with the same sign rules as `TileSyntaxReader`.
     ///
     /// @param decoder the oracle arithmetic decoder
@@ -339,6 +490,96 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced use_filter_intra=true after block syntax");
     }
 
+    /// Finds a small payload whose first preskip segment-id decode resolves to segment `1`.
+    ///
+    /// @return a small payload whose first preskip segment-id decode resolves to segment `1`
+    private static byte[] findPayloadForPreskipSegmentOne() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableSegmentIdCdf(0), 7) == 1) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced seg_id=1 for the preskip path");
+    }
+
+    /// Finds a small payload whose first postskip segment-id decode resolves to segment `1` and whose
+    /// UV mode would decode as CFL when lossless gating is disabled.
+    ///
+    /// @return a small payload whose first postskip segment-id decode resolves to segment `1`
+    private static byte[] findPayloadForPostskipLosslessSegment() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                    continue;
+                }
+                if (oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableSegmentIdCdf(0), 7) != 1) {
+                    continue;
+                }
+                LumaIntraPredictionMode yMode = LumaIntraPredictionMode.fromSymbolIndex(
+                        oracleDecoder.decodeSymbolAdapt(
+                                oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                                12
+                        )
+                );
+                if (yMode.isDirectional()) {
+                    oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(yMode.angleDeltaContextIndex()), 6);
+                }
+                UvIntraPredictionMode uvMode = UvIntraPredictionMode.fromSymbolIndex(
+                        oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, yMode.symbolIndex()), 13)
+                );
+                if (uvMode == UvIntraPredictionMode.CFL) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced seg_id=1 with CFL-eligible UV mode");
+    }
+
+    /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.
+    ///
+    /// @return a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled
+    private static byte[] findPayloadForPaletteBlock() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+                LumaIntraPredictionMode yMode = LumaIntraPredictionMode.fromSymbolIndex(
+                        oracleDecoder.decodeSymbolAdapt(
+                                oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                                12
+                        )
+                );
+                if (yMode != LumaIntraPredictionMode.DC) {
+                    continue;
+                }
+                UvIntraPredictionMode uvMode = UvIntraPredictionMode.fromSymbolIndex(
+                        oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, yMode.symbolIndex()), 13)
+                );
+                if (uvMode != UvIntraPredictionMode.DC) {
+                    continue;
+                }
+                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0))) {
+                    continue;
+                }
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced palette-enabled DC/DC block syntax");
+    }
+
     /// Creates a simple tile context used by block-header tests.
     ///
     /// @param frameType the synthetic frame type
@@ -361,6 +602,35 @@ final class TileBlockHeaderReaderTest {
             boolean allowIntrabc,
             byte[] payload,
             boolean filterIntra
+    ) {
+        return createTileContext(
+                frameType,
+                allowIntrabc,
+                payload,
+                filterIntra,
+                defaultDisabledSegmentation(),
+                false,
+                true
+        );
+    }
+
+    /// Creates a simple tile context used by block-header tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param allowIntrabc whether the synthetic frame allows `intrabc`
+    /// @param payload the collected tile entropy payload
+    /// @param filterIntra whether the synthetic sequence enables filter intra
+    /// @param segmentation the synthetic frame segmentation state
+    /// @param allLossless whether all segments in the synthetic frame are lossless
+    /// @return a simple tile context used by block-header tests
+    private static TileDecodeContext createTileContext(
+            FrameType frameType,
+            boolean allowIntrabc,
+            byte[] payload,
+            boolean filterIntra,
+            FrameHeader.SegmentationInfo segmentation,
+            boolean allowScreenContentTools,
+            boolean allLossless
     ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
@@ -423,7 +693,7 @@ final class TileBlockHeaderReaderTest {
                 false,
                 true,
                 false,
-                false,
+                allowScreenContentTools,
                 true,
                 false,
                 7,
@@ -449,9 +719,9 @@ final class TileBlockHeaderReaderTest {
                         0
                 ),
                 new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
-                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                segmentation,
                 new FrameHeader.DeltaInfo(false, 0, false, 0, false),
-                true,
+                allLossless,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -485,6 +755,41 @@ final class TileBlockHeaderReaderTest {
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return TileDecodeContext.create(assembly, 0);
+    }
+
+    /// Creates disabled segmentation info used by block-header tests.
+    ///
+    /// @return disabled segmentation info used by block-header tests
+    private static FrameHeader.SegmentationInfo defaultDisabledSegmentation() {
+        return new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]);
+    }
+
+    /// Creates enabled segmentation info used by block-header tests.
+    ///
+    /// @param preskip whether the synthetic segmentation features require preskip decoding
+    /// @param lastActiveSegmentId the highest active segment identifier
+    /// @param segments the synthetic per-segment feature data
+    /// @param losslessBySegment the synthetic per-segment lossless flags
+    /// @param qIndexBySegment the synthetic per-segment qindex values
+    /// @return enabled segmentation info used by block-header tests
+    private static FrameHeader.SegmentationInfo createSegmentationInfo(
+            boolean preskip,
+            int lastActiveSegmentId,
+            FrameHeader.SegmentData[] segments,
+            boolean[] losslessBySegment,
+            int[] qIndexBySegment
+    ) {
+        return new FrameHeader.SegmentationInfo(
+                true,
+                true,
+                false,
+                true,
+                preskip,
+                lastActiveSegmentId,
+                segments,
+                losslessBySegment,
+                qIndexBySegment
+        );
     }
 
     /// Creates default per-segment data with all features disabled.

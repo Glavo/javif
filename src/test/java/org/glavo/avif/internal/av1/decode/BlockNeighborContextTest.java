@@ -22,7 +22,6 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
-import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -59,8 +58,12 @@ final class BlockNeighborContextTest {
                 true,
                 true,
                 false,
+                true,
+                3,
                 LumaIntraPredictionMode.VERTICAL,
                 UvIntraPredictionMode.PAETH,
+                4,
+                0,
                 null,
                 0,
                 0,
@@ -72,6 +75,12 @@ final class BlockNeighborContextTest {
         assertEquals(2, context.intraContext(new BlockPosition(0, 4)));
         assertEquals(LumaIntraPredictionMode.VERTICAL, context.aboveMode(0));
         assertEquals(LumaIntraPredictionMode.VERTICAL, context.leftMode(0));
+        assertEquals(2, context.segmentPredictionContext(new BlockPosition(2, 2)));
+        BlockNeighborContext.SegmentPrediction prediction = context.currentSegmentPrediction(new BlockPosition(2, 2));
+        assertEquals(3, prediction.predictedSegmentId());
+        assertEquals(2, prediction.context());
+        assertEquals(4, context.abovePaletteSize(0));
+        assertEquals(4, context.leftPaletteSize(0));
 
         context.updatePartition(position, 8, 0x10, 0x18);
         assertEquals(2, context.partitionContext(3, new BlockPosition(0, 8)));

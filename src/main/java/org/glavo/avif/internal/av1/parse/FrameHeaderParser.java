@@ -604,7 +604,7 @@ public final class FrameHeaderParser {
         int[] qIndexBySegment = new int[MAX_SEGMENTS];
 
         if (!enabled) {
-            return new FrameHeader.SegmentationInfo(false, false, false, false, segments, losslessBySegment, qIndexBySegment);
+            return new FrameHeader.SegmentationInfo(false, false, false, false, false, -1, segments, losslessBySegment, qIndexBySegment);
         }
 
         boolean updateMap;
@@ -617,6 +617,8 @@ public final class FrameHeaderParser {
             throw unsupported("Frame headers that copy segmentation state from reference frames are not implemented yet");
         }
 
+        boolean preskip = false;
+        int lastActiveSegmentId = -1;
         if (updateData) {
             for (int i = 0; i < MAX_SEGMENTS; i++) {
                 int deltaQ = reader.readFlag() ? reader.readSignedBits(9) : 0;
@@ -627,6 +629,14 @@ public final class FrameHeaderParser {
                 int referenceFrame = reader.readFlag() ? readInt(reader, 3) : -1;
                 boolean skip = reader.readFlag();
                 boolean globalMotion = reader.readFlag();
+
+                if (deltaQ != 0 || deltaLfYVertical != 0 || deltaLfYHorizontal != 0 || deltaLfU != 0 || deltaLfV != 0
+                        || referenceFrame >= 0 || skip || globalMotion) {
+                    lastActiveSegmentId = i;
+                }
+                if (referenceFrame >= 0 || skip || globalMotion) {
+                    preskip = true;
+                }
 
                 segments[i] = new FrameHeader.SegmentData(
                         deltaQ,
@@ -641,7 +651,17 @@ public final class FrameHeaderParser {
             }
         }
 
-        return new FrameHeader.SegmentationInfo(enabled, updateMap, temporalUpdate, updateData, segments, losslessBySegment, qIndexBySegment);
+        return new FrameHeader.SegmentationInfo(
+                enabled,
+                updateMap,
+                temporalUpdate,
+                updateData,
+                preskip,
+                lastActiveSegmentId,
+                segments,
+                losslessBySegment,
+                qIndexBySegment
+        );
     }
 
     /// Parses delta-q and delta-lf signaling flags.
@@ -708,6 +728,8 @@ public final class FrameHeaderParser {
                 segmentation.updateMap(),
                 segmentation.temporalUpdate(),
                 segmentation.updateData(),
+                segmentation.preskip(),
+                segmentation.lastActiveSegmentId(),
                 segmentation.segments(),
                 losslessBySegment,
                 qIndexBySegment

@@ -231,6 +231,53 @@ final class TileSyntaxReaderTest {
         assertArrayEquals(oracleCdf.mutableFilterIntraCdf(), tileContext.cdfContext().mutableFilterIntraCdf());
     }
 
+    /// Verifies that segmentation prediction and segment-id symbols use the expected tile-local CDF tables.
+    @Test
+    void readsSegmentationSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSegmentPrediction = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSegmentPredictionCdf(1));
+        int expectedSegmentId = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableSegmentIdCdf(2), 7);
+
+        assertEquals(expectedSegmentPrediction, reader.readSegmentPredictionFlag(1));
+        assertArrayEquals(
+                oracleCdf.mutableSegmentPredictionCdf(1),
+                tileContext.cdfContext().mutableSegmentPredictionCdf(1)
+        );
+        assertEquals(expectedSegmentId, reader.readSegmentId(2));
+        assertArrayEquals(oracleCdf.mutableSegmentIdCdf(2), tileContext.cdfContext().mutableSegmentIdCdf(2));
+    }
+
+    /// Verifies that palette presence and size syntax use the expected tile-local CDF tables.
+    @Test
+    void readsPaletteSyntax() {
+        byte[] payload = findPayloadForPaletteSyntax();
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedUseLumaPalette = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0));
+        assertTrue(expectedUseLumaPalette);
+        int expectedLumaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6) + 2;
+        boolean expectedUseChromaPalette = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1));
+        assertTrue(expectedUseChromaPalette);
+        int expectedChromaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(1, 0), 6) + 2;
+
+        assertTrue(reader.readUseLumaPalette(0, 0));
+        assertArrayEquals(oracleCdf.mutableLumaPaletteCdf(0, 0), tileContext.cdfContext().mutableLumaPaletteCdf(0, 0));
+        assertEquals(expectedLumaPaletteSize, reader.readPaletteSize(0, 0));
+        assertArrayEquals(oracleCdf.mutablePaletteSizeCdf(0, 0), tileContext.cdfContext().mutablePaletteSizeCdf(0, 0));
+        assertTrue(reader.readUseChromaPalette(1));
+        assertArrayEquals(oracleCdf.mutableChromaPaletteCdf(1), tileContext.cdfContext().mutableChromaPaletteCdf(1));
+        assertEquals(expectedChromaPaletteSize, reader.readPaletteSize(1, 0));
+        assertArrayEquals(oracleCdf.mutablePaletteSizeCdf(1, 0), tileContext.cdfContext().mutablePaletteSizeCdf(1, 0));
+    }
+
     /// Decodes one signed CFL alpha value with the same sign rules as `TileSyntaxReader`.
     ///
     /// @param decoder the oracle arithmetic decoder
@@ -256,6 +303,27 @@ final class TileSyntaxReaderTest {
             }
         }
         throw new IllegalStateException("No deterministic payload produced use_filter_intra=true");
+    }
+
+    /// Finds a small payload whose first palette syntax decisions decode to `use_y_pal=true` and `use_uv_pal=true`.
+    ///
+    /// @return a small payload whose first palette syntax decisions decode to `use_y_pal=true` and `use_uv_pal=true`
+    private static byte[] findPayloadForPaletteSyntax() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0))) {
+                    continue;
+                }
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced luma and chroma palette syntax");
     }
 
     /// Creates a synthetic tile-local decode context backed by one collected tile payload.

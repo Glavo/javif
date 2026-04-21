@@ -45,6 +45,24 @@ public final class BlockNeighborContext {
     /// The left-edge skip flags indexed in 4x4 units.
     private final byte[] leftSkip;
 
+    /// The above-edge segmentation-prediction flags indexed in 4x4 units.
+    private final byte[] aboveSegmentPredicted;
+
+    /// The left-edge segmentation-prediction flags indexed in 4x4 units.
+    private final byte[] leftSegmentPredicted;
+
+    /// The above-edge segment identifiers indexed in 4x4 units.
+    private final byte[] aboveSegmentId;
+
+    /// The left-edge segment identifiers indexed in 4x4 units.
+    private final byte[] leftSegmentId;
+
+    /// The above-edge luma palette sizes indexed in 4x4 units.
+    private final byte[] abovePaletteSize;
+
+    /// The left-edge luma palette sizes indexed in 4x4 units.
+    private final byte[] leftPaletteSize;
+
     /// The above-edge luma modes indexed in 4x4 units.
     private final LumaIntraPredictionMode[] aboveMode;
 
@@ -65,6 +83,12 @@ public final class BlockNeighborContext {
     /// @param leftIntra the left-edge intra flags indexed in 4x4 units
     /// @param aboveSkip the above-edge skip flags indexed in 4x4 units
     /// @param leftSkip the left-edge skip flags indexed in 4x4 units
+    /// @param aboveSegmentPredicted the above-edge segmentation-prediction flags indexed in 4x4 units
+    /// @param leftSegmentPredicted the left-edge segmentation-prediction flags indexed in 4x4 units
+    /// @param aboveSegmentId the above-edge segment identifiers indexed in 4x4 units
+    /// @param leftSegmentId the left-edge segment identifiers indexed in 4x4 units
+    /// @param abovePaletteSize the above-edge luma palette sizes indexed in 4x4 units
+    /// @param leftPaletteSize the left-edge luma palette sizes indexed in 4x4 units
     /// @param aboveMode the above-edge luma modes indexed in 4x4 units
     /// @param leftMode the left-edge luma modes indexed in 4x4 units
     /// @param abovePartition the above-edge partition context state indexed in 8x8 units
@@ -76,6 +100,12 @@ public final class BlockNeighborContext {
             byte[] leftIntra,
             byte[] aboveSkip,
             byte[] leftSkip,
+            byte[] aboveSegmentPredicted,
+            byte[] leftSegmentPredicted,
+            byte[] aboveSegmentId,
+            byte[] leftSegmentId,
+            byte[] abovePaletteSize,
+            byte[] leftPaletteSize,
             LumaIntraPredictionMode[] aboveMode,
             LumaIntraPredictionMode[] leftMode,
             byte[] abovePartition,
@@ -87,6 +117,12 @@ public final class BlockNeighborContext {
         this.leftIntra = Objects.requireNonNull(leftIntra, "leftIntra");
         this.aboveSkip = Objects.requireNonNull(aboveSkip, "aboveSkip");
         this.leftSkip = Objects.requireNonNull(leftSkip, "leftSkip");
+        this.aboveSegmentPredicted = Objects.requireNonNull(aboveSegmentPredicted, "aboveSegmentPredicted");
+        this.leftSegmentPredicted = Objects.requireNonNull(leftSegmentPredicted, "leftSegmentPredicted");
+        this.aboveSegmentId = Objects.requireNonNull(aboveSegmentId, "aboveSegmentId");
+        this.leftSegmentId = Objects.requireNonNull(leftSegmentId, "leftSegmentId");
+        this.abovePaletteSize = Objects.requireNonNull(abovePaletteSize, "abovePaletteSize");
+        this.leftPaletteSize = Objects.requireNonNull(leftPaletteSize, "leftPaletteSize");
         this.aboveMode = Objects.requireNonNull(aboveMode, "aboveMode");
         this.leftMode = Objects.requireNonNull(leftMode, "leftMode");
         this.abovePartition = Objects.requireNonNull(abovePartition, "abovePartition");
@@ -121,6 +157,12 @@ public final class BlockNeighborContext {
                 tileHeight4,
                 aboveIntra,
                 leftIntra,
+                new byte[tileWidth4],
+                new byte[tileHeight4],
+                new byte[tileWidth4],
+                new byte[tileHeight4],
+                new byte[tileWidth4],
+                new byte[tileHeight4],
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 aboveMode,
@@ -196,6 +238,71 @@ public final class BlockNeighborContext {
         return context;
     }
 
+    /// Returns the temporal segmentation-prediction context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the temporal segmentation-prediction context for the supplied block position
+    public int segmentPredictionContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int context = 0;
+        if (hasTopNeighbor(nonNullPosition)) {
+            context += aboveSegmentPredicted[nonNullPosition.x4()];
+        }
+        if (hasLeftNeighbor(nonNullPosition)) {
+            context += leftSegmentPredicted[nonNullPosition.y4()];
+        }
+        return context;
+    }
+
+    /// Returns the current-frame predicted segment identifier and context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the current-frame predicted segment identifier and context
+    public SegmentPrediction currentSegmentPrediction(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        boolean haveTop = hasTopNeighbor(nonNullPosition);
+        boolean haveLeft = hasLeftNeighbor(nonNullPosition);
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        if (haveLeft && haveTop) {
+            int left = leftSegmentId[y4] & 0xFF;
+            int above = aboveSegmentId[x4] & 0xFF;
+            int aboveLeft = aboveSegmentId[x4 - 1] & 0xFF;
+            int context;
+            if (left == above && aboveLeft == left) {
+                context = 2;
+            } else if (left == above || aboveLeft == left || above == aboveLeft) {
+                context = 1;
+            } else {
+                context = 0;
+            }
+            return new SegmentPrediction(above == aboveLeft ? above : left, context);
+        }
+
+        int predictedSegmentId = haveLeft
+                ? leftSegmentId[y4] & 0xFF
+                : haveTop
+                ? aboveSegmentId[x4] & 0xFF
+                : 0;
+        return new SegmentPrediction(predictedSegmentId, 0);
+    }
+
+    /// Returns the above-edge luma palette size for the supplied X coordinate in 4x4 units.
+    ///
+    /// @param x4 the X coordinate in 4x4 units
+    /// @return the above-edge luma palette size for the supplied X coordinate in 4x4 units
+    public int abovePaletteSize(int x4) {
+        return abovePaletteSize[x4] & 0xFF;
+    }
+
+    /// Returns the left-edge luma palette size for the supplied Y coordinate in 4x4 units.
+    ///
+    /// @param y4 the Y coordinate in 4x4 units
+    /// @return the left-edge luma palette size for the supplied Y coordinate in 4x4 units
+    public int leftPaletteSize(int y4) {
+        return leftPaletteSize[y4] & 0xFF;
+    }
+
     /// Returns the above-edge luma mode for the supplied X coordinate in 4x4 units.
     ///
     /// @param x4 the X coordinate in 4x4 units
@@ -233,17 +340,26 @@ public final class BlockNeighborContext {
         BlockSize size = nonNullHeader.size();
         byte intra = (byte) (nonNullHeader.intra() ? 1 : 0);
         byte skip = (byte) (nonNullHeader.skip() ? 1 : 0);
+        byte segmentPredicted = (byte) (nonNullHeader.segmentPredicted() ? 1 : 0);
+        byte segmentId = (byte) nonNullHeader.segmentId();
+        byte paletteSize = (byte) nonNullHeader.yPaletteSize();
         LumaIntraPredictionMode mode = nonNullHeader.intra() ? nonNullHeader.yMode() : LumaIntraPredictionMode.DC;
         int endX4 = Math.min(tileWidth4, position.x4() + size.width4());
         int endY4 = Math.min(tileHeight4, position.y4() + size.height4());
         for (int x4 = position.x4(); x4 < endX4; x4++) {
             aboveIntra[x4] = intra;
             aboveSkip[x4] = skip;
+            aboveSegmentPredicted[x4] = segmentPredicted;
+            aboveSegmentId[x4] = segmentId;
+            abovePaletteSize[x4] = paletteSize;
             aboveMode[x4] = mode;
         }
         for (int y4 = position.y4(); y4 < endY4; y4++) {
             leftIntra[y4] = intra;
             leftSkip[y4] = skip;
+            leftSegmentPredicted[y4] = segmentPredicted;
+            leftSegmentId[y4] = segmentId;
+            leftPaletteSize[y4] = paletteSize;
             leftMode[y4] = mode;
         }
     }
@@ -265,6 +381,39 @@ public final class BlockNeighborContext {
         }
         for (int y8 = startY8; y8 < endY8; y8++) {
             leftPartition[y8] = (byte) leftValue;
+        }
+    }
+
+    /// The current-frame segment prediction for one block position.
+    @NotNullByDefault
+    public static final class SegmentPrediction {
+        /// The predicted segment identifier derived from already-decoded neighbors.
+        private final int predictedSegmentId;
+
+        /// The zero-based segment-id context derived from already-decoded neighbors.
+        private final int context;
+
+        /// Creates one current-frame segment prediction.
+        ///
+        /// @param predictedSegmentId the predicted segment identifier derived from already-decoded neighbors
+        /// @param context the zero-based segment-id context derived from already-decoded neighbors
+        public SegmentPrediction(int predictedSegmentId, int context) {
+            this.predictedSegmentId = predictedSegmentId;
+            this.context = context;
+        }
+
+        /// Returns the predicted segment identifier derived from already-decoded neighbors.
+        ///
+        /// @return the predicted segment identifier derived from already-decoded neighbors
+        public int predictedSegmentId() {
+            return predictedSegmentId;
+        }
+
+        /// Returns the zero-based segment-id context derived from already-decoded neighbors.
+        ///
+        /// @return the zero-based segment-id context derived from already-decoded neighbors
+        public int context() {
+            return context;
         }
     }
 }

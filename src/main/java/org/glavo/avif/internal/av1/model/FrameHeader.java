@@ -845,6 +845,10 @@ public final class FrameHeader {
         private final boolean temporalUpdate;
         /// Whether segmentation data is updated in this frame.
         private final boolean updateData;
+        /// Whether any active segment feature must be decoded before the skip flag.
+        private final boolean preskip;
+        /// The highest active segment index, or `-1` when all segment features are defaulted.
+        private final int lastActiveSegmentId;
         /// The per-segment data array.
         private final SegmentData[] segments;
         /// The derived lossless flag for each segment.
@@ -853,6 +857,39 @@ public final class FrameHeader {
         private final int[] qIndexBySegment;
 
         /// Creates parsed segmentation parameters.
+        ///
+        /// @param enabled whether segmentation is enabled
+        /// @param updateMap whether the segmentation map is updated
+        /// @param temporalUpdate whether temporal prediction is used
+        /// @param updateData whether segmentation data is updated in this frame
+        /// @param preskip whether any active segment feature must be decoded before the skip flag
+        /// @param lastActiveSegmentId the highest active segment index, or `-1`
+        /// @param segments the per-segment data array
+        /// @param losslessBySegment the derived lossless flags
+        /// @param qIndexBySegment the derived qindex values
+        public SegmentationInfo(
+                boolean enabled,
+                boolean updateMap,
+                boolean temporalUpdate,
+                boolean updateData,
+                boolean preskip,
+                int lastActiveSegmentId,
+                SegmentData[] segments,
+                boolean[] losslessBySegment,
+                int[] qIndexBySegment
+        ) {
+            this.enabled = enabled;
+            this.updateMap = updateMap;
+            this.temporalUpdate = temporalUpdate;
+            this.updateData = updateData;
+            this.preskip = preskip;
+            this.lastActiveSegmentId = lastActiveSegmentId;
+            this.segments = Arrays.copyOf(segments, segments.length);
+            this.losslessBySegment = Arrays.copyOf(losslessBySegment, losslessBySegment.length);
+            this.qIndexBySegment = Arrays.copyOf(qIndexBySegment, qIndexBySegment.length);
+        }
+
+        /// Creates parsed segmentation parameters with derived fields defaulted to disabled values.
         ///
         /// @param enabled whether segmentation is enabled
         /// @param updateMap whether the segmentation map is updated
@@ -870,13 +907,7 @@ public final class FrameHeader {
                 boolean[] losslessBySegment,
                 int[] qIndexBySegment
         ) {
-            this.enabled = enabled;
-            this.updateMap = updateMap;
-            this.temporalUpdate = temporalUpdate;
-            this.updateData = updateData;
-            this.segments = Arrays.copyOf(segments, segments.length);
-            this.losslessBySegment = Arrays.copyOf(losslessBySegment, losslessBySegment.length);
-            this.qIndexBySegment = Arrays.copyOf(qIndexBySegment, qIndexBySegment.length);
+            this(enabled, updateMap, temporalUpdate, updateData, false, -1, segments, losslessBySegment, qIndexBySegment);
         }
 
         /// Returns whether segmentation is enabled.
@@ -905,6 +936,20 @@ public final class FrameHeader {
         /// @return whether segmentation data is updated
         public boolean updateData() {
             return updateData;
+        }
+
+        /// Returns whether any active segment feature must be decoded before the skip flag.
+        ///
+        /// @return whether any active segment feature must be decoded before the skip flag
+        public boolean preskip() {
+            return preskip;
+        }
+
+        /// Returns the highest active segment index, or `-1` when all features are defaulted.
+        ///
+        /// @return the highest active segment index, or `-1`
+        public int lastActiveSegmentId() {
+            return lastActiveSegmentId;
         }
 
         /// Returns a segment description by index.
