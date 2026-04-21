@@ -19,6 +19,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -140,11 +141,13 @@ public final class FrameAssembly {
     /// @param header the parsed tile-group header
     /// @param tileDataOffset the byte offset of the tile data inside the OBU payload
     /// @param tileDataLength the byte length of the tile data inside the OBU payload
+    /// @param tiles the parsed per-tile payload ranges
     public void addTileGroup(
             ObuPacket sourceObu,
             TileGroupHeader header,
             int tileDataOffset,
-            int tileDataLength
+            int tileDataLength,
+            TileDataEntry[] tiles
     ) {
         if (tileDataOffset < 0) {
             throw new IllegalArgumentException("tileDataOffset < 0: " + tileDataOffset);
@@ -155,8 +158,12 @@ public final class FrameAssembly {
         if (header.totalTileCount() != totalTiles) {
             throw new IllegalArgumentException("Tile-group header belongs to a different frame layout");
         }
+        Objects.requireNonNull(tiles, "tiles");
+        if (tiles.length != header.tileCount()) {
+            throw new IllegalArgumentException("Tile entry count does not match the tile-group header");
+        }
 
-        tileGroups.add(new TileGroup(sourceObu, header, tileDataOffset, tileDataLength));
+        tileGroups.add(new TileGroup(sourceObu, header, tileDataOffset, tileDataLength, tiles));
         nextTileIndex = header.endTileIndex() + 1;
     }
 
@@ -171,6 +178,8 @@ public final class FrameAssembly {
         private final int tileDataOffset;
         /// The byte length of the tile data inside the source OBU payload.
         private final int tileDataLength;
+        /// The parsed per-tile payload ranges inside this tile group.
+        private final TileDataEntry[] tiles;
 
         /// Creates tile-group payload metadata.
         ///
@@ -178,11 +187,13 @@ public final class FrameAssembly {
         /// @param header the parsed tile-group header
         /// @param tileDataOffset the byte offset of the tile data inside the OBU payload
         /// @param tileDataLength the byte length of the tile data inside the OBU payload
+        /// @param tiles the parsed per-tile payload ranges inside this tile group
         public TileGroup(
                 ObuPacket sourceObu,
                 TileGroupHeader header,
                 int tileDataOffset,
-                int tileDataLength
+                int tileDataLength,
+                TileDataEntry[] tiles
         ) {
             this.sourceObu = Objects.requireNonNull(sourceObu, "sourceObu");
             this.header = Objects.requireNonNull(header, "header");
@@ -192,8 +203,13 @@ public final class FrameAssembly {
             if (tileDataLength < 0 || tileDataOffset + tileDataLength > sourceObu.payload().length) {
                 throw new IllegalArgumentException("tileDataLength out of range: " + tileDataLength);
             }
+            Objects.requireNonNull(tiles, "tiles");
+            if (tiles.length != header.tileCount()) {
+                throw new IllegalArgumentException("Tile entry count does not match the tile-group header");
+            }
             this.tileDataOffset = tileDataOffset;
             this.tileDataLength = tileDataLength;
+            this.tiles = Arrays.copyOf(tiles, tiles.length);
         }
 
         /// Returns the source OBU that carried the tile-group payload.
@@ -222,6 +238,13 @@ public final class FrameAssembly {
         /// @return the byte length of the tile data inside the OBU payload
         public int tileDataLength() {
             return tileDataLength;
+        }
+
+        /// Returns the parsed per-tile payload ranges inside this tile group.
+        ///
+        /// @return the parsed per-tile payload ranges inside this tile group
+        public TileDataEntry[] tiles() {
+            return Arrays.copyOf(tiles, tiles.length);
         }
     }
 }
