@@ -523,6 +523,151 @@ public final class BlockNeighborContext {
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
 
+    /// Builds a provisional inter-mode syntax context from already-decoded top and left neighbors.
+    ///
+    /// This helper intentionally does not implement the full AV1 `refmvs` stack. Instead it
+    /// derives stable, bounded syntax contexts and a small provisional candidate-weight stack from
+    /// the currently available neighbor references, which is sufficient for early block-header
+    /// parsing before full motion-vector candidate derivation is implemented.
+    ///
+    /// @param position the current block position
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
+    /// @return a provisional inter-mode syntax context derived from already-decoded neighbors
+    public ProvisionalInterModeContext provisionalInterModeContext(
+            BlockPosition position,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        if (referenceFrame0 < 0) {
+            throw new IllegalArgumentException("referenceFrame0 < 0");
+        }
+        if (!compoundReference && referenceFrame1 >= 0) {
+            throw new IllegalArgumentException("Single-reference blocks must not carry referenceFrame1");
+        }
+        if (compoundReference && referenceFrame1 < 0) {
+            throw new IllegalArgumentException("Compound-reference blocks must carry referenceFrame1");
+        }
+
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        int exactMatches = 0;
+        int partialMatches = 0;
+        int interNeighborCount = 0;
+        int compoundNeighborCount = 0;
+        int[] candidateWeights = new int[]{640, 0, 0, 0};
+        int candidateCount = 1;
+
+        if (hasTopNeighbor(nonNullPosition) && aboveIntra[x4] == 0) {
+            int neighborReferenceFrame0 = aboveReferenceFrame0[x4];
+            int neighborReferenceFrame1 = aboveReferenceFrame1[x4];
+            boolean neighborCompound = aboveCompoundReference[x4] != 0;
+            int baseWeight = provisionalNeighborWeight(
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    neighborCompound,
+                    neighborReferenceFrame0,
+                    neighborReferenceFrame1
+            );
+            candidateCount = appendProvisionalCandidateWeights(candidateWeights, candidateCount, baseWeight);
+            interNeighborCount++;
+            if (neighborCompound) {
+                compoundNeighborCount++;
+            }
+            if (baseWeight >= 640) {
+                exactMatches++;
+            } else if (baseWeight >= 384) {
+                partialMatches++;
+            }
+        }
+        if (hasLeftNeighbor(nonNullPosition) && leftIntra[y4] == 0) {
+            int neighborReferenceFrame0 = leftReferenceFrame0[y4];
+            int neighborReferenceFrame1 = leftReferenceFrame1[y4];
+            boolean neighborCompound = leftCompoundReference[y4] != 0;
+            int baseWeight = provisionalNeighborWeight(
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    neighborCompound,
+                    neighborReferenceFrame0,
+                    neighborReferenceFrame1
+            );
+            candidateCount = appendProvisionalCandidateWeights(candidateWeights, candidateCount, baseWeight);
+            interNeighborCount++;
+            if (neighborCompound) {
+                compoundNeighborCount++;
+            }
+            if (baseWeight >= 640) {
+                exactMatches++;
+            } else if (baseWeight >= 384) {
+                partialMatches++;
+            }
+        }
+
+        sortDescending(candidateWeights, candidateCount);
+
+        int singleNewMvContext;
+        if (exactMatches >= 2) {
+            singleNewMvContext = 0;
+        } else if (exactMatches == 1) {
+            singleNewMvContext = partialMatches > 0 ? 1 : 2;
+        } else if (partialMatches >= 2) {
+            singleNewMvContext = 3;
+        } else if (partialMatches == 1) {
+            singleNewMvContext = 4;
+        } else {
+            singleNewMvContext = 5;
+        }
+
+        int singleGlobalMvContext = exactMatches > 0 ? 0 : 1;
+
+        int singleReferenceMvContext;
+        if (exactMatches >= 2) {
+            singleReferenceMvContext = 0;
+        } else if (exactMatches == 1) {
+            singleReferenceMvContext = 1;
+        } else if (partialMatches >= 2) {
+            singleReferenceMvContext = 2;
+        } else if (partialMatches == 1) {
+            singleReferenceMvContext = 3;
+        } else if (interNeighborCount > 0) {
+            singleReferenceMvContext = 4;
+        } else {
+            singleReferenceMvContext = 5;
+        }
+
+        int compoundInterModeContext;
+        if (exactMatches >= 2) {
+            compoundInterModeContext = 0;
+        } else if (exactMatches == 1 && partialMatches > 0) {
+            compoundInterModeContext = 1;
+        } else if (exactMatches == 1) {
+            compoundInterModeContext = 2;
+        } else if (compoundNeighborCount >= 2) {
+            compoundInterModeContext = 3;
+        } else if (compoundNeighborCount == 1 && partialMatches > 0) {
+            compoundInterModeContext = 4;
+        } else if (partialMatches >= 2) {
+            compoundInterModeContext = 5;
+        } else if (partialMatches == 1 || interNeighborCount > 0) {
+            compoundInterModeContext = 6;
+        } else {
+            compoundInterModeContext = 7;
+        }
+
+        return new ProvisionalInterModeContext(
+                singleNewMvContext,
+                singleGlobalMvContext,
+                singleReferenceMvContext,
+                compoundInterModeContext,
+                Arrays.copyOf(candidateWeights, candidateCount)
+        );
+    }
+
     /// Returns the temporal segmentation-prediction context for the supplied block position.
     ///
     /// @param position the current block position
@@ -784,6 +929,117 @@ public final class BlockNeighborContext {
         }
     }
 
+    /// Computes one provisional neighbor weight for inter-mode context derivation.
+    ///
+    /// Exact reference matches receive the highest weight, partial reference overlap receives a
+    /// medium weight, matching forward/backward direction receives a weaker weight, and unrelated
+    /// inter neighbors receive the weakest retained weight.
+    ///
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param neighborCompound whether the stored neighbor uses compound references
+    /// @param neighborReferenceFrame0 the neighbor primary reference
+    /// @param neighborReferenceFrame1 the neighbor secondary reference, or `-1`
+    /// @return the provisional neighbor weight
+    private static int provisionalNeighborWeight(
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            boolean neighborCompound,
+            int neighborReferenceFrame0,
+            int neighborReferenceFrame1
+    ) {
+        if (compoundReference == neighborCompound
+                && referenceFrame0 == neighborReferenceFrame0
+                && referenceFrame1 == neighborReferenceFrame1) {
+            return 640;
+        }
+        if (sharesAnyReference(
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                neighborCompound,
+                neighborReferenceFrame0,
+                neighborReferenceFrame1
+        )) {
+            return compoundReference == neighborCompound ? 512 : 448;
+        }
+        return referenceDirection(referenceFrame0) == referenceDirection(neighborReferenceFrame0) ? 384 : 256;
+    }
+
+    /// Appends one provisional candidate weight and an optional weaker companion candidate.
+    ///
+    /// @param destination the destination candidate-weight array
+    /// @param count the number of valid weights currently stored in `destination`
+    /// @param baseWeight the base candidate weight to append
+    /// @return the updated candidate count after appending the provisional weight entries
+    private static int appendProvisionalCandidateWeights(int[] destination, int count, int baseWeight) {
+        if (count < destination.length) {
+            destination[count++] = baseWeight;
+        }
+        int secondaryWeight;
+        if (baseWeight >= 640) {
+            secondaryWeight = 512;
+        } else if (baseWeight >= 512) {
+            secondaryWeight = 384;
+        } else if (baseWeight >= 384) {
+            secondaryWeight = 256;
+        } else {
+            secondaryWeight = -1;
+        }
+        if (secondaryWeight > 0 && count < destination.length) {
+            destination[count++] = secondaryWeight;
+        }
+        return count;
+    }
+
+    /// Sorts a prefix of the supplied candidate-weight array in descending order.
+    ///
+    /// @param values the candidate-weight array to sort
+    /// @param count the number of active values at the front of the array
+    private static void sortDescending(int[] values, int count) {
+        Arrays.sort(values, 0, count);
+        for (int left = 0, right = count - 1; left < right; left++, right--) {
+            int tmp = values[left];
+            values[left] = values[right];
+            values[right] = tmp;
+        }
+    }
+
+    /// Returns whether two reference selections share at least one reference-frame index.
+    ///
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param neighborCompound whether the stored neighbor uses compound references
+    /// @param neighborReferenceFrame0 the neighbor primary reference
+    /// @param neighborReferenceFrame1 the neighbor secondary reference, or `-1`
+    /// @return whether the two reference selections share at least one reference-frame index
+    private static boolean sharesAnyReference(
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            boolean neighborCompound,
+            int neighborReferenceFrame0,
+            int neighborReferenceFrame1
+    ) {
+        if (referenceFrame0 == neighborReferenceFrame0 || referenceFrame0 == neighborReferenceFrame1) {
+            return true;
+        }
+        return compoundReference
+                && (referenceFrame1 == neighborReferenceFrame0 || referenceFrame1 == neighborReferenceFrame1)
+                && neighborCompound;
+    }
+
+    /// Returns the coarse forward/backward reference direction for one reference-frame index.
+    ///
+    /// @param referenceFrame the reference-frame index in internal LAST..ALTREF order
+    /// @return `0` for forward references and `1` for backward references
+    private static int referenceDirection(int referenceFrame) {
+        return referenceFrame >= 4 ? 1 : 0;
+    }
+
     /// Updates the partition edge state after a non-deferred partition decision.
     ///
     /// @param position the current square block position
@@ -801,6 +1057,104 @@ public final class BlockNeighborContext {
         }
         for (int y8 = startY8; y8 < endY8; y8++) {
             leftPartition[y8] = (byte) leftValue;
+        }
+    }
+
+    /// A provisional inter-mode syntax context derived only from already-decoded neighbors.
+    @NotNullByDefault
+    public static final class ProvisionalInterModeContext {
+        /// The zero-based provisional `newmv` context index in `[0, 6)`.
+        private final int singleNewMvContext;
+
+        /// The zero-based provisional `globalmv` context index in `[0, 2)`.
+        private final int singleGlobalMvContext;
+
+        /// The zero-based provisional `refmv` context index in `[0, 6)`.
+        private final int singleReferenceMvContext;
+
+        /// The zero-based provisional compound inter-mode context index in `[0, 8)`.
+        private final int compoundInterModeContext;
+
+        /// The provisional candidate weights sorted in descending order.
+        private final int[] candidateWeights;
+
+        /// Creates one provisional inter-mode syntax context.
+        ///
+        /// @param singleNewMvContext the zero-based provisional `newmv` context index in `[0, 6)`
+        /// @param singleGlobalMvContext the zero-based provisional `globalmv` context index in `[0, 2)`
+        /// @param singleReferenceMvContext the zero-based provisional `refmv` context index in `[0, 6)`
+        /// @param compoundInterModeContext the zero-based provisional compound inter-mode context index in `[0, 8)`
+        /// @param candidateWeights the provisional candidate weights sorted in descending order
+        public ProvisionalInterModeContext(
+                int singleNewMvContext,
+                int singleGlobalMvContext,
+                int singleReferenceMvContext,
+                int compoundInterModeContext,
+                int[] candidateWeights
+        ) {
+            this.singleNewMvContext = singleNewMvContext;
+            this.singleGlobalMvContext = singleGlobalMvContext;
+            this.singleReferenceMvContext = singleReferenceMvContext;
+            this.compoundInterModeContext = compoundInterModeContext;
+            this.candidateWeights = Arrays.copyOf(Objects.requireNonNull(candidateWeights, "candidateWeights"), candidateWeights.length);
+        }
+
+        /// Returns the zero-based provisional `newmv` context index in `[0, 6)`.
+        ///
+        /// @return the zero-based provisional `newmv` context index in `[0, 6)`
+        public int singleNewMvContext() {
+            return singleNewMvContext;
+        }
+
+        /// Returns the zero-based provisional `globalmv` context index in `[0, 2)`.
+        ///
+        /// @return the zero-based provisional `globalmv` context index in `[0, 2)`
+        public int singleGlobalMvContext() {
+            return singleGlobalMvContext;
+        }
+
+        /// Returns the zero-based provisional `refmv` context index in `[0, 6)`.
+        ///
+        /// @return the zero-based provisional `refmv` context index in `[0, 6)`
+        public int singleReferenceMvContext() {
+            return singleReferenceMvContext;
+        }
+
+        /// Returns the zero-based provisional compound inter-mode context index in `[0, 8)`.
+        ///
+        /// @return the zero-based provisional compound inter-mode context index in `[0, 8)`
+        public int compoundInterModeContext() {
+            return compoundInterModeContext;
+        }
+
+        /// Returns the number of provisional candidate weights currently available.
+        ///
+        /// @return the number of provisional candidate weights currently available
+        public int candidateCount() {
+            return candidateWeights.length;
+        }
+
+        /// Returns one provisional candidate weight by index.
+        ///
+        /// @param index the zero-based candidate index
+        /// @return one provisional candidate weight by index
+        public int candidateWeight(int index) {
+            return candidateWeights[Objects.checkIndex(index, candidateWeights.length)];
+        }
+
+        /// Returns the provisional dynamic-reference-list context for one candidate boundary.
+        ///
+        /// This follows `dav1d`'s threshold rule over the locally stored provisional candidate
+        /// weights instead of a full `refmvs` stack.
+        ///
+        /// @param referenceIndex the zero-based candidate boundary index
+        /// @return the zero-based provisional dynamic-reference-list context in `[0, 3)`
+        public int drlContext(int referenceIndex) {
+            int index = Objects.checkIndex(referenceIndex + 1, candidateWeights.length) - 1;
+            if (candidateWeights[index] >= 640) {
+                return candidateWeights[index + 1] < 640 ? 1 : 0;
+            }
+            return candidateWeights[index + 1] < 640 ? 2 : 0;
         }
     }
 

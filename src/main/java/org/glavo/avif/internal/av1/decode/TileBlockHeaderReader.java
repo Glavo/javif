@@ -34,8 +34,8 @@ import java.util.Objects;
 /// Reader for one leaf block header inside a tile partition tree.
 ///
 /// This implementation intentionally covers only the syntax elements already backed by
-/// `TileSyntaxReader`, including skip mode, palette size signaling, `intrabc`, directional angle
-/// deltas, and block-size-aware CFL gating.
+/// `TileSyntaxReader`, including skip mode, provisional inter prediction modes, palette size
+/// signaling, `intrabc`, directional angle deltas, and block-size-aware CFL gating.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
     /// Sentinel used when a block does not carry an inter reference frame.
@@ -172,9 +172,18 @@ public final class TileBlockHeaderReader {
             if (skipMode) {
                 compoundInterMode = CompoundInterPredictionMode.NEARESTMV_NEARESTMV;
                 drlIndex = 0;
-            } else if (!compoundReference && (segmentData.globalMotion() || segmentData.skip())) {
-                singleInterMode = SingleInterPredictionMode.GLOBALMV;
-                drlIndex = 0;
+            } else {
+                InterModeSelection interModeSelection = readInterModeSelection(
+                        nonNullPosition,
+                        nonNullNeighborContext,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        segmentData
+                );
+                singleInterMode = interModeSelection.singleInterMode();
+                compoundInterMode = interModeSelection.compoundInterMode();
+                drlIndex = interModeSelection.drlIndex();
             }
         }
 
@@ -381,6 +390,100 @@ public final class TileBlockHeaderReader {
             return readCompoundReferenceSelection(position, neighborContext);
         }
         return new InterReferenceSelection(false, readSingleReference(position, neighborContext, segmentData), NO_REFERENCE_FRAME);
+    }
+
+    /// Decodes the inter prediction mode and provisional dynamic-reference-list index for one block.
+    ///
+    /// This stage intentionally stops at syntax parsing. Full motion-vector candidate lookup and
+    /// residual decoding are deferred to a later refmvs-backed implementation.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param neighborContext the mutable neighbor context that supplies syntax contexts
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+    /// @param segmentData the final segment data for the current block
+    /// @return the decoded inter prediction mode and provisional dynamic-reference-list index
+    private InterModeSelection readInterModeSelection(
+            BlockPosition position,
+            BlockNeighborContext neighborContext,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            FrameHeader.SegmentData segmentData
+    ) {
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                neighborContext.provisionalInterModeContext(position, compoundReference, referenceFrame0, referenceFrame1);
+        if (compoundReference) {
+            CompoundInterPredictionMode compoundInterMode =
+                    syntaxReader.readCompoundInterMode(provisionalContext.compoundInterModeContext());
+            int drlIndex = 0;
+            if (compoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
+                if (provisionalContext.candidateCount() > 1) {
+                    drlIndex += syntaxReader.readDrlBit(provisionalContext.drlContext(0)) ? 1 : 0;
+                    if (drlIndex == 1 && provisionalContext.candidateCount() > 2) {
+                        drlIndex += syntaxReader.readDrlBit(provisionalContext.drlContext(1)) ? 1 : 0;
+                    }
+                }
+            } else if (compoundInterMode.usesNearMotionVector()) {
+                drlIndex = 1;
+                if (provisionalContext.candidateCount() > 2) {
+                    drlIndex += syntaxReader.readDrlBit(provisionalContext.drlContext(1)) ? 1 : 0;
+                    if (drlIndex == 2 && provisionalContext.candidateCount() > 3) {
+                        drlIndex += syntaxReader.readDrlBit(provisionalContext.drlContext(2)) ? 1 : 0;
+                    }
+                }
+            }
+            return new InterModeSelection(null, compoundInterMode, drlIndex);
+        }
+
+        if (segmentData.globalMotion() || segmentData.skip()) {
+            return new InterModeSelection(SingleInterPredictionMode.GLOBALMV, null, 0);
+        }
+
+        SingleInterPredictionMode singleInterMode = syntaxReader.readSingleInterMode(
+                provisionalContext.singleNewMvContext(),
+                provisionalContext.singleGlobalMvContext(),
+                provisionalContext.singleReferenceMvContext(),
+                false,
+                false
+        );
+        int drlIndex = switch (singleInterMode) {
+            case GLOBALMV, NEARESTMV -> 0;
+            case NEARMV -> readNearDrlIndex(provisionalContext);
+            case NEWMV -> readNewDrlIndex(provisionalContext);
+        };
+        return new InterModeSelection(singleInterMode, null, drlIndex);
+    }
+
+    /// Decodes the provisional dynamic-reference-list index for a `NEWMV` single-reference block.
+    ///
+    /// @param provisionalContext the provisional inter-mode context derived from neighbors
+    /// @return the decoded provisional dynamic-reference-list index
+    private int readNewDrlIndex(BlockNeighborContext.ProvisionalInterModeContext provisionalContext) {
+        if (provisionalContext.candidateCount() <= 1) {
+            return 0;
+        }
+        int drlIndex = syntaxReader.readDrlBit(provisionalContext.drlContext(0)) ? 1 : 0;
+        if (drlIndex == 1 && provisionalContext.candidateCount() > 2) {
+            drlIndex += syntaxReader.readDrlBit(provisionalContext.drlContext(1)) ? 1 : 0;
+        }
+        return drlIndex;
+    }
+
+    /// Decodes the provisional dynamic-reference-list index for a `NEARMV` single-reference block.
+    ///
+    /// @param provisionalContext the provisional inter-mode context derived from neighbors
+    /// @return the decoded provisional dynamic-reference-list index
+    private int readNearDrlIndex(BlockNeighborContext.ProvisionalInterModeContext provisionalContext) {
+        int drlIndex = 1;
+        if (provisionalContext.candidateCount() > 2) {
+            drlIndex += syntaxReader.readDrlBit(provisionalContext.drlContext(1)) ? 1 : 0;
+            if (drlIndex == 2 && provisionalContext.candidateCount() > 3) {
+                drlIndex += syntaxReader.readDrlBit(provisionalContext.drlContext(2)) ? 1 : 0;
+            }
+        }
+        return drlIndex;
     }
 
     /// Decodes one compound inter reference pair.
@@ -1194,6 +1297,12 @@ public final class TileBlockHeaderReader {
                 if (!compoundReference && compoundInterMode != null) {
                     throw new IllegalArgumentException("Single-reference blocks must not carry a compound inter mode");
                 }
+                if (compoundReference && compoundInterMode == null && drlIndex != -1) {
+                    throw new IllegalArgumentException("Compound-reference blocks with DRL state must carry a compound inter mode");
+                }
+                if (!compoundReference && singleInterMode == null && drlIndex != -1) {
+                    throw new IllegalArgumentException("Single-reference blocks with DRL state must carry a single inter mode");
+                }
             }
         }
 
@@ -1569,6 +1678,55 @@ public final class TileBlockHeaderReader {
         /// @return the secondary inter reference in internal LAST..ALTREF order, or `-1`
         public int referenceFrame1() {
             return referenceFrame1;
+        }
+    }
+
+    /// The decoded inter prediction mode and provisional dynamic-reference-list index for one block.
+    @NotNullByDefault
+    private static final class InterModeSelection {
+        /// The decoded single-reference inter mode, or `null` when the block is compound.
+        private final @Nullable SingleInterPredictionMode singleInterMode;
+
+        /// The decoded compound inter mode, or `null` when the block is single-reference.
+        private final @Nullable CompoundInterPredictionMode compoundInterMode;
+
+        /// The decoded provisional dynamic-reference-list index.
+        private final int drlIndex;
+
+        /// Creates one decoded inter prediction-mode selection.
+        ///
+        /// @param singleInterMode the decoded single-reference inter mode, or `null`
+        /// @param compoundInterMode the decoded compound inter mode, or `null`
+        /// @param drlIndex the decoded provisional dynamic-reference-list index
+        private InterModeSelection(
+                @Nullable SingleInterPredictionMode singleInterMode,
+                @Nullable CompoundInterPredictionMode compoundInterMode,
+                int drlIndex
+        ) {
+            this.singleInterMode = singleInterMode;
+            this.compoundInterMode = compoundInterMode;
+            this.drlIndex = drlIndex;
+        }
+
+        /// Returns the decoded single-reference inter mode, or `null` when the block is compound.
+        ///
+        /// @return the decoded single-reference inter mode, or `null`
+        public @Nullable SingleInterPredictionMode singleInterMode() {
+            return singleInterMode;
+        }
+
+        /// Returns the decoded compound inter mode, or `null` when the block is single-reference.
+        ///
+        /// @return the decoded compound inter mode, or `null`
+        public @Nullable CompoundInterPredictionMode compoundInterMode() {
+            return compoundInterMode;
+        }
+
+        /// Returns the decoded provisional dynamic-reference-list index.
+        ///
+        /// @return the decoded provisional dynamic-reference-list index
+        public int drlIndex() {
+            return drlIndex;
         }
     }
 }

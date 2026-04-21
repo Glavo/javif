@@ -376,6 +376,10 @@ final class TileBlockHeaderReaderTest {
         boolean intraIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
         assertFalse(expectedSkip);
         assertTrue(intraIfConsumed);
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                neighborContext.provisionalInterModeContext(new BlockPosition(0, 0), false, 0, -1);
+        InterModeExpectation expectedInterMode =
+                decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
 
         TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
 
@@ -386,9 +390,9 @@ final class TileBlockHeaderReaderTest {
         assertFalse(header.compoundReference());
         assertEquals(0, header.referenceFrame0());
         assertEquals(-1, header.referenceFrame1());
-        assertNull(header.singleInterMode());
+        assertEquals(expectedInterMode.singleInterMode(), header.singleInterMode());
         assertNull(header.compoundInterMode());
-        assertEquals(-1, header.drlIndex());
+        assertEquals(expectedInterMode.drlIndex(), header.drlIndex());
         assertNull(header.yMode());
         assertNull(header.uvMode());
         assertEquals(0, header.yAngle());
@@ -427,6 +431,110 @@ final class TileBlockHeaderReaderTest {
         assertEquals(SingleInterPredictionMode.GLOBALMV, header.singleInterMode());
         assertNull(header.compoundInterMode());
         assertEquals(0, header.drlIndex());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
+    }
+
+    /// Verifies that a non-fixed single-reference inter block decodes `inter_mode + drl`.
+    @Test
+    void readsSingleInterModeBlockHeader() {
+        byte[] payload = findPayloadForSingleInterModeBlock();
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                true,
+                false,
+                true
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedInterReferenceNeighbors(neighborContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
+        int expectedReferenceFrame0 = decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                neighborContext.provisionalInterModeContext(position, false, expectedReferenceFrame0, -1);
+        InterModeExpectation expectedInterMode =
+                decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
+        assertTrue(expectedInterMode.singleInterMode() == SingleInterPredictionMode.NEARMV
+                || expectedInterMode.singleInterMode() == SingleInterPredictionMode.NEWMV);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertFalse(header.skipMode());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertFalse(header.compoundReference());
+        assertEquals(expectedReferenceFrame0, header.referenceFrame0());
+        assertEquals(-1, header.referenceFrame1());
+        assertEquals(expectedInterMode.singleInterMode(), header.singleInterMode());
+        assertNull(header.compoundInterMode());
+        assertEquals(expectedInterMode.drlIndex(), header.drlIndex());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
+    }
+
+    /// Verifies that a non-fixed compound inter block decodes `comp_inter_mode + drl`.
+    @Test
+    void readsCompoundInterModeBlockHeader() {
+        byte[] payload = findPayloadForCompoundInterModeBlock();
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                true,
+                false,
+                true
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedInterReferenceNeighbors(neighborContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
+        InterReferenceExpectation expectedReferences =
+                decodeCompoundReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                neighborContext.provisionalInterModeContext(
+                        position,
+                        true,
+                        expectedReferences.referenceFrame0(),
+                        expectedReferences.referenceFrame1()
+                );
+        InterModeExpectation expectedInterMode =
+                decodeCompoundInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
+        assertTrue(expectedInterMode.compoundInterMode() == CompoundInterPredictionMode.NEWMV_NEWMV
+                || expectedInterMode.compoundInterMode().usesNearMotionVector());
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertFalse(header.skipMode());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertTrue(header.compoundReference());
+        assertEquals(expectedReferences.referenceFrame0(), header.referenceFrame0());
+        assertEquals(expectedReferences.referenceFrame1(), header.referenceFrame1());
+        assertNull(header.singleInterMode());
+        assertEquals(expectedInterMode.compoundInterMode(), header.compoundInterMode());
+        assertEquals(expectedInterMode.drlIndex(), header.drlIndex());
         assertNull(header.yMode());
         assertNull(header.uvMode());
     }
@@ -1462,6 +1570,108 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced skip=false and intra=false");
     }
 
+    /// Finds a small payload whose first inter block decodes a non-fixed single-reference `inter_mode + drl` path.
+    ///
+    /// @return a small payload whose first inter block decodes a non-fixed single-reference `inter_mode + drl` path
+    private static byte[] findPayloadForSingleInterModeBlock() {
+        BlockPosition position = new BlockPosition(4, 4);
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
+                    BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
+                            FrameType.INTER,
+                            false,
+                            new byte[]{0x00},
+                            false,
+                            defaultDisabledSegmentation(),
+                            false,
+                            true,
+                            false,
+                            true
+                    ));
+                    seedInterReferenceNeighbors(neighborContext);
+                    CdfContext oracleCdf = CdfContext.createDefault();
+                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2))) {
+                        continue;
+                    }
+                    int referenceFrame0 = decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+                    BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                            neighborContext.provisionalInterModeContext(position, false, referenceFrame0, -1);
+                    InterModeExpectation expectation =
+                            decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
+                    if ((expectation.singleInterMode() == SingleInterPredictionMode.NEARMV
+                            || expectation.singleInterMode() == SingleInterPredictionMode.NEWMV)
+                            && expectation.drlIndex() > 0) {
+                        return payload;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a non-fixed single-reference inter-mode block");
+    }
+
+    /// Finds a small payload whose first inter block decodes a non-fixed compound `inter_mode + drl` path.
+    ///
+    /// @return a small payload whose first inter block decodes a non-fixed compound `inter_mode + drl` path
+    private static byte[] findPayloadForCompoundInterModeBlock() {
+        BlockPosition position = new BlockPosition(4, 4);
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
+                    BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
+                            FrameType.INTER,
+                            false,
+                            new byte[]{0x00},
+                            false,
+                            defaultDisabledSegmentation(),
+                            false,
+                            true,
+                            false,
+                            true
+                    ));
+                    seedInterReferenceNeighbors(neighborContext);
+                    CdfContext oracleCdf = CdfContext.createDefault();
+                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                        continue;
+                    }
+                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2))) {
+                        continue;
+                    }
+                    InterReferenceExpectation references =
+                            decodeCompoundReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+                    BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                            neighborContext.provisionalInterModeContext(
+                                    position,
+                                    true,
+                                    references.referenceFrame0(),
+                                    references.referenceFrame1()
+                            );
+                    InterModeExpectation expectation =
+                            decodeCompoundInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
+                    if ((expectation.compoundInterMode() == CompoundInterPredictionMode.NEWMV_NEWMV
+                            || expectation.compoundInterMode().usesNearMotionVector())
+                            && expectation.drlIndex() > 0) {
+                        return payload;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a non-fixed compound inter-mode block");
+    }
+
     /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.
     ///
     /// @return a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled
@@ -1580,6 +1790,108 @@ final class TileBlockHeaderReaderTest {
         return decoder.decodeBooleanAdapt(cdfContext.mutableSingleReferenceCdf(3, neighborContext.forwardReference1Context(position)))
                 ? 1
                 : 0;
+    }
+
+    /// Decodes one single-reference inter-mode expectation using the same provisional contexts as the reader.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
+    /// @return the decoded single-reference inter-mode expectation
+    private static InterModeExpectation decodeSingleInterModeExpectation(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext
+    ) {
+        SingleInterPredictionMode mode;
+        if (decoder.decodeBooleanAdapt(cdfContext.mutableSingleInterNewMvCdf(provisionalContext.singleNewMvContext()))) {
+            if (!decoder.decodeBooleanAdapt(cdfContext.mutableSingleInterGlobalMvCdf(provisionalContext.singleGlobalMvContext()))) {
+                mode = SingleInterPredictionMode.GLOBALMV;
+            } else {
+                mode = decoder.decodeBooleanAdapt(cdfContext.mutableSingleInterReferenceMvCdf(provisionalContext.singleReferenceMvContext()))
+                        ? SingleInterPredictionMode.NEARMV
+                        : SingleInterPredictionMode.NEARESTMV;
+            }
+        } else {
+            mode = SingleInterPredictionMode.NEWMV;
+        }
+
+        int drlIndex = switch (mode) {
+            case GLOBALMV, NEARESTMV -> 0;
+            case NEARMV -> decodeNearDrlExpectation(decoder, cdfContext, provisionalContext);
+            case NEWMV -> decodeNewDrlExpectation(decoder, cdfContext, provisionalContext);
+        };
+        return new InterModeExpectation(mode, null, drlIndex);
+    }
+
+    /// Decodes one compound inter-mode expectation using the same provisional contexts as the reader.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
+    /// @return the decoded compound inter-mode expectation
+    private static InterModeExpectation decodeCompoundInterModeExpectation(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext
+    ) {
+        CompoundInterPredictionMode mode = CompoundInterPredictionMode.fromSymbolIndex(
+                decoder.decodeSymbolAdapt(cdfContext.mutableCompoundInterModeCdf(provisionalContext.compoundInterModeContext()), 7)
+        );
+        int drlIndex = 0;
+        if (mode == CompoundInterPredictionMode.NEWMV_NEWMV) {
+            if (provisionalContext.candidateCount() > 1) {
+                drlIndex += decoder.decodeBooleanAdapt(cdfContext.mutableDrlCdf(provisionalContext.drlContext(0))) ? 1 : 0;
+                if (drlIndex == 1 && provisionalContext.candidateCount() > 2) {
+                    drlIndex += decoder.decodeBooleanAdapt(cdfContext.mutableDrlCdf(provisionalContext.drlContext(1))) ? 1 : 0;
+                }
+            }
+        } else if (mode.usesNearMotionVector()) {
+            drlIndex = decodeNearDrlExpectation(decoder, cdfContext, provisionalContext);
+        }
+        return new InterModeExpectation(null, mode, drlIndex);
+    }
+
+    /// Decodes the provisional DRL expectation for one `NEWMV` block.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
+    /// @return the decoded provisional DRL index for one `NEWMV` block
+    private static int decodeNewDrlExpectation(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext
+    ) {
+        if (provisionalContext.candidateCount() <= 1) {
+            return 0;
+        }
+        int drlIndex = decoder.decodeBooleanAdapt(cdfContext.mutableDrlCdf(provisionalContext.drlContext(0))) ? 1 : 0;
+        if (drlIndex == 1 && provisionalContext.candidateCount() > 2) {
+            drlIndex += decoder.decodeBooleanAdapt(cdfContext.mutableDrlCdf(provisionalContext.drlContext(1))) ? 1 : 0;
+        }
+        return drlIndex;
+    }
+
+    /// Decodes the provisional DRL expectation for one `NEARMV`-carrying block.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param provisionalContext the provisional inter-mode context derived from seeded neighbors
+    /// @return the decoded provisional DRL index for one `NEARMV`-carrying block
+    private static int decodeNearDrlExpectation(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            BlockNeighborContext.ProvisionalInterModeContext provisionalContext
+    ) {
+        int drlIndex = 1;
+        if (provisionalContext.candidateCount() > 2) {
+            drlIndex += decoder.decodeBooleanAdapt(cdfContext.mutableDrlCdf(provisionalContext.drlContext(1))) ? 1 : 0;
+            if (drlIndex == 2 && provisionalContext.candidateCount() > 3) {
+                drlIndex += decoder.decodeBooleanAdapt(cdfContext.mutableDrlCdf(provisionalContext.drlContext(2))) ? 1 : 0;
+            }
+        }
+        return drlIndex;
     }
 
     /// Creates a simple tile context used by block-header tests.
@@ -2048,6 +2360,55 @@ final class TileBlockHeaderReaderTest {
         /// @return the secondary inter reference in internal LAST..ALTREF order
         public int referenceFrame1() {
             return referenceFrame1;
+        }
+    }
+
+    /// One decoded inter-mode expectation used by oracle tests.
+    @NotNullByDefault
+    private static final class InterModeExpectation {
+        /// The decoded single-reference inter mode, or `null` when the block is compound.
+        private final @org.jetbrains.annotations.Nullable SingleInterPredictionMode singleInterMode;
+
+        /// The decoded compound inter mode, or `null` when the block is single-reference.
+        private final @org.jetbrains.annotations.Nullable CompoundInterPredictionMode compoundInterMode;
+
+        /// The decoded provisional dynamic-reference-list index.
+        private final int drlIndex;
+
+        /// Creates one decoded inter-mode expectation.
+        ///
+        /// @param singleInterMode the decoded single-reference inter mode, or `null`
+        /// @param compoundInterMode the decoded compound inter mode, or `null`
+        /// @param drlIndex the decoded provisional dynamic-reference-list index
+        private InterModeExpectation(
+                @org.jetbrains.annotations.Nullable SingleInterPredictionMode singleInterMode,
+                @org.jetbrains.annotations.Nullable CompoundInterPredictionMode compoundInterMode,
+                int drlIndex
+        ) {
+            this.singleInterMode = singleInterMode;
+            this.compoundInterMode = compoundInterMode;
+            this.drlIndex = drlIndex;
+        }
+
+        /// Returns the decoded single-reference inter mode, or `null` when the block is compound.
+        ///
+        /// @return the decoded single-reference inter mode, or `null`
+        public @org.jetbrains.annotations.Nullable SingleInterPredictionMode singleInterMode() {
+            return singleInterMode;
+        }
+
+        /// Returns the decoded compound inter mode, or `null` when the block is single-reference.
+        ///
+        /// @return the decoded compound inter mode, or `null`
+        public @org.jetbrains.annotations.Nullable CompoundInterPredictionMode compoundInterMode() {
+            return compoundInterMode;
+        }
+
+        /// Returns the decoded provisional dynamic-reference-list index.
+        ///
+        /// @return the decoded provisional dynamic-reference-list index
+        public int drlIndex() {
+            return drlIndex;
         }
     }
 }

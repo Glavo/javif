@@ -173,6 +173,100 @@ final class BlockNeighborContextTest {
         assertEquals(1, context.unidirectionalReference1Context(position));
     }
 
+    /// Verifies provisional inter-mode contexts derive stable mode and DRL contexts from neighbors.
+    @Test
+    void derivesProvisionalInterModeContextsFromUpdatedNeighbors() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+
+        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(4, 0),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(0, 4),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                4,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+
+        BlockPosition position = new BlockPosition(4, 4);
+        BlockNeighborContext.ProvisionalInterModeContext singleContext =
+                context.provisionalInterModeContext(position, false, 0, -1);
+        assertEquals(1, singleContext.singleNewMvContext());
+        assertEquals(0, singleContext.singleGlobalMvContext());
+        assertEquals(1, singleContext.singleReferenceMvContext());
+        assertEquals(1, singleContext.compoundInterModeContext());
+        assertEquals(4, singleContext.candidateCount());
+        assertEquals(640, singleContext.candidateWeight(0));
+        assertEquals(640, singleContext.candidateWeight(1));
+        assertEquals(512, singleContext.candidateWeight(2));
+        assertEquals(448, singleContext.candidateWeight(3));
+        assertEquals(0, singleContext.drlContext(0));
+        assertEquals(1, singleContext.drlContext(1));
+        assertEquals(2, singleContext.drlContext(2));
+
+        BlockNeighborContext.ProvisionalInterModeContext compoundContext =
+                context.provisionalInterModeContext(position, true, 0, 4);
+        assertEquals(1, compoundContext.singleNewMvContext());
+        assertEquals(0, compoundContext.singleGlobalMvContext());
+        assertEquals(1, compoundContext.singleReferenceMvContext());
+        assertEquals(1, compoundContext.compoundInterModeContext());
+        assertEquals(4, compoundContext.candidateCount());
+        assertEquals(640, compoundContext.candidateWeight(0));
+        assertEquals(640, compoundContext.candidateWeight(1));
+        assertEquals(448, compoundContext.candidateWeight(2));
+        assertEquals(256, compoundContext.candidateWeight(3));
+        assertEquals(0, compoundContext.drlContext(0));
+        assertEquals(1, compoundContext.drlContext(1));
+        assertEquals(2, compoundContext.drlContext(2));
+    }
+
     /// Verifies inter-frame initialization starts with non-intra neighbors.
     @Test
     void initializesInterFrameNeighborState() {
