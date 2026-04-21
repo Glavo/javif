@@ -179,6 +179,7 @@ public final class TileBlockHeaderReader {
                 BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
                         nonNullNeighborContext.provisionalInterModeContext(
                                 nonNullPosition,
+                                nonNullSize,
                                 compoundReference,
                                 referenceFrame0,
                                 referenceFrame1
@@ -190,6 +191,7 @@ public final class TileBlockHeaderReader {
             } else {
                 InterModeSelection interModeSelection = readInterModeSelection(
                         nonNullPosition,
+                        nonNullSize,
                         nonNullNeighborContext,
                         compoundReference,
                         referenceFrame0,
@@ -419,6 +421,7 @@ public final class TileBlockHeaderReader {
     /// and `drl` decoding instead of a full AV1 `refmvs` walk.
     ///
     /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
     /// @param neighborContext the mutable neighbor context that supplies syntax contexts
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
@@ -427,6 +430,7 @@ public final class TileBlockHeaderReader {
     /// @return the decoded inter prediction mode, dynamic-reference-list index, and motion-vector state
     private InterModeSelection readInterModeSelection(
             BlockPosition position,
+            BlockSize size,
             BlockNeighborContext neighborContext,
             boolean compoundReference,
             int referenceFrame0,
@@ -434,7 +438,7 @@ public final class TileBlockHeaderReader {
             FrameHeader.SegmentData segmentData
     ) {
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                neighborContext.provisionalInterModeContext(position, compoundReference, referenceFrame0, referenceFrame1);
+                neighborContext.provisionalInterModeContext(position, size, compoundReference, referenceFrame0, referenceFrame1);
         if (compoundReference) {
             CompoundInterPredictionMode compoundInterMode =
                     syntaxReader.readCompoundInterMode(provisionalContext.compoundInterModeContext());

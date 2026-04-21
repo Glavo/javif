@@ -381,7 +381,7 @@ final class TileBlockHeaderReaderTest {
         assertFalse(expectedSkip);
         assertTrue(intraIfConsumed);
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                neighborContext.provisionalInterModeContext(new BlockPosition(0, 0), false, 0, -1);
+                neighborContext.provisionalInterModeContext(new BlockPosition(0, 0), BlockSize.SIZE_16X16, false, 0, -1);
         InterModeExpectation expectedInterMode =
                 decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
 
@@ -468,7 +468,7 @@ final class TileBlockHeaderReaderTest {
         oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
         int expectedReferenceFrame0 = decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                neighborContext.provisionalInterModeContext(position, false, expectedReferenceFrame0, -1);
+                neighborContext.provisionalInterModeContext(position, BlockSize.SIZE_16X16, false, expectedReferenceFrame0, -1);
         InterModeExpectation expectedInterMode =
                 decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
         assertEquals(SingleInterPredictionMode.NEWMV, expectedInterMode.singleInterMode());
@@ -528,6 +528,7 @@ final class TileBlockHeaderReaderTest {
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
                 neighborContext.provisionalInterModeContext(
                         position,
+                        BlockSize.SIZE_16X16,
                         true,
                         expectedReferences.referenceFrame0(),
                         expectedReferences.referenceFrame1()
@@ -1633,7 +1634,7 @@ final class TileBlockHeaderReaderTest {
                     }
                     int referenceFrame0 = decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
                     BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                            neighborContext.provisionalInterModeContext(position, false, referenceFrame0, -1);
+                            neighborContext.provisionalInterModeContext(position, BlockSize.SIZE_16X16, false, referenceFrame0, -1);
                     InterModeExpectation expectation =
                             decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
                     if (expectation.singleInterMode() != SingleInterPredictionMode.NEWMV || expectation.drlIndex() <= 0) {
@@ -1687,6 +1688,7 @@ final class TileBlockHeaderReaderTest {
                     BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
                             neighborContext.provisionalInterModeContext(
                                     position,
+                                    BlockSize.SIZE_16X16,
                                     true,
                                     references.referenceFrame0(),
                                     references.referenceFrame1()
