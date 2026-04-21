@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -59,7 +60,12 @@ final class BlockNeighborContextTest {
                 true,
                 false,
                 LumaIntraPredictionMode.VERTICAL,
-                UvIntraPredictionMode.PAETH
+                UvIntraPredictionMode.PAETH,
+                null,
+                0,
+                0,
+                0,
+                0
         ));
 
         assertEquals(1, context.skipContext(new BlockPosition(0, 4)));

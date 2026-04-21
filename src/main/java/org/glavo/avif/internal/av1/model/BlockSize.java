@@ -21,49 +21,49 @@ import org.jetbrains.annotations.NotNullByDefault;
 @NotNullByDefault
 public enum BlockSize {
     /// A 128x128 block.
-    SIZE_128X128(32, 32, 3),
+    SIZE_128X128(32, 32, 3, 15),
     /// A 128x64 block.
-    SIZE_128X64(32, 16, 3),
+    SIZE_128X64(32, 16, 3, 14),
     /// A 64x128 block.
-    SIZE_64X128(16, 32, 3),
+    SIZE_64X128(16, 32, 3, 13),
     /// A 64x64 block.
-    SIZE_64X64(16, 16, 3),
+    SIZE_64X64(16, 16, 3, 12),
     /// A 64x32 block.
-    SIZE_64X32(16, 8, 3),
+    SIZE_64X32(16, 8, 3, 11),
     /// A 64x16 block.
-    SIZE_64X16(16, 4, 2),
+    SIZE_64X16(16, 4, 2, 21),
     /// A 32x64 block.
-    SIZE_32X64(8, 16, 3),
+    SIZE_32X64(8, 16, 3, 10),
     /// A 32x32 block.
-    SIZE_32X32(8, 8, 3),
+    SIZE_32X32(8, 8, 3, 9),
     /// A 32x16 block.
-    SIZE_32X16(8, 4, 2),
+    SIZE_32X16(8, 4, 2, 8),
     /// A 32x8 block.
-    SIZE_32X8(8, 2, 1),
+    SIZE_32X8(8, 2, 1, 19),
     /// A 16x64 block.
-    SIZE_16X64(4, 16, 2),
+    SIZE_16X64(4, 16, 2, 20),
     /// A 16x32 block.
-    SIZE_16X32(4, 8, 2),
+    SIZE_16X32(4, 8, 2, 7),
     /// A 16x16 block.
-    SIZE_16X16(4, 4, 2),
+    SIZE_16X16(4, 4, 2, 6),
     /// A 16x8 block.
-    SIZE_16X8(4, 2, 1),
+    SIZE_16X8(4, 2, 1, 5),
     /// A 16x4 block.
-    SIZE_16X4(4, 1, 0),
+    SIZE_16X4(4, 1, 0, 17),
     /// A 8x32 block.
-    SIZE_8X32(2, 8, 1),
+    SIZE_8X32(2, 8, 1, 18),
     /// A 8x16 block.
-    SIZE_8X16(2, 4, 1),
+    SIZE_8X16(2, 4, 1, 4),
     /// A 8x8 block.
-    SIZE_8X8(2, 2, 1),
+    SIZE_8X8(2, 2, 1, 3),
     /// A 8x4 block.
-    SIZE_8X4(2, 1, 0),
+    SIZE_8X4(2, 1, 0, 2),
     /// A 4x16 block.
-    SIZE_4X16(1, 4, 0),
+    SIZE_4X16(1, 4, 0, 16),
     /// A 4x8 block.
-    SIZE_4X8(1, 2, 0),
+    SIZE_4X8(1, 2, 0, 1),
     /// A 4x4 block.
-    SIZE_4X4(1, 1, 0);
+    SIZE_4X4(1, 1, 0, 0);
 
     /// The block width in 4x4 units.
     private final int width4;
@@ -74,15 +74,20 @@ public enum BlockSize {
     /// The Y-mode size context used by `TileSyntaxReader`.
     private final int yModeSizeContext;
 
+    /// The size-dependent entropy-table index matching `dav1d`'s `N_BS_SIZES` order.
+    private final int cdfIndex;
+
     /// Creates one AV1 block size entry.
     ///
     /// @param width4 the block width in 4x4 units
     /// @param height4 the block height in 4x4 units
     /// @param yModeSizeContext the Y-mode size context used by `TileSyntaxReader`
-    BlockSize(int width4, int height4, int yModeSizeContext) {
+    /// @param cdfIndex the size-dependent entropy-table index matching `dav1d`'s `N_BS_SIZES` order
+    BlockSize(int width4, int height4, int yModeSizeContext, int cdfIndex) {
         this.width4 = width4;
         this.height4 = height4;
         this.yModeSizeContext = yModeSizeContext;
+        this.cdfIndex = cdfIndex;
     }
 
     /// Returns the block width in 4x4 units.
@@ -118,6 +123,13 @@ public enum BlockSize {
     /// @return the Y-mode size context used by `TileSyntaxReader`
     public int yModeSizeContext() {
         return yModeSizeContext;
+    }
+
+    /// Returns the size-dependent entropy-table index matching `dav1d`'s `N_BS_SIZES` order.
+    ///
+    /// @return the size-dependent entropy-table index matching `dav1d`'s `N_BS_SIZES` order
+    public int cdfIndex() {
+        return cdfIndex;
     }
 
     /// Returns whether the block is square.

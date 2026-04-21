@@ -52,6 +52,35 @@ public final class CdfContext {
             {20155, 21301, 22838, 23178, 23261, 23533, 23703, 24804, 25352, 26575, 27016, 28049}
     });
 
+    /// The transformed default `use_filter_intra` CDFs.
+    private static final int[][] DEFAULT_USE_FILTER_INTRA_CDFS = inverse2d(new int[][]{
+            {4621},
+            {6743},
+            {5893},
+            {7866},
+            {12551},
+            {9394},
+            {12408},
+            {14301},
+            {12756},
+            {22343},
+            {16384},
+            {16384},
+            {16384},
+            {16384},
+            {16384},
+            {16384},
+            {12770},
+            {10368},
+            {20229},
+            {18101},
+            {16384},
+            {16384}
+    });
+
+    /// The transformed default filter-intra-mode CDF.
+    private static final int[] DEFAULT_FILTER_INTRA_CDF = inverse(8949, 12776, 17211, 29558);
+
     /// The transformed default chroma intra-mode CDFs.
     private static final int[][][] DEFAULT_UV_MODE_CDFS = inverse3d(new int[][][]{
             {
@@ -159,6 +188,31 @@ public final class CdfContext {
             }
     });
 
+    /// The transformed default directional angle-delta CDFs.
+    private static final int[][] DEFAULT_ANGLE_DELTA_CDFS = inverse2d(new int[][]{
+            {2180, 5032, 7567, 22776, 26989, 30217},
+            {2301, 5608, 8801, 23487, 26974, 30330},
+            {3780, 11018, 13699, 19354, 23083, 31286},
+            {4581, 11226, 15147, 17138, 21834, 28397},
+            {1737, 10927, 14509, 19588, 22745, 28823},
+            {2664, 10176, 12485, 17650, 21600, 30495},
+            {2240, 11096, 15453, 20341, 22561, 28917},
+            {3605, 10428, 12459, 17676, 21244, 30655}
+    });
+
+    /// The transformed default CFL-sign CDF.
+    private static final int[] DEFAULT_CFL_SIGN_CDF = inverse(1418, 2123, 13340, 18405, 26972, 28343, 32294);
+
+    /// The transformed default CFL-alpha CDFs.
+    private static final int[][] DEFAULT_CFL_ALPHA_CDFS = inverse2d(new int[][]{
+            {7637, 20719, 31401, 32481, 32657, 32688, 32692, 32696, 32700, 32704, 32708, 32712, 32716, 32720, 32724},
+            {14365, 23603, 28135, 31168, 32167, 32395, 32487, 32573, 32620, 32647, 32668, 32672, 32676, 32680, 32684},
+            {11532, 22380, 28445, 31360, 32349, 32523, 32584, 32649, 32673, 32677, 32681, 32685, 32689, 32693, 32697},
+            {26990, 31402, 32282, 32571, 32692, 32696, 32700, 32704, 32708, 32712, 32716, 32720, 32724, 32728, 32732},
+            {17248, 26058, 28904, 30608, 31305, 31877, 32126, 32321, 32394, 32464, 32516, 32560, 32576, 32593, 32622},
+            {14738, 21678, 25779, 27901, 29024, 30302, 30980, 31843, 32144, 32413, 32520, 32594, 32622, 32656, 32660}
+    });
+
     /// The mutable skip CDFs for skip-flag decoding.
     private final int[][] skipCdfs;
 
@@ -171,6 +225,12 @@ public final class CdfContext {
     /// The mutable luma intra-mode CDFs.
     private final int[][] yModeCdfs;
 
+    /// The mutable `use_filter_intra` CDFs.
+    private final int[][] useFilterIntraCdfs;
+
+    /// The mutable filter-intra-mode CDF.
+    private final int[] filterIntraCdf;
+
     /// The mutable chroma intra-mode CDFs.
     private final int[][][] uvModeCdfs;
 
@@ -180,31 +240,55 @@ public final class CdfContext {
     /// The mutable key-frame luma intra-mode CDFs.
     private final int[][][] keyFrameYModeCdfs;
 
+    /// The mutable directional angle-delta CDFs.
+    private final int[][] angleDeltaCdfs;
+
+    /// The mutable CFL-sign CDF.
+    private final int[] cflSignCdf;
+
+    /// The mutable CFL-alpha CDFs.
+    private final int[][] cflAlphaCdfs;
+
     /// Creates a mutable CDF context from already-copied arrays.
     ///
     /// @param skipCdfs the mutable skip CDFs
     /// @param intraCdfs the mutable intra/inter decision CDFs
     /// @param intrabcCdf the mutable `intrabc` CDF
     /// @param yModeCdfs the mutable luma intra-mode CDFs
+    /// @param useFilterIntraCdfs the mutable `use_filter_intra` CDFs
+    /// @param filterIntraCdf the mutable filter-intra-mode CDF
     /// @param uvModeCdfs the mutable chroma intra-mode CDFs
     /// @param partitionCdfs the mutable partition CDFs
     /// @param keyFrameYModeCdfs the mutable key-frame luma intra-mode CDFs
+    /// @param angleDeltaCdfs the mutable directional angle-delta CDFs
+    /// @param cflSignCdf the mutable CFL-sign CDF
+    /// @param cflAlphaCdfs the mutable CFL-alpha CDFs
     private CdfContext(
             int[][] skipCdfs,
             int[][] intraCdfs,
             int[] intrabcCdf,
             int[][] yModeCdfs,
+            int[][] useFilterIntraCdfs,
+            int[] filterIntraCdf,
             int[][][] uvModeCdfs,
             int[][][] partitionCdfs,
-            int[][][] keyFrameYModeCdfs
+            int[][][] keyFrameYModeCdfs,
+            int[][] angleDeltaCdfs,
+            int[] cflSignCdf,
+            int[][] cflAlphaCdfs
     ) {
         this.skipCdfs = Objects.requireNonNull(skipCdfs, "skipCdfs");
         this.intraCdfs = Objects.requireNonNull(intraCdfs, "intraCdfs");
         this.intrabcCdf = Objects.requireNonNull(intrabcCdf, "intrabcCdf");
         this.yModeCdfs = Objects.requireNonNull(yModeCdfs, "yModeCdfs");
+        this.useFilterIntraCdfs = Objects.requireNonNull(useFilterIntraCdfs, "useFilterIntraCdfs");
+        this.filterIntraCdf = Objects.requireNonNull(filterIntraCdf, "filterIntraCdf");
         this.uvModeCdfs = Objects.requireNonNull(uvModeCdfs, "uvModeCdfs");
         this.partitionCdfs = Objects.requireNonNull(partitionCdfs, "partitionCdfs");
         this.keyFrameYModeCdfs = Objects.requireNonNull(keyFrameYModeCdfs, "keyFrameYModeCdfs");
+        this.angleDeltaCdfs = Objects.requireNonNull(angleDeltaCdfs, "angleDeltaCdfs");
+        this.cflSignCdf = Objects.requireNonNull(cflSignCdf, "cflSignCdf");
+        this.cflAlphaCdfs = Objects.requireNonNull(cflAlphaCdfs, "cflAlphaCdfs");
     }
 
     /// Creates a mutable CDF context seeded with the AV1 default tables.
@@ -216,9 +300,14 @@ public final class CdfContext {
                 deepCopy(DEFAULT_INTRA_CDFS),
                 Arrays.copyOf(DEFAULT_INTRABC_CDF, DEFAULT_INTRABC_CDF.length),
                 deepCopy(DEFAULT_Y_MODE_CDFS),
+                deepCopy(DEFAULT_USE_FILTER_INTRA_CDFS),
+                Arrays.copyOf(DEFAULT_FILTER_INTRA_CDF, DEFAULT_FILTER_INTRA_CDF.length),
                 deepCopy(DEFAULT_UV_MODE_CDFS),
                 deepCopy(DEFAULT_PARTITION_CDFS),
-                deepCopy(DEFAULT_KEY_FRAME_Y_MODE_CDFS)
+                deepCopy(DEFAULT_KEY_FRAME_Y_MODE_CDFS),
+                deepCopy(DEFAULT_ANGLE_DELTA_CDFS),
+                Arrays.copyOf(DEFAULT_CFL_SIGN_CDF, DEFAULT_CFL_SIGN_CDF.length),
+                deepCopy(DEFAULT_CFL_ALPHA_CDFS)
         );
     }
 
@@ -231,9 +320,14 @@ public final class CdfContext {
                 deepCopy(intraCdfs),
                 Arrays.copyOf(intrabcCdf, intrabcCdf.length),
                 deepCopy(yModeCdfs),
+                deepCopy(useFilterIntraCdfs),
+                Arrays.copyOf(filterIntraCdf, filterIntraCdf.length),
                 deepCopy(uvModeCdfs),
                 deepCopy(partitionCdfs),
-                deepCopy(keyFrameYModeCdfs)
+                deepCopy(keyFrameYModeCdfs),
+                deepCopy(angleDeltaCdfs),
+                Arrays.copyOf(cflSignCdf, cflSignCdf.length),
+                deepCopy(cflAlphaCdfs)
         );
     }
 
@@ -268,6 +362,21 @@ public final class CdfContext {
         return yModeCdfs[Objects.checkIndex(context, yModeCdfs.length)];
     }
 
+    /// Returns the live mutable `use_filter_intra` CDF for the supplied block-size index.
+    ///
+    /// @param sizeIndex the zero-based block-size index in `dav1d` `N_BS_SIZES` order
+    /// @return the live mutable `use_filter_intra` CDF for the supplied block-size index
+    public int[] mutableUseFilterIntraCdf(int sizeIndex) {
+        return useFilterIntraCdfs[Objects.checkIndex(sizeIndex, useFilterIntraCdfs.length)];
+    }
+
+    /// Returns the live mutable filter-intra-mode CDF.
+    ///
+    /// @return the live mutable filter-intra-mode CDF
+    public int[] mutableFilterIntraCdf() {
+        return filterIntraCdf;
+    }
+
     /// Returns the live mutable key-frame luma intra-mode CDF for the supplied above/left mode classes.
     ///
     /// @param aboveMode the coarsened above-neighbor mode class
@@ -296,6 +405,29 @@ public final class CdfContext {
     public int[] mutablePartitionCdf(int blockLevel, int context) {
         int[][] level = partitionCdfs[Objects.checkIndex(blockLevel, partitionCdfs.length)];
         return level[Objects.checkIndex(context, level.length)];
+    }
+
+    /// Returns the live mutable directional angle-delta CDF for the supplied directional mode index.
+    ///
+    /// @param directionalModeIndex the zero-based directional-mode index in `[0, 8)`
+    /// @return the live mutable directional angle-delta CDF for the supplied directional mode index
+    public int[] mutableAngleDeltaCdf(int directionalModeIndex) {
+        return angleDeltaCdfs[Objects.checkIndex(directionalModeIndex, angleDeltaCdfs.length)];
+    }
+
+    /// Returns the live mutable CFL-sign CDF.
+    ///
+    /// @return the live mutable CFL-sign CDF
+    public int[] mutableCflSignCdf() {
+        return cflSignCdf;
+    }
+
+    /// Returns the live mutable CFL-alpha CDF for the supplied sign context.
+    ///
+    /// @param context the zero-based CFL-alpha context index in `[0, 6)`
+    /// @return the live mutable CFL-alpha CDF for the supplied sign context
+    public int[] mutableCflAlphaCdf(int context) {
+        return cflAlphaCdfs[Objects.checkIndex(context, cflAlphaCdfs.length)];
     }
 
     /// Converts raw `dav1d` CDF thresholds into inverse-ordered AV1 CDF arrays with a zero count slot.

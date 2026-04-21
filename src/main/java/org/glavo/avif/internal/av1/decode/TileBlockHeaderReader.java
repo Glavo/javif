@@ -19,6 +19,7 @@ import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -29,7 +30,7 @@ import java.util.Objects;
 /// Reader for one leaf block header inside a tile partition tree.
 ///
 /// This implementation intentionally covers only the syntax elements already backed by
-/// `TileSyntaxReader` and uses a provisional CFL-availability rule of `hasChroma`.
+/// `TileSyntaxReader`, including `intrabc`, directional angle deltas, and block-size-aware CFL gating.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
     /// The tile-local decode state that owns the active frame and sequence headers.
@@ -80,7 +81,17 @@ public final class TileBlockHeaderReader {
 
         @Nullable LumaIntraPredictionMode yMode = null;
         @Nullable UvIntraPredictionMode uvMode = null;
-        if (intra) {
+        @Nullable FilterIntraMode filterIntraMode = null;
+        int yAngle = 0;
+        int uvAngle = 0;
+        int cflAlphaU = 0;
+        int cflAlphaV = 0;
+        if (useIntrabc) {
+            yMode = LumaIntraPredictionMode.DC;
+            if (hasChroma) {
+                uvMode = UvIntraPredictionMode.DC;
+            }
+        } else if (intra) {
             if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
                 yMode = syntaxReader.readYMode(nonNullSize.yModeSizeContext());
             } else {
@@ -89,12 +100,40 @@ public final class TileBlockHeaderReader {
                         nonNullNeighborContext.leftMode(nonNullPosition.y4())
                 );
             }
+            if (supportsAngleDelta(nonNullSize) && yMode.isDirectional()) {
+                yAngle = syntaxReader.readYAngleDelta(yMode);
+            }
             if (hasChroma) {
-                uvMode = syntaxReader.readUvMode(yMode, true);
+                boolean cflAllowed = isCflAllowed(nonNullSize);
+                uvMode = syntaxReader.readUvMode(yMode, cflAllowed);
+                if (uvMode == UvIntraPredictionMode.CFL) {
+                    TileSyntaxReader.CflAlpha cflAlpha = syntaxReader.readCflAlpha();
+                    cflAlphaU = cflAlpha.alphaU();
+                    cflAlphaV = cflAlpha.alphaV();
+                } else if (supportsAngleDelta(nonNullSize) && uvMode.isDirectional()) {
+                    uvAngle = syntaxReader.readUvAngleDelta(uvMode);
+                }
+            }
+            if (allowsFilterIntra(nonNullSize, yMode) && syntaxReader.readUseFilterIntra(nonNullSize)) {
+                filterIntraMode = syntaxReader.readFilterIntraMode();
             }
         }
 
-        BlockHeader header = new BlockHeader(nonNullPosition, nonNullSize, hasChroma, skip, intra, useIntrabc, yMode, uvMode);
+        BlockHeader header = new BlockHeader(
+                nonNullPosition,
+                nonNullSize,
+                hasChroma,
+                skip,
+                intra,
+                useIntrabc,
+                yMode,
+                uvMode,
+                filterIntraMode,
+                yAngle,
+                uvAngle,
+                cflAlphaU,
+                cflAlphaV
+        );
         nonNullNeighborContext.updateFromBlockHeader(header);
         return header;
     }
@@ -113,6 +152,47 @@ public final class TileBlockHeaderReader {
         int subsamplingY = tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
         return (size.width4() > subsamplingX || (position.x4() & 1) != 0)
                 && (size.height4() > subsamplingY || (position.y4() & 1) != 0);
+    }
+
+    /// Returns whether CFL syntax is available for the supplied block size in the active frame.
+    ///
+    /// In lossless mode AV1 only allows CFL when the corresponding chroma block is 4x4. For
+    /// non-lossless blocks CFL is limited to luma partitions up to 32x32.
+    ///
+    /// @param size the block size to test
+    /// @return whether CFL syntax is available for the supplied block size in the active frame
+    private boolean isCflAllowed(BlockSize size) {
+        if (!tileContext.frameHeader().allLossless()) {
+            return size.widthPixels() <= 32 && size.heightPixels() <= 32;
+        }
+
+        int subsamplingX = tileContext.sequenceHeader().colorConfig().chromaSubsamplingX() ? 1 : 0;
+        int subsamplingY = tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
+        int chromaWidth4 = Math.max(1, size.width4() >> subsamplingX);
+        int chromaHeight4 = Math.max(1, size.height4() >> subsamplingY);
+        return chromaWidth4 == 1 && chromaHeight4 == 1;
+    }
+
+    /// Returns whether filter-intra syntax is available for the supplied block.
+    ///
+    /// Filter intra is only signaled for DC-predicted luma blocks whose longest side does not
+    /// exceed 32 pixels when the active sequence enables the tool.
+    ///
+    /// @param size the block size to test
+    /// @param yMode the decoded luma intra prediction mode
+    /// @return whether filter-intra syntax is available for the supplied block
+    private boolean allowsFilterIntra(BlockSize size, LumaIntraPredictionMode yMode) {
+        return tileContext.sequenceHeader().features().filterIntra()
+                && yMode == LumaIntraPredictionMode.DC
+                && Math.max(size.widthPixels(), size.heightPixels()) <= 32;
+    }
+
+    /// Returns whether the supplied block size supports directional angle-delta syntax.
+    ///
+    /// @param size the block size to test
+    /// @return whether the supplied block size supports directional angle-delta syntax
+    private static boolean supportsAngleDelta(BlockSize size) {
+        return size.width4() * size.height4() >= 4;
     }
 
     /// One decoded leaf block header.
@@ -142,6 +222,21 @@ public final class TileBlockHeaderReader {
         /// The decoded chroma intra prediction mode, or `null` when not present.
         private final @Nullable UvIntraPredictionMode uvMode;
 
+        /// The decoded filter-intra mode, or `null` when filter intra is disabled.
+        private final @Nullable FilterIntraMode filterIntraMode;
+
+        /// The decoded signed luma angle delta in `[-3, 3]`.
+        private final int yAngle;
+
+        /// The decoded signed chroma angle delta in `[-3, 3]`.
+        private final int uvAngle;
+
+        /// The decoded signed CFL alpha for chroma U.
+        private final int cflAlphaU;
+
+        /// The decoded signed CFL alpha for chroma V.
+        private final int cflAlphaV;
+
         /// Creates one decoded leaf block header.
         ///
         /// @param position the local tile-relative block origin
@@ -152,6 +247,11 @@ public final class TileBlockHeaderReader {
         /// @param useIntrabc whether the block uses `intrabc`
         /// @param yMode the decoded luma intra prediction mode, or `null`
         /// @param uvMode the decoded chroma intra prediction mode, or `null`
+        /// @param filterIntraMode the decoded filter-intra mode, or `null`
+        /// @param yAngle the decoded signed luma angle delta in `[-3, 3]`
+        /// @param uvAngle the decoded signed chroma angle delta in `[-3, 3]`
+        /// @param cflAlphaU the decoded signed CFL alpha for chroma U
+        /// @param cflAlphaV the decoded signed CFL alpha for chroma V
         public BlockHeader(
                 BlockPosition position,
                 BlockSize size,
@@ -160,7 +260,12 @@ public final class TileBlockHeaderReader {
                 boolean intra,
                 boolean useIntrabc,
                 @Nullable LumaIntraPredictionMode yMode,
-                @Nullable UvIntraPredictionMode uvMode
+                @Nullable UvIntraPredictionMode uvMode,
+                @Nullable FilterIntraMode filterIntraMode,
+                int yAngle,
+                int uvAngle,
+                int cflAlphaU,
+                int cflAlphaV
         ) {
             this.position = Objects.requireNonNull(position, "position");
             this.size = Objects.requireNonNull(size, "size");
@@ -170,6 +275,11 @@ public final class TileBlockHeaderReader {
             this.useIntrabc = useIntrabc;
             this.yMode = yMode;
             this.uvMode = uvMode;
+            this.filterIntraMode = filterIntraMode;
+            this.yAngle = yAngle;
+            this.uvAngle = uvAngle;
+            this.cflAlphaU = cflAlphaU;
+            this.cflAlphaV = cflAlphaV;
         }
 
         /// Returns the local tile-relative block origin.
@@ -226,6 +336,41 @@ public final class TileBlockHeaderReader {
         /// @return the decoded chroma intra prediction mode, or `null`
         public @Nullable UvIntraPredictionMode uvMode() {
             return uvMode;
+        }
+
+        /// Returns the decoded filter-intra mode, or `null` when filter intra is disabled.
+        ///
+        /// @return the decoded filter-intra mode, or `null`
+        public @Nullable FilterIntraMode filterIntraMode() {
+            return filterIntraMode;
+        }
+
+        /// Returns the decoded signed luma angle delta in `[-3, 3]`.
+        ///
+        /// @return the decoded signed luma angle delta in `[-3, 3]`
+        public int yAngle() {
+            return yAngle;
+        }
+
+        /// Returns the decoded signed chroma angle delta in `[-3, 3]`.
+        ///
+        /// @return the decoded signed chroma angle delta in `[-3, 3]`
+        public int uvAngle() {
+            return uvAngle;
+        }
+
+        /// Returns the decoded signed CFL alpha for chroma U.
+        ///
+        /// @return the decoded signed CFL alpha for chroma U
+        public int cflAlphaU() {
+            return cflAlphaU;
+        }
+
+        /// Returns the decoded signed CFL alpha for chroma V.
+        ///
+        /// @return the decoded signed CFL alpha for chroma V
+        public int cflAlphaV() {
+            return cflAlphaV;
         }
     }
 }

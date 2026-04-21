@@ -38,6 +38,9 @@ final class CdfContextTest {
         assertEquals(9967, context.mutableYModeCdf(0)[0]);
         assertEquals(2419, context.mutableYModeCdf(0)[11]);
 
+        assertArrayEquals(new int[]{28147, 0}, context.mutableUseFilterIntraCdf(0));
+        assertArrayEquals(new int[]{23819, 19992, 15557, 3210, 0}, context.mutableFilterIntraCdf());
+
         assertEquals(13, context.mutableKeyFrameYModeCdf(0, 0).length);
         assertEquals(17180, context.mutableKeyFrameYModeCdf(0, 0)[0]);
         assertEquals(2302, context.mutableKeyFrameYModeCdf(0, 0)[11]);
@@ -62,16 +65,22 @@ final class CdfContextTest {
         CdfContext copy = original.copy();
 
         assertNotSame(original.mutableSkipCdf(0), copy.mutableSkipCdf(0));
+        assertNotSame(original.mutableUseFilterIntraCdf(0), copy.mutableUseFilterIntraCdf(0));
+        assertNotSame(original.mutableFilterIntraCdf(), copy.mutableFilterIntraCdf());
         assertNotSame(original.mutableUvModeCdf(true, 0), copy.mutableUvModeCdf(true, 0));
         assertNotSame(original.mutablePartitionCdf(0, 0), copy.mutablePartitionCdf(0, 0));
         assertNotSame(original.mutableKeyFrameYModeCdf(0, 0), copy.mutableKeyFrameYModeCdf(0, 0));
 
         copy.mutableSkipCdf(0)[0] = 77;
+        copy.mutableUseFilterIntraCdf(0)[0] = 66;
+        copy.mutableFilterIntraCdf()[0] = 55;
         copy.mutableUvModeCdf(true, 0)[0] = 88;
         copy.mutablePartitionCdf(0, 0)[0] = 99;
         copy.mutableKeyFrameYModeCdf(0, 0)[0] = 111;
 
         assertEquals(1097, original.mutableSkipCdf(0)[0]);
+        assertEquals(28147, original.mutableUseFilterIntraCdf(0)[0]);
+        assertEquals(23819, original.mutableFilterIntraCdf()[0]);
         assertEquals(22361, original.mutableUvModeCdf(true, 0)[0]);
         assertEquals(4869, original.mutablePartitionCdf(0, 0)[0]);
         assertEquals(17180, original.mutableKeyFrameYModeCdf(0, 0)[0]);

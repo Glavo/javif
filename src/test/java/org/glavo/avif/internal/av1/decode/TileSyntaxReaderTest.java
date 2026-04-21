@@ -22,6 +22,8 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
+import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -145,6 +147,115 @@ final class TileSyntaxReaderTest {
         assertFalse(reader.readUseIntrabcFlag());
         assertEquals(expectedYMode, reader.readYMode(2));
         assertArrayEquals(new int[]{2237, 0}, tileContext.cdfContext().mutableIntrabcCdf());
+    }
+
+    /// Verifies that directional angle deltas use the expected tile-local CDF tables.
+    @Test
+    void readsDirectionalAngleDeltas() {
+        byte[] payload = new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        int expectedYAngle = oracleDecoder.decodeSymbolAdapt(
+                oracleCdf.mutableAngleDeltaCdf(LumaIntraPredictionMode.VERTICAL.angleDeltaContextIndex()),
+                6
+        ) - 3;
+        int expectedUvAngle = oracleDecoder.decodeSymbolAdapt(
+                oracleCdf.mutableAngleDeltaCdf(UvIntraPredictionMode.VERTICAL_LEFT.angleDeltaContextIndex()),
+                6
+        ) - 3;
+
+        assertEquals(expectedYAngle, reader.readYAngleDelta(LumaIntraPredictionMode.VERTICAL));
+        assertEquals(expectedUvAngle, reader.readUvAngleDelta(UvIntraPredictionMode.VERTICAL_LEFT));
+        assertArrayEquals(
+                oracleCdf.mutableAngleDeltaCdf(LumaIntraPredictionMode.VERTICAL.angleDeltaContextIndex()),
+                tileContext.cdfContext().mutableAngleDeltaCdf(LumaIntraPredictionMode.VERTICAL.angleDeltaContextIndex())
+        );
+        assertArrayEquals(
+                oracleCdf.mutableAngleDeltaCdf(UvIntraPredictionMode.VERTICAL_LEFT.angleDeltaContextIndex()),
+                tileContext.cdfContext().mutableAngleDeltaCdf(UvIntraPredictionMode.VERTICAL_LEFT.angleDeltaContextIndex())
+        );
+    }
+
+    /// Verifies that CFL alpha decoding uses the expected tile-local sign and alpha CDF tables.
+    @Test
+    void readsCflAlpha() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        int signSymbol = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCflSignCdf(), 7) + 1;
+        int signU = signSymbol / 3;
+        int signV = signSymbol - signU * 3;
+        int expectedAlphaU = signU == 0
+                ? 0
+                : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signU == 2 ? 3 : 0) + signV, signU == 2);
+        int expectedAlphaV = signV == 0
+                ? 0
+                : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signV == 2 ? 3 : 0) + signU, signV == 2);
+
+        TileSyntaxReader.CflAlpha cflAlpha = reader.readCflAlpha();
+
+        assertEquals(expectedAlphaU, cflAlpha.alphaU());
+        assertEquals(expectedAlphaV, cflAlpha.alphaV());
+        assertArrayEquals(oracleCdf.mutableCflSignCdf(), tileContext.cdfContext().mutableCflSignCdf());
+    }
+
+    /// Verifies that filter-intra syntax uses the expected tile-local CDF tables.
+    @Test
+    void readsFilterIntraSyntax() {
+        byte[] payload = findPayloadForFilterIntra();
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedUseFilterIntra = oracleDecoder.decodeBooleanAdapt(
+                oracleCdf.mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex())
+        );
+        assertTrue(expectedUseFilterIntra);
+        FilterIntraMode expectedMode = FilterIntraMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableFilterIntraCdf(), 4)
+        );
+
+        assertTrue(reader.readUseFilterIntra(BlockSize.SIZE_8X8));
+        assertEquals(expectedMode, reader.readFilterIntraMode());
+        assertArrayEquals(
+                oracleCdf.mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex()),
+                tileContext.cdfContext().mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex())
+        );
+        assertArrayEquals(oracleCdf.mutableFilterIntraCdf(), tileContext.cdfContext().mutableFilterIntraCdf());
+    }
+
+    /// Decodes one signed CFL alpha value with the same sign rules as `TileSyntaxReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param context the CFL-alpha context index
+    /// @param positive whether the decoded alpha should be positive
+    /// @return the decoded signed CFL alpha value
+    private static int decodeSignedCflAlpha(MsacDecoder decoder, CdfContext cdfContext, int context, boolean positive) {
+        int alpha = decoder.decodeSymbolAdapt(cdfContext.mutableCflAlphaCdf(context), 15) + 1;
+        return positive ? alpha : -alpha;
+    }
+
+    /// Finds a small payload whose first `use_filter_intra` decision decodes to `true`.
+    ///
+    /// @return a small payload whose first `use_filter_intra` decision decodes to `true`
+    private static byte[] findPayloadForFilterIntra() {
+        for (int value = 0; value < 256; value++) {
+            byte[] payload = new byte[]{(byte) value, 0x00, 0x00, 0x00, 0x00};
+            CdfContext oracleCdf = CdfContext.createDefault();
+            MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+            if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex()))) {
+                return payload;
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced use_filter_intra=true");
     }
 
     /// Creates a synthetic tile-local decode context backed by one collected tile payload.

@@ -56,6 +56,23 @@ public enum UvIntraPredictionMode {
         return ordinal();
     }
 
+    /// Returns whether this mode uses the directional angle-delta syntax element.
+    ///
+    /// @return whether this mode uses the directional angle-delta syntax element
+    public boolean isDirectional() {
+        return ordinal() >= VERTICAL.ordinal() && ordinal() <= VERTICAL_LEFT.ordinal();
+    }
+
+    /// Returns the zero-based directional angle-delta CDF index for this mode.
+    ///
+    /// @return the zero-based directional angle-delta CDF index for this mode
+    public int angleDeltaContextIndex() {
+        if (!isDirectional()) {
+            throw new IllegalStateException("Mode does not use angle_delta: " + this);
+        }
+        return ordinal() - VERTICAL.ordinal();
+    }
+
     /// Maps a decoded bitstream symbol index back to a chroma intra prediction mode.
     ///
     /// @param symbolIndex the decoded bitstream symbol index

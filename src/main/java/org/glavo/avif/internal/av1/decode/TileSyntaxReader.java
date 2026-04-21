@@ -18,6 +18,8 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
+import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
@@ -28,7 +30,8 @@ import java.util.Objects;
 /// Typed reader for the first block-level AV1 syntax elements inside one tile bitstream.
 ///
 /// This reader is intentionally small and currently covers only syntax elements already backed by
-/// `CdfContext`: partitioning, skip, intra/inter, `intrabc`, and Y/UV intra prediction modes.
+/// `CdfContext`: partitioning, skip, intra/inter, `intrabc`, Y/UV intra prediction modes,
+/// filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
     /// The tile-local decode state that owns the mutable decoder and CDF context.
@@ -133,6 +136,23 @@ public final class TileSyntaxReader {
         return UvIntraPredictionMode.fromSymbolIndex(symbol);
     }
 
+    /// Decodes one `use_filter_intra` flag for the supplied block size.
+    ///
+    /// @param size the current block size
+    /// @return whether filter intra is enabled for the current block
+    public boolean readUseFilterIntra(BlockSize size) {
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableUseFilterIntraCdf(nonNullSize.cdfIndex()));
+    }
+
+    /// Decodes one filter-intra mode after `use_filter_intra` signaled `true`.
+    ///
+    /// @return the decoded filter-intra mode
+    public FilterIntraMode readFilterIntraMode() {
+        int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableFilterIntraCdf(), 4);
+        return FilterIntraMode.fromSymbolIndex(symbol);
+    }
+
     /// Decodes one partition symbol using the supplied partition block level and context index.
     ///
     /// @param blockLevel the partition block level that selects the CDF shape
@@ -145,6 +165,54 @@ public final class TileSyntaxReader {
                 nonNullBlockLevel.symbolLimit()
         );
         return PartitionType.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one directional angle delta for the supplied luma intra prediction mode.
+    ///
+    /// @param mode the already-decoded directional luma intra prediction mode
+    /// @return the decoded signed angle delta in `[-3, 3]`
+    public int readYAngleDelta(LumaIntraPredictionMode mode) {
+        LumaIntraPredictionMode nonNullMode = Objects.requireNonNull(mode, "mode");
+        int symbol = msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableAngleDeltaCdf(nonNullMode.angleDeltaContextIndex()),
+                6
+        );
+        return symbol - 3;
+    }
+
+    /// Decodes one directional angle delta for the supplied chroma intra prediction mode.
+    ///
+    /// @param mode the already-decoded directional chroma intra prediction mode
+    /// @return the decoded signed angle delta in `[-3, 3]`
+    public int readUvAngleDelta(UvIntraPredictionMode mode) {
+        UvIntraPredictionMode nonNullMode = Objects.requireNonNull(mode, "mode");
+        int symbol = msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableAngleDeltaCdf(nonNullMode.angleDeltaContextIndex()),
+                6
+        );
+        return symbol - 3;
+    }
+
+    /// Decodes the signed CFL alpha pair for one block.
+    ///
+    /// @return the decoded signed CFL alpha pair for one block
+    public CflAlpha readCflAlpha() {
+        int signSymbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCflSignCdf(), 7) + 1;
+        int signU = signSymbol / 3;
+        int signV = signSymbol - signU * 3;
+        int alphaU = signU == 0 ? 0 : decodeSignedCflAlpha((signU == 2 ? 3 : 0) + signV, signU == 2);
+        int alphaV = signV == 0 ? 0 : decodeSignedCflAlpha((signV == 2 ? 3 : 0) + signU, signV == 2);
+        return new CflAlpha(alphaU, alphaV);
+    }
+
+    /// Decodes one signed CFL alpha value from the supplied sign context.
+    ///
+    /// @param context the zero-based CFL-alpha sign context
+    /// @param positive whether the decoded alpha should be positive
+    /// @return the decoded signed CFL alpha value
+    private int decodeSignedCflAlpha(int context, boolean positive) {
+        int alpha = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCflAlphaCdf(context), 15) + 1;
+        return positive ? alpha : -alpha;
     }
 
     /// Decodes a partition decision when only a horizontal split or no split is allowed.
@@ -238,6 +306,39 @@ public final class TileSyntaxReader {
         /// @return the maximum decoded symbol value for this partition level
         public int symbolLimit() {
             return symbolLimit;
+        }
+    }
+
+    /// The signed CFL alpha pair decoded for one block.
+    @NotNullByDefault
+    public static final class CflAlpha {
+        /// The signed CFL alpha for chroma U.
+        private final int alphaU;
+
+        /// The signed CFL alpha for chroma V.
+        private final int alphaV;
+
+        /// Creates one signed CFL alpha pair.
+        ///
+        /// @param alphaU the signed CFL alpha for chroma U
+        /// @param alphaV the signed CFL alpha for chroma V
+        public CflAlpha(int alphaU, int alphaV) {
+            this.alphaU = alphaU;
+            this.alphaV = alphaV;
+        }
+
+        /// Returns the signed CFL alpha for chroma U.
+        ///
+        /// @return the signed CFL alpha for chroma U
+        public int alphaU() {
+            return alphaU;
+        }
+
+        /// Returns the signed CFL alpha for chroma V.
+        ///
+        /// @return the signed CFL alpha for chroma V
+        public int alphaV() {
+            return alphaV;
         }
     }
 }

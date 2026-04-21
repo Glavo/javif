@@ -24,6 +24,7 @@ import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -60,9 +61,28 @@ final class TileBlockHeaderReaderTest {
                         12
                 )
         );
+        int expectedYAngle = expectedYMode.isDirectional() && BlockSize.SIZE_8X8.width4() * BlockSize.SIZE_8X8.height4() >= 4
+                ? oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedYMode.angleDeltaContextIndex()), 6) - 3
+                : 0;
         UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
                 oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, expectedYMode.symbolIndex()), 13)
         );
+        int expectedUvAngle = 0;
+        int expectedCflAlphaU = 0;
+        int expectedCflAlphaV = 0;
+        if (expectedUvMode == UvIntraPredictionMode.CFL) {
+            int signSymbol = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCflSignCdf(), 7) + 1;
+            int signU = signSymbol / 3;
+            int signV = signSymbol - signU * 3;
+            expectedCflAlphaU = signU == 0
+                    ? 0
+                    : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signU == 2 ? 3 : 0) + signV, signU == 2);
+            expectedCflAlphaV = signV == 0
+                    ? 0
+                    : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signV == 2 ? 3 : 0) + signU, signV == 2);
+        } else if (expectedUvMode.isDirectional() && BlockSize.SIZE_8X8.width4() * BlockSize.SIZE_8X8.height4() >= 4) {
+            expectedUvAngle = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedUvMode.angleDeltaContextIndex()), 6) - 3;
+        }
 
         TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_8X8, neighborContext);
 
@@ -71,6 +91,11 @@ final class TileBlockHeaderReaderTest {
         assertFalse(header.useIntrabc());
         assertEquals(expectedYMode, header.yMode());
         assertEquals(expectedUvMode, header.uvMode());
+        assertNull(header.filterIntraMode());
+        assertEquals(expectedYAngle, header.yAngle());
+        assertEquals(expectedUvAngle, header.uvAngle());
+        assertEquals(expectedCflAlphaU, header.cflAlphaU());
+        assertEquals(expectedCflAlphaV, header.cflAlphaV());
         assertTrue(header.hasChroma());
         assertEquals(3, neighborContext.intraContext(new BlockPosition(2, 2)));
     }
@@ -101,10 +126,217 @@ final class TileBlockHeaderReaderTest {
         assertFalse(header.useIntrabc());
         assertEquals(expectedYMode, header.yMode());
         assertEquals(expectedUvMode, header.uvMode());
+        assertEquals(0, header.yAngle());
+        assertEquals(0, header.uvAngle());
+        assertEquals(0, header.cflAlphaU());
+        assertEquals(0, header.cflAlphaV());
         if (!expectedIntra) {
             assertNull(header.yMode());
             assertNull(header.uvMode());
         }
+    }
+
+    /// Verifies that `intrabc` blocks keep their implicit DC/DC prediction modes.
+    @Test
+    void readsIntrabcBlockHeaderWithImplicitDcModes() {
+        byte[] payload = findPayloadForIntrabc();
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, true, payload);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean expectedUseIntrabc = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntrabcCdf());
+
+        assertTrue(expectedUseIntrabc);
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
+
+        assertEquals(expectedSkip, header.skip());
+        assertFalse(header.intra());
+        assertTrue(header.useIntrabc());
+        assertEquals(LumaIntraPredictionMode.DC, header.yMode());
+        assertEquals(UvIntraPredictionMode.DC, header.uvMode());
+        assertNull(header.filterIntraMode());
+        assertEquals(0, header.yAngle());
+        assertEquals(0, header.uvAngle());
+        assertEquals(0, header.cflAlphaU());
+        assertEquals(0, header.cflAlphaV());
+    }
+
+    /// Verifies that large lossless blocks decode UV modes with CFL disabled.
+    @Test
+    void readsLargeLosslessBlockWithoutCflMode() {
+        byte[] payload = new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(
+                        oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                        12
+                )
+        );
+        int expectedYAngle = expectedYMode.isDirectional()
+                ? oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedYMode.angleDeltaContextIndex()), 6) - 3
+                : 0;
+        UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(false, expectedYMode.symbolIndex()), 12)
+        );
+        int expectedUvAngle = expectedUvMode.isDirectional()
+                ? oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedUvMode.angleDeltaContextIndex()), 6) - 3
+                : 0;
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_64X64, neighborContext);
+
+        assertEquals(expectedSkip, header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertEquals(expectedYMode, header.yMode());
+        assertEquals(expectedUvMode, header.uvMode());
+        assertNull(header.filterIntraMode());
+        assertTrue(header.hasChroma());
+        assertFalse(header.uvMode() == UvIntraPredictionMode.CFL);
+        assertEquals(expectedYAngle, header.yAngle());
+        assertEquals(expectedUvAngle, header.uvAngle());
+        assertEquals(0, header.cflAlphaU());
+        assertEquals(0, header.cflAlphaV());
+    }
+
+    /// Verifies that filter intra is decoded after DC luma and UV syntax.
+    @Test
+    void readsFilterIntraBlockHeader() {
+        byte[] payload = findPayloadForFilterIntraBlock();
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, true);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(
+                        oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                        12
+                )
+        );
+        assertEquals(LumaIntraPredictionMode.DC, expectedYMode);
+        UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, expectedYMode.symbolIndex()), 13)
+        );
+        int expectedUvAngle = 0;
+        int expectedCflAlphaU = 0;
+        int expectedCflAlphaV = 0;
+        if (expectedUvMode == UvIntraPredictionMode.CFL) {
+            int signSymbol = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCflSignCdf(), 7) + 1;
+            int signU = signSymbol / 3;
+            int signV = signSymbol - signU * 3;
+            expectedCflAlphaU = signU == 0
+                    ? 0
+                    : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signU == 2 ? 3 : 0) + signV, signU == 2);
+            expectedCflAlphaV = signV == 0
+                    ? 0
+                    : decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signV == 2 ? 3 : 0) + signU, signV == 2);
+        } else if (expectedUvMode.isDirectional()) {
+            expectedUvAngle = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(expectedUvMode.angleDeltaContextIndex()), 6) - 3;
+        }
+        boolean expectedUseFilterIntra = oracleDecoder.decodeBooleanAdapt(
+                oracleCdf.mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex())
+        );
+        assertTrue(expectedUseFilterIntra);
+        FilterIntraMode expectedFilterIntraMode = FilterIntraMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableFilterIntraCdf(), 4)
+        );
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
+
+        assertEquals(expectedSkip, header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertEquals(LumaIntraPredictionMode.DC, header.yMode());
+        assertEquals(expectedUvMode, header.uvMode());
+        assertEquals(expectedFilterIntraMode, header.filterIntraMode());
+        assertEquals(0, header.yAngle());
+        assertEquals(expectedUvAngle, header.uvAngle());
+        assertEquals(expectedCflAlphaU, header.cflAlphaU());
+        assertEquals(expectedCflAlphaV, header.cflAlphaV());
+    }
+
+    /// Decodes one signed CFL alpha value with the same sign rules as `TileSyntaxReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param context the CFL-alpha context index
+    /// @param positive whether the decoded alpha should be positive
+    /// @return the decoded signed CFL alpha value
+    private static int decodeSignedCflAlpha(MsacDecoder decoder, CdfContext cdfContext, int context, boolean positive) {
+        int alpha = decoder.decodeSymbolAdapt(cdfContext.mutableCflAlphaCdf(context), 15) + 1;
+        return positive ? alpha : -alpha;
+    }
+
+    /// Finds a small payload whose first `intrabc` decision decodes to `true`.
+    ///
+    /// @return a small payload whose first `intrabc` decision decodes to `true`
+    private static byte[] findPayloadForIntrabc() {
+        for (int value = 0; value < 256; value++) {
+            byte[] payload = new byte[]{(byte) value, 0x00, 0x00, 0x00, 0x00};
+            CdfContext oracleCdf = CdfContext.createDefault();
+            MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+            oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+            if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntrabcCdf())) {
+                return payload;
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced intrabc=true");
+    }
+
+    /// Finds a small payload whose first block decodes as `DC + use_filter_intra`.
+    ///
+    /// @return a small payload whose first block decodes as `DC + use_filter_intra`
+    private static byte[] findPayloadForFilterIntraBlock() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+                LumaIntraPredictionMode yMode = LumaIntraPredictionMode.fromSymbolIndex(
+                        oracleDecoder.decodeSymbolAdapt(
+                                oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
+                                12
+                        )
+                );
+                if (yMode != LumaIntraPredictionMode.DC) {
+                    continue;
+                }
+
+                UvIntraPredictionMode uvMode = UvIntraPredictionMode.fromSymbolIndex(
+                        oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, yMode.symbolIndex()), 13)
+                );
+                if (uvMode == UvIntraPredictionMode.CFL) {
+                    int signSymbol = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCflSignCdf(), 7) + 1;
+                    int signU = signSymbol / 3;
+                    int signV = signSymbol - signU * 3;
+                    if (signU != 0) {
+                        decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signU == 2 ? 3 : 0) + signV, signU == 2);
+                    }
+                    if (signV != 0) {
+                        decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signV == 2 ? 3 : 0) + signU, signV == 2);
+                    }
+                } else if (uvMode.isDirectional()) {
+                    oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(uvMode.angleDeltaContextIndex()), 6);
+                }
+
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex()))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced use_filter_intra=true after block syntax");
     }
 
     /// Creates a simple tile context used by block-header tests.
@@ -114,6 +346,22 @@ final class TileBlockHeaderReaderTest {
     /// @param payload the collected tile entropy payload
     /// @return a simple tile context used by block-header tests
     private static TileDecodeContext createTileContext(FrameType frameType, boolean allowIntrabc, byte[] payload) {
+        return createTileContext(frameType, allowIntrabc, payload, false);
+    }
+
+    /// Creates a simple tile context used by block-header tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param allowIntrabc whether the synthetic frame allows `intrabc`
+    /// @param payload the collected tile entropy payload
+    /// @param filterIntra whether the synthetic sequence enables filter intra
+    /// @return a simple tile context used by block-header tests
+    private static TileDecodeContext createTileContext(
+            FrameType frameType,
+            boolean allowIntrabc,
+            byte[] payload,
+            boolean filterIntra
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -131,7 +379,7 @@ final class TileBlockHeaderReaderTest {
                 0,
                 new SequenceHeader.FeatureConfig(
                         false,
-                        false,
+                        filterIntra,
                         false,
                         true,
                         false,
