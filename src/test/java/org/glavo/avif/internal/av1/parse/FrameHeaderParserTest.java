@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -77,6 +78,57 @@ final class FrameHeaderParserTest {
         assertTrue(header.allLossless());
         assertTrue(header.loopFilter().modeRefDeltaEnabled());
         assertEquals(FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY, header.transformMode());
+        assertFalse(header.reducedTransformSet());
+        assertFalse(header.filmGrainPresent());
+    }
+
+    /// Verifies that an inter frame header can reuse a reference frame size and derive skip-mode state.
+    ///
+    /// @throws IOException if the test payload cannot be parsed
+    @Test
+    void parsesInterFrameHeaderWithReferenceSizedFrame() throws IOException {
+        SequenceHeader sequenceHeader = fullInterSequenceHeader();
+        FrameHeader[] references = createInterReferenceFrames();
+
+        FrameHeader header = new FrameHeaderParser().parse(
+                frameHeaderObu(interFrameHeaderPayload()),
+                sequenceHeader,
+                false,
+                references
+        );
+
+        assertFalse(header.showExistingFrame());
+        assertEquals(FrameType.INTER, header.frameType());
+        assertTrue(header.showFrame());
+        assertTrue(header.showableFrame());
+        assertFalse(header.errorResilientMode());
+        assertTrue(header.disableCdfUpdate());
+        assertFalse(header.allowScreenContentTools());
+        assertFalse(header.forceIntegerMotionVectors());
+        assertTrue(header.frameSizeOverride());
+        assertEquals(7, header.primaryRefFrame());
+        assertEquals(10, header.frameOffset());
+        assertEquals(0x12, header.refreshFrameFlags());
+        assertFalse(header.frameReferenceShortSignaling());
+        assertArrayEquals(new int[]{0, 1, 2, 3, 4, 5, 6}, header.referenceFrameIndices());
+        assertEquals(64, header.frameSize().codedWidth());
+        assertEquals(64, header.frameSize().upscaledWidth());
+        assertEquals(64, header.frameSize().height());
+        assertEquals(66, header.frameSize().renderWidth());
+        assertEquals(68, header.frameSize().renderHeight());
+        assertFalse(header.superResolution().enabled());
+        assertEquals(8, header.superResolution().widthScaleDenominator());
+        assertFalse(header.allowIntrabc());
+        assertTrue(header.allowHighPrecisionMotionVectors());
+        assertEquals(FrameHeader.InterpolationFilter.SWITCHABLE, header.subpelFilterMode());
+        assertTrue(header.switchableMotionMode());
+        assertTrue(header.useReferenceFrameMotionVectors());
+        assertTrue(header.refreshContext());
+        assertTrue(header.switchableCompoundReferences());
+        assertTrue(header.skipModeAllowed());
+        assertTrue(header.skipModeEnabled());
+        assertArrayEquals(new int[]{0, 3}, header.skipModeReferenceIndices());
+        assertTrue(header.warpedMotion());
         assertFalse(header.reducedTransformSet());
         assertFalse(header.filmGrainPresent());
     }
@@ -146,6 +198,189 @@ final class FrameHeaderParserTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a synthetic non-reduced sequence header configuration suitable for inter-frame parser tests.
+    ///
+    /// @return a synthetic non-reduced sequence header configuration
+    private static SequenceHeader fullInterSequenceHeader() {
+        return new SequenceHeader(
+                0,
+                1024,
+                512,
+                new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
+                new SequenceHeader.OperatingPoint[]{
+                        new SequenceHeader.OperatingPoint(2, 0, 10, 0, false, false, false, null)
+                },
+                false,
+                false,
+                10,
+                9,
+                false,
+                0,
+                0,
+                new SequenceHeader.FeatureConfig(
+                        false,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        4,
+                        true,
+                        false,
+                        false,
+                        false
+                ),
+                new SequenceHeader.ColorConfig(
+                        8,
+                        false,
+                        false,
+                        2,
+                        2,
+                        2,
+                        false,
+                        org.glavo.avif.decode.PixelFormat.I420,
+                        0,
+                        true,
+                        true,
+                        false
+                )
+        );
+    }
+
+    /// Creates refreshed reference-frame headers with order hints on both sides of the current frame.
+    ///
+    /// @return refreshed reference-frame headers with deterministic sizes and order hints
+    private static FrameHeader[] createInterReferenceFrames() {
+        FrameHeader[] references = new FrameHeader[8];
+        references[0] = createReferenceFrameHeader(9, 64, 64, 66, 68);
+        references[1] = createReferenceFrameHeader(8, 640, 360, 640, 360);
+        references[2] = createReferenceFrameHeader(7, 640, 360, 640, 360);
+        references[3] = createReferenceFrameHeader(11, 640, 360, 640, 360);
+        references[4] = createReferenceFrameHeader(12, 640, 360, 640, 360);
+        references[5] = createReferenceFrameHeader(13, 640, 360, 640, 360);
+        references[6] = createReferenceFrameHeader(14, 640, 360, 640, 360);
+        return references;
+    }
+
+    /// Creates a refreshed reference-frame header with deterministic geometry and order hint.
+    ///
+    /// @param frameOffset the order hint stored in the refreshed reference
+    /// @param upscaledWidth the frame width before super-resolution downscaling
+    /// @param height the frame height
+    /// @param renderWidth the render width
+    /// @param renderHeight the render height
+    /// @return a refreshed reference-frame header
+    private static FrameHeader createReferenceFrameHeader(
+            int frameOffset,
+            int upscaledWidth,
+            int height,
+            int renderWidth,
+            int renderHeight
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                7,
+                frameOffset,
+                0,
+                new FrameHeader.FrameSize(upscaledWidth, upscaledWidth, height, renderWidth, renderHeight),
+                new FrameHeader.SuperResolutionInfo(false, 8),
+                false,
+                true,
+                new FrameHeader.TilingInfo(false, 0, 0, 0, 0, 1, 0, 0, 0, 1, new int[]{0, 1}, new int[]{0, 1}, 0),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                false,
+                false
+        );
+    }
+
+    /// Returns default per-segment data with all features disabled.
+    ///
+    /// @return default per-segment data with all features disabled
+    private static FrameHeader.SegmentData[] defaultSegments() {
+        FrameHeader.SegmentData[] segments = new FrameHeader.SegmentData[8];
+        for (int i = 0; i < segments.length; i++) {
+            segments[i] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, false);
+        }
+        return segments;
+    }
+
+    /// Creates a standalone inter frame header payload that uses the first reference for frame size.
+    ///
+    /// @return a standalone inter frame header payload
+    private static byte[] interFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writer.writeFlag(false);
+        writer.writeBits(1, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(10, 4);
+        writer.writeBits(7, 3);
+        writer.writeBits(0x12, 8);
+        writer.writeFlag(false);
+        writer.writeBits(0, 3);
+        writer.writeBits(1, 3);
+        writer.writeBits(2, 3);
+        writer.writeBits(3, 3);
+        writer.writeBits(4, 3);
+        writer.writeBits(5, 3);
+        writer.writeBits(6, 3);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeTrailingBits();
         return writer.toByteArray();

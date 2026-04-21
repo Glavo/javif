@@ -34,6 +34,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -56,6 +57,8 @@ public final class Av1ImageReader implements AutoCloseable {
     private final TileBitstreamParser tileBitstreamParser;
     /// The most recently parsed sequence header.
     private @Nullable SequenceHeader sequenceHeader;
+    /// The refreshed frame headers stored by reference-frame slot.
+    private final FrameHeader[] referenceFrameHeaders;
     /// The currently assembled frame when tile groups span multiple OBUs.
     private @Nullable FrameAssembly pendingFrameAssembly;
     /// Whether this reader has already been closed.
@@ -73,6 +76,7 @@ public final class Av1ImageReader implements AutoCloseable {
         this.frameHeaderParser = new FrameHeaderParser();
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
         this.tileBitstreamParser = new TileBitstreamParser();
+        this.referenceFrameHeaders = new FrameHeader[8];
     }
 
     /// Opens an AV1 image reader using the default decoder configuration.
@@ -112,6 +116,7 @@ public final class Av1ImageReader implements AutoCloseable {
             if (type == ObuType.SEQUENCE_HEADER) {
                 ensureNoPendingFrameAssembly(packet, "Sequence header OBU appeared before the current frame was completed");
                 sequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
+                Arrays.fill(referenceFrameHeaders, null);
                 continue;
             }
             if (type == ObuType.FRAME_HEADER) {
@@ -121,7 +126,7 @@ public final class Av1ImageReader implements AutoCloseable {
             if (type == ObuType.FRAME) {
                 FrameAssembly assembly = startCombinedFrameAssembly(packet);
                 if (assembly.isComplete()) {
-                    throw notImplementedForFrame(packet);
+                    completeFrameAssembly(assembly, packet);
                 }
                 pendingFrameAssembly = assembly;
                 continue;
@@ -130,7 +135,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 FrameAssembly assembly = appendStandaloneTileGroup(packet);
                 if (assembly.isComplete()) {
                     pendingFrameAssembly = null;
-                    throw notImplementedForFrame(packet);
+                    completeFrameAssembly(assembly, packet);
                 }
                 continue;
             }
@@ -190,7 +195,7 @@ public final class Av1ImageReader implements AutoCloseable {
         SequenceHeader activeSequenceHeader = requireSequenceHeader(packet);
         ensureNoPendingFrameAssembly(packet, "Standalone frame header OBU appeared before the previous frame was completed");
 
-        FrameHeader frameHeader = frameHeaderParser.parse(packet, activeSequenceHeader, config.strictStdCompliance());
+        FrameHeader frameHeader = frameHeaderParser.parse(packet, activeSequenceHeader, config.strictStdCompliance(), referenceFrameHeaders);
         enforceFrameSizeLimit(frameHeader, packet);
         if (frameHeader.showExistingFrame()) {
             throw showExistingFrameNotImplemented(packet);
@@ -209,7 +214,7 @@ public final class Av1ImageReader implements AutoCloseable {
         ensureNoPendingFrameAssembly(packet, "Combined frame OBU appeared before the previous frame was completed");
 
         BitReader reader = new BitReader(packet.payload());
-        FrameHeader frameHeader = frameHeaderParser.parseFramePayload(reader, packet, activeSequenceHeader, config.strictStdCompliance());
+        FrameHeader frameHeader = frameHeaderParser.parseFramePayload(reader, packet, activeSequenceHeader, config.strictStdCompliance(), referenceFrameHeaders);
         enforceFrameSizeLimit(frameHeader, packet);
         if (frameHeader.showExistingFrame()) {
             reader.byteAlign();
@@ -228,6 +233,16 @@ public final class Av1ImageReader implements AutoCloseable {
         reader.byteAlign();
         appendTileGroup(assembly, packet, tileGroupHeader, reader.byteOffset());
         return assembly;
+    }
+
+    /// Finalizes a completed frame assembly by refreshing reference slots before reporting the decode boundary.
+    ///
+    /// @param assembly the completed frame assembly
+    /// @param packet the OBU that completed the frame assembly
+    /// @throws DecodeException always, to report that pixel decoding is not implemented yet
+    private void completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
+        refreshReferenceFrameHeaders(assembly.frameHeader());
+        throw notImplementedForFrame(packet);
     }
 
     /// Parses and appends a standalone tile-group OBU to the current frame assembly.
@@ -414,6 +429,18 @@ public final class Av1ImageReader implements AutoCloseable {
                     packet.obuIndex(),
                     null
             );
+        }
+    }
+
+    /// Refreshes any reference-frame slots targeted by the parsed frame header.
+    ///
+    /// @param frameHeader the parsed frame header whose refresh flags should be applied
+    private void refreshReferenceFrameHeaders(FrameHeader frameHeader) {
+        int refreshFrameFlags = frameHeader.refreshFrameFlags();
+        for (int i = 0; i < referenceFrameHeaders.length; i++) {
+            if ((refreshFrameFlags & (1 << i)) != 0) {
+                referenceFrameHeaders[i] = frameHeader;
+            }
         }
     }
 }

@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -43,6 +44,10 @@ public final class FrameHeaderParser {
     private static final int MAX_TILE_ROWS = 64;
     /// The AV1 segment count.
     private static final int MAX_SEGMENTS = 8;
+    /// The AV1 total reference-frame slot count.
+    private static final int TOTAL_REFERENCE_FRAMES = 8;
+    /// The AV1 reference-frame count signaled per frame.
+    private static final int REFERENCES_PER_FRAME = 7;
     /// The AV1 maximum CDEF strength count.
     private static final int MAX_CDEF_STRENGTHS = 8;
     /// The default loop filter reference deltas.
@@ -58,14 +63,32 @@ public final class FrameHeaderParser {
     /// @return the parsed frame header
     /// @throws IOException if the OBU is truncated, unreadable, or invalid
     public FrameHeader parse(ObuPacket obu, SequenceHeader sequenceHeader, boolean strictStdCompliance) throws IOException {
+        return parse(obu, sequenceHeader, strictStdCompliance, new FrameHeader[TOTAL_REFERENCE_FRAMES]);
+    }
+
+    /// Parses a standalone AV1 frame header OBU with access to previously refreshed reference headers.
+    ///
+    /// @param obu the standalone frame header OBU
+    /// @param sequenceHeader the active sequence header
+    /// @param strictStdCompliance whether strict standards compliance should be enforced
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @return the parsed frame header
+    /// @throws IOException if the OBU is truncated, unreadable, or invalid
+    public FrameHeader parse(
+            ObuPacket obu,
+            SequenceHeader sequenceHeader,
+            boolean strictStdCompliance,
+            @Nullable FrameHeader[] referenceFrameHeaders
+    ) throws IOException {
         Objects.requireNonNull(obu, "obu");
         Objects.requireNonNull(sequenceHeader, "sequenceHeader");
+        validateReferenceFrameHeaders(referenceFrameHeaders);
         if (obu.header().type() != ObuType.FRAME_HEADER) {
             throw new IllegalArgumentException("OBU type is not a standalone frame header: " + obu.header().type());
         }
 
         BitReader reader = new BitReader(obu.payload());
-        FrameHeader header = parseFramePayload(reader, obu, sequenceHeader, strictStdCompliance);
+        FrameHeader header = parseFramePayload(reader, obu, sequenceHeader, strictStdCompliance, referenceFrameHeaders);
         try {
             checkTrailingBits(reader, strictStdCompliance);
             return header;
@@ -108,16 +131,36 @@ public final class FrameHeaderParser {
             SequenceHeader sequenceHeader,
             boolean strictStdCompliance
     ) throws IOException {
+        return parseFramePayload(reader, obu, sequenceHeader, strictStdCompliance, new FrameHeader[TOTAL_REFERENCE_FRAMES]);
+    }
+
+    /// Parses a frame header payload from a `FRAME_HEADER` or `FRAME` OBU using refreshed reference headers.
+    ///
+    /// @param reader the payload bit reader positioned at the frame header
+    /// @param obu the source OBU packet
+    /// @param sequenceHeader the active sequence header
+    /// @param strictStdCompliance whether strict standards compliance should be enforced
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @return the parsed frame header
+    /// @throws IOException if the payload is truncated, unreadable, or invalid
+    public FrameHeader parseFramePayload(
+            BitReader reader,
+            ObuPacket obu,
+            SequenceHeader sequenceHeader,
+            boolean strictStdCompliance,
+            @Nullable FrameHeader[] referenceFrameHeaders
+    ) throws IOException {
         Objects.requireNonNull(reader, "reader");
         Objects.requireNonNull(obu, "obu");
         Objects.requireNonNull(sequenceHeader, "sequenceHeader");
+        validateReferenceFrameHeaders(referenceFrameHeaders);
         ObuType type = obu.header().type();
         if (type != ObuType.FRAME_HEADER && type != ObuType.FRAME) {
             throw new IllegalArgumentException("OBU type does not carry a frame header payload: " + type);
         }
 
         try {
-            return parse(reader, obu, sequenceHeader, strictStdCompliance);
+            return parse(reader, obu, sequenceHeader, strictStdCompliance, referenceFrameHeaders);
         } catch (EOFException ex) {
             throw new DecodeException(
                     DecodeErrorCode.UNEXPECTED_EOF,
@@ -155,7 +198,8 @@ public final class FrameHeaderParser {
             BitReader reader,
             ObuPacket obu,
             SequenceHeader sequenceHeader,
-            boolean strictStdCompliance
+            boolean strictStdCompliance,
+            @Nullable FrameHeader[] referenceFrameHeaders
     ) throws IOException {
         int temporalId = obu.header().temporalId();
         int spatialId = obu.header().spatialId();
@@ -180,6 +224,10 @@ public final class FrameHeaderParser {
             }
             if (sequenceHeader.frameIdNumbersPresent()) {
                 frameId = readLong(reader, sequenceHeader.frameIdBits());
+                FrameHeader existingFrameHeader = referenceFrameHeaders[existingFrameIndex];
+                if (existingFrameHeader != null && existingFrameHeader.frameId() != frameId) {
+                    fail("show_existing_frame frame id does not match the referenced slot");
+                }
             }
 
             return new FrameHeader(
@@ -294,20 +342,81 @@ public final class FrameHeaderParser {
                 }
             }
         }
-
-        if (isInterOrSwitch(frameType)) {
-            throw unsupported("Inter and switch frame headers are not implemented yet");
-        }
-
-        int refreshFrameFlags = (frameType == FrameType.KEY && showFrame) ? 0xFF : readInt(reader, 8);
-        if (strictStdCompliance && frameType == FrameType.INTRA && refreshFrameFlags == 0xFF) {
-            fail("Intra frame headers must not refresh all reference frames in strict mode");
-        }
-
-        FrameSizeResult frameSizeResult = readFrameSize(reader, sequenceHeader, frameSizeOverride);
+        int refreshFrameFlags;
+        boolean frameReferenceShortSignaling = false;
+        int[] referenceFrameIndices = new int[]{-1, -1, -1, -1, -1, -1, -1};
+        FrameSizeResult frameSizeResult;
         boolean allowIntrabc = false;
-        if (allowScreenContentTools && !frameSizeResult.superResolution.enabled()) {
-            allowIntrabc = reader.readFlag();
+        boolean allowHighPrecisionMotionVectors = false;
+        FrameHeader.InterpolationFilter subpelFilterMode = FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
+        boolean switchableMotionMode = false;
+        boolean useReferenceFrameMotionVectors = false;
+
+        if (!isInterOrSwitch(frameType)) {
+            refreshFrameFlags = (frameType == FrameType.KEY && showFrame) ? 0xFF : readInt(reader, 8);
+            if (refreshFrameFlags != 0xFF && errorResilientMode && sequenceHeader.features().orderHint()) {
+                skipReferenceOrderHints(reader, sequenceHeader);
+            }
+            if (strictStdCompliance && frameType == FrameType.INTRA && refreshFrameFlags == 0xFF) {
+                fail("Intra frame headers must not refresh all reference frames in strict mode");
+            }
+
+            frameSizeResult = readFrameSize(
+                    reader,
+                    sequenceHeader,
+                    frameSizeOverride,
+                    false,
+                    referenceFrameHeaders,
+                    referenceFrameIndices
+            );
+            if (allowScreenContentTools && !frameSizeResult.superResolution.enabled()) {
+                allowIntrabc = reader.readFlag();
+            }
+        } else {
+            refreshFrameFlags = frameType == FrameType.SWITCH ? 0xFF : readInt(reader, 8);
+            if (errorResilientMode && sequenceHeader.features().orderHint()) {
+                skipReferenceOrderHints(reader, sequenceHeader);
+            }
+
+            if (sequenceHeader.features().orderHint()) {
+                frameReferenceShortSignaling = reader.readFlag();
+                if (frameReferenceShortSignaling) {
+                    deriveReferenceFrameIndices(reader, sequenceHeader, frameOffset, referenceFrameHeaders, referenceFrameIndices);
+                }
+            }
+
+            for (int i = 0; i < REFERENCES_PER_FRAME; i++) {
+                if (!frameReferenceShortSignaling) {
+                    referenceFrameIndices[i] = readInt(reader, 3);
+                }
+                if (sequenceHeader.frameIdNumbersPresent()) {
+                    long deltaReferenceFrameId = readLong(reader, sequenceHeader.deltaFrameIdBits()) + 1;
+                    long frameIdMask = (1L << sequenceHeader.frameIdBits()) - 1;
+                    long referenceFrameId = (frameId + (1L << sequenceHeader.frameIdBits()) - deltaReferenceFrameId) & frameIdMask;
+                    FrameHeader referenceFrameHeader = referenceFrameHeaders[referenceFrameIndices[i]];
+                    if (referenceFrameHeader != null && referenceFrameHeader.frameId() != referenceFrameId) {
+                        fail("Reference frame id does not match the decoded slot");
+                    }
+                }
+            }
+
+            frameSizeResult = readFrameSize(
+                    reader,
+                    sequenceHeader,
+                    frameSizeOverride,
+                    !errorResilientMode && frameSizeOverride,
+                    referenceFrameHeaders,
+                    referenceFrameIndices
+            );
+            if (!forceIntegerMotionVectors) {
+                allowHighPrecisionMotionVectors = reader.readFlag();
+            }
+            subpelFilterMode = parseInterpolationFilter(reader);
+            switchableMotionMode = reader.readFlag();
+            if (!errorResilientMode && sequenceHeader.features().refFrameMotionVectors()
+                    && sequenceHeader.features().orderHint()) {
+                useReferenceFrameMotionVectors = reader.readFlag();
+            }
         }
 
         boolean refreshContext = true;
@@ -326,6 +435,20 @@ public final class FrameHeaderParser {
         FrameHeader.TransformMode transformMode = losslessState.allLossless
                 ? FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY
                 : (reader.readFlag() ? FrameHeader.TransformMode.SWITCHABLE : FrameHeader.TransformMode.LARGEST);
+        boolean switchableCompoundReferences = isInterOrSwitch(frameType) && reader.readFlag();
+        SkipModeResult skipMode = deriveSkipMode(
+                reader,
+                sequenceHeader,
+                frameType,
+                frameOffset,
+                switchableCompoundReferences,
+                referenceFrameHeaders,
+                referenceFrameIndices
+        );
+        boolean warpedMotion = false;
+        if (!errorResilientMode && isInterOrSwitch(frameType) && sequenceHeader.features().warpedMotion()) {
+            warpedMotion = reader.readFlag();
+        }
         boolean reducedTransformSet = reader.readFlag();
         boolean filmGrainPresent = false;
         if (sequenceHeader.features().filmGrainPresent() && (showFrame || showableFrame)) {
@@ -353,9 +476,15 @@ public final class FrameHeaderParser {
                 primaryRefFrame,
                 frameOffset,
                 refreshFrameFlags,
+                frameReferenceShortSignaling,
+                referenceFrameIndices,
                 frameSizeResult.frameSize,
                 frameSizeResult.superResolution,
                 allowIntrabc,
+                allowHighPrecisionMotionVectors,
+                subpelFilterMode,
+                switchableMotionMode,
+                useReferenceFrameMotionVectors,
                 refreshContext,
                 tiling,
                 quantization,
@@ -366,21 +495,175 @@ public final class FrameHeaderParser {
                 cdef,
                 restoration,
                 transformMode,
+                switchableCompoundReferences,
+                skipMode.allowed,
+                skipMode.enabled,
+                skipMode.referenceIndices,
+                warpedMotion,
                 reducedTransformSet,
                 filmGrainPresent
         );
     }
 
-    /// Parses the frame size and render size fields for non-reference-sized intra frames.
+    /// Validates the supplied reference-frame header array shape.
+    ///
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    private static void validateReferenceFrameHeaders(@Nullable FrameHeader[] referenceFrameHeaders) {
+        Objects.requireNonNull(referenceFrameHeaders, "referenceFrameHeaders");
+        if (referenceFrameHeaders.length != TOTAL_REFERENCE_FRAMES) {
+            throw new IllegalArgumentException("referenceFrameHeaders.length != 8: " + referenceFrameHeaders.length);
+        }
+    }
+
+    /// Consumes the error-resilient reference order-hint array when it is present.
+    ///
+    /// @param reader the payload bit reader
+    /// @param sequenceHeader the active sequence header
+    /// @throws IOException if the payload is truncated
+    private static void skipReferenceOrderHints(BitReader reader, SequenceHeader sequenceHeader) throws IOException {
+        for (int i = 0; i < TOTAL_REFERENCE_FRAMES; i++) {
+            readInt(reader, sequenceHeader.features().orderHintBits());
+        }
+    }
+
+    /// Derives the reference-frame list from short-signaling syntax.
+    ///
+    /// @param reader the payload bit reader
+    /// @param sequenceHeader the active sequence header
+    /// @param frameOffset the current frame order hint
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceFrameIndices the destination LAST..ALTREF slot array
+    /// @throws IOException if any referenced header is unavailable or invalid
+    private static void deriveReferenceFrameIndices(
+            BitReader reader,
+            SequenceHeader sequenceHeader,
+            int frameOffset,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices
+    ) throws IOException {
+        referenceFrameIndices[0] = readInt(reader, 3);
+        referenceFrameIndices[1] = -1;
+        referenceFrameIndices[2] = -1;
+        referenceFrameIndices[3] = readInt(reader, 3);
+
+        int[] referenceOffsets = new int[TOTAL_REFERENCE_FRAMES];
+        int earliestReference = -1;
+        int earliestOffset = Integer.MAX_VALUE;
+        for (int i = 0; i < TOTAL_REFERENCE_FRAMES; i++) {
+            FrameHeader referenceFrameHeader = referenceFrameHeaders[i];
+            if (referenceFrameHeader == null) {
+                fail("Short-signaled references require all reference-frame headers to be available");
+            }
+            int diff = getPocDiff(sequenceHeader.features().orderHintBits(), referenceFrameHeader.frameOffset(), frameOffset);
+            referenceOffsets[i] = diff;
+            if (diff < earliestOffset) {
+                earliestOffset = diff;
+                earliestReference = i;
+            }
+        }
+
+        referenceOffsets[referenceFrameIndices[0]] = Integer.MIN_VALUE;
+        referenceOffsets[referenceFrameIndices[3]] = Integer.MIN_VALUE;
+        if (earliestReference < 0) {
+            fail("Could not derive an earliest short-signaled reference frame");
+        }
+
+        int referenceIndex = -1;
+        int latestOffset = 0;
+        for (int i = 0; i < TOTAL_REFERENCE_FRAMES; i++) {
+            int hint = referenceOffsets[i];
+            if (hint >= latestOffset) {
+                latestOffset = hint;
+                referenceIndex = i;
+            }
+        }
+        referenceOffsets[referenceIndex] = Integer.MIN_VALUE;
+        referenceFrameIndices[6] = referenceIndex;
+
+        for (int i = 4; i < 6; i++) {
+            int earliestUnsignedOffset = -1;
+            referenceIndex = -1;
+            for (int j = 0; j < TOTAL_REFERENCE_FRAMES; j++) {
+                int hint = referenceOffsets[j];
+                if (Integer.compareUnsigned(hint, earliestUnsignedOffset) < 0) {
+                    earliestUnsignedOffset = hint;
+                    referenceIndex = j;
+                }
+            }
+            referenceOffsets[referenceIndex] = Integer.MIN_VALUE;
+            referenceFrameIndices[i] = referenceIndex;
+        }
+
+        for (int i = 1; i < REFERENCES_PER_FRAME; i++) {
+            referenceIndex = referenceFrameIndices[i];
+            if (referenceIndex < 0) {
+                int latestUnsignedOffset = ~0xFF;
+                for (int j = 0; j < TOTAL_REFERENCE_FRAMES; j++) {
+                    int hint = referenceOffsets[j];
+                    if (Integer.compareUnsigned(hint, latestUnsignedOffset) >= 0) {
+                        latestUnsignedOffset = hint;
+                        referenceIndex = j;
+                    }
+                }
+                referenceOffsets[referenceIndex] = Integer.MIN_VALUE;
+                referenceFrameIndices[i] = referenceIndex >= 0 ? referenceIndex : earliestReference;
+            }
+        }
+    }
+
+    /// Parses the frame size and render size fields for intra and inter frames.
     ///
     /// @param reader the payload bit reader
     /// @param sequenceHeader the active sequence header
     /// @param frameSizeOverride whether frame size override signaling is enabled
+    /// @param useReferenceFrameSize whether the frame size may be copied from a reference frame
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceFrameIndices the decoded LAST..ALTREF slot indices
     /// @return the parsed frame size and super-resolution state
     /// @throws IOException if the payload is truncated or invalid
-    private static FrameSizeResult readFrameSize(BitReader reader, SequenceHeader sequenceHeader, boolean frameSizeOverride) throws IOException {
+    private static FrameSizeResult readFrameSize(
+            BitReader reader,
+            SequenceHeader sequenceHeader,
+            boolean frameSizeOverride,
+            boolean useReferenceFrameSize,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices
+    ) throws IOException {
         int upscaledWidth;
         int height;
+        int renderWidth;
+        int renderHeight;
+        if (useReferenceFrameSize) {
+            for (int i = 0; i < REFERENCES_PER_FRAME; i++) {
+                if (reader.readFlag()) {
+                    int referenceSlot = referenceFrameIndices[i];
+                    if (referenceSlot < 0 || referenceSlot >= TOTAL_REFERENCE_FRAMES) {
+                        fail("Reference-sized frames require a decoded reference-frame slot");
+                    }
+                    FrameHeader referenceFrameHeader = referenceFrameHeaders[referenceSlot];
+                    if (referenceFrameHeader == null) {
+                        fail("Reference-sized frames require the selected reference-frame header");
+                    }
+                    upscaledWidth = referenceFrameHeader.frameSize().upscaledWidth();
+                    height = referenceFrameHeader.frameSize().height();
+                    renderWidth = referenceFrameHeader.frameSize().renderWidth();
+                    renderHeight = referenceFrameHeader.frameSize().renderHeight();
+
+                    FrameHeader.SuperResolutionInfo superResolution = readSuperResolution(reader, sequenceHeader);
+                    return new FrameSizeResult(
+                            new FrameHeader.FrameSize(
+                                    computeCodedWidth(upscaledWidth, superResolution.widthScaleDenominator()),
+                                    upscaledWidth,
+                                    height,
+                                    renderWidth,
+                                    renderHeight
+                            ),
+                            superResolution
+                    );
+                }
+            }
+        }
+
         if (frameSizeOverride) {
             upscaledWidth = readInt(reader, sequenceHeader.widthBits()) + 1;
             height = readInt(reader, sequenceHeader.heightBits()) + 1;
@@ -389,20 +672,9 @@ public final class FrameHeaderParser {
             height = sequenceHeader.maxHeight();
         }
 
-        boolean superResolutionEnabled = sequenceHeader.features().superResolution() && reader.readFlag();
-        int widthScaleDenominator;
-        int codedWidth;
-        if (superResolutionEnabled) {
-            widthScaleDenominator = 9 + readInt(reader, 3);
-            codedWidth = Math.max((upscaledWidth * 8 + (widthScaleDenominator >> 1)) / widthScaleDenominator, Math.min(16, upscaledWidth));
-        } else {
-            widthScaleDenominator = 8;
-            codedWidth = upscaledWidth;
-        }
+        FrameHeader.SuperResolutionInfo superResolution = readSuperResolution(reader, sequenceHeader);
 
         boolean haveRenderSize = reader.readFlag();
-        int renderWidth;
-        int renderHeight;
         if (haveRenderSize) {
             renderWidth = readInt(reader, 16) + 1;
             renderHeight = readInt(reader, 16) + 1;
@@ -412,9 +684,42 @@ public final class FrameHeaderParser {
         }
 
         return new FrameSizeResult(
-                new FrameHeader.FrameSize(codedWidth, upscaledWidth, height, renderWidth, renderHeight),
-                new FrameHeader.SuperResolutionInfo(superResolutionEnabled, widthScaleDenominator)
+                new FrameHeader.FrameSize(
+                        computeCodedWidth(upscaledWidth, superResolution.widthScaleDenominator()),
+                        upscaledWidth,
+                        height,
+                        renderWidth,
+                        renderHeight
+                ),
+                superResolution
         );
+    }
+
+    /// Parses frame-level super-resolution signaling.
+    ///
+    /// @param reader the payload bit reader
+    /// @param sequenceHeader the active sequence header
+    /// @return the parsed super-resolution state
+    /// @throws IOException if the payload is truncated
+    private static FrameHeader.SuperResolutionInfo readSuperResolution(
+            BitReader reader,
+            SequenceHeader sequenceHeader
+    ) throws IOException {
+        boolean enabled = sequenceHeader.features().superResolution() && reader.readFlag();
+        int widthScaleDenominator = enabled ? 9 + readInt(reader, 3) : 8;
+        return new FrameHeader.SuperResolutionInfo(enabled, widthScaleDenominator);
+    }
+
+    /// Computes the coded width after optional super-resolution downscaling.
+    ///
+    /// @param upscaledWidth the frame width before super-resolution downscaling
+    /// @param widthScaleDenominator the super-resolution width denominator
+    /// @return the coded width after super-resolution downscaling
+    private static int computeCodedWidth(int upscaledWidth, int widthScaleDenominator) {
+        if (widthScaleDenominator == 8) {
+            return upscaledWidth;
+        }
+        return Math.max((upscaledWidth * 8 + (widthScaleDenominator >> 1)) / widthScaleDenominator, Math.min(16, upscaledWidth));
     }
 
     /// Parses tile layout information.
@@ -910,6 +1215,125 @@ public final class FrameHeaderParser {
         };
     }
 
+    /// Parses the frame-level interpolation filter mode for inter prediction.
+    ///
+    /// @param reader the payload bit reader
+    /// @return the parsed interpolation filter mode
+    /// @throws IOException if the payload is truncated or invalid
+    private static FrameHeader.InterpolationFilter parseInterpolationFilter(BitReader reader) throws IOException {
+        if (reader.readFlag()) {
+            return FrameHeader.InterpolationFilter.SWITCHABLE;
+        }
+        return switch (readInt(reader, 2)) {
+            case 0 -> FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
+            case 1 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH;
+            case 2 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
+            case 3 -> FrameHeader.InterpolationFilter.BILINEAR;
+            default -> throw new IllegalStateException("Unexpected interpolation filter code");
+        };
+    }
+
+    /// Derives skip-mode availability and reads the enabled flag when present.
+    ///
+    /// @param reader the payload bit reader
+    /// @param sequenceHeader the active sequence header
+    /// @param frameType the current frame type
+    /// @param frameOffset the current frame order hint
+    /// @param switchableCompoundReferences whether compound-reference mode is switchable
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceFrameIndices the decoded LAST..ALTREF slot indices
+    /// @return the parsed skip-mode state
+    /// @throws IOException if referenced headers are unavailable or the payload is truncated
+    private static SkipModeResult deriveSkipMode(
+            BitReader reader,
+            SequenceHeader sequenceHeader,
+            FrameType frameType,
+            int frameOffset,
+            boolean switchableCompoundReferences,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices
+    ) throws IOException {
+        if (!switchableCompoundReferences || !isInterOrSwitch(frameType) || !sequenceHeader.features().orderHint()) {
+            return new SkipModeResult(false, false, new int[]{-1, -1});
+        }
+
+        int offBefore = -1;
+        int offAfter = -1;
+        int offBeforeIndex = -1;
+        int offAfterIndex = -1;
+        for (int i = 0; i < REFERENCES_PER_FRAME; i++) {
+            int referenceSlot = referenceFrameIndices[i];
+            if (referenceSlot < 0 || referenceSlot >= TOTAL_REFERENCE_FRAMES) {
+                fail("Skip-mode derivation requires all reference-frame slots to be decoded");
+            }
+            FrameHeader referenceFrameHeader = referenceFrameHeaders[referenceSlot];
+            if (referenceFrameHeader == null) {
+                fail("Skip-mode derivation requires all referenced frame headers");
+            }
+            int referencePoc = referenceFrameHeader.frameOffset();
+            int diff = getPocDiff(sequenceHeader.features().orderHintBits(), referencePoc, frameOffset);
+            if (diff > 0) {
+                if (offAfter < 0 || getPocDiff(sequenceHeader.features().orderHintBits(), offAfter, referencePoc) > 0) {
+                    offAfter = referencePoc;
+                    offAfterIndex = i;
+                }
+            } else if (diff < 0) {
+                if (offBefore < 0 || getPocDiff(sequenceHeader.features().orderHintBits(), referencePoc, offBefore) > 0) {
+                    offBefore = referencePoc;
+                    offBeforeIndex = i;
+                }
+            }
+        }
+
+        int[] skipModeReferenceIndices = new int[]{-1, -1};
+        boolean skipModeAllowed = false;
+        if (offBefore >= 0 && offAfter >= 0) {
+            skipModeReferenceIndices[0] = Math.min(offBeforeIndex, offAfterIndex);
+            skipModeReferenceIndices[1] = Math.max(offBeforeIndex, offAfterIndex);
+            skipModeAllowed = true;
+        } else if (offBefore >= 0) {
+            int offBefore2 = -1;
+            int offBefore2Index = -1;
+            for (int i = 0; i < REFERENCES_PER_FRAME; i++) {
+                int referenceSlot = referenceFrameIndices[i];
+                FrameHeader referenceFrameHeader = referenceFrameHeaders[referenceSlot];
+                if (referenceFrameHeader == null) {
+                    fail("Skip-mode derivation requires all referenced frame headers");
+                }
+                int referencePoc = referenceFrameHeader.frameOffset();
+                if (getPocDiff(sequenceHeader.features().orderHintBits(), referencePoc, offBefore) < 0) {
+                    if (offBefore2 < 0 || getPocDiff(sequenceHeader.features().orderHintBits(), referencePoc, offBefore2) > 0) {
+                        offBefore2 = referencePoc;
+                        offBefore2Index = i;
+                    }
+                }
+            }
+            if (offBefore2 >= 0) {
+                skipModeReferenceIndices[0] = Math.min(offBeforeIndex, offBefore2Index);
+                skipModeReferenceIndices[1] = Math.max(offBeforeIndex, offBefore2Index);
+                skipModeAllowed = true;
+            }
+        }
+
+        boolean skipModeEnabled = skipModeAllowed && reader.readFlag();
+        return new SkipModeResult(skipModeAllowed, skipModeEnabled, skipModeReferenceIndices);
+    }
+
+    /// Returns the wrapped order-hint difference `poc0 - poc1`.
+    ///
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param poc0 the minuend order hint
+    /// @param poc1 the subtrahend order hint
+    /// @return the wrapped order-hint difference `poc0 - poc1`
+    private static int getPocDiff(int orderHintBits, int poc0, int poc1) {
+        if (orderHintBits == 0) {
+            return 0;
+        }
+        int mask = 1 << (orderHintBits - 1);
+        int diff = poc0 - poc1;
+        return (diff & (mask - 1)) - (diff & mask);
+    }
+
     /// Maps an AV1 frame type code to the public enum.
     ///
     /// @param value the AV1 frame type code
@@ -1052,6 +1476,28 @@ public final class FrameHeaderParser {
     /// @throws IOException always
     private static IOException unsupported(String message) throws IOException {
         throw new IOException(message);
+    }
+
+    /// Parsed skip-mode availability and enabled state.
+    @NotNullByDefault
+    private static final class SkipModeResult {
+        /// Whether skip mode is permitted for the frame.
+        private final boolean allowed;
+        /// Whether skip mode is enabled for the frame.
+        private final boolean enabled;
+        /// The two skip-mode reference positions, or `-1` when unavailable.
+        private final int[] referenceIndices;
+
+        /// Creates parsed skip-mode state.
+        ///
+        /// @param allowed whether skip mode is permitted for the frame
+        /// @param enabled whether skip mode is enabled for the frame
+        /// @param referenceIndices the two skip-mode reference positions, or `-1`
+        private SkipModeResult(boolean allowed, boolean enabled, int[] referenceIndices) {
+            this.allowed = allowed;
+            this.enabled = enabled;
+            this.referenceIndices = Arrays.copyOf(referenceIndices, referenceIndices.length);
+        }
     }
 
     /// Parsed frame size and super-resolution state.

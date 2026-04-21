@@ -21,7 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Parsed AV1 frame header data for currently supported frame types.
+/// Parsed AV1 frame header data.
 @NotNullByDefault
 public final class FrameHeader {
     /// The temporal layer identifier copied from the OBU header.
@@ -58,12 +58,24 @@ public final class FrameHeader {
     private final int frameOffset;
     /// The refresh frame flags bitset.
     private final int refreshFrameFlags;
+    /// Whether short signaling was used to derive the reference-frame list.
+    private final boolean frameReferenceShortSignaling;
+    /// The decoded reference-frame slot indices for LAST..ALTREF.
+    private final int[] referenceFrameIndices;
     /// The frame dimensions and render size.
     private final FrameSize frameSize;
     /// The super-resolution settings for the frame.
     private final SuperResolutionInfo superResolution;
     /// Whether `allow_intrabc` is enabled.
     private final boolean allowIntrabc;
+    /// Whether high-precision motion vectors are allowed.
+    private final boolean allowHighPrecisionMotionVectors;
+    /// The frame-level interpolation filter mode for inter prediction.
+    private final InterpolationFilter subpelFilterMode;
+    /// Whether motion mode signaling is switchable.
+    private final boolean switchableMotionMode;
+    /// Whether reference-frame motion vectors are enabled.
+    private final boolean useReferenceFrameMotionVectors;
     /// Whether context refresh is enabled.
     private final boolean refreshContext;
     /// The tile layout information.
@@ -84,12 +96,22 @@ public final class FrameHeader {
     private final RestorationInfo restoration;
     /// The transform mode for this frame.
     private final TransformMode transformMode;
+    /// Whether compound reference mode is switchable for inter prediction.
+    private final boolean switchableCompoundReferences;
+    /// Whether skip mode is permitted for this frame.
+    private final boolean skipModeAllowed;
+    /// Whether skip mode is enabled for this frame.
+    private final boolean skipModeEnabled;
+    /// The two reference indices used by skip mode, or `-1` when unavailable.
+    private final int[] skipModeReferenceIndices;
+    /// Whether warped motion is enabled for this frame.
+    private final boolean warpedMotion;
     /// Whether the reduced transform type set is used.
     private final boolean reducedTransformSet;
     /// Whether film grain is present for this frame.
     private final boolean filmGrainPresent;
 
-    /// Creates a parsed frame header.
+    /// Creates a parsed frame header with inter-specific fields defaulted to disabled values.
     ///
     /// @param temporalId the temporal layer identifier
     /// @param spatialId the spatial layer identifier
@@ -157,6 +179,143 @@ public final class FrameHeader {
             boolean reducedTransformSet,
             boolean filmGrainPresent
     ) {
+        this(
+                temporalId,
+                spatialId,
+                showExistingFrame,
+                existingFrameIndex,
+                frameId,
+                framePresentationDelay,
+                frameType,
+                showFrame,
+                showableFrame,
+                errorResilientMode,
+                disableCdfUpdate,
+                allowScreenContentTools,
+                forceIntegerMotionVectors,
+                frameSizeOverride,
+                primaryRefFrame,
+                frameOffset,
+                refreshFrameFlags,
+                false,
+                new int[]{-1, -1, -1, -1, -1, -1, -1},
+                frameSize,
+                superResolution,
+                allowIntrabc,
+                false,
+                InterpolationFilter.EIGHT_TAP_REGULAR,
+                false,
+                false,
+                refreshContext,
+                tiling,
+                quantization,
+                segmentation,
+                delta,
+                allLossless,
+                loopFilter,
+                cdef,
+                restoration,
+                transformMode,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                reducedTransformSet,
+                filmGrainPresent
+        );
+    }
+
+    /// Creates a parsed frame header.
+    ///
+    /// @param temporalId the temporal layer identifier
+    /// @param spatialId the spatial layer identifier
+    /// @param showExistingFrame whether this is a show-existing-frame header
+    /// @param existingFrameIndex the referenced frame slot when `showExistingFrame` is true
+    /// @param frameId the frame identifier when present
+    /// @param framePresentationDelay the frame presentation delay when present
+    /// @param frameType the AV1 frame type
+    /// @param showFrame whether the frame is shown immediately
+    /// @param showableFrame whether the frame can be shown later
+    /// @param errorResilientMode whether error resilient mode is enabled
+    /// @param disableCdfUpdate whether CDF updates are disabled
+    /// @param allowScreenContentTools whether screen content tools are enabled
+    /// @param forceIntegerMotionVectors whether integer motion vectors are forced
+    /// @param frameSizeOverride whether frame size override signaling is enabled
+    /// @param primaryRefFrame the primary reference frame index, or `7` when none is used
+    /// @param frameOffset the frame order hint when present
+    /// @param refreshFrameFlags the refresh frame flags bitset
+    /// @param frameReferenceShortSignaling whether short signaling was used for references
+    /// @param referenceFrameIndices the decoded reference-frame slot indices for LAST..ALTREF
+    /// @param frameSize the frame dimensions and render size
+    /// @param superResolution the super-resolution settings
+    /// @param allowIntrabc whether `allow_intrabc` is enabled
+    /// @param allowHighPrecisionMotionVectors whether high-precision motion vectors are allowed
+    /// @param subpelFilterMode the interpolation filter mode used for inter prediction
+    /// @param switchableMotionMode whether motion mode signaling is switchable
+    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
+    /// @param refreshContext whether context refresh is enabled
+    /// @param tiling the tile layout information
+    /// @param quantization the quantization parameters
+    /// @param segmentation the segmentation parameters
+    /// @param delta the delta-q and delta-lf signaling flags
+    /// @param allLossless whether all segments are lossless
+    /// @param loopFilter the loop filter parameters
+    /// @param cdef the CDEF parameters
+    /// @param restoration the loop restoration parameters
+    /// @param transformMode the transform mode for this frame
+    /// @param switchableCompoundReferences whether compound reference mode is switchable
+    /// @param skipModeAllowed whether skip mode is permitted
+    /// @param skipModeEnabled whether skip mode is enabled
+    /// @param skipModeReferenceIndices the two skip-mode reference indices, or `-1`
+    /// @param warpedMotion whether warped motion is enabled
+    /// @param reducedTransformSet whether the reduced transform type set is used
+    /// @param filmGrainPresent whether film grain is present for this frame
+    public FrameHeader(
+            int temporalId,
+            int spatialId,
+            boolean showExistingFrame,
+            int existingFrameIndex,
+            long frameId,
+            long framePresentationDelay,
+            FrameType frameType,
+            boolean showFrame,
+            boolean showableFrame,
+            boolean errorResilientMode,
+            boolean disableCdfUpdate,
+            boolean allowScreenContentTools,
+            boolean forceIntegerMotionVectors,
+            boolean frameSizeOverride,
+            int primaryRefFrame,
+            int frameOffset,
+            int refreshFrameFlags,
+            boolean frameReferenceShortSignaling,
+            int[] referenceFrameIndices,
+            FrameSize frameSize,
+            SuperResolutionInfo superResolution,
+            boolean allowIntrabc,
+            boolean allowHighPrecisionMotionVectors,
+            InterpolationFilter subpelFilterMode,
+            boolean switchableMotionMode,
+            boolean useReferenceFrameMotionVectors,
+            boolean refreshContext,
+            TilingInfo tiling,
+            QuantizationInfo quantization,
+            SegmentationInfo segmentation,
+            DeltaInfo delta,
+            boolean allLossless,
+            LoopFilterInfo loopFilter,
+            CdefInfo cdef,
+            RestorationInfo restoration,
+            TransformMode transformMode,
+            boolean switchableCompoundReferences,
+            boolean skipModeAllowed,
+            boolean skipModeEnabled,
+            int[] skipModeReferenceIndices,
+            boolean warpedMotion,
+            boolean reducedTransformSet,
+            boolean filmGrainPresent
+    ) {
         this.temporalId = temporalId;
         this.spatialId = spatialId;
         this.showExistingFrame = showExistingFrame;
@@ -174,9 +333,18 @@ public final class FrameHeader {
         this.primaryRefFrame = primaryRefFrame;
         this.frameOffset = frameOffset;
         this.refreshFrameFlags = refreshFrameFlags;
+        this.frameReferenceShortSignaling = frameReferenceShortSignaling;
+        if (referenceFrameIndices.length != 7) {
+            throw new IllegalArgumentException("referenceFrameIndices.length != 7: " + referenceFrameIndices.length);
+        }
+        this.referenceFrameIndices = Arrays.copyOf(referenceFrameIndices, referenceFrameIndices.length);
         this.frameSize = Objects.requireNonNull(frameSize, "frameSize");
         this.superResolution = Objects.requireNonNull(superResolution, "superResolution");
         this.allowIntrabc = allowIntrabc;
+        this.allowHighPrecisionMotionVectors = allowHighPrecisionMotionVectors;
+        this.subpelFilterMode = Objects.requireNonNull(subpelFilterMode, "subpelFilterMode");
+        this.switchableMotionMode = switchableMotionMode;
+        this.useReferenceFrameMotionVectors = useReferenceFrameMotionVectors;
         this.refreshContext = refreshContext;
         this.tiling = Objects.requireNonNull(tiling, "tiling");
         this.quantization = Objects.requireNonNull(quantization, "quantization");
@@ -187,6 +355,14 @@ public final class FrameHeader {
         this.cdef = Objects.requireNonNull(cdef, "cdef");
         this.restoration = Objects.requireNonNull(restoration, "restoration");
         this.transformMode = Objects.requireNonNull(transformMode, "transformMode");
+        this.switchableCompoundReferences = switchableCompoundReferences;
+        this.skipModeAllowed = skipModeAllowed;
+        this.skipModeEnabled = skipModeEnabled;
+        if (skipModeReferenceIndices.length != 2) {
+            throw new IllegalArgumentException("skipModeReferenceIndices.length != 2: " + skipModeReferenceIndices.length);
+        }
+        this.skipModeReferenceIndices = Arrays.copyOf(skipModeReferenceIndices, skipModeReferenceIndices.length);
+        this.warpedMotion = warpedMotion;
         this.reducedTransformSet = reducedTransformSet;
         this.filmGrainPresent = filmGrainPresent;
     }
@@ -310,6 +486,28 @@ public final class FrameHeader {
         return refreshFrameFlags;
     }
 
+    /// Returns whether short signaling was used to derive the reference-frame list.
+    ///
+    /// @return whether short signaling was used to derive the reference-frame list
+    public boolean frameReferenceShortSignaling() {
+        return frameReferenceShortSignaling;
+    }
+
+    /// Returns the decoded reference-frame slot indices for LAST..ALTREF.
+    ///
+    /// @return the decoded reference-frame slot indices for LAST..ALTREF
+    public int[] referenceFrameIndices() {
+        return Arrays.copyOf(referenceFrameIndices, referenceFrameIndices.length);
+    }
+
+    /// Returns a decoded reference-frame slot index by position.
+    ///
+    /// @param index the zero-based LAST..ALTREF position
+    /// @return the decoded reference-frame slot index
+    public int referenceFrameIndex(int index) {
+        return referenceFrameIndices[index];
+    }
+
     /// Returns the frame dimensions and render size.
     ///
     /// @return the frame dimensions and render size
@@ -329,6 +527,34 @@ public final class FrameHeader {
     /// @return whether `allow_intrabc` is enabled
     public boolean allowIntrabc() {
         return allowIntrabc;
+    }
+
+    /// Returns whether high-precision motion vectors are allowed.
+    ///
+    /// @return whether high-precision motion vectors are allowed
+    public boolean allowHighPrecisionMotionVectors() {
+        return allowHighPrecisionMotionVectors;
+    }
+
+    /// Returns the interpolation filter mode used for inter prediction.
+    ///
+    /// @return the interpolation filter mode used for inter prediction
+    public InterpolationFilter subpelFilterMode() {
+        return subpelFilterMode;
+    }
+
+    /// Returns whether motion mode signaling is switchable.
+    ///
+    /// @return whether motion mode signaling is switchable
+    public boolean switchableMotionMode() {
+        return switchableMotionMode;
+    }
+
+    /// Returns whether reference-frame motion vectors are enabled.
+    ///
+    /// @return whether reference-frame motion vectors are enabled
+    public boolean useReferenceFrameMotionVectors() {
+        return useReferenceFrameMotionVectors;
     }
 
     /// Returns whether context refresh is enabled.
@@ -401,6 +627,49 @@ public final class FrameHeader {
         return transformMode;
     }
 
+    /// Returns whether compound reference mode is switchable for inter prediction.
+    ///
+    /// @return whether compound reference mode is switchable for inter prediction
+    public boolean switchableCompoundReferences() {
+        return switchableCompoundReferences;
+    }
+
+    /// Returns whether skip mode is permitted for this frame.
+    ///
+    /// @return whether skip mode is permitted for this frame
+    public boolean skipModeAllowed() {
+        return skipModeAllowed;
+    }
+
+    /// Returns whether skip mode is enabled for this frame.
+    ///
+    /// @return whether skip mode is enabled for this frame
+    public boolean skipModeEnabled() {
+        return skipModeEnabled;
+    }
+
+    /// Returns the two skip-mode reference indices, or `-1` when unavailable.
+    ///
+    /// @return the two skip-mode reference indices, or `-1` when unavailable
+    public int[] skipModeReferenceIndices() {
+        return Arrays.copyOf(skipModeReferenceIndices, skipModeReferenceIndices.length);
+    }
+
+    /// Returns one skip-mode reference index by position.
+    ///
+    /// @param index the zero-based skip-mode reference position
+    /// @return the skip-mode reference index, or `-1`
+    public int skipModeReferenceIndex(int index) {
+        return skipModeReferenceIndices[index];
+    }
+
+    /// Returns whether warped motion is enabled for this frame.
+    ///
+    /// @return whether warped motion is enabled for this frame
+    public boolean warpedMotion() {
+        return warpedMotion;
+    }
+
     /// Returns whether the reduced transform type set is used.
     ///
     /// @return whether the reduced transform type set is used
@@ -423,6 +692,21 @@ public final class FrameHeader {
         /// Largest-allowed transform mode.
         LARGEST,
         /// Switchable transform mode.
+        SWITCHABLE
+    }
+
+    /// Interpolation filter modes used by AV1 inter prediction.
+    @NotNullByDefault
+    public enum InterpolationFilter {
+        /// Regular 8-tap interpolation.
+        EIGHT_TAP_REGULAR,
+        /// Smooth 8-tap interpolation.
+        EIGHT_TAP_SMOOTH,
+        /// Sharp 8-tap interpolation.
+        EIGHT_TAP_SHARP,
+        /// Bilinear interpolation.
+        BILINEAR,
+        /// Switchable interpolation selected per block.
         SWITCHABLE
     }
 
