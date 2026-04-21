@@ -15,34 +15,40 @@
  */
 package org.glavo.avif.internal.av1.model;
 
+import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.jetbrains.annotations.NotNullByDefault;
 
+import java.util.Arrays;
 import java.util.Objects;
 
-/// Parsed byte-range metadata for one tile payload inside a tile group.
+/// Read-only view over one tile payload inside a tile group.
 @NotNullByDefault
-public final class TileDataEntry {
+public final class TileBitstream {
     /// The zero-based tile index within the frame.
     private final int tileIndex;
-    /// The byte offset of the tile payload inside the source OBU payload.
+    /// The backing payload bytes that contain the tile payload.
+    private final byte[] data;
+    /// The first tile byte inside `data`.
     private final int dataOffset;
     /// The byte length of the tile payload.
     private final int dataLength;
 
-    /// Creates parsed tile payload metadata.
+    /// Creates a read-only tile payload view.
     ///
     /// @param tileIndex the zero-based tile index within the frame
-    /// @param dataOffset the byte offset of the tile payload inside the source OBU payload
+    /// @param data the backing payload bytes that contain the tile payload
+    /// @param dataOffset the first tile byte inside `data`
     /// @param dataLength the byte length of the tile payload
-    public TileDataEntry(int tileIndex, int dataOffset, int dataLength) {
+    public TileBitstream(int tileIndex, byte[] data, int dataOffset, int dataLength) {
         if (tileIndex < 0) {
             throw new IllegalArgumentException("tileIndex < 0: " + tileIndex);
         }
-        if (dataOffset < 0) {
-            throw new IllegalArgumentException("dataOffset < 0: " + dataOffset);
+        this.data = Objects.requireNonNull(data, "data");
+        if (dataOffset < 0 || dataOffset > data.length) {
+            throw new IllegalArgumentException("dataOffset out of range: " + dataOffset);
         }
-        if (dataLength < 0) {
-            throw new IllegalArgumentException("dataLength < 0: " + dataLength);
+        if (dataLength < 0 || dataOffset + dataLength > data.length) {
+            throw new IllegalArgumentException("dataLength out of range: " + dataLength);
         }
         this.tileIndex = tileIndex;
         this.dataOffset = dataOffset;
@@ -56,9 +62,9 @@ public final class TileDataEntry {
         return tileIndex;
     }
 
-    /// Returns the byte offset of the tile payload inside the source OBU payload.
+    /// Returns the first tile byte inside the backing payload.
     ///
-    /// @return the byte offset of the tile payload inside the source OBU payload
+    /// @return the first tile byte inside the backing payload
     public int dataOffset() {
         return dataOffset;
     }
@@ -70,12 +76,17 @@ public final class TileDataEntry {
         return dataLength;
     }
 
-    /// Creates a read-only tile payload view over the supplied backing bytes.
+    /// Opens a fresh bit reader over the tile payload.
     ///
-    /// @param payload the backing bytes that contain the tile payload
-    /// @return a read-only tile payload view over the supplied backing bytes
-    public TileBitstream toBitstream(byte[] payload) {
-        Objects.requireNonNull(payload, "payload");
-        return new TileBitstream(tileIndex, payload, dataOffset, dataLength);
+    /// @return a fresh bit reader over the tile payload
+    public BitReader openBitReader() {
+        return new BitReader(data, dataOffset, dataLength);
+    }
+
+    /// Returns a copy of the tile payload bytes.
+    ///
+    /// @return a copy of the tile payload bytes
+    public byte[] copyBytes() {
+        return Arrays.copyOfRange(data, dataOffset, dataOffset + dataLength);
     }
 }

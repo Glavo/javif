@@ -22,11 +22,11 @@ import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
-import org.glavo.avif.internal.av1.model.TileDataEntry;
+import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
-import org.glavo.avif.internal.av1.parse.TileDataParser;
+import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
 import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -52,8 +52,8 @@ public final class Av1ImageReader implements AutoCloseable {
     private final FrameHeaderParser frameHeaderParser;
     /// The parser used for tile-group headers.
     private final TileGroupHeaderParser tileGroupHeaderParser;
-    /// The parser used for per-tile payload layout inside tile groups.
-    private final TileDataParser tileDataParser;
+    /// The parser used for per-tile bitstream views inside tile groups.
+    private final TileBitstreamParser tileBitstreamParser;
     /// The most recently parsed sequence header.
     private @Nullable SequenceHeader sequenceHeader;
     /// The currently assembled frame when tile groups span multiple OBUs.
@@ -72,7 +72,7 @@ public final class Av1ImageReader implements AutoCloseable {
         this.sequenceHeaderParser = new SequenceHeaderParser();
         this.frameHeaderParser = new FrameHeaderParser();
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
-        this.tileDataParser = new TileDataParser();
+        this.tileBitstreamParser = new TileBitstreamParser();
     }
 
     /// Opens an AV1 image reader using the default decoder configuration.
@@ -271,7 +271,7 @@ public final class Av1ImageReader implements AutoCloseable {
         }
 
         int tileDataLength = packet.payload().length - tileDataOffset;
-        TileDataEntry[] tiles = tileDataParser.parse(packet, assembly.frameHeader(), tileGroupHeader, tileDataOffset);
+        TileBitstream[] tiles = tileBitstreamParser.parse(packet, assembly.frameHeader(), tileGroupHeader, tileDataOffset);
         assembly.addTileGroup(packet, tileGroupHeader, tileDataOffset, tileDataLength, tiles);
     }
 

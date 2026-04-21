@@ -26,6 +26,10 @@ import java.util.Objects;
 public final class BitReader {
     /// The payload bytes being read.
     private final byte[] data;
+    /// The first readable byte offset inside `data`.
+    private final int startByteOffset;
+    /// The readable byte length inside `data`.
+    private final int byteLength;
     /// The next unread bit offset from the start of the payload.
     private int bitOffset;
 
@@ -33,14 +37,31 @@ public final class BitReader {
     ///
     /// @param data the payload bytes
     public BitReader(byte[] data) {
+        this(data, 0, Objects.requireNonNull(data, "data").length);
+    }
+
+    /// Creates a bit reader for a byte slice inside the supplied payload array.
+    ///
+    /// @param data the payload bytes
+    /// @param startByteOffset the first readable byte offset inside `data`
+    /// @param byteLength the readable byte length inside `data`
+    public BitReader(byte[] data, int startByteOffset, int byteLength) {
         this.data = Objects.requireNonNull(data, "data");
+        if (startByteOffset < 0 || startByteOffset > data.length) {
+            throw new IllegalArgumentException("startByteOffset out of range: " + startByteOffset);
+        }
+        if (byteLength < 0 || startByteOffset + byteLength > data.length) {
+            throw new IllegalArgumentException("byteLength out of range: " + byteLength);
+        }
+        this.startByteOffset = startByteOffset;
+        this.byteLength = byteLength;
     }
 
     /// Returns the number of unread bits.
     ///
     /// @return the number of unread bits
     public int bitsRemaining() {
-        return data.length * Byte.SIZE - bitOffset;
+        return byteLength * Byte.SIZE - bitOffset;
     }
 
     /// Returns the next unread bit offset from the start of the payload.
@@ -81,7 +102,7 @@ public final class BitReader {
     /// @throws IOException if the payload is truncated
     public int readBit() throws IOException {
         ensureBitsRemaining(1);
-        int byteIndex = bitOffset >>> 3;
+        int byteIndex = startByteOffset + (bitOffset >>> 3);
         int bitIndex = 7 - (bitOffset & 7);
         bitOffset++;
         return (data[byteIndex] >>> bitIndex) & 1;

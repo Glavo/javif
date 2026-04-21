@@ -141,13 +141,13 @@ public final class FrameAssembly {
     /// @param header the parsed tile-group header
     /// @param tileDataOffset the byte offset of the tile data inside the OBU payload
     /// @param tileDataLength the byte length of the tile data inside the OBU payload
-    /// @param tiles the parsed per-tile payload ranges
+    /// @param tiles the parsed per-tile bitstream views
     public void addTileGroup(
             ObuPacket sourceObu,
             TileGroupHeader header,
             int tileDataOffset,
             int tileDataLength,
-            TileDataEntry[] tiles
+            TileBitstream[] tiles
     ) {
         if (tileDataOffset < 0) {
             throw new IllegalArgumentException("tileDataOffset < 0: " + tileDataOffset);
@@ -178,8 +178,8 @@ public final class FrameAssembly {
         private final int tileDataOffset;
         /// The byte length of the tile data inside the source OBU payload.
         private final int tileDataLength;
-        /// The parsed per-tile payload ranges inside this tile group.
-        private final TileDataEntry[] tiles;
+        /// The parsed per-tile bitstream views inside this tile group.
+        private final TileBitstream[] tiles;
 
         /// Creates tile-group payload metadata.
         ///
@@ -187,13 +187,13 @@ public final class FrameAssembly {
         /// @param header the parsed tile-group header
         /// @param tileDataOffset the byte offset of the tile data inside the OBU payload
         /// @param tileDataLength the byte length of the tile data inside the OBU payload
-        /// @param tiles the parsed per-tile payload ranges inside this tile group
+        /// @param tiles the parsed per-tile bitstream views inside this tile group
         public TileGroup(
                 ObuPacket sourceObu,
                 TileGroupHeader header,
                 int tileDataOffset,
                 int tileDataLength,
-                TileDataEntry[] tiles
+                TileBitstream[] tiles
         ) {
             this.sourceObu = Objects.requireNonNull(sourceObu, "sourceObu");
             this.header = Objects.requireNonNull(header, "header");
@@ -240,10 +240,10 @@ public final class FrameAssembly {
             return tileDataLength;
         }
 
-        /// Returns the parsed per-tile payload ranges inside this tile group.
+        /// Returns the parsed per-tile bitstream views inside this tile group.
         ///
-        /// @return the parsed per-tile payload ranges inside this tile group
-        public TileDataEntry[] tiles() {
+        /// @return the parsed per-tile bitstream views inside this tile group
+        public TileBitstream[] tiles() {
             return Arrays.copyOf(tiles, tiles.length);
         }
     }

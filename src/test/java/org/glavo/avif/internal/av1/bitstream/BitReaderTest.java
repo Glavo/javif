@@ -43,6 +43,18 @@ final class BitReaderTest {
         assertEquals(0, reader.bitsRemaining());
     }
 
+    /// Verifies that a sliced reader only sees the selected byte range.
+    ///
+    /// @throws IOException if the test payload cannot be read
+    @Test
+    void readsBitsFromByteSlice() throws IOException {
+        BitReader reader = new BitReader(new byte[]{0x55, (byte) 0xD2, 0x33}, 1, 1);
+
+        assertEquals(0b110, reader.readBits(3));
+        assertEquals(0b10010, reader.readBits(5));
+        assertEquals(0, reader.bitsRemaining());
+    }
+
     /// Verifies that byte alignment skips to the next whole-byte boundary.
     ///
     /// @throws IOException if the test payload cannot be read
