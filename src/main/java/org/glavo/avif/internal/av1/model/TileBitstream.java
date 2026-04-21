@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.glavo.avif.internal.av1.bitstream.BitReader;
+import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Arrays;
@@ -81,6 +82,14 @@ public final class TileBitstream {
     /// @return a fresh bit reader over the tile payload
     public BitReader openBitReader() {
         return new BitReader(data, dataOffset, dataLength);
+    }
+
+    /// Opens a fresh AV1 multi-symbol arithmetic decoder over the tile payload.
+    ///
+    /// @param disableCdfUpdate whether CDF updates are disabled for the active frame
+    /// @return a fresh arithmetic decoder over the tile payload
+    public MsacDecoder openMsacDecoder(boolean disableCdfUpdate) {
+        return new MsacDecoder(data, dataOffset, dataLength, disableCdfUpdate);
     }
 
     /// Returns a copy of the tile payload bytes.
