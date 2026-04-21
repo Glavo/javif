@@ -36,6 +36,9 @@ import java.util.Objects;
 /// and block-size-aware CFL gating.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
+    /// The AV1 segment reference-frame code that forces intra block syntax.
+    private static final int SEGMENT_REFERENCE_INTRA_FRAME = 0;
+
     /// The tile-local decode state that owns the active frame and sequence headers.
     private final TileDecodeContext tileContext;
 
@@ -96,7 +99,14 @@ public final class TileBlockHeaderReader {
         if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH) && skip) {
             intra = false;
         } else if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
-            intra = syntaxReader.readIntraBlockFlag(nonNullNeighborContext.intraContext(nonNullPosition));
+            int segmentReferenceFrame = segmentData.referenceFrame();
+            if (segmentReferenceFrame >= 0) {
+                intra = segmentReferenceFrame == SEGMENT_REFERENCE_INTRA_FRAME;
+            } else {
+                intra = syntaxReader.readIntraBlockFlag(nonNullNeighborContext.intraContext(nonNullPosition));
+            }
+        } else if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
+            throw new IllegalStateException("Inter block syntax fell through the expected branch structure");
         } else if (tileContext.frameHeader().allowIntrabc()) {
             useIntrabc = syntaxReader.readUseIntrabcFlag();
             intra = !useIntrabc;

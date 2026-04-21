@@ -165,6 +165,90 @@ final class TileBlockHeaderReaderTest {
         assertEquals(0, header.cflAlphaV());
     }
 
+    /// Verifies that `segment_reference_frame = INTRA_FRAME` forces inter blocks down the intra syntax path.
+    @Test
+    void readsInterBlockForcedIntraBySegmentReference() {
+        byte[] payload = findPayloadForSegmentReferenceForcedIntra();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, 0, false, false);
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                createFixedSegmentationInfo(segments),
+                false,
+                false
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleProbe = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleProbe.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean intraIfConsumed = oracleProbe.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        assertFalse(expectedSkip);
+        assertFalse(intraIfConsumed);
+
+        CdfContext forcedCdf = CdfContext.createDefault();
+        MsacDecoder forcedDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        forcedDecoder.decodeBooleanAdapt(forcedCdf.mutableSkipCdf(0));
+        LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
+                forcedDecoder.decodeSymbolAdapt(forcedCdf.mutableYModeCdf(BlockSize.SIZE_16X16.yModeSizeContext()), 12)
+        );
+        UvIntraPredictionMode expectedUvMode = UvIntraPredictionMode.fromSymbolIndex(
+                forcedDecoder.decodeSymbolAdapt(forcedCdf.mutableUvModeCdf(true, expectedYMode.symbolIndex()), 13)
+        );
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertTrue(header.intra());
+        assertFalse(header.useIntrabc());
+        assertEquals(0, header.segmentId());
+        assertEquals(expectedYMode, header.yMode());
+        assertEquals(expectedUvMode, header.uvMode());
+    }
+
+    /// Verifies that inter segment reference-frame forcing suppresses the intra/inter syntax bit.
+    @Test
+    void readsInterBlockForcedInterBySegmentReference() {
+        byte[] payload = findPayloadForSegmentReferenceForcedInter();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, 1, false, false);
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                createFixedSegmentationInfo(segments),
+                false,
+                false
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean intraIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        assertFalse(expectedSkip);
+        assertTrue(intraIfConsumed);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertEquals(0, header.segmentId());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
+        assertEquals(0, header.yAngle());
+        assertEquals(0, header.uvAngle());
+        assertEquals(0, header.cflAlphaU());
+        assertEquals(0, header.cflAlphaV());
+    }
+
     /// Verifies that `intrabc` blocks keep their implicit DC/DC prediction modes.
     @Test
     void readsIntrabcBlockHeaderWithImplicitDcModes() {
@@ -926,6 +1010,48 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced skip=true with a skipped intra=true decision");
     }
 
+    /// Finds a small payload whose first inter block decodes `skip = false` and whose consumed
+    /// intra/inter decision would decode to `false`.
+    ///
+    /// @return a small payload whose first inter block decodes `skip = false`
+    private static byte[] findPayloadForSegmentReferenceForcedIntra() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                    continue;
+                }
+                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced skip=false with a skipped intra=false decision");
+    }
+
+    /// Finds a small payload whose first inter block decodes `skip = false` and whose consumed
+    /// intra/inter decision would decode to `true`.
+    ///
+    /// @return a small payload whose first inter block decodes `skip = false`
+    private static byte[] findPayloadForSegmentReferenceForcedInter() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                    continue;
+                }
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced skip=false with a skipped intra=true decision");
+    }
+
     /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.
     ///
     /// @return a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled
@@ -1146,6 +1272,24 @@ final class TileBlockHeaderReaderTest {
     /// @return disabled segmentation info used by block-header tests
     private static FrameHeader.SegmentationInfo defaultDisabledSegmentation() {
         return new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]);
+    }
+
+    /// Creates fixed segmentation info used by block-header tests that do not update per-block segment ids.
+    ///
+    /// @param segments the synthetic per-segment feature data
+    /// @return fixed segmentation info used by block-header tests
+    private static FrameHeader.SegmentationInfo createFixedSegmentationInfo(FrameHeader.SegmentData[] segments) {
+        return new FrameHeader.SegmentationInfo(
+                true,
+                false,
+                false,
+                false,
+                false,
+                0,
+                segments,
+                new boolean[8],
+                new int[8]
+        );
     }
 
     /// Creates enabled segmentation info used by block-header tests.
