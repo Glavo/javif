@@ -112,7 +112,7 @@ final class TileBlockHeaderReaderTest {
         CdfContext oracleCdf = CdfContext.createDefault();
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-        boolean expectedIntra = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        boolean expectedIntra = !expectedSkip && oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
         LumaIntraPredictionMode expectedYMode = expectedIntra
                 ? LumaIntraPredictionMode.fromSymbolIndex(oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableYModeCdf(BlockSize.SIZE_16X16.yModeSizeContext()), 12))
                 : null;
@@ -135,6 +135,34 @@ final class TileBlockHeaderReaderTest {
             assertNull(header.yMode());
             assertNull(header.uvMode());
         }
+    }
+
+    /// Verifies that skipped inter blocks do not consume an intra/inter decision or intra syntax.
+    @Test
+    void readsSkippedInterBlockWithoutIntraSyntax() {
+        byte[] payload = findPayloadForSkippedInterBlock();
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean intraIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        assertTrue(expectedSkip);
+        assertTrue(intraIfConsumed);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertTrue(header.skip());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
+        assertEquals(0, header.yAngle());
+        assertEquals(0, header.uvAngle());
+        assertEquals(0, header.cflAlphaU());
+        assertEquals(0, header.cflAlphaV());
     }
 
     /// Verifies that `intrabc` blocks keep their implicit DC/DC prediction modes.
@@ -875,6 +903,27 @@ final class TileBlockHeaderReaderTest {
             }
         }
         throw new IllegalStateException("No deterministic payload produced seg_id_predicted=true for the postskip path");
+    }
+
+    /// Finds a small payload whose first inter block decodes `skip = true` and whose skipped
+    /// intra/inter decision would decode to `intra = true` if it were consumed.
+    ///
+    /// @return a small payload whose first inter block decodes `skip = true`
+    private static byte[] findPayloadForSkippedInterBlock() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                    continue;
+                }
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced skip=true with a skipped intra=true decision");
     }
 
     /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.

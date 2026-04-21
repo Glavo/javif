@@ -93,7 +93,9 @@ public final class TileBlockHeaderReader {
         boolean useIntrabc = false;
         boolean intra;
         FrameType frameType = tileContext.frameHeader().frameType();
-        if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
+        if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH) && skip) {
+            intra = false;
+        } else if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
             intra = syntaxReader.readIntraBlockFlag(nonNullNeighborContext.intraContext(nonNullPosition));
         } else if (tileContext.frameHeader().allowIntrabc()) {
             useIntrabc = syntaxReader.readUseIntrabcFlag();
