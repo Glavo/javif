@@ -51,6 +51,24 @@ public final class BlockNeighborContext {
     /// The left-edge skip-mode flags indexed in 4x4 units.
     private final byte[] leftSkipMode;
 
+    /// The above-edge compound-reference flags indexed in 4x4 units.
+    private final byte[] aboveCompoundReference;
+
+    /// The left-edge compound-reference flags indexed in 4x4 units.
+    private final byte[] leftCompoundReference;
+
+    /// The above-edge primary reference-frame indices indexed in 4x4 units.
+    private final byte[] aboveReferenceFrame0;
+
+    /// The left-edge primary reference-frame indices indexed in 4x4 units.
+    private final byte[] leftReferenceFrame0;
+
+    /// The above-edge secondary reference-frame indices indexed in 4x4 units.
+    private final byte[] aboveReferenceFrame1;
+
+    /// The left-edge secondary reference-frame indices indexed in 4x4 units.
+    private final byte[] leftReferenceFrame1;
+
     /// The above-edge segmentation-prediction flags indexed in 4x4 units.
     private final byte[] aboveSegmentPredicted;
 
@@ -103,6 +121,12 @@ public final class BlockNeighborContext {
     /// @param leftSkip the left-edge skip flags indexed in 4x4 units
     /// @param aboveSkipMode the above-edge skip-mode flags indexed in 4x4 units
     /// @param leftSkipMode the left-edge skip-mode flags indexed in 4x4 units
+    /// @param aboveCompoundReference the above-edge compound-reference flags indexed in 4x4 units
+    /// @param leftCompoundReference the left-edge compound-reference flags indexed in 4x4 units
+    /// @param aboveReferenceFrame0 the above-edge primary reference-frame indices indexed in 4x4 units
+    /// @param leftReferenceFrame0 the left-edge primary reference-frame indices indexed in 4x4 units
+    /// @param aboveReferenceFrame1 the above-edge secondary reference-frame indices indexed in 4x4 units
+    /// @param leftReferenceFrame1 the left-edge secondary reference-frame indices indexed in 4x4 units
     /// @param aboveSegmentPredicted the above-edge segmentation-prediction flags indexed in 4x4 units
     /// @param leftSegmentPredicted the left-edge segmentation-prediction flags indexed in 4x4 units
     /// @param aboveSegmentId the above-edge segment identifiers indexed in 4x4 units
@@ -126,6 +150,12 @@ public final class BlockNeighborContext {
             byte[] leftSkip,
             byte[] aboveSkipMode,
             byte[] leftSkipMode,
+            byte[] aboveCompoundReference,
+            byte[] leftCompoundReference,
+            byte[] aboveReferenceFrame0,
+            byte[] leftReferenceFrame0,
+            byte[] aboveReferenceFrame1,
+            byte[] leftReferenceFrame1,
             byte[] aboveSegmentPredicted,
             byte[] leftSegmentPredicted,
             byte[] aboveSegmentId,
@@ -149,6 +179,12 @@ public final class BlockNeighborContext {
         this.leftSkip = Objects.requireNonNull(leftSkip, "leftSkip");
         this.aboveSkipMode = Objects.requireNonNull(aboveSkipMode, "aboveSkipMode");
         this.leftSkipMode = Objects.requireNonNull(leftSkipMode, "leftSkipMode");
+        this.aboveCompoundReference = Objects.requireNonNull(aboveCompoundReference, "aboveCompoundReference");
+        this.leftCompoundReference = Objects.requireNonNull(leftCompoundReference, "leftCompoundReference");
+        this.aboveReferenceFrame0 = Objects.requireNonNull(aboveReferenceFrame0, "aboveReferenceFrame0");
+        this.leftReferenceFrame0 = Objects.requireNonNull(leftReferenceFrame0, "leftReferenceFrame0");
+        this.aboveReferenceFrame1 = Objects.requireNonNull(aboveReferenceFrame1, "aboveReferenceFrame1");
+        this.leftReferenceFrame1 = Objects.requireNonNull(leftReferenceFrame1, "leftReferenceFrame1");
         this.aboveSegmentPredicted = Objects.requireNonNull(aboveSegmentPredicted, "aboveSegmentPredicted");
         this.leftSegmentPredicted = Objects.requireNonNull(leftSegmentPredicted, "leftSegmentPredicted");
         this.aboveSegmentId = Objects.requireNonNull(aboveSegmentId, "aboveSegmentId");
@@ -179,8 +215,16 @@ public final class BlockNeighborContext {
 
         byte[] aboveIntra = new byte[tileWidth4];
         byte[] leftIntra = new byte[tileHeight4];
+        byte[] aboveReferenceFrame0 = new byte[tileWidth4];
+        byte[] leftReferenceFrame0 = new byte[tileHeight4];
+        byte[] aboveReferenceFrame1 = new byte[tileWidth4];
+        byte[] leftReferenceFrame1 = new byte[tileHeight4];
         LumaIntraPredictionMode[] aboveMode = new LumaIntraPredictionMode[tileWidth4];
         LumaIntraPredictionMode[] leftMode = new LumaIntraPredictionMode[tileHeight4];
+        Arrays.fill(aboveReferenceFrame0, (byte) -1);
+        Arrays.fill(leftReferenceFrame0, (byte) -1);
+        Arrays.fill(aboveReferenceFrame1, (byte) -1);
+        Arrays.fill(leftReferenceFrame1, (byte) -1);
         Arrays.fill(aboveMode, LumaIntraPredictionMode.DC);
         Arrays.fill(leftMode, LumaIntraPredictionMode.DC);
         if (keyFrame) {
@@ -197,6 +241,12 @@ public final class BlockNeighborContext {
                 new byte[tileHeight4],
                 new byte[tileWidth4],
                 new byte[tileHeight4],
+                new byte[tileWidth4],
+                new byte[tileHeight4],
+                aboveReferenceFrame0,
+                leftReferenceFrame0,
+                aboveReferenceFrame1,
+                leftReferenceFrame1,
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 new byte[tileWidth4],
@@ -294,6 +344,183 @@ public final class BlockNeighborContext {
             context += leftSkipMode[nonNullPosition.y4()];
         }
         return context;
+    }
+
+    /// Returns the compound-reference context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the compound-reference context for the supplied block position
+    public int compoundReferenceContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        boolean haveTop = hasTopNeighbor(nonNullPosition);
+        boolean haveLeft = hasLeftNeighbor(nonNullPosition);
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        if (haveTop) {
+            if (haveLeft) {
+                if (aboveCompoundReference[x4] != 0) {
+                    if (leftCompoundReference[y4] != 0) {
+                        return 4;
+                    }
+                    return 2 + ((leftReferenceFrame0[y4] & 0xFF) >= 4 ? 1 : 0);
+                }
+                if (leftCompoundReference[y4] != 0) {
+                    return 2 + ((aboveReferenceFrame0[x4] & 0xFF) >= 4 ? 1 : 0);
+                }
+                return (((leftReferenceFrame0[y4] & 0xFF) >= 4) ? 1 : 0)
+                        ^ (((aboveReferenceFrame0[x4] & 0xFF) >= 4) ? 1 : 0);
+            }
+            return aboveCompoundReference[x4] != 0 ? 3 : ((aboveReferenceFrame0[x4] & 0xFF) >= 4 ? 1 : 0);
+        }
+        if (haveLeft) {
+            return leftCompoundReference[y4] != 0 ? 3 : ((leftReferenceFrame0[y4] & 0xFF) >= 4 ? 1 : 0);
+        }
+        return 1;
+    }
+
+    /// Returns the compound-direction context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the compound-direction context for the supplied block position
+    public int compoundDirectionContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        boolean haveTop = hasTopNeighbor(nonNullPosition);
+        boolean haveLeft = hasLeftNeighbor(nonNullPosition);
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        if (haveTop && haveLeft) {
+            int aboveIntra = this.aboveIntra[x4];
+            int leftIntra = this.leftIntra[y4];
+            if (aboveIntra != 0 && leftIntra != 0) {
+                return 2;
+            }
+            if (aboveIntra != 0 || leftIntra != 0) {
+                boolean useLeft = aboveIntra != 0;
+                int off = useLeft ? y4 : x4;
+                if ((useLeft ? leftCompoundReference[off] : aboveCompoundReference[off]) == 0) {
+                    return 2;
+                }
+                return 1 + 2 * (hasUnidirectionalCompoundReference(useLeft, off) ? 1 : 0);
+            }
+
+            boolean aboveCompound = aboveCompoundReference[x4] != 0;
+            boolean leftCompound = leftCompoundReference[y4] != 0;
+            int aboveRef0 = aboveReferenceFrame0[x4];
+            int leftRef0 = leftReferenceFrame0[y4];
+            if (!aboveCompound && !leftCompound) {
+                return 1 + (((aboveRef0 >= 4) == (leftRef0 >= 4)) ? 2 : 0);
+            }
+            if (!aboveCompound || !leftCompound) {
+                boolean useAbove = aboveCompound;
+                int off = useAbove ? x4 : y4;
+                if (!hasUnidirectionalCompoundReference(!useAbove, off)) {
+                    return 1;
+                }
+                return 3 + ((((aboveRef0 >= 4) == (leftRef0 >= 4)) ? 1 : 0));
+            }
+            boolean aboveUni = hasUnidirectionalCompoundReference(false, x4);
+            boolean leftUni = hasUnidirectionalCompoundReference(true, y4);
+            if (!aboveUni && !leftUni) {
+                return 0;
+            }
+            if (!aboveUni || !leftUni) {
+                return 2;
+            }
+            return 3 + (((aboveRef0 == 4) == (leftRef0 == 4)) ? 1 : 0);
+        }
+        if (haveTop || haveLeft) {
+            boolean useLeft = haveLeft;
+            int off = useLeft ? nonNullPosition.y4() : nonNullPosition.x4();
+            if ((useLeft ? leftIntra[off] : aboveIntra[off]) != 0) {
+                return 2;
+            }
+            if ((useLeft ? leftCompoundReference[off] : aboveCompoundReference[off]) == 0) {
+                return 2;
+            }
+            return hasUnidirectionalCompoundReference(useLeft, off) ? 4 : 0;
+        }
+        return 2;
+    }
+
+    /// Returns the single-reference primary context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the single-reference primary context for the supplied block position
+    public int singleReferenceContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int[] count = new int[2];
+        accumulateForwardBackwardCounts(count, false, nonNullPosition);
+        return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
+    }
+
+    /// Returns the forward-reference context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the forward-reference context for the supplied block position
+    public int forwardReferenceContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int[] count = new int[4];
+        accumulateReferenceCounts(count, nonNullPosition, 0, 4);
+        count[0] += count[1];
+        count[2] += count[3];
+        return count[0] == count[2] ? 1 : count[0] < count[2] ? 0 : 2;
+    }
+
+    /// Returns the LAST-vs-LAST2 reference context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the LAST-vs-LAST2 reference context for the supplied block position
+    public int forwardReference1Context(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int[] count = new int[2];
+        accumulateReferenceCounts(count, nonNullPosition, 0, 2);
+        return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
+    }
+
+    /// Returns the LAST3-vs-GOLDEN reference context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the LAST3-vs-GOLDEN reference context for the supplied block position
+    public int forwardReference2Context(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int[] count = new int[2];
+        accumulateReferenceCounts(count, nonNullPosition, 2, 2);
+        return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
+    }
+
+    /// Returns the backward-reference primary context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the backward-reference primary context for the supplied block position
+    public int backwardReferenceContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int[] count = new int[3];
+        accumulateReferenceCounts(count, nonNullPosition, 4, 3);
+        count[1] += count[0];
+        return count[2] == count[1] ? 1 : count[1] < count[2] ? 0 : 2;
+    }
+
+    /// Returns the BWDREF-vs-ALTREF2 reference context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the BWDREF-vs-ALTREF2 reference context for the supplied block position
+    public int backwardReference1Context(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int[] count = new int[3];
+        accumulateReferenceCounts(count, nonNullPosition, 4, 3);
+        return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
+    }
+
+    /// Returns the LAST2/LAST3/GOLDEN unidirectional-reference context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the LAST2/LAST3/GOLDEN unidirectional-reference context for the supplied block position
+    public int unidirectionalReference1Context(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int[] count = new int[3];
+        accumulateReferenceCounts(count, nonNullPosition, 1, 3);
+        count[1] += count[2];
+        return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
 
     /// Returns the temporal segmentation-prediction context for the supplied block position.
@@ -432,9 +659,10 @@ public final class BlockNeighborContext {
         TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
         BlockPosition position = nonNullHeader.position();
         BlockSize size = nonNullHeader.size();
-        byte intra = (byte) (nonNullHeader.intra() ? 1 : 0);
+        byte intra = (byte) ((nonNullHeader.intra() || nonNullHeader.useIntrabc()) ? 1 : 0);
         byte skip = (byte) (nonNullHeader.skip() ? 1 : 0);
         byte skipMode = (byte) (nonNullHeader.skipMode() ? 1 : 0);
+        byte compoundReference = (byte) (nonNullHeader.compoundReference() ? 1 : 0);
         byte segmentPredicted = (byte) (nonNullHeader.segmentPredicted() ? 1 : 0);
         byte segmentId = (byte) nonNullHeader.segmentId();
         byte paletteSize = (byte) nonNullHeader.yPaletteSize();
@@ -442,6 +670,8 @@ public final class BlockNeighborContext {
         int[] yPaletteColors = nonNullHeader.yPaletteColors();
         int[] uPaletteColors = nonNullHeader.uPaletteColors();
         int[] vPaletteColors = nonNullHeader.vPaletteColors();
+        byte referenceFrame0 = (byte) nonNullHeader.referenceFrame0();
+        byte referenceFrame1 = (byte) nonNullHeader.referenceFrame1();
         LumaIntraPredictionMode mode = nonNullHeader.intra() ? nonNullHeader.yMode() : LumaIntraPredictionMode.DC;
         int endX4 = Math.min(tileWidth4, position.x4() + size.width4());
         int endY4 = Math.min(tileHeight4, position.y4() + size.height4());
@@ -449,6 +679,9 @@ public final class BlockNeighborContext {
             aboveIntra[x4] = intra;
             aboveSkip[x4] = skip;
             aboveSkipMode[x4] = skipMode;
+            aboveCompoundReference[x4] = compoundReference;
+            aboveReferenceFrame0[x4] = referenceFrame0;
+            aboveReferenceFrame1[x4] = referenceFrame1;
             aboveSegmentPredicted[x4] = segmentPredicted;
             aboveSegmentId[x4] = segmentId;
             abovePaletteSize[x4] = paletteSize;
@@ -465,6 +698,9 @@ public final class BlockNeighborContext {
             leftIntra[y4] = intra;
             leftSkip[y4] = skip;
             leftSkipMode[y4] = skipMode;
+            leftCompoundReference[y4] = compoundReference;
+            leftReferenceFrame0[y4] = referenceFrame0;
+            leftReferenceFrame1[y4] = referenceFrame1;
             leftSegmentPredicted[y4] = segmentPredicted;
             leftSegmentId[y4] = segmentId;
             leftPaletteSize[y4] = paletteSize;
@@ -476,6 +712,75 @@ public final class BlockNeighborContext {
             System.arraycopy(uPaletteColors, 0, leftPaletteEntries[1][y4], 0, uPaletteColors.length);
             System.arraycopy(vPaletteColors, 0, leftPaletteEntries[2][y4], 0, vPaletteColors.length);
             leftMode[y4] = mode;
+        }
+    }
+
+    /// Returns whether one stored neighbor uses a unidirectional compound reference pair.
+    ///
+    /// @param leftEdge whether the stored neighbor lives on the left edge instead of the above edge
+    /// @param index the edge index in 4x4 units
+    /// @return whether one stored neighbor uses a unidirectional compound reference pair
+    private boolean hasUnidirectionalCompoundReference(boolean leftEdge, int index) {
+        int referenceFrame0 = leftEdge ? leftReferenceFrame0[index] : aboveReferenceFrame0[index];
+        int referenceFrame1 = leftEdge ? leftReferenceFrame1[index] : aboveReferenceFrame1[index];
+        return (referenceFrame0 < 4) == (referenceFrame1 < 4);
+    }
+
+    /// Accumulates forward-vs-backward reference counts from already-decoded neighbors.
+    ///
+    /// @param count the two-entry destination array for forward and backward reference counts
+    /// @param includeIntra whether intra-coded neighbors should also contribute
+    /// @param position the current block position
+    private void accumulateForwardBackwardCounts(int[] count, boolean includeIntra, BlockPosition position) {
+        int x4 = position.x4();
+        int y4 = position.y4();
+        if (hasTopNeighbor(position) && (includeIntra || aboveIntra[x4] == 0)) {
+            count[(aboveReferenceFrame0[x4] & 0xFF) >= 4 ? 1 : 0]++;
+            if (aboveCompoundReference[x4] != 0) {
+                count[(aboveReferenceFrame1[x4] & 0xFF) >= 4 ? 1 : 0]++;
+            }
+        }
+        if (hasLeftNeighbor(position) && (includeIntra || leftIntra[y4] == 0)) {
+            count[(leftReferenceFrame0[y4] & 0xFF) >= 4 ? 1 : 0]++;
+            if (leftCompoundReference[y4] != 0) {
+                count[(leftReferenceFrame1[y4] & 0xFF) >= 4 ? 1 : 0]++;
+            }
+        }
+    }
+
+    /// Accumulates reference counts for one contiguous range of reference-frame indices.
+    ///
+    /// @param count the destination count array whose length equals the tracked range length
+    /// @param position the current block position
+    /// @param startReference the inclusive first tracked reference-frame index
+    /// @param length the number of tracked reference-frame indices
+    private void accumulateReferenceCounts(int[] count, BlockPosition position, int startReference, int length) {
+        int x4 = position.x4();
+        int y4 = position.y4();
+        if (hasTopNeighbor(position) && aboveIntra[x4] == 0) {
+            incrementReferenceCount(count, aboveReferenceFrame0[x4], startReference, length);
+            if (aboveCompoundReference[x4] != 0) {
+                incrementReferenceCount(count, aboveReferenceFrame1[x4], startReference, length);
+            }
+        }
+        if (hasLeftNeighbor(position) && leftIntra[y4] == 0) {
+            incrementReferenceCount(count, leftReferenceFrame0[y4], startReference, length);
+            if (leftCompoundReference[y4] != 0) {
+                incrementReferenceCount(count, leftReferenceFrame1[y4], startReference, length);
+            }
+        }
+    }
+
+    /// Increments one counted reference bucket when the supplied stored reference falls in range.
+    ///
+    /// @param count the destination count array
+    /// @param referenceFrame the stored reference-frame index
+    /// @param startReference the inclusive first tracked reference-frame index
+    /// @param length the number of tracked reference-frame indices
+    private static void incrementReferenceCount(int[] count, int referenceFrame, int startReference, int length) {
+        int index = referenceFrame - startReference;
+        if (index >= 0 && index < length) {
+            count[index]++;
         }
     }
 

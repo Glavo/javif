@@ -59,6 +59,9 @@ final class BlockNeighborContextTest {
                 true,
                 true,
                 false,
+                false,
+                -1,
+                -1,
                 true,
                 3,
                 LumaIntraPredictionMode.VERTICAL,
@@ -94,6 +97,80 @@ final class BlockNeighborContextTest {
 
         context.updatePartition(position, 8, 0x10, 0x18);
         assertEquals(2, context.partitionContext(3, new BlockPosition(0, 8)));
+    }
+
+    /// Verifies that inter-reference contexts track compound and single-reference neighbors.
+    @Test
+    void derivesInterReferenceContextsFromUpdatedNeighbors() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+
+        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(4, 0),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(0, 4),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                4,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+
+        BlockPosition position = new BlockPosition(4, 4);
+        assertEquals(2, context.compoundReferenceContext(position));
+        assertEquals(1, context.compoundDirectionContext(position));
+        assertEquals(2, context.singleReferenceContext(position));
+        assertEquals(2, context.forwardReferenceContext(position));
+        assertEquals(2, context.forwardReference1Context(position));
+        assertEquals(1, context.forwardReference2Context(position));
+        assertEquals(2, context.backwardReferenceContext(position));
+        assertEquals(2, context.backwardReference1Context(position));
+        assertEquals(1, context.unidirectionalReference1Context(position));
     }
 
     /// Verifies inter-frame initialization starts with non-intra neighbors.

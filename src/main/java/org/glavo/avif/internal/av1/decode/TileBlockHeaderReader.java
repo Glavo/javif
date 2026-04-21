@@ -36,8 +36,32 @@ import java.util.Objects;
 /// deltas, and block-size-aware CFL gating.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
+    /// Sentinel used when a block does not carry an inter reference frame.
+    private static final int NO_REFERENCE_FRAME = -1;
+
     /// The AV1 segment reference-frame code that forces intra block syntax.
     private static final int SEGMENT_REFERENCE_INTRA_FRAME = 0;
+
+    /// The AV1 LAST_FRAME index in internal LAST..ALTREF order.
+    private static final int LAST_FRAME = 0;
+
+    /// The AV1 LAST2_FRAME index in internal LAST..ALTREF order.
+    private static final int LAST2_FRAME = 1;
+
+    /// The AV1 LAST3_FRAME index in internal LAST..ALTREF order.
+    private static final int LAST3_FRAME = 2;
+
+    /// The AV1 GOLDEN_FRAME index in internal LAST..ALTREF order.
+    private static final int GOLDEN_FRAME = 3;
+
+    /// The AV1 BWDREF_FRAME index in internal LAST..ALTREF order.
+    private static final int BWDREF_FRAME = 4;
+
+    /// The AV1 ALTREF2_FRAME index in internal LAST..ALTREF order.
+    private static final int ALTREF2_FRAME = 5;
+
+    /// The AV1 ALTREF_FRAME index in internal LAST..ALTREF order.
+    private static final int ALTREF_FRAME = 6;
 
     /// The tile-local decode state that owns the active frame and sequence headers.
     private final TileDecodeContext tileContext;
@@ -126,6 +150,22 @@ public final class TileBlockHeaderReader {
             intra = true;
         }
 
+        boolean compoundReference = false;
+        int referenceFrame0 = NO_REFERENCE_FRAME;
+        int referenceFrame1 = NO_REFERENCE_FRAME;
+        if (!intra && !useIntrabc) {
+            InterReferenceSelection selection = readInterReferenceSelection(
+                    nonNullPosition,
+                    nonNullSize,
+                    nonNullNeighborContext,
+                    segmentData,
+                    skipMode
+            );
+            compoundReference = selection.compoundReference();
+            referenceFrame0 = selection.referenceFrame0();
+            referenceFrame1 = selection.referenceFrame1();
+        }
+
         @Nullable LumaIntraPredictionMode yMode = null;
         @Nullable UvIntraPredictionMode uvMode = null;
         int yPaletteSize = 0;
@@ -205,6 +245,9 @@ public final class TileBlockHeaderReader {
                 skipMode,
                 intra,
                 useIntrabc,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
                 segmentPredicted,
                 segmentId,
                 yMode,
@@ -262,6 +305,21 @@ public final class TileBlockHeaderReader {
         return chromaWidth4 == 1 && chromaHeight4 == 1;
     }
 
+    /// Returns whether compound-reference syntax is available for the supplied block and segment state.
+    ///
+    /// @param size the block size to test
+    /// @param segmentData the final segment data for the current block
+    /// @return whether compound-reference syntax is available for the supplied block and segment state
+    private boolean canDecodeCompoundReference(BlockSize size, FrameHeader.SegmentData segmentData) {
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        FrameHeader.SegmentData nonNullSegmentData = Objects.requireNonNull(segmentData, "segmentData");
+        return tileContext.frameHeader().switchableCompoundReferences()
+                && Math.min(nonNullSize.width4(), nonNullSize.height4()) > 1
+                && nonNullSegmentData.referenceFrame() < 0
+                && !nonNullSegmentData.globalMotion()
+                && !nonNullSegmentData.skip();
+    }
+
     /// Returns whether skip-mode syntax is available for the supplied block and segment state.
     ///
     /// Postskip segmentation does not know the final segment features yet, so a `null` segment
@@ -277,6 +335,114 @@ public final class TileBlockHeaderReader {
                 && Math.min(nonNullSize.width4(), nonNullSize.height4()) > 1
                 && (segmentData == null
                 || (!segmentData.globalMotion() && segmentData.referenceFrame() < 0 && !segmentData.skip()));
+    }
+
+    /// Decodes the inter reference selection for one non-intra block.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param neighborContext the mutable neighbor context that supplies syntax contexts
+    /// @param segmentData the final segment data for the current block
+    /// @param skipMode whether skip mode is active for the current block
+    /// @return the decoded inter reference selection for one non-intra block
+    private InterReferenceSelection readInterReferenceSelection(
+            BlockPosition position,
+            BlockSize size,
+            BlockNeighborContext neighborContext,
+            FrameHeader.SegmentData segmentData,
+            boolean skipMode
+    ) {
+        if (skipMode) {
+            return new InterReferenceSelection(
+                    true,
+                    tileContext.frameHeader().skipModeReferenceIndex(0),
+                    tileContext.frameHeader().skipModeReferenceIndex(1)
+            );
+        }
+
+        boolean compoundReference = canDecodeCompoundReference(size, segmentData)
+                && syntaxReader.readCompoundReferenceFlag(neighborContext.compoundReferenceContext(position));
+        if (compoundReference) {
+            return readCompoundReferenceSelection(position, neighborContext);
+        }
+        return new InterReferenceSelection(false, readSingleReference(position, neighborContext, segmentData), NO_REFERENCE_FRAME);
+    }
+
+    /// Decodes one compound inter reference pair.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param neighborContext the mutable neighbor context that supplies syntax contexts
+    /// @return the decoded compound inter reference pair
+    private InterReferenceSelection readCompoundReferenceSelection(
+            BlockPosition position,
+            BlockNeighborContext neighborContext
+    ) {
+        if (syntaxReader.readCompoundDirectionFlag(neighborContext.compoundDirectionContext(position))) {
+            int referenceFrame0;
+            if (syntaxReader.readCompoundForwardReferenceFlag(0, neighborContext.forwardReferenceContext(position))) {
+                referenceFrame0 = LAST3_FRAME
+                        + (syntaxReader.readCompoundForwardReferenceFlag(2, neighborContext.forwardReference2Context(position)) ? 1 : 0);
+            } else {
+                referenceFrame0 = syntaxReader.readCompoundForwardReferenceFlag(1, neighborContext.forwardReference1Context(position))
+                        ? LAST2_FRAME
+                        : LAST_FRAME;
+            }
+
+            int referenceFrame1;
+            if (syntaxReader.readCompoundBackwardReferenceFlag(0, neighborContext.backwardReferenceContext(position))) {
+                referenceFrame1 = ALTREF_FRAME;
+            } else {
+                referenceFrame1 = BWDREF_FRAME
+                        + (syntaxReader.readCompoundBackwardReferenceFlag(1, neighborContext.backwardReference1Context(position)) ? 1 : 0);
+            }
+            return new InterReferenceSelection(true, referenceFrame0, referenceFrame1);
+        }
+
+        if (syntaxReader.readCompoundUnidirectionalReferenceFlag(0, neighborContext.singleReferenceContext(position))) {
+            return new InterReferenceSelection(true, BWDREF_FRAME, ALTREF_FRAME);
+        }
+
+        int referenceFrame1 = LAST2_FRAME
+                + (syntaxReader.readCompoundUnidirectionalReferenceFlag(1, neighborContext.unidirectionalReference1Context(position)) ? 1 : 0);
+        if (referenceFrame1 == LAST3_FRAME) {
+            referenceFrame1 += syntaxReader.readCompoundUnidirectionalReferenceFlag(2, neighborContext.forwardReference2Context(position)) ? 1 : 0;
+        }
+        return new InterReferenceSelection(true, LAST_FRAME, referenceFrame1);
+    }
+
+    /// Decodes one single inter reference.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param neighborContext the mutable neighbor context that supplies syntax contexts
+    /// @param segmentData the final segment data for the current block
+    /// @return the decoded single inter reference in internal LAST..ALTREF order
+    private int readSingleReference(
+            BlockPosition position,
+            BlockNeighborContext neighborContext,
+            FrameHeader.SegmentData segmentData
+    ) {
+        int segmentReferenceFrame = segmentData.referenceFrame();
+        if (segmentReferenceFrame >= 0) {
+            return segmentReferenceFrame - 1;
+        }
+        if (segmentData.globalMotion() || segmentData.skip()) {
+            return LAST_FRAME;
+        }
+
+        if (syntaxReader.readSingleReferenceFlag(0, neighborContext.singleReferenceContext(position))) {
+            if (syntaxReader.readSingleReferenceFlag(1, neighborContext.backwardReferenceContext(position))) {
+                return ALTREF_FRAME;
+            }
+            return BWDREF_FRAME
+                    + (syntaxReader.readSingleReferenceFlag(5, neighborContext.backwardReference1Context(position)) ? 1 : 0);
+        }
+        if (syntaxReader.readSingleReferenceFlag(2, neighborContext.forwardReferenceContext(position))) {
+            return LAST3_FRAME
+                    + (syntaxReader.readSingleReferenceFlag(4, neighborContext.forwardReference2Context(position)) ? 1 : 0);
+        }
+        return syntaxReader.readSingleReferenceFlag(3, neighborContext.forwardReference1Context(position))
+                ? LAST2_FRAME
+                : LAST_FRAME;
     }
 
     /// Returns whether palette syntax is available for the supplied block size.
@@ -815,6 +981,15 @@ public final class TileBlockHeaderReader {
         /// Whether the block uses `intrabc`.
         private final boolean useIntrabc;
 
+        /// Whether the block uses compound inter references.
+        private final boolean compoundReference;
+
+        /// The primary inter reference in internal LAST..ALTREF order, or `-1`.
+        private final int referenceFrame0;
+
+        /// The secondary inter reference in internal LAST..ALTREF order, or `-1`.
+        private final int referenceFrame1;
+
         /// Whether the block used temporal segmentation prediction.
         private final boolean segmentPredicted;
 
@@ -872,6 +1047,9 @@ public final class TileBlockHeaderReader {
         /// @param skipMode the decoded skip-mode flag
         /// @param intra whether the block is intra-coded
         /// @param useIntrabc whether the block uses `intrabc`
+        /// @param compoundReference whether the block uses compound inter references
+        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
         /// @param segmentPredicted whether the block used temporal segmentation prediction
         /// @param segmentId the decoded segment identifier for the block
         /// @param yMode the decoded luma intra prediction mode, or `null`
@@ -896,6 +1074,9 @@ public final class TileBlockHeaderReader {
                 boolean skipMode,
                 boolean intra,
                 boolean useIntrabc,
+                boolean compoundReference,
+                int referenceFrame0,
+                int referenceFrame1,
                 boolean segmentPredicted,
                 int segmentId,
                 @Nullable LumaIntraPredictionMode yMode,
@@ -920,6 +1101,9 @@ public final class TileBlockHeaderReader {
             this.skipMode = skipMode;
             this.intra = intra;
             this.useIntrabc = useIntrabc;
+            this.compoundReference = compoundReference;
+            this.referenceFrame0 = referenceFrame0;
+            this.referenceFrame1 = referenceFrame1;
             this.segmentPredicted = segmentPredicted;
             this.segmentId = segmentId;
             this.yMode = yMode;
@@ -950,6 +1134,21 @@ public final class TileBlockHeaderReader {
             }
             if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
                 throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
+            }
+            if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
+            }
+            if (!intra && !useIntrabc) {
+                if (referenceFrame0 == NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Inter blocks must carry a primary reference");
+                }
+                if (compoundReference) {
+                    if (referenceFrame1 == NO_REFERENCE_FRAME) {
+                        throw new IllegalArgumentException("Compound-reference blocks must carry a secondary reference");
+                    }
+                } else if (referenceFrame1 != NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary reference");
+                }
             }
         }
 
@@ -1000,6 +1199,27 @@ public final class TileBlockHeaderReader {
         /// @return whether the block uses `intrabc`
         public boolean useIntrabc() {
             return useIntrabc;
+        }
+
+        /// Returns whether the block uses compound inter references.
+        ///
+        /// @return whether the block uses compound inter references
+        public boolean compoundReference() {
+            return compoundReference;
+        }
+
+        /// Returns the primary inter reference in internal LAST..ALTREF order, or `-1`.
+        ///
+        /// @return the primary inter reference in internal LAST..ALTREF order, or `-1`
+        public int referenceFrame0() {
+            return referenceFrame0;
+        }
+
+        /// Returns the secondary inter reference in internal LAST..ALTREF order, or `-1`.
+        ///
+        /// @return the secondary inter reference in internal LAST..ALTREF order, or `-1`
+        public int referenceFrame1() {
+            return referenceFrame1;
         }
 
         /// Returns whether the block used temporal segmentation prediction.
@@ -1149,6 +1369,51 @@ public final class TileBlockHeaderReader {
         /// @return the decoded segment identifier
         public int segmentId() {
             return segmentId;
+        }
+    }
+
+    /// The decoded inter reference selection for one block.
+    @NotNullByDefault
+    private static final class InterReferenceSelection {
+        /// Whether the block uses compound inter references.
+        private final boolean compoundReference;
+
+        /// The primary inter reference in internal LAST..ALTREF order.
+        private final int referenceFrame0;
+
+        /// The secondary inter reference in internal LAST..ALTREF order, or `-1`.
+        private final int referenceFrame1;
+
+        /// Creates one decoded inter reference selection.
+        ///
+        /// @param compoundReference whether the block uses compound inter references
+        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+        private InterReferenceSelection(boolean compoundReference, int referenceFrame0, int referenceFrame1) {
+            this.compoundReference = compoundReference;
+            this.referenceFrame0 = referenceFrame0;
+            this.referenceFrame1 = referenceFrame1;
+        }
+
+        /// Returns whether the block uses compound inter references.
+        ///
+        /// @return whether the block uses compound inter references
+        public boolean compoundReference() {
+            return compoundReference;
+        }
+
+        /// Returns the primary inter reference in internal LAST..ALTREF order.
+        ///
+        /// @return the primary inter reference in internal LAST..ALTREF order
+        public int referenceFrame0() {
+            return referenceFrame0;
+        }
+
+        /// Returns the secondary inter reference in internal LAST..ALTREF order, or `-1`.
+        ///
+        /// @return the secondary inter reference in internal LAST..ALTREF order, or `-1`
+        public int referenceFrame1() {
+            return referenceFrame1;
         }
     }
 }

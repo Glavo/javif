@@ -30,8 +30,9 @@ import java.util.Objects;
 /// Typed reader for the first block-level AV1 syntax elements inside one tile bitstream.
 ///
 /// This reader is intentionally small and currently covers only syntax elements already backed by
-/// `CdfContext`: partitioning, skip, skip mode, intra/inter, `intrabc`, Y/UV intra prediction
-/// modes, palette presence and size signaling, filter intra, angle deltas, and CFL alpha.
+/// `CdfContext`: partitioning, skip, skip mode, intra/inter, compound and single-reference
+/// selection, `intrabc`, Y/UV intra prediction modes, palette presence and size signaling,
+/// filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
     /// The tile-local decode state that owns the mutable decoder and CDF context.
@@ -88,6 +89,58 @@ public final class TileSyntaxReader {
             return true;
         }
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableIntraCdf(context));
+    }
+
+    /// Decodes one compound-reference decision for inter and switch frames.
+    ///
+    /// @param context the zero-based compound-reference context index in `[0, 5)`
+    /// @return whether the block uses compound references
+    public boolean readCompoundReferenceFlag(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableCompoundReferenceCdf(context));
+    }
+
+    /// Decodes one compound-reference direction decision.
+    ///
+    /// @param context the zero-based compound-direction context index in `[0, 5)`
+    /// @return whether the compound block uses bi-directional references
+    public boolean readCompoundDirectionFlag(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableCompoundDirectionCdf(context));
+    }
+
+    /// Decodes one single-reference selection flag from the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based single-reference table index in `[0, 6)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the decoded single-reference selection flag
+    public boolean readSingleReferenceFlag(int tableIndex, int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableSingleReferenceCdf(tableIndex, context));
+    }
+
+    /// Decodes one compound forward-reference selection flag from the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based compound forward-reference table index in `[0, 3)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the decoded compound forward-reference selection flag
+    public boolean readCompoundForwardReferenceFlag(int tableIndex, int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableCompoundForwardReferenceCdf(tableIndex, context));
+    }
+
+    /// Decodes one compound backward-reference selection flag from the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based compound backward-reference table index in `[0, 2)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the decoded compound backward-reference selection flag
+    public boolean readCompoundBackwardReferenceFlag(int tableIndex, int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableCompoundBackwardReferenceCdf(tableIndex, context));
+    }
+
+    /// Decodes one compound unidirectional-reference selection flag from the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based compound unidirectional-reference table index in `[0, 3)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the decoded compound unidirectional-reference selection flag
+    public boolean readCompoundUnidirectionalReferenceFlag(int tableIndex, int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableCompoundUnidirectionalReferenceCdf(tableIndex, context));
     }
 
     /// Decodes one `use_intrabc` flag when the active frame allows it.

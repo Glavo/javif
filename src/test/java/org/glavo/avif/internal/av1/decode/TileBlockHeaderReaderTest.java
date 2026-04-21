@@ -177,6 +177,7 @@ final class TileBlockHeaderReaderTest {
                 defaultDisabledSegmentation(),
                 false,
                 true,
+                true,
                 true
         );
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
@@ -197,12 +198,105 @@ final class TileBlockHeaderReaderTest {
         assertTrue(header.skip());
         assertFalse(header.intra());
         assertFalse(header.useIntrabc());
+        assertTrue(header.compoundReference());
+        assertEquals(0, header.referenceFrame0());
+        assertEquals(1, header.referenceFrame1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
         assertEquals(0, header.yAngle());
         assertEquals(0, header.uvAngle());
         assertEquals(0, header.cflAlphaU());
         assertEquals(0, header.cflAlphaV());
+    }
+
+    /// Verifies that switchable compound-reference syntax decodes a compound reference pair.
+    @Test
+    void readsCompoundReferenceBlockHeader() {
+        byte[] payload = findPayloadForCompoundReferenceBlock();
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                true,
+                false,
+                true
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedInterReferenceNeighbors(neighborContext);
+
+        assertEquals(2, neighborContext.compoundReferenceContext(position));
+        assertEquals(1, neighborContext.compoundDirectionContext(position));
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean expectedIntra = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        boolean expectedCompound = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
+        assertFalse(expectedSkip);
+        assertFalse(expectedIntra);
+        assertTrue(expectedCompound);
+        InterReferenceExpectation expectedReferences =
+                decodeCompoundReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertFalse(header.skipMode());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertTrue(header.compoundReference());
+        assertEquals(expectedReferences.referenceFrame0(), header.referenceFrame0());
+        assertEquals(expectedReferences.referenceFrame1(), header.referenceFrame1());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
+    }
+
+    /// Verifies that single-reference syntax decodes the primary inter reference when compound mode is disabled.
+    @Test
+    void readsSingleReferenceBlockHeader() {
+        byte[] payload = findPayloadForSingleReferenceBlock();
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                true,
+                false,
+                true
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedInterReferenceNeighbors(neighborContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean expectedIntra = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        boolean expectedCompound = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
+        assertFalse(expectedSkip);
+        assertFalse(expectedIntra);
+        assertFalse(expectedCompound);
+        int expectedReferenceFrame0 = decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(header.skip());
+        assertFalse(header.skipMode());
+        assertFalse(header.intra());
+        assertFalse(header.useIntrabc());
+        assertFalse(header.compoundReference());
+        assertEquals(expectedReferenceFrame0, header.referenceFrame0());
+        assertEquals(-1, header.referenceFrame1());
+        assertNull(header.yMode());
+        assertNull(header.uvMode());
     }
 
     /// Verifies that `segment_reference_frame = INTRA_FRAME` forces inter blocks down the intra syntax path.
@@ -246,6 +340,9 @@ final class TileBlockHeaderReaderTest {
         assertTrue(header.intra());
         assertFalse(header.useIntrabc());
         assertEquals(0, header.segmentId());
+        assertFalse(header.compoundReference());
+        assertEquals(-1, header.referenceFrame0());
+        assertEquals(-1, header.referenceFrame1());
         assertEquals(expectedYMode, header.yMode());
         assertEquals(expectedUvMode, header.uvMode());
     }
@@ -281,6 +378,9 @@ final class TileBlockHeaderReaderTest {
         assertFalse(header.intra());
         assertFalse(header.useIntrabc());
         assertEquals(0, header.segmentId());
+        assertFalse(header.compoundReference());
+        assertEquals(0, header.referenceFrame0());
+        assertEquals(-1, header.referenceFrame1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
         assertEquals(0, header.yAngle());
@@ -1174,6 +1274,90 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced skip_mode=true with skipped skip=false and intra=true");
     }
 
+    /// Finds a small payload whose first inter block decodes `skip = false`, `intra = false`,
+    /// `compound = true`, and a stable compound reference pair.
+    ///
+    /// @return a small payload whose first inter block decodes a compound reference pair
+    private static byte[] findPayloadForCompoundReferenceBlock() {
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
+                FrameType.INTER,
+                false,
+                new byte[]{0x00},
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                true,
+                false,
+                true
+        ));
+        BlockPosition position = new BlockPosition(4, 4);
+        seedInterReferenceNeighbors(neighborContext);
+
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
+                    CdfContext oracleCdf = CdfContext.createDefault();
+                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                        continue;
+                    }
+                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(neighborContext.compoundReferenceContext(position)))) {
+                        continue;
+                    }
+                    decodeCompoundReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a compound-reference inter block");
+    }
+
+    /// Finds a small payload whose first inter block decodes `skip = false`, `intra = false`,
+    /// and `compound = false` so single-reference syntax is exercised.
+    ///
+    /// @return a small payload whose first inter block decodes a single-reference selection
+    private static byte[] findPayloadForSingleReferenceBlock() {
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
+                FrameType.INTER,
+                false,
+                new byte[]{0x00},
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                true,
+                false,
+                true
+        ));
+        BlockPosition position = new BlockPosition(4, 4);
+        seedInterReferenceNeighbors(neighborContext);
+
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
+                    CdfContext oracleCdf = CdfContext.createDefault();
+                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
+                        continue;
+                    }
+                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(neighborContext.compoundReferenceContext(position)))) {
+                        continue;
+                    }
+                    decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a single-reference inter block");
+    }
+
     /// Finds a small payload whose first inter block decodes `skip = false` and whose consumed
     /// intra/inter decision would decode to `false`.
     ///
@@ -1254,6 +1438,88 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced palette-enabled DC/DC block syntax");
     }
 
+    /// Decodes one compound-reference expectation with the same contexts as `TileBlockHeaderReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param neighborContext the seeded neighbor context
+    /// @param position the block position under test
+    /// @return the decoded compound-reference expectation
+    private static InterReferenceExpectation decodeCompoundReferenceExpectation(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            BlockNeighborContext neighborContext,
+            BlockPosition position
+    ) {
+        if (decoder.decodeBooleanAdapt(cdfContext.mutableCompoundDirectionCdf(neighborContext.compoundDirectionContext(position)))) {
+            int referenceFrame0;
+            if (decoder.decodeBooleanAdapt(cdfContext.mutableCompoundForwardReferenceCdf(0, neighborContext.forwardReferenceContext(position)))) {
+                referenceFrame0 = 2 + (decoder.decodeBooleanAdapt(
+                        cdfContext.mutableCompoundForwardReferenceCdf(2, neighborContext.forwardReference2Context(position))
+                ) ? 1 : 0);
+            } else {
+                referenceFrame0 = decoder.decodeBooleanAdapt(
+                        cdfContext.mutableCompoundForwardReferenceCdf(1, neighborContext.forwardReference1Context(position))
+                ) ? 1 : 0;
+            }
+
+            int referenceFrame1;
+            if (decoder.decodeBooleanAdapt(cdfContext.mutableCompoundBackwardReferenceCdf(0, neighborContext.backwardReferenceContext(position)))) {
+                referenceFrame1 = 6;
+            } else {
+                referenceFrame1 = 4 + (decoder.decodeBooleanAdapt(
+                        cdfContext.mutableCompoundBackwardReferenceCdf(1, neighborContext.backwardReference1Context(position))
+                ) ? 1 : 0);
+            }
+            return new InterReferenceExpectation(referenceFrame0, referenceFrame1);
+        }
+
+        if (decoder.decodeBooleanAdapt(cdfContext.mutableCompoundUnidirectionalReferenceCdf(0, neighborContext.singleReferenceContext(position)))) {
+            return new InterReferenceExpectation(4, 6);
+        }
+
+        int referenceFrame1 = 1 + (decoder.decodeBooleanAdapt(
+                cdfContext.mutableCompoundUnidirectionalReferenceCdf(1, neighborContext.unidirectionalReference1Context(position))
+        ) ? 1 : 0);
+        if (referenceFrame1 == 2) {
+            referenceFrame1 += decoder.decodeBooleanAdapt(
+                    cdfContext.mutableCompoundUnidirectionalReferenceCdf(2, neighborContext.forwardReference2Context(position))
+            ) ? 1 : 0;
+        }
+        return new InterReferenceExpectation(0, referenceFrame1);
+    }
+
+    /// Decodes one single-reference expectation with the same contexts as `TileBlockHeaderReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdfContext the oracle CDF context
+    /// @param neighborContext the seeded neighbor context
+    /// @param position the block position under test
+    /// @return the decoded single reference in internal LAST..ALTREF order
+    private static int decodeSingleReferenceExpectation(
+            MsacDecoder decoder,
+            CdfContext cdfContext,
+            BlockNeighborContext neighborContext,
+            BlockPosition position
+    ) {
+        if (decoder.decodeBooleanAdapt(cdfContext.mutableSingleReferenceCdf(0, neighborContext.singleReferenceContext(position)))) {
+            if (decoder.decodeBooleanAdapt(cdfContext.mutableSingleReferenceCdf(1, neighborContext.backwardReferenceContext(position)))) {
+                return 6;
+            }
+            return 4 + (decoder.decodeBooleanAdapt(
+                    cdfContext.mutableSingleReferenceCdf(5, neighborContext.backwardReference1Context(position))
+            ) ? 1 : 0);
+        }
+        if (decoder.decodeBooleanAdapt(cdfContext.mutableSingleReferenceCdf(2, neighborContext.forwardReferenceContext(position)))) {
+            return 2 + (decoder.decodeBooleanAdapt(
+                    cdfContext.mutableSingleReferenceCdf(4, neighborContext.forwardReference2Context(position))
+            ) ? 1 : 0);
+        }
+        return decoder.decodeBooleanAdapt(cdfContext.mutableSingleReferenceCdf(3, neighborContext.forwardReference1Context(position)))
+                ? 1
+                : 0;
+    }
+
     /// Creates a simple tile context used by block-header tests.
     ///
     /// @param frameType the synthetic frame type
@@ -1284,7 +1550,9 @@ final class TileBlockHeaderReaderTest {
                 filterIntra,
                 defaultDisabledSegmentation(),
                 false,
-                true
+                true,
+                false,
+                false
         );
     }
 
@@ -1314,6 +1582,7 @@ final class TileBlockHeaderReaderTest {
                 segmentation,
                 allowScreenContentTools,
                 allLossless,
+                false,
                 false
         );
     }
@@ -1328,6 +1597,7 @@ final class TileBlockHeaderReaderTest {
     /// @param allowScreenContentTools whether the synthetic frame enables screen-content tools
     /// @param allLossless whether all segments in the synthetic frame are lossless
     /// @param skipModeEnabled whether skip mode is enabled for the synthetic frame
+    /// @param switchableCompoundReferences whether compound-reference mode is switchable for the synthetic frame
     /// @return a simple tile context used by block-header tests
     private static TileDecodeContext createTileContext(
             FrameType frameType,
@@ -1337,7 +1607,8 @@ final class TileBlockHeaderReaderTest {
             FrameHeader.SegmentationInfo segmentation,
             boolean allowScreenContentTools,
             boolean allLossless,
-            boolean skipModeEnabled
+            boolean skipModeEnabled,
+            boolean switchableCompoundReferences
     ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
@@ -1456,7 +1727,7 @@ final class TileBlockHeaderReaderTest {
                         0
                 ),
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
-                false,
+                switchableCompoundReferences,
                 skipModeEnabled,
                 skipModeEnabled,
                 skipModeEnabled ? new int[]{0, 1} : new int[]{-1, -1},
@@ -1561,6 +1832,9 @@ final class TileBlockHeaderReaderTest {
                 false,
                 true,
                 false,
+                false,
+                -1,
+                -1,
                 true,
                 segmentId,
                 LumaIntraPredictionMode.DC,
@@ -1586,10 +1860,76 @@ final class TileBlockHeaderReaderTest {
                 false,
                 true,
                 false,
+                false,
+                -1,
+                -1,
                 true,
                 segmentId,
                 LumaIntraPredictionMode.DC,
                 UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+    }
+
+    /// Seeds one neighbor context so the block at `(4, 4)` observes a single forward reference
+    /// above and a compound forward/backward reference on the left.
+    ///
+    /// @param neighborContext the mutable neighbor context to seed
+    private static void seedInterReferenceNeighbors(BlockNeighborContext neighborContext) {
+        neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(4, 0),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+        neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(0, 4),
+                BlockSize.SIZE_8X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                4,
+                false,
+                0,
+                null,
+                null,
                 0,
                 0,
                 new int[0],
@@ -1614,5 +1954,38 @@ final class TileBlockHeaderReaderTest {
             segments[i] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, false);
         }
         return segments;
+    }
+
+    /// One decoded inter-reference expectation used by oracle tests.
+    @NotNullByDefault
+    private static final class InterReferenceExpectation {
+        /// The primary inter reference in internal LAST..ALTREF order.
+        private final int referenceFrame0;
+
+        /// The secondary inter reference in internal LAST..ALTREF order.
+        private final int referenceFrame1;
+
+        /// Creates one decoded inter-reference expectation.
+        ///
+        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order
+        private InterReferenceExpectation(int referenceFrame0, int referenceFrame1) {
+            this.referenceFrame0 = referenceFrame0;
+            this.referenceFrame1 = referenceFrame1;
+        }
+
+        /// Returns the primary inter reference in internal LAST..ALTREF order.
+        ///
+        /// @return the primary inter reference in internal LAST..ALTREF order
+        public int referenceFrame0() {
+            return referenceFrame0;
+        }
+
+        /// Returns the secondary inter reference in internal LAST..ALTREF order.
+        ///
+        /// @return the secondary inter reference in internal LAST..ALTREF order
+        public int referenceFrame1() {
+            return referenceFrame1;
+        }
     }
 }

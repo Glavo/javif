@@ -89,6 +89,47 @@ final class TileSyntaxReaderTest {
         assertArrayEquals(oracleCdf.mutableSkipModeCdf(1), tileContext.cdfContext().mutableSkipModeCdf(1));
     }
 
+    /// Verifies that inter-frame reference syntax uses the expected tile-local CDF tables.
+    @Test
+    void readsInterFrameReferenceSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedCompound = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
+        boolean expectedCompoundDirection = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundDirectionCdf(1));
+        boolean expectedSingleReference = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSingleReferenceCdf(0, 2));
+        boolean expectedCompoundForwardReference = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundForwardReferenceCdf(0, 2));
+        boolean expectedCompoundBackwardReference = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundBackwardReferenceCdf(1, 0));
+        boolean expectedCompoundUnidirectionalReference = oracleDecoder.decodeBooleanAdapt(
+                oracleCdf.mutableCompoundUnidirectionalReferenceCdf(2, 1)
+        );
+
+        assertEquals(expectedCompound, reader.readCompoundReferenceFlag(2));
+        assertArrayEquals(oracleCdf.mutableCompoundReferenceCdf(2), tileContext.cdfContext().mutableCompoundReferenceCdf(2));
+        assertEquals(expectedCompoundDirection, reader.readCompoundDirectionFlag(1));
+        assertArrayEquals(oracleCdf.mutableCompoundDirectionCdf(1), tileContext.cdfContext().mutableCompoundDirectionCdf(1));
+        assertEquals(expectedSingleReference, reader.readSingleReferenceFlag(0, 2));
+        assertArrayEquals(oracleCdf.mutableSingleReferenceCdf(0, 2), tileContext.cdfContext().mutableSingleReferenceCdf(0, 2));
+        assertEquals(expectedCompoundForwardReference, reader.readCompoundForwardReferenceFlag(0, 2));
+        assertArrayEquals(
+                oracleCdf.mutableCompoundForwardReferenceCdf(0, 2),
+                tileContext.cdfContext().mutableCompoundForwardReferenceCdf(0, 2)
+        );
+        assertEquals(expectedCompoundBackwardReference, reader.readCompoundBackwardReferenceFlag(1, 0));
+        assertArrayEquals(
+                oracleCdf.mutableCompoundBackwardReferenceCdf(1, 0),
+                tileContext.cdfContext().mutableCompoundBackwardReferenceCdf(1, 0)
+        );
+        assertEquals(expectedCompoundUnidirectionalReference, reader.readCompoundUnidirectionalReferenceFlag(2, 1));
+        assertArrayEquals(
+                oracleCdf.mutableCompoundUnidirectionalReferenceCdf(2, 1),
+                tileContext.cdfContext().mutableCompoundUnidirectionalReferenceCdf(2, 1)
+        );
+    }
+
     /// Verifies that key-frame intra decisions do not consume entropy-coded bits and that Y/UV modes use the expected CDFs.
     @Test
     void readsKeyFrameYAndUvModes() {

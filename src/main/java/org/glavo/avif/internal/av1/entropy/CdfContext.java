@@ -48,6 +48,54 @@ public final class CdfContext {
             {26538}
     });
 
+    /// The transformed default compound-reference decision CDFs.
+    private static final int[][] DEFAULT_COMPOUND_REFERENCE_CDFS = inverse2d(new int[][]{
+            {26828},
+            {24035},
+            {12031},
+            {10640},
+            {2901}
+    });
+
+    /// The transformed default compound-direction decision CDFs.
+    private static final int[][] DEFAULT_COMPOUND_DIRECTION_CDFS = inverse2d(new int[][]{
+            {1198},
+            {2070},
+            {9166},
+            {7499},
+            {22475}
+    });
+
+    /// The transformed default single-reference selection CDFs.
+    private static final int[][][] DEFAULT_SINGLE_REFERENCE_CDFS = inverse3d(new int[][][]{
+            {{4897}, {16973}, {29744}},
+            {{1555}, {16751}, {30279}},
+            {{4236}, {19647}, {31194}},
+            {{8650}, {24773}, {31895}},
+            {{904}, {11014}, {26875}},
+            {{1444}, {15087}, {30304}}
+    });
+
+    /// The transformed default compound forward-reference selection CDFs.
+    private static final int[][][] DEFAULT_COMPOUND_FORWARD_REFERENCE_CDFS = inverse3d(new int[][][]{
+            {{4946}, {19891}, {30731}},
+            {{9468}, {22441}, {31059}},
+            {{1503}, {15160}, {27544}}
+    });
+
+    /// The transformed default compound backward-reference selection CDFs.
+    private static final int[][][] DEFAULT_COMPOUND_BACKWARD_REFERENCE_CDFS = inverse3d(new int[][][]{
+            {{2235}, {17182}, {30606}},
+            {{1423}, {15175}, {30489}}
+    });
+
+    /// The transformed default compound unidirectional-reference selection CDFs.
+    private static final int[][][] DEFAULT_COMPOUND_UNIDIRECTIONAL_REFERENCE_CDFS = inverse3d(new int[][][]{
+            {{5284}, {23152}, {31774}},
+            {{3865}, {14173}, {25120}},
+            {{3128}, {15270}, {26710}}
+    });
+
     /// The transformed default `intrabc` CDF.
     private static final int[] DEFAULT_INTRABC_CDF = inverse(30531);
 
@@ -360,6 +408,24 @@ public final class CdfContext {
     /// The mutable intra/inter decision CDFs.
     private final int[][] intraCdfs;
 
+    /// The mutable compound-reference decision CDFs.
+    private final int[][] compoundReferenceCdfs;
+
+    /// The mutable compound-direction decision CDFs.
+    private final int[][] compoundDirectionCdfs;
+
+    /// The mutable single-reference selection CDFs.
+    private final int[][][] singleReferenceCdfs;
+
+    /// The mutable compound forward-reference selection CDFs.
+    private final int[][][] compoundForwardReferenceCdfs;
+
+    /// The mutable compound backward-reference selection CDFs.
+    private final int[][][] compoundBackwardReferenceCdfs;
+
+    /// The mutable compound unidirectional-reference selection CDFs.
+    private final int[][][] compoundUnidirectionalReferenceCdfs;
+
     /// The mutable `intrabc` CDF.
     private final int[] intrabcCdf;
 
@@ -413,6 +479,12 @@ public final class CdfContext {
     /// @param skipCdfs the mutable skip CDFs
     /// @param skipModeCdfs the mutable skip-mode CDFs
     /// @param intraCdfs the mutable intra/inter decision CDFs
+    /// @param compoundReferenceCdfs the mutable compound-reference decision CDFs
+    /// @param compoundDirectionCdfs the mutable compound-direction decision CDFs
+    /// @param singleReferenceCdfs the mutable single-reference selection CDFs
+    /// @param compoundForwardReferenceCdfs the mutable compound forward-reference selection CDFs
+    /// @param compoundBackwardReferenceCdfs the mutable compound backward-reference selection CDFs
+    /// @param compoundUnidirectionalReferenceCdfs the mutable compound unidirectional-reference selection CDFs
     /// @param intrabcCdf the mutable `intrabc` CDF
     /// @param yModeCdfs the mutable luma intra-mode CDFs
     /// @param useFilterIntraCdfs the mutable `use_filter_intra` CDFs
@@ -433,6 +505,12 @@ public final class CdfContext {
             int[][] skipCdfs,
             int[][] skipModeCdfs,
             int[][] intraCdfs,
+            int[][] compoundReferenceCdfs,
+            int[][] compoundDirectionCdfs,
+            int[][][] singleReferenceCdfs,
+            int[][][] compoundForwardReferenceCdfs,
+            int[][][] compoundBackwardReferenceCdfs,
+            int[][][] compoundUnidirectionalReferenceCdfs,
             int[] intrabcCdf,
             int[][] yModeCdfs,
             int[][] useFilterIntraCdfs,
@@ -453,6 +531,12 @@ public final class CdfContext {
         this.skipCdfs = Objects.requireNonNull(skipCdfs, "skipCdfs");
         this.skipModeCdfs = Objects.requireNonNull(skipModeCdfs, "skipModeCdfs");
         this.intraCdfs = Objects.requireNonNull(intraCdfs, "intraCdfs");
+        this.compoundReferenceCdfs = Objects.requireNonNull(compoundReferenceCdfs, "compoundReferenceCdfs");
+        this.compoundDirectionCdfs = Objects.requireNonNull(compoundDirectionCdfs, "compoundDirectionCdfs");
+        this.singleReferenceCdfs = Objects.requireNonNull(singleReferenceCdfs, "singleReferenceCdfs");
+        this.compoundForwardReferenceCdfs = Objects.requireNonNull(compoundForwardReferenceCdfs, "compoundForwardReferenceCdfs");
+        this.compoundBackwardReferenceCdfs = Objects.requireNonNull(compoundBackwardReferenceCdfs, "compoundBackwardReferenceCdfs");
+        this.compoundUnidirectionalReferenceCdfs = Objects.requireNonNull(compoundUnidirectionalReferenceCdfs, "compoundUnidirectionalReferenceCdfs");
         this.intrabcCdf = Objects.requireNonNull(intrabcCdf, "intrabcCdf");
         this.yModeCdfs = Objects.requireNonNull(yModeCdfs, "yModeCdfs");
         this.useFilterIntraCdfs = Objects.requireNonNull(useFilterIntraCdfs, "useFilterIntraCdfs");
@@ -479,6 +563,12 @@ public final class CdfContext {
                 deepCopy(DEFAULT_SKIP_CDFS),
                 deepCopy(DEFAULT_SKIP_MODE_CDFS),
                 deepCopy(DEFAULT_INTRA_CDFS),
+                deepCopy(DEFAULT_COMPOUND_REFERENCE_CDFS),
+                deepCopy(DEFAULT_COMPOUND_DIRECTION_CDFS),
+                deepCopy(DEFAULT_SINGLE_REFERENCE_CDFS),
+                deepCopy(DEFAULT_COMPOUND_FORWARD_REFERENCE_CDFS),
+                deepCopy(DEFAULT_COMPOUND_BACKWARD_REFERENCE_CDFS),
+                deepCopy(DEFAULT_COMPOUND_UNIDIRECTIONAL_REFERENCE_CDFS),
                 Arrays.copyOf(DEFAULT_INTRABC_CDF, DEFAULT_INTRABC_CDF.length),
                 deepCopy(DEFAULT_Y_MODE_CDFS),
                 deepCopy(DEFAULT_USE_FILTER_INTRA_CDFS),
@@ -506,6 +596,12 @@ public final class CdfContext {
                 deepCopy(skipCdfs),
                 deepCopy(skipModeCdfs),
                 deepCopy(intraCdfs),
+                deepCopy(compoundReferenceCdfs),
+                deepCopy(compoundDirectionCdfs),
+                deepCopy(singleReferenceCdfs),
+                deepCopy(compoundForwardReferenceCdfs),
+                deepCopy(compoundBackwardReferenceCdfs),
+                deepCopy(compoundUnidirectionalReferenceCdfs),
                 Arrays.copyOf(intrabcCdf, intrabcCdf.length),
                 deepCopy(yModeCdfs),
                 deepCopy(useFilterIntraCdfs),
@@ -547,6 +643,62 @@ public final class CdfContext {
     /// @return the live mutable intra/inter decision CDF for the supplied context index
     public int[] mutableIntraCdf(int context) {
         return intraCdfs[Objects.checkIndex(context, intraCdfs.length)];
+    }
+
+    /// Returns the live mutable compound-reference decision CDF for the supplied context index.
+    ///
+    /// @param context the zero-based compound-reference context index in `[0, 5)`
+    /// @return the live mutable compound-reference decision CDF for the supplied context index
+    public int[] mutableCompoundReferenceCdf(int context) {
+        return compoundReferenceCdfs[Objects.checkIndex(context, compoundReferenceCdfs.length)];
+    }
+
+    /// Returns the live mutable compound-direction decision CDF for the supplied context index.
+    ///
+    /// @param context the zero-based compound-direction context index in `[0, 5)`
+    /// @return the live mutable compound-direction decision CDF for the supplied context index
+    public int[] mutableCompoundDirectionCdf(int context) {
+        return compoundDirectionCdfs[Objects.checkIndex(context, compoundDirectionCdfs.length)];
+    }
+
+    /// Returns the live mutable single-reference selection CDF for the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based single-reference table index in `[0, 6)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the live mutable single-reference selection CDF for the supplied inputs
+    public int[] mutableSingleReferenceCdf(int tableIndex, int context) {
+        int[][] table = singleReferenceCdfs[Objects.checkIndex(tableIndex, singleReferenceCdfs.length)];
+        return table[Objects.checkIndex(context, table.length)];
+    }
+
+    /// Returns the live mutable compound forward-reference selection CDF for the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based compound forward-reference table index in `[0, 3)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the live mutable compound forward-reference selection CDF for the supplied inputs
+    public int[] mutableCompoundForwardReferenceCdf(int tableIndex, int context) {
+        int[][] table = compoundForwardReferenceCdfs[Objects.checkIndex(tableIndex, compoundForwardReferenceCdfs.length)];
+        return table[Objects.checkIndex(context, table.length)];
+    }
+
+    /// Returns the live mutable compound backward-reference selection CDF for the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based compound backward-reference table index in `[0, 2)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the live mutable compound backward-reference selection CDF for the supplied inputs
+    public int[] mutableCompoundBackwardReferenceCdf(int tableIndex, int context) {
+        int[][] table = compoundBackwardReferenceCdfs[Objects.checkIndex(tableIndex, compoundBackwardReferenceCdfs.length)];
+        return table[Objects.checkIndex(context, table.length)];
+    }
+
+    /// Returns the live mutable compound unidirectional-reference selection CDF for the supplied table and context.
+    ///
+    /// @param tableIndex the zero-based compound unidirectional-reference table index in `[0, 3)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the live mutable compound unidirectional-reference selection CDF for the supplied inputs
+    public int[] mutableCompoundUnidirectionalReferenceCdf(int tableIndex, int context) {
+        int[][] table = compoundUnidirectionalReferenceCdfs[Objects.checkIndex(tableIndex, compoundUnidirectionalReferenceCdfs.length)];
+        return table[Objects.checkIndex(context, table.length)];
     }
 
     /// Returns the live mutable `intrabc` CDF.

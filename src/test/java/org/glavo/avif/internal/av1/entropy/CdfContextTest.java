@@ -35,6 +35,12 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{12060, 0}, context.mutableSkipModeCdf(1));
         assertArrayEquals(new int[]{24641, 0}, context.mutableSkipModeCdf(2));
         assertArrayEquals(new int[]{16106, 0}, context.mutableIntraCdf(1));
+        assertArrayEquals(new int[]{5940, 0}, context.mutableCompoundReferenceCdf(0));
+        assertArrayEquals(new int[]{30698, 0}, context.mutableCompoundDirectionCdf(1));
+        assertArrayEquals(new int[]{27871, 0}, context.mutableSingleReferenceCdf(0, 0));
+        assertArrayEquals(new int[]{23300, 0}, context.mutableCompoundForwardReferenceCdf(1, 0));
+        assertArrayEquals(new int[]{30533, 0}, context.mutableCompoundBackwardReferenceCdf(0, 0));
+        assertArrayEquals(new int[]{29640, 0}, context.mutableCompoundUnidirectionalReferenceCdf(2, 0));
         assertArrayEquals(new int[]{2237, 0}, context.mutableIntrabcCdf());
         assertArrayEquals(new int[]{16384, 0}, context.mutableSegmentPredictionCdf(0));
         assertArrayEquals(new int[]{27146, 24875, 16675, 14535, 4959, 4395, 235, 0}, context.mutableSegmentIdCdf(0));
@@ -77,6 +83,12 @@ final class CdfContextTest {
 
         assertNotSame(original.mutableSkipCdf(0), copy.mutableSkipCdf(0));
         assertNotSame(original.mutableSkipModeCdf(0), copy.mutableSkipModeCdf(0));
+        assertNotSame(original.mutableCompoundReferenceCdf(0), copy.mutableCompoundReferenceCdf(0));
+        assertNotSame(original.mutableCompoundDirectionCdf(0), copy.mutableCompoundDirectionCdf(0));
+        assertNotSame(original.mutableSingleReferenceCdf(0, 0), copy.mutableSingleReferenceCdf(0, 0));
+        assertNotSame(original.mutableCompoundForwardReferenceCdf(0, 0), copy.mutableCompoundForwardReferenceCdf(0, 0));
+        assertNotSame(original.mutableCompoundBackwardReferenceCdf(0, 0), copy.mutableCompoundBackwardReferenceCdf(0, 0));
+        assertNotSame(original.mutableCompoundUnidirectionalReferenceCdf(0, 0), copy.mutableCompoundUnidirectionalReferenceCdf(0, 0));
         assertNotSame(original.mutableUseFilterIntraCdf(0), copy.mutableUseFilterIntraCdf(0));
         assertNotSame(original.mutableFilterIntraCdf(), copy.mutableFilterIntraCdf());
         assertNotSame(original.mutableUvModeCdf(true, 0), copy.mutableUvModeCdf(true, 0));
@@ -91,6 +103,12 @@ final class CdfContextTest {
 
         copy.mutableSkipCdf(0)[0] = 77;
         copy.mutableSkipModeCdf(0)[0] = 88;
+        copy.mutableCompoundReferenceCdf(0)[0] = 89;
+        copy.mutableCompoundDirectionCdf(0)[0] = 90;
+        copy.mutableSingleReferenceCdf(0, 0)[0] = 91;
+        copy.mutableCompoundForwardReferenceCdf(0, 0)[0] = 92;
+        copy.mutableCompoundBackwardReferenceCdf(0, 0)[0] = 93;
+        copy.mutableCompoundUnidirectionalReferenceCdf(0, 0)[0] = 94;
         copy.mutableUseFilterIntraCdf(0)[0] = 66;
         copy.mutableFilterIntraCdf()[0] = 55;
         copy.mutableUvModeCdf(true, 0)[0] = 99;
@@ -105,6 +123,12 @@ final class CdfContextTest {
 
         assertEquals(1097, original.mutableSkipCdf(0)[0]);
         assertEquals(147, original.mutableSkipModeCdf(0)[0]);
+        assertEquals(5940, original.mutableCompoundReferenceCdf(0)[0]);
+        assertEquals(31570, original.mutableCompoundDirectionCdf(0)[0]);
+        assertEquals(27871, original.mutableSingleReferenceCdf(0, 0)[0]);
+        assertEquals(27822, original.mutableCompoundForwardReferenceCdf(0, 0)[0]);
+        assertEquals(30533, original.mutableCompoundBackwardReferenceCdf(0, 0)[0]);
+        assertEquals(27484, original.mutableCompoundUnidirectionalReferenceCdf(0, 0)[0]);
         assertEquals(28147, original.mutableUseFilterIntraCdf(0)[0]);
         assertEquals(23819, original.mutableFilterIntraCdf()[0]);
         assertEquals(22361, original.mutableUvModeCdf(true, 0)[0]);
