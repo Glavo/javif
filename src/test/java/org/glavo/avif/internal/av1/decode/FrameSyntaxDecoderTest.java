@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FrameSyntaxDecoder`.
@@ -52,6 +53,41 @@ final class FrameSyntaxDecoderTest {
         assertNotNull(temporalBlock);
         assertEquals(0, temporalBlock.referenceFrame0());
         assertEquals(InterMotionVector.resolved(MotionVector.zero()), temporalBlock.motionVector0());
+    }
+
+    /// Verifies that structural frame decoding captures the final tile-local CDF state.
+    @Test
+    void decodeFrameCapturesFinalTileCdfState() {
+        FrameAssembly assembly = createAssembly(FrameType.INTER, findPayloadForInterBlockWithoutSkipOrIntra(), false);
+
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
+
+        assertNotEquals(
+                CdfContext.createDefault().mutableSkipCdf(0)[0],
+                result.finalTileCdfContext(0).mutableSkipCdf(0)[0]
+        );
+    }
+
+    /// Verifies that reference-frame CDF snapshots seed subsequent tile syntax decoding.
+    @Test
+    void decodeFrameSeedsTileSyntaxFromReferenceCdfState() {
+        CdfContext inheritedCdf = CdfContext.createDefault();
+        inheritedCdf.mutableSkipCdf(0)[0] = 32000;
+        byte[] payload = findPayloadWithDifferentSkipDecision(inheritedCdf);
+        FrameAssembly assembly = createAssembly(FrameType.INTER, payload, false, 8, 8);
+        FrameSyntaxDecodeResult referenceResult = new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)},
+                new CdfContext[]{inheritedCdf}
+        );
+
+        FrameSyntaxDecodeResult defaultResult = new FrameSyntaxDecoder(null).decode(assembly);
+        FrameSyntaxDecodeResult seededResult = new FrameSyntaxDecoder(referenceResult).decode(assembly);
+
+        boolean defaultSkip = firstLeaf(defaultResult.tileRoots(0)).header().skip();
+        boolean seededSkip = firstLeaf(seededResult.tileRoots(0)).header().skip();
+        assertNotEquals(defaultSkip, seededSkip);
     }
 
     /// Finds a small payload whose first inter block decodes `skip = false` and `intra = false`.
@@ -74,6 +110,29 @@ final class FrameSyntaxDecoderTest {
         throw new IllegalStateException("No deterministic payload produced skip=false and intra=false");
     }
 
+    /// Finds a small payload whose first skip decision differs between the default and supplied CDF states.
+    ///
+    /// @param overriddenCdf the overridden skip CDF to test against the default state
+    /// @return a small payload whose first skip decision differs between the default and supplied CDF states
+    private static byte[] findPayloadWithDifferentSkipDecision(CdfContext overriddenCdf) {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
+                CdfContext defaultCdf = CdfContext.createDefault();
+                MsacDecoder defaultDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                boolean defaultSkip = defaultDecoder.decodeBooleanAdapt(defaultCdf.mutableSkipCdf(0));
+
+                CdfContext inherited = overriddenCdf.copy();
+                MsacDecoder inheritedDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                boolean inheritedSkip = inheritedDecoder.decodeBooleanAdapt(inherited.mutableSkipCdf(0));
+                if (defaultSkip != inheritedSkip) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a different inherited skip decision");
+    }
+
     /// Creates a synthetic frame assembly used by structural frame-decoder tests.
     ///
     /// @param frameType the synthetic frame type
@@ -85,10 +144,28 @@ final class FrameSyntaxDecoderTest {
             byte[] payload,
             boolean useReferenceFrameMotionVectors
     ) {
+        return createAssembly(frameType, payload, useReferenceFrameMotionVectors, 64, 64);
+    }
+
+    /// Creates a synthetic frame assembly used by structural frame-decoder tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param payload the collected tile entropy payload
+    /// @param useReferenceFrameMotionVectors whether temporal motion vectors are enabled
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @return a synthetic frame assembly used by structural frame-decoder tests
+    private static FrameAssembly createAssembly(
+            FrameType frameType,
+            byte[] payload,
+            boolean useReferenceFrameMotionVectors,
+            int codedWidth,
+            int codedHeight
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
-                64,
-                64,
+                codedWidth,
+                codedHeight,
                 new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
                 new SequenceHeader.OperatingPoint[]{
                         new SequenceHeader.OperatingPoint(2, 0, 10, 0, false, false, false, null)
@@ -154,7 +231,7 @@ final class FrameSyntaxDecoderTest {
                 0xFF,
                 false,
                 new int[]{-1, -1, -1, -1, -1, -1, -1},
-                new FrameHeader.FrameSize(64, 64, 64, 64, 64),
+                new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
                 new FrameHeader.SuperResolutionInfo(false, 8),
                 false,
                 false,
@@ -219,6 +296,40 @@ final class FrameSyntaxDecoderTest {
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
+    }
+
+    /// Returns the first leaf node in raster order from one tile-root array.
+    ///
+    /// @param roots the top-level tile roots
+    /// @return the first leaf node in raster order
+    private static TilePartitionTreeReader.LeafNode firstLeaf(TilePartitionTreeReader.Node[] roots) {
+        for (TilePartitionTreeReader.Node root : roots) {
+            TilePartitionTreeReader.LeafNode leaf = firstLeaf(root);
+            if (leaf != null) {
+                return leaf;
+            }
+        }
+        throw new IllegalStateException("No leaf nodes were produced");
+    }
+
+    /// Returns the first leaf node in raster order from one subtree, or `null`.
+    ///
+    /// @param node the subtree root
+    /// @return the first leaf node in raster order from one subtree, or `null`
+    private static TilePartitionTreeReader.@org.jetbrains.annotations.Nullable LeafNode firstLeaf(
+            TilePartitionTreeReader.Node node
+    ) {
+        if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
+            return leafNode;
+        }
+        TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
+        for (TilePartitionTreeReader.Node child : partitionNode.children()) {
+            TilePartitionTreeReader.LeafNode leaf = firstLeaf(child);
+            if (leaf != null) {
+                return leaf;
+            }
+        }
+        return null;
     }
 
     /// Creates default per-segment data with all features disabled.

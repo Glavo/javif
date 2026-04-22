@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -33,7 +34,12 @@ public final class FrameSyntaxDecodeResult {
     /// The tile-local temporal motion fields produced while decoding the current frame.
     private final TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields;
 
+    /// The final tile-local CDF contexts produced while decoding the current frame.
+    private final CdfContext[] finalTileCdfContexts;
+
     /// Creates one structural frame-decode result.
+    ///
+    /// Final tile CDF contexts default to fresh `CdfContext.createDefault()` copies.
     ///
     /// @param assembly the fully assembled frame that was structurally decoded
     /// @param tileRoots the decoded top-level partition roots for each tile in frame order
@@ -43,9 +49,30 @@ public final class FrameSyntaxDecodeResult {
             TilePartitionTreeReader.Node[][] tileRoots,
             TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields
     ) {
+        this(
+                assembly,
+                tileRoots,
+                decodedTemporalMotionFields,
+                createDefaultTileCdfContexts(Objects.requireNonNull(assembly, "assembly").totalTiles())
+        );
+    }
+
+    /// Creates one structural frame-decode result.
+    ///
+    /// @param assembly the fully assembled frame that was structurally decoded
+    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced while decoding the current frame
+    /// @param finalTileCdfContexts the final tile-local CDF contexts produced while decoding the current frame
+    public FrameSyntaxDecodeResult(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.Node[][] tileRoots,
+            TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields,
+            CdfContext[] finalTileCdfContexts
+    ) {
         this.assembly = Objects.requireNonNull(assembly, "assembly");
         Objects.requireNonNull(tileRoots, "tileRoots");
         Objects.requireNonNull(decodedTemporalMotionFields, "decodedTemporalMotionFields");
+        Objects.requireNonNull(finalTileCdfContexts, "finalTileCdfContexts");
         if (tileRoots.length != assembly.totalTiles()) {
             throw new IllegalArgumentException("tileRoots.length != totalTiles: " + tileRoots.length);
         }
@@ -53,6 +80,9 @@ public final class FrameSyntaxDecodeResult {
             throw new IllegalArgumentException(
                     "decodedTemporalMotionFields.length != totalTiles: " + decodedTemporalMotionFields.length
             );
+        }
+        if (finalTileCdfContexts.length != assembly.totalTiles()) {
+            throw new IllegalArgumentException("finalTileCdfContexts.length != totalTiles: " + finalTileCdfContexts.length);
         }
 
         this.tileRoots = new TilePartitionTreeReader.Node[tileRoots.length][];
@@ -65,6 +95,10 @@ public final class FrameSyntaxDecodeResult {
                     decodedTemporalMotionFields[i],
                     "decodedTemporalMotionFields[" + i + "]"
             ).copy();
+        }
+        this.finalTileCdfContexts = new CdfContext[finalTileCdfContexts.length];
+        for (int i = 0; i < finalTileCdfContexts.length; i++) {
+            this.finalTileCdfContexts[i] = Objects.requireNonNull(finalTileCdfContexts[i], "finalTileCdfContexts[" + i + "]").copy();
         }
     }
 
@@ -121,6 +155,25 @@ public final class FrameSyntaxDecodeResult {
         return decodedTemporalMotionFields[checkedTileIndex(tileIndex)].copy();
     }
 
+    /// Returns a snapshot of the final tile-local CDF contexts for every tile.
+    ///
+    /// @return a snapshot of the final tile-local CDF contexts for every tile
+    public CdfContext[] finalTileCdfContexts() {
+        CdfContext[] copy = new CdfContext[finalTileCdfContexts.length];
+        for (int i = 0; i < finalTileCdfContexts.length; i++) {
+            copy[i] = finalTileCdfContexts[i].copy();
+        }
+        return copy;
+    }
+
+    /// Returns a snapshot of the final tile-local CDF context for one tile.
+    ///
+    /// @param tileIndex the zero-based tile index in frame order
+    /// @return a snapshot of the final tile-local CDF context for one tile
+    public CdfContext finalTileCdfContext(int tileIndex) {
+        return finalTileCdfContexts[checkedTileIndex(tileIndex)].copy();
+    }
+
     /// Validates and returns one tile index.
     ///
     /// @param tileIndex the zero-based tile index in frame order
@@ -130,5 +183,17 @@ public final class FrameSyntaxDecodeResult {
             throw new IndexOutOfBoundsException("tileIndex out of range: " + tileIndex);
         }
         return tileIndex;
+    }
+
+    /// Creates default tile-local CDF contexts for the supplied tile count.
+    ///
+    /// @param tileCount the number of tiles in the frame
+    /// @return default tile-local CDF contexts for the supplied tile count
+    private static CdfContext[] createDefaultTileCdfContexts(int tileCount) {
+        CdfContext[] contexts = new CdfContext[tileCount];
+        for (int i = 0; i < tileCount; i++) {
+            contexts[i] = CdfContext.createDefault();
+        }
+        return contexts;
     }
 }

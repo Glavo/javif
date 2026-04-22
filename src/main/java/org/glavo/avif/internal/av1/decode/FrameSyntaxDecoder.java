@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -48,13 +49,15 @@ public final class FrameSyntaxDecoder {
         TilePartitionTreeReader.Node[][] tileRoots = new TilePartitionTreeReader.Node[tileCount][];
         TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields =
                 new TileDecodeContext.TemporalMotionField[tileCount];
+        CdfContext[] finalTileCdfContexts = new CdfContext[tileCount];
         for (int tileIndex = 0; tileIndex < tileCount; tileIndex++) {
             TileDecodeContext tileContext = createTileContext(nonNullAssembly, tileIndex);
             TilePartitionTreeReader treeReader = new TilePartitionTreeReader(tileContext);
             tileRoots[tileIndex] = treeReader.readTile();
             decodedTemporalMotionFields[tileIndex] = tileContext.decodedTemporalMotionField().copy();
+            finalTileCdfContexts[tileIndex] = tileContext.cdfContext().copy();
         }
-        return new FrameSyntaxDecodeResult(nonNullAssembly, tileRoots, decodedTemporalMotionFields);
+        return new FrameSyntaxDecodeResult(nonNullAssembly, tileRoots, decodedTemporalMotionFields, finalTileCdfContexts);
     }
 
     /// Creates one tile-local decode context, attaching reference temporal state when it matches.
@@ -63,15 +66,33 @@ public final class FrameSyntaxDecoder {
     /// @param tileIndex the zero-based tile index in frame order
     /// @return one tile-local decode context
     private TileDecodeContext createTileContext(FrameAssembly assembly, int tileIndex) {
+        @Nullable CdfContext baseCdfContext = referenceCdfContext(tileIndex);
         @Nullable TileDecodeContext.TemporalMotionField temporalMotionField = referenceTemporalMotionField(tileIndex);
-        if (temporalMotionField == null) {
+        if (baseCdfContext == null && temporalMotionField == null) {
             return TileDecodeContext.create(assembly, tileIndex);
+        }
+        if (baseCdfContext == null) {
+            return TileDecodeContext.create(assembly, tileIndex, temporalMotionField);
+        }
+        if (temporalMotionField == null) {
+            return TileDecodeContext.create(assembly, tileIndex, baseCdfContext);
         }
         try {
-            return TileDecodeContext.create(assembly, tileIndex, temporalMotionField);
+            return TileDecodeContext.create(assembly, tileIndex, baseCdfContext, temporalMotionField);
         } catch (IllegalArgumentException ignored) {
-            return TileDecodeContext.create(assembly, tileIndex);
+            return TileDecodeContext.create(assembly, tileIndex, baseCdfContext);
         }
+    }
+
+    /// Returns the reference tile-local CDF context for one tile, or `null` when no compatible context exists.
+    ///
+    /// @param tileIndex the zero-based tile index in frame order
+    /// @return the reference tile-local CDF context for one tile, or `null`
+    private @Nullable CdfContext referenceCdfContext(int tileIndex) {
+        if (referenceFrameSyntaxResult == null || tileIndex >= referenceFrameSyntaxResult.tileCount()) {
+            return null;
+        }
+        return referenceFrameSyntaxResult.finalTileCdfContext(tileIndex);
     }
 
     /// Returns the reference temporal motion field for one tile, or `null` when no compatible field exists.
