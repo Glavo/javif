@@ -50,6 +50,7 @@ final class FrameSyntaxDecoderTest {
         assertEquals(1, result.tileCount());
         assertTrue(result.tileRoots(0).length > 0);
         assertTrue(firstLeaf(result.tileRoots(0)).transformLayout().lumaUnits().length > 0);
+        assertTrue(firstLeaf(result.tileRoots(0)).residualLayout().lumaUnits().length > 0);
         TileDecodeContext.TemporalMotionBlock temporalBlock = result.decodedTemporalMotionField(0).block(0, 0);
         assertNotNull(temporalBlock);
         assertEquals(0, temporalBlock.referenceFrame0());
@@ -133,7 +134,7 @@ final class FrameSyntaxDecoderTest {
     private static byte[] findPayloadForInterBlockWithoutSkipOrIntra() {
         for (int first = 0; first < 256; first++) {
             for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
                 CdfContext oracleCdf = CdfContext.createDefault();
                 MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
                 if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
@@ -154,7 +155,7 @@ final class FrameSyntaxDecoderTest {
     private static byte[] findPayloadWithDifferentSkipDecision(CdfContext overriddenCdf) {
         for (int first = 0; first < 256; first++) {
             for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
                 CdfContext defaultCdf = CdfContext.createDefault();
                 MsacDecoder defaultDecoder = new MsacDecoder(payload, 0, payload.length, false);
                 boolean defaultSkip = defaultDecoder.decodeBooleanAdapt(defaultCdf.mutableSkipCdf(0));
@@ -315,7 +316,7 @@ final class FrameSyntaxDecoderTest {
                         0,
                         0
                 ),
-                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                FrameHeader.TransformMode.LARGEST,
                 false,
                 false,
                 false,

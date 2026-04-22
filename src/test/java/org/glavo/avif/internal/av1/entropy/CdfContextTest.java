@@ -50,6 +50,8 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{14091, 1920, 0}, context.mutableTransformSizeCdf(1, 2));
         assertArrayEquals(new int[]{4187, 0}, context.mutableTransformPartitionCdf(0, 0));
         assertArrayEquals(new int[]{16680, 0}, context.mutableTransformPartitionCdf(6, 2));
+        assertArrayEquals(new int[]{919, 0}, context.mutableCoefficientSkipCdf(0, 0));
+        assertArrayEquals(new int[]{2521, 0}, context.mutableCoefficientSkipCdf(4, 6));
         assertArrayEquals(new int[]{32160, 32120, 32677, 0}, context.mutableDeltaQCdf());
         assertArrayEquals(new int[]{32160, 32120, 32677, 0}, context.mutableDeltaLfCdf(4));
         assertArrayEquals(new int[]{28672, 21504, 13440, 0}, context.mutableMotionVectorJointCdf());
@@ -116,6 +118,7 @@ final class CdfContextTest {
         assertNotSame(original.mutableCompoundInterModeCdf(0), copy.mutableCompoundInterModeCdf(0));
         assertNotSame(original.mutableTransformSizeCdf(0, 0), copy.mutableTransformSizeCdf(0, 0));
         assertNotSame(original.mutableTransformPartitionCdf(0, 0), copy.mutableTransformPartitionCdf(0, 0));
+        assertNotSame(original.mutableCoefficientSkipCdf(0, 0), copy.mutableCoefficientSkipCdf(0, 0));
         assertNotSame(original.mutableDeltaQCdf(), copy.mutableDeltaQCdf());
         assertNotSame(original.mutableDeltaLfCdf(0), copy.mutableDeltaLfCdf(0));
         assertNotSame(original.mutableMotionVectorJointCdf(), copy.mutableMotionVectorJointCdf());
@@ -154,6 +157,7 @@ final class CdfContextTest {
         copy.mutableCompoundInterModeCdf(0)[0] = 99;
         copy.mutableTransformSizeCdf(0, 0)[0] = 111;
         copy.mutableTransformPartitionCdf(0, 0)[0] = 112;
+        copy.mutableCoefficientSkipCdf(0, 0)[0] = 113;
         copy.mutableDeltaQCdf()[0] = 113;
         copy.mutableDeltaLfCdf(0)[0] = 114;
         copy.mutableMotionVectorJointCdf()[0] = 101;
@@ -192,6 +196,7 @@ final class CdfContextTest {
         assertEquals(25008, original.mutableCompoundInterModeCdf(0)[0]);
         assertEquals(12800, original.mutableTransformSizeCdf(0, 0)[0]);
         assertEquals(4187, original.mutableTransformPartitionCdf(0, 0)[0]);
+        assertEquals(919, original.mutableCoefficientSkipCdf(0, 0)[0]);
         assertEquals(32160, original.mutableDeltaQCdf()[0]);
         assertEquals(32160, original.mutableDeltaLfCdf(0)[0]);
         assertEquals(28672, original.mutableMotionVectorJointCdf()[0]);

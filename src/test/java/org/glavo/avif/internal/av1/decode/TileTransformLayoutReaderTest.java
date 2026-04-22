@@ -171,11 +171,15 @@ final class TileTransformLayoutReaderTest {
         TilePartitionTreeReader.Node[] roots = treeReader.readTile();
         TilePartitionTreeReader.LeafNode leafNode = firstLeaf(roots);
         TransformLayout transformLayout = leafNode.transformLayout();
+        org.glavo.avif.internal.av1.model.ResidualLayout residualLayout = leafNode.residualLayout();
         TransformUnit[] lumaUnits = transformLayout.lumaUnits();
 
         assertNotNull(transformLayout);
+        assertNotNull(residualLayout);
         assertEquals(TransformSize.TX_64X64, transformLayout.uniformLumaTransformSize());
         assertEquals(1, lumaUnits.length);
+        assertEquals(1, residualLayout.lumaUnits().length);
+        assertEquals(TransformSize.TX_64X64, residualLayout.lumaUnits()[0].size());
         assertEquals(0, lumaUnits[0].position().x4());
         assertEquals(0, lumaUnits[0].position().y4());
     }

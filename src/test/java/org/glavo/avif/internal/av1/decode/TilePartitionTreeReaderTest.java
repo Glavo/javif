@@ -42,7 +42,7 @@ final class TilePartitionTreeReaderTest {
     @Test
     void readsTilePartitionTree() {
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createTileContext(FrameType.KEY, new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A})
+                createTileContext(FrameType.KEY, new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A, 0x00, 0x00, 0x00})
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
@@ -59,7 +59,7 @@ final class TilePartitionTreeReaderTest {
     @Test
     void readsClippedTilePartitionTree() {
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createClippedTileContext(new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18})
+                createClippedTileContext(new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18, 0x00, 0x00, 0x00})
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
@@ -249,7 +249,7 @@ final class TilePartitionTreeReaderTest {
                         0,
                         0
                 ),
-                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                FrameHeader.TransformMode.LARGEST,
                 false,
                 false
         );

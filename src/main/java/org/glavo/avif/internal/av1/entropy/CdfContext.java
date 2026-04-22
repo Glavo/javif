@@ -190,6 +190,30 @@ public final class CdfContext {
             {16088}
     });
 
+    /// The transformed default coefficient-skip CDFs grouped by AV1 transform-context class.
+    private static final int[][][] DEFAULT_COEFFICIENT_SKIP_CDFS = inverse3d(new int[][][]{
+            {
+                    {31849}, {5892}, {12112}, {21935}, {20289}, {27473}, {32487},
+                    {7654}, {19473}, {29984}, {9961}, {30242}, {32117}
+            },
+            {
+                    {31548}, {1549}, {10130}, {16656}, {18591}, {26308}, {32537},
+                    {5403}, {18096}, {30003}, {16384}, {16384}, {16384}
+            },
+            {
+                    {29957}, {5391}, {18039}, {23566}, {22431}, {25822}, {32197},
+                    {3778}, {15336}, {28981}, {16384}, {16384}, {16384}
+            },
+            {
+                    {17920}, {1818}, {7282}, {25273}, {10923}, {31554}, {32624},
+                    {1366}, {15628}, {30462}, {146}, {5132}, {31657}
+            },
+            {
+                    {6308}, {117}, {1638}, {2161}, {16384}, {10923}, {30247},
+                    {16384}, {16384}, {16384}, {16384}, {16384}, {16384}
+            }
+    });
+
     /// The transformed default delta-q CDF.
     private static final int[] DEFAULT_DELTA_Q_CDF = inverse(608, 648, 91);
 
@@ -616,6 +640,9 @@ public final class CdfContext {
     /// The mutable inter transform-partition CDFs.
     private final int[][] transformPartitionCdfs;
 
+    /// The mutable coefficient-skip CDFs grouped by AV1 transform-context class.
+    private final int[][][] coefficientSkipCdfs;
+
     /// The mutable delta-q CDF.
     private final int[] deltaQCdf;
 
@@ -715,6 +742,7 @@ public final class CdfContext {
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
     /// @param transformSizeCdfs the mutable transform-size CDFs
     /// @param transformPartitionCdfs the mutable inter transform-partition CDFs
+    /// @param coefficientSkipCdfs the mutable coefficient-skip CDFs grouped by AV1 transform-context class
     /// @param deltaQCdf the mutable delta-q CDF
     /// @param deltaLfCdfs the mutable delta-lf CDFs
     /// @param motionVectorJointCdf the mutable motion-vector joint CDF
@@ -759,6 +787,7 @@ public final class CdfContext {
             int[][] compoundInterModeCdfs,
             int[][][] transformSizeCdfs,
             int[][] transformPartitionCdfs,
+            int[][][] coefficientSkipCdfs,
             int[] deltaQCdf,
             int[][] deltaLfCdfs,
             int[] motionVectorJointCdf,
@@ -803,6 +832,7 @@ public final class CdfContext {
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
         this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
         this.transformPartitionCdfs = Objects.requireNonNull(transformPartitionCdfs, "transformPartitionCdfs");
+        this.coefficientSkipCdfs = Objects.requireNonNull(coefficientSkipCdfs, "coefficientSkipCdfs");
         this.deltaQCdf = Objects.requireNonNull(deltaQCdf, "deltaQCdf");
         this.deltaLfCdfs = Objects.requireNonNull(deltaLfCdfs, "deltaLfCdfs");
         this.motionVectorJointCdf = Objects.requireNonNull(motionVectorJointCdf, "motionVectorJointCdf");
@@ -853,6 +883,7 @@ public final class CdfContext {
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_PARTITION_CDFS),
+                deepCopy(DEFAULT_COEFFICIENT_SKIP_CDFS),
                 Arrays.copyOf(DEFAULT_DELTA_Q_CDF, DEFAULT_DELTA_Q_CDF.length),
                 deepCopy(DEFAULT_DELTA_LF_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
@@ -904,6 +935,7 @@ public final class CdfContext {
                 deepCopy(compoundInterModeCdfs),
                 deepCopy(transformSizeCdfs),
                 deepCopy(transformPartitionCdfs),
+                deepCopy(coefficientSkipCdfs),
                 Arrays.copyOf(deltaQCdf, deltaQCdf.length),
                 deepCopy(deltaLfCdfs),
                 Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
@@ -1074,6 +1106,16 @@ public final class CdfContext {
     public int[] mutableTransformPartitionCdf(int tableIndex, int context) {
         int baseIndex = Objects.checkIndex(tableIndex, 7) * 3;
         return transformPartitionCdfs[baseIndex + Objects.checkIndex(context, 3)];
+    }
+
+    /// Returns the live mutable coefficient-skip CDF for the supplied transform-context group and context index.
+    ///
+    /// @param transformContextIndex the zero-based AV1 transform-context group index in `[0, 5)`
+    /// @param context the zero-based coefficient-skip context index in `[0, 13)`
+    /// @return the live mutable coefficient-skip CDF for the supplied inputs
+    public int[] mutableCoefficientSkipCdf(int transformContextIndex, int context) {
+        int[][] table = coefficientSkipCdfs[Objects.checkIndex(transformContextIndex, coefficientSkipCdfs.length)];
+        return table[Objects.checkIndex(context, table.length)];
     }
 
     /// Returns the live mutable delta-q CDF.

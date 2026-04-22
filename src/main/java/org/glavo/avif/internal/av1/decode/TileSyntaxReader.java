@@ -226,6 +226,18 @@ public final class TileSyntaxReader {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableTransformPartitionCdf(tableIndex, context));
     }
 
+    /// Decodes one luma coefficient-skip flag for the supplied transform size and context.
+    ///
+    /// @param transformSize the luma transform size that selects the AV1 coefficient-context group
+    /// @param context the zero-based coefficient-skip context index in `[0, 13)`
+    /// @return whether the current transform block is signaled as all-zero
+    public boolean readCoefficientSkipFlag(TransformSize transformSize, int context) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        return msacDecoder.decodeBooleanAdapt(
+                cdfContext.mutableCoefficientSkipCdf(nonNullTransformSize.coefficientContextIndex(), context)
+        );
+    }
+
     /// Decodes an unsigned literal made of equiprobable binary values.
     ///
     /// @param bitCount the number of equiprobable bits to decode

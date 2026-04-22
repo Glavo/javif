@@ -18,6 +18,8 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.PartitionType;
+import org.glavo.avif.internal.av1.model.ResidualLayout;
+import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -62,6 +64,9 @@ public final class TilePartitionTreeReader {
     /// The transform-layout reader used after terminal block headers are decoded.
     private final TileTransformLayoutReader transformLayoutReader;
 
+    /// The residual syntax reader used after transform layouts are decoded.
+    private final TileResidualSyntaxReader residualSyntaxReader;
+
     /// The tile width rounded up to 4x4 units.
     private final int tileWidth4;
 
@@ -78,6 +83,7 @@ public final class TilePartitionTreeReader {
         this.syntaxReader = new TileSyntaxReader(nonNullTileContext);
         this.blockHeaderReader = new TileBlockHeaderReader(nonNullTileContext);
         this.transformLayoutReader = new TileTransformLayoutReader(nonNullTileContext);
+        this.residualSyntaxReader = new TileResidualSyntaxReader(nonNullTileContext);
         this.tileWidth4 = (nonNullTileContext.width() + 3) >> 2;
         this.tileHeight4 = (nonNullTileContext.height() + 3) >> 2;
     }
@@ -237,7 +243,8 @@ public final class TilePartitionTreeReader {
             return null;
         }
         TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, size, neighborContext, false);
-        org.glavo.avif.internal.av1.model.TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
         neighborContext.updateFromBlockHeader(header);
         neighborContext.updateDefaultTransformContext(position, size);
         if (header.intra() || header.useIntrabc()) {
@@ -250,7 +257,7 @@ public final class TilePartitionTreeReader {
                 }
             }
         }
-        return new LeafNode(header, transformLayout);
+        return new LeafNode(header, transformLayout, residualLayout);
     }
 
     /// Creates a partition node and drops children that fell fully outside the tile.
@@ -528,18 +535,24 @@ public final class TilePartitionTreeReader {
         private final TileBlockHeaderReader.BlockHeader header;
 
         /// The decoded block-level transform layout.
-        private final org.glavo.avif.internal.av1.model.TransformLayout transformLayout;
+        private final TransformLayout transformLayout;
+
+        /// The decoded first-pass block-level residual layout.
+        private final ResidualLayout residualLayout;
 
         /// Creates one partition tree leaf.
         ///
         /// @param header the decoded leaf block header
         /// @param transformLayout the decoded block-level transform layout
+        /// @param residualLayout the decoded first-pass block-level residual layout
         public LeafNode(
                 TileBlockHeaderReader.BlockHeader header,
-                org.glavo.avif.internal.av1.model.TransformLayout transformLayout
+                TransformLayout transformLayout,
+                ResidualLayout residualLayout
         ) {
             this.header = Objects.requireNonNull(header, "header");
             this.transformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
+            this.residualLayout = Objects.requireNonNull(residualLayout, "residualLayout");
         }
 
         /// Returns the decoded leaf block header.
@@ -552,8 +565,15 @@ public final class TilePartitionTreeReader {
         /// Returns the decoded block-level transform layout.
         ///
         /// @return the decoded block-level transform layout
-        public org.glavo.avif.internal.av1.model.TransformLayout transformLayout() {
+        public TransformLayout transformLayout() {
             return transformLayout;
+        }
+
+        /// Returns the decoded first-pass block-level residual layout.
+        ///
+        /// @return the decoded first-pass block-level residual layout
+        public ResidualLayout residualLayout() {
+            return residualLayout;
         }
 
         /// Returns the local tile-relative origin of this node.

@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,6 +34,18 @@ import java.util.Objects;
 public final class BlockNeighborContext {
     /// The maximum number of provisional motion-vector candidate entries retained locally.
     private static final int PROVISIONAL_CANDIDATE_CAPACITY = 12;
+
+    /// The AV1 coefficient-context byte that marks one transform block as all-zero.
+    private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
+
+    /// The `dav1d` luma coefficient skip-context lookup table indexed by merged top and left counts.
+    private static final int[][] LUMA_COEFFICIENT_SKIP_CONTEXTS = {
+            {1, 2, 2, 2, 3},
+            {2, 4, 4, 4, 5},
+            {2, 4, 4, 4, 5},
+            {2, 4, 4, 4, 5},
+            {3, 5, 5, 5, 6}
+    };
 
     /// The weight penalty applied to secondary spatial candidates relative to direct-edge candidates.
     private static final int SECONDARY_SPATIAL_WEIGHT_PENALTY = 192;
@@ -175,6 +188,12 @@ public final class BlockNeighborContext {
     /// The left-edge inter var-tx heights indexed in 4x4 units.
     private final byte[] leftInterTransformHeightLog2;
 
+    /// The above-edge luma coefficient-context bytes indexed in 4x4 units.
+    private final byte[] aboveLumaCoefficientContext;
+
+    /// The left-edge luma coefficient-context bytes indexed in 4x4 units.
+    private final byte[] leftLumaCoefficientContext;
+
     /// Creates tile-local neighbor context state.
     ///
     /// @param tileWidth4 the tile width rounded up to 4x4 units
@@ -219,6 +238,8 @@ public final class BlockNeighborContext {
     /// @param leftTransformHeightLog2 the left-edge transform-context heights indexed in 4x4 units
     /// @param aboveInterTransformWidthLog2 the above-edge inter var-tx widths indexed in 4x4 units
     /// @param leftInterTransformHeightLog2 the left-edge inter var-tx heights indexed in 4x4 units
+    /// @param aboveLumaCoefficientContext the above-edge luma coefficient-context bytes indexed in 4x4 units
+    /// @param leftLumaCoefficientContext the left-edge luma coefficient-context bytes indexed in 4x4 units
     private BlockNeighborContext(
             int tileWidth4,
             int tileHeight4,
@@ -261,7 +282,9 @@ public final class BlockNeighborContext {
             byte[] aboveTransformWidthLog2,
             byte[] leftTransformHeightLog2,
             byte[] aboveInterTransformWidthLog2,
-            byte[] leftInterTransformHeightLog2
+            byte[] leftInterTransformHeightLog2,
+            byte[] aboveLumaCoefficientContext,
+            byte[] leftLumaCoefficientContext
     ) {
         this.tileWidth4 = tileWidth4;
         this.tileHeight4 = tileHeight4;
@@ -311,6 +334,14 @@ public final class BlockNeighborContext {
                 leftInterTransformHeightLog2,
                 "leftInterTransformHeightLog2"
         );
+        this.aboveLumaCoefficientContext = Objects.requireNonNull(
+                aboveLumaCoefficientContext,
+                "aboveLumaCoefficientContext"
+        );
+        this.leftLumaCoefficientContext = Objects.requireNonNull(
+                leftLumaCoefficientContext,
+                "leftLumaCoefficientContext"
+        );
     }
 
     /// Creates initialized neighbor context state for one tile.
@@ -335,6 +366,8 @@ public final class BlockNeighborContext {
         byte[] leftTransformHeightLog2 = new byte[tileHeight4];
         byte[] aboveInterTransformWidthLog2 = new byte[tileWidth4];
         byte[] leftInterTransformHeightLog2 = new byte[tileHeight4];
+        byte[] aboveLumaCoefficientContext = new byte[tileWidth4];
+        byte[] leftLumaCoefficientContext = new byte[tileHeight4];
         InterMotionVector[] aboveMotionVector0 = new InterMotionVector[tileWidth4];
         InterMotionVector[] leftMotionVector0 = new InterMotionVector[tileHeight4];
         InterMotionVector[] aboveMotionVector1 = new InterMotionVector[tileWidth4];
@@ -346,6 +379,8 @@ public final class BlockNeighborContext {
         Arrays.fill(leftTransformHeightLog2, (byte) -1);
         Arrays.fill(aboveInterTransformWidthLog2, (byte) -1);
         Arrays.fill(leftInterTransformHeightLog2, (byte) -1);
+        Arrays.fill(aboveLumaCoefficientContext, (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
+        Arrays.fill(leftLumaCoefficientContext, (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
         Arrays.fill(aboveReferenceFrame0, (byte) -1);
         Arrays.fill(leftReferenceFrame0, (byte) -1);
         Arrays.fill(aboveReferenceFrame1, (byte) -1);
@@ -403,7 +438,9 @@ public final class BlockNeighborContext {
                 aboveTransformWidthLog2,
                 leftTransformHeightLog2,
                 aboveInterTransformWidthLog2,
-                leftInterTransformHeightLog2
+                leftInterTransformHeightLog2,
+                aboveLumaCoefficientContext,
+                leftLumaCoefficientContext
         );
     }
 
@@ -1228,6 +1265,36 @@ public final class BlockNeighborContext {
                 + (leftInterTransformHeightLog2[y4] < nonNullTransformSize.log2Height4() ? 1 : 0);
     }
 
+    /// Returns the luma coefficient skip-context for one transform unit.
+    ///
+    /// This matches the luma-only `dav1d` `get_skip_ctx()` path by merging the already stored top
+    /// and left coefficient-context bytes across the current transform span and mapping the merged
+    /// counts through the `dav1d_skip_ctx` table. Chroma-specific contexts are still out of scope.
+    ///
+    /// @param blockSize the coded block size that owns the current transform unit
+    /// @param transformUnit the current luma transform unit
+    /// @return the luma coefficient skip-context in `[0, 7)`
+    public int lumaCoefficientSkipContext(BlockSize blockSize, TransformUnit transformUnit) {
+        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
+        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+        TransformSize transformSize = nonNullTransformUnit.size();
+        if (nonNullBlockSize.width4() == transformSize.width4() && nonNullBlockSize.height4() == transformSize.height4()) {
+            return 0;
+        }
+
+        int aboveContext = mergeCoefficientContext(
+                aboveLumaCoefficientContext,
+                nonNullTransformUnit.position().x4(),
+                transformSize.width4()
+        );
+        int leftContext = mergeCoefficientContext(
+                leftLumaCoefficientContext,
+                nonNullTransformUnit.position().y4(),
+                transformSize.height4()
+        );
+        return LUMA_COEFFICIENT_SKIP_CONTEXTS[Math.min(aboveContext & 0x3F, 4)][Math.min(leftContext & 0x3F, 4)];
+    }
+
     /// Updates the default transform-context dimensions after one block header is decoded.
     ///
     /// Inter blocks use their coded block dimensions for subsequent transform-size contexts, which
@@ -1310,6 +1377,28 @@ public final class BlockNeighborContext {
         }
     }
 
+    /// Updates the luma coefficient-context state after one transform residual unit is decoded.
+    ///
+    /// @param transformUnit the decoded luma transform residual unit
+    /// @param coefficientContextByte the coefficient-context byte written back for the decoded unit
+    public void updateLumaCoefficientContext(TransformUnit transformUnit, int coefficientContextByte) {
+        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+        if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
+            throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
+        }
+        BlockPosition position = nonNullTransformUnit.position();
+        TransformSize transformSize = nonNullTransformUnit.size();
+        int endX4 = Math.min(tileWidth4, position.x4() + transformSize.width4());
+        int endY4 = Math.min(tileHeight4, position.y4() + transformSize.height4());
+        byte storedValue = (byte) coefficientContextByte;
+        for (int x4 = position.x4(); x4 < endX4; x4++) {
+            aboveLumaCoefficientContext[x4] = storedValue;
+        }
+        for (int y4 = position.y4(); y4 < endY4; y4++) {
+            leftLumaCoefficientContext[y4] = storedValue;
+        }
+    }
+
     /// Writes one transform-context width/height pair across the visible edges of one block span.
     ///
     /// @param position the local tile-relative block origin
@@ -1327,6 +1416,21 @@ public final class BlockNeighborContext {
         for (int y4 = nonNullPosition.y4(); y4 < endY4; y4++) {
             leftTransformHeightLog2[y4] = (byte) heightLog2;
         }
+    }
+
+    /// Merges one coefficient-context span by OR-ing the stored bytes across the visible edge range.
+    ///
+    /// @param contexts the stored coefficient-context edge bytes
+    /// @param start the inclusive start coordinate in 4x4 units
+    /// @param span the requested span length in 4x4 units
+    /// @return the merged coefficient-context byte across the requested visible edge range
+    private static int mergeCoefficientContext(byte[] contexts, int start, int span) {
+        int end = Math.min(contexts.length, start + span);
+        int merged = ALL_ZERO_COEFFICIENT_CONTEXT_BYTE;
+        for (int index = start; index < end; index++) {
+            merged |= contexts[index] & 0xFF;
+        }
+        return merged;
     }
 
     /// Updates the neighbor state after decoding one block header.
