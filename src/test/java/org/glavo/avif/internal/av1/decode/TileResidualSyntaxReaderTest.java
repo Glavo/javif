@@ -93,6 +93,29 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(residualUnit.dcCoefficient(), residualUnit.coefficients()[0]);
     }
 
+    /// Verifies that the residual reader supports the first scanned AC coefficient in addition to DC.
+    @Test
+    void readsResidualWithFirstScannedAcCoefficientForSingleTransformBlock() {
+        byte[] payload = findPayloadForSingleAcResidual(BlockSize.SIZE_4X4);
+        TileDecodeContext tileContext = createTileContext(payload);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_4X4, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+        int[] coefficients = residualUnit.coefficients();
+        int firstAcIndex = expectedFirstAcCoefficientIndex(transformLayout.lumaUnits()[0].size());
+
+        assertFalse(residualUnit.allZero());
+        assertEquals(1, residualUnit.endOfBlockIndex());
+        assertTrue(coefficients[firstAcIndex] != 0);
+        assertEquals(expectedCoefficientContextByte(coefficients), residualUnit.coefficientContextByte());
+    }
+
     /// Verifies that non-zero coefficient state from one 4x4 unit affects the next unit's skip context.
     @Test
     void propagatesCoefficientSkipContextAcrossFourByFourUnits() {
@@ -113,8 +136,8 @@ final class TileResidualSyntaxReaderTest {
         assertFalse(decodeHeader.skip());
         assertEquals(4, residualUnits.length);
         assertFalse(residualUnits[0].allZero());
-        assertEquals(0, residualUnits[0].endOfBlockIndex());
-        assertEquals(expectedNonZeroCoefficientContextByte(residualUnits[0].dcCoefficient()), residualUnits[0].coefficientContextByte());
+        assertTrue(residualUnits[0].endOfBlockIndex() >= 0);
+        assertEquals(expectedCoefficientContextByte(residualUnits[0].coefficients()), residualUnits[0].coefficientContextByte());
         assertTrue(residualUnits[1].allZero());
         assertEquals(0x40, residualUnits[1].coefficientContextByte());
 
@@ -183,6 +206,42 @@ final class TileResidualSyntaxReaderTest {
         throw new IllegalStateException("No deterministic payload produced a supported DC-only residual");
     }
 
+    /// Finds a small payload whose first residual unit exposes the first scanned AC coefficient.
+    ///
+    /// @param blockSize the block size whose residual syntax should be decoded
+    /// @return a small payload whose first residual unit exposes the first scanned AC coefficient
+    private static byte[] findPayloadForSingleAcResidual(BlockSize blockSize) {
+        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
+            int limit = 1 << (searchBytes << 3);
+            for (int value = 0; value < limit; value++) {
+                byte[] payload = new byte[8];
+                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
+                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
+                }
+                try {
+                    TileDecodeContext tileContext = createTileContext(payload);
+                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+                    TileBlockHeaderReader.BlockHeader header =
+                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
+                    if (header.skip()) {
+                        continue;
+                    }
+                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+                    TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+                    if (residualUnit.endOfBlockIndex() == 1) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported residual trees are skipped while brute-forcing a supported first-AC unit.
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a supported first-AC residual");
+    }
+
     /// Finds a payload whose first residual flags match the requested sequence, or `null`.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
@@ -240,6 +299,31 @@ final class TileResidualSyntaxReaderTest {
     /// @return the stored coefficient-context byte expected for one non-zero DC coefficient
     private static int expectedNonZeroCoefficientContextByte(int signedDcCoefficient) {
         return Math.min(Math.abs(signedDcCoefficient), 63) | (signedDcCoefficient > 0 ? 0x80 : 0);
+    }
+
+    /// Returns the expected stored coefficient-context byte for one dense residual coefficient array.
+    ///
+    /// @param coefficients the dense transform-domain coefficient array in natural raster order
+    /// @return the expected stored coefficient-context byte
+    private static int expectedCoefficientContextByte(int[] coefficients) {
+        int cumulativeLevel = 0;
+        for (int coefficient : coefficients) {
+            cumulativeLevel += Math.abs(coefficient);
+        }
+        int magnitude = Math.min(cumulativeLevel, 63);
+        int dcCoefficient = coefficients[0];
+        if (dcCoefficient == 0) {
+            return magnitude | 0x40;
+        }
+        return magnitude | (dcCoefficient > 0 ? 0x80 : 0);
+    }
+
+    /// Returns the expected natural-raster index of the first scanned AC coefficient.
+    ///
+    /// @param transformSize the active transform size
+    /// @return the expected natural-raster index of the first scanned AC coefficient
+    private static int expectedFirstAcCoefficientIndex(TransformSize transformSize) {
+        return transformSize.widthPixels() > transformSize.heightPixels() ? 1 : transformSize.widthPixels();
     }
 
     /// Returns the expected skip context for the second 4x4 unit in a `FOUR_BY_FOUR_ONLY` 8x8 block.

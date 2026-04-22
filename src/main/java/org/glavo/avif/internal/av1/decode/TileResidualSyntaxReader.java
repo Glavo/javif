@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
+import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -25,8 +26,9 @@ import java.util.Objects;
 
 /// Reader for the first coefficient-side syntax elements inside one tile bitstream.
 ///
-/// The current implementation covers luma `txb_skip`, end-of-block prefix decoding, and DC-only
-/// coefficient decoding. AC token trees are still added incrementally on top of this foundation.
+/// The current implementation covers luma `txb_skip`, end-of-block prefix decoding, DC-only
+/// coefficient decoding, and the first scanned AC coefficient. Higher-order AC token trees are
+/// still added incrementally on top of this foundation.
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
@@ -95,26 +97,53 @@ public final class TileResidualSyntaxReader {
         }
 
         int endOfBlockIndex = syntaxReader.readEndOfBlockIndex(nonNullTransformUnit.size(), false, false);
-        if (endOfBlockIndex != 0) {
+        if (endOfBlockIndex > 1) {
             throw new IllegalStateException("AC coefficient decoding is not implemented yet");
         }
 
-        int dcToken = syntaxReader.readEndOfBlockBaseToken(nonNullTransformUnit.size(), false, 0);
+        int[] coefficients = new int[nonNullTransformUnit.size().widthPixels() * nonNullTransformUnit.size().heightPixels()];
+        int cumulativeLevel = 0;
+
+        if (endOfBlockIndex == 1) {
+            int coefficientIndex = naturalCoefficientIndex(nonNullTransformUnit.size(), endOfBlockIndex);
+            int acToken = syntaxReader.readEndOfBlockBaseToken(
+                    nonNullTransformUnit.size(),
+                    false,
+                    endOfBlockTokenContext(endOfBlockIndex, nonNullTransformUnit.size())
+            );
+            if (acToken == 3) {
+                acToken = syntaxReader.readHighToken(nonNullTransformUnit.size(), false, 7);
+            }
+            if (acToken == 15) {
+                acToken += syntaxReader.readCoefficientGolomb();
+            }
+            coefficients[coefficientIndex] = syntaxReader.readCoefficientSignFlag() ? -acToken : acToken;
+            cumulativeLevel += acToken;
+        }
+
+        int dcToken = endOfBlockIndex == 0
+                ? syntaxReader.readEndOfBlockBaseToken(nonNullTransformUnit.size(), false, 0)
+                : syntaxReader.readBaseToken(nonNullTransformUnit.size(), false, 0);
         if (dcToken == 3) {
-            dcToken = syntaxReader.readDcHighToken(nonNullTransformUnit.size(), false);
+            dcToken = syntaxReader.readHighToken(nonNullTransformUnit.size(), false, 0);
         }
         if (dcToken == 15) {
             dcToken += syntaxReader.readCoefficientGolomb();
         }
-        boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
-        int signedDcLevel = negative ? -dcToken : dcToken;
-        int coefficientContextByte = createNonZeroCoefficientContextByte(signedDcLevel);
-        int[] coefficients = new int[nonNullTransformUnit.size().widthPixels() * nonNullTransformUnit.size().heightPixels()];
-        coefficients[0] = signedDcLevel;
+
+        int signedDcLevel = 0;
+        if (dcToken != 0) {
+            boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
+            signedDcLevel = negative ? -dcToken : dcToken;
+            coefficients[0] = signedDcLevel;
+            cumulativeLevel += dcToken;
+        }
+
+        int coefficientContextByte = createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel);
         return new TransformResidualUnit(
                 nonNullTransformUnit.position(),
                 nonNullTransformUnit.size(),
-                0,
+                endOfBlockIndex,
                 coefficients,
                 coefficientContextByte
         );
@@ -135,12 +164,54 @@ public final class TileResidualSyntaxReader {
         );
     }
 
-    /// Creates the stored coefficient-context byte for one non-zero DC coefficient.
+    /// Returns the natural-raster coefficient index for one supported scan index.
     ///
-    /// @param signedDcLevel the signed DC coefficient level
-    /// @return the stored coefficient-context byte for one non-zero DC coefficient
-    private static int createNonZeroCoefficientContextByte(int signedDcLevel) {
-        int magnitude = Math.min(Math.abs(signedDcLevel), 63);
+    /// The current implementation supports only scan indices `0` and `1`. For 2D transforms the
+    /// first scanned AC coefficient follows the dominant transform axis, which matches the first
+    /// `dav1d` scan entry for each supported transform size.
+    ///
+    /// @param transformSize the active transform size
+    /// @param endOfBlockIndex the supported scan index
+    /// @return the natural-raster coefficient index for the supplied scan index
+    private static int naturalCoefficientIndex(TransformSize transformSize, int endOfBlockIndex) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        if (endOfBlockIndex == 0) {
+            return 0;
+        }
+        if (endOfBlockIndex != 1) {
+            throw new IllegalArgumentException("Unsupported scan index: " + endOfBlockIndex);
+        }
+        return nonNullTransformSize.widthPixels() > nonNullTransformSize.heightPixels()
+                ? 1
+                : nonNullTransformSize.widthPixels();
+    }
+
+    /// Returns the end-of-block base-token context for one supported end-of-block index.
+    ///
+    /// @param endOfBlockIndex the supported end-of-block index
+    /// @param transformSize the active transform size
+    /// @return the end-of-block base-token context for the supplied index
+    private static int endOfBlockTokenContext(int endOfBlockIndex, TransformSize transformSize) {
+        if (endOfBlockIndex < 0) {
+            throw new IllegalArgumentException("endOfBlockIndex < 0: " + endOfBlockIndex);
+        }
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int tx2dSizeContext = Math.min(nonNullTransformSize.log2Width4(), 3)
+                + Math.min(nonNullTransformSize.log2Height4(), 3);
+        return 1 + (endOfBlockIndex > (2 << tx2dSizeContext) ? 1 : 0)
+                + (endOfBlockIndex > (4 << tx2dSizeContext) ? 1 : 0);
+    }
+
+    /// Creates the stored coefficient-context byte for one non-zero transform unit.
+    ///
+    /// @param cumulativeLevel the sum of decoded absolute coefficient levels, clamped later to six bits
+    /// @param signedDcLevel the signed DC coefficient level, or zero when the transform block has only AC
+    /// @return the stored coefficient-context byte for one non-zero transform unit
+    private static int createNonZeroCoefficientContextByte(int cumulativeLevel, int signedDcLevel) {
+        int magnitude = Math.min(cumulativeLevel, 63);
+        if (signedDcLevel == 0) {
+            return magnitude | 0x40;
+        }
         return magnitude | (signedDcLevel > 0 ? 0x80 : 0);
     }
 }

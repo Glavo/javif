@@ -256,11 +256,15 @@ public final class TileSyntaxReader {
                 cdfContext.mutableEndOfBlockPrefixCdf(tx2dSizeContext, chroma, oneDimensional),
                 4 + tx2dSizeContext
         );
-        if (eob <= 1) {
-            return eob;
+        if (eob > 1) {
+            int eobBin = eob - 2;
+            boolean eobHighBit = msacDecoder.decodeBooleanAdapt(
+                    cdfContext.mutableEndOfBlockHighBitCdf(nonNullTransformSize.coefficientContextIndex(), chroma, eobBin)
+            );
+            eob = ((eobHighBit ? 1 : 0) | 2) << eobBin;
+            eob |= msacDecoder.decodeBools(eobBin);
         }
-
-        throw new IllegalStateException("AC end-of-block syntax is not implemented yet");
+        return eob;
     }
 
     /// Decodes one end-of-block/DC base token for the supplied transform context and table context.
@@ -279,6 +283,23 @@ public final class TileSyntaxReader {
         );
     }
 
+    /// Decodes one coefficient base token for the supplied transform context and table context.
+    ///
+    /// The returned token is in `[0, 3]`, where zero means the coefficient level is zero and three
+    /// enters the high-token extension path.
+    ///
+    /// @param transformSize the active transform size
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param context the zero-based coefficient base-token context
+    /// @return the decoded coefficient base token in `[0, 3]`
+    public int readBaseToken(TransformSize transformSize, boolean chroma, int context) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        return msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableBaseTokenCdf(nonNullTransformSize.coefficientContextIndex(), chroma, context),
+                3
+        );
+    }
+
     /// Decodes one DC high token from the `br_tok` context `0`.
     ///
     /// This path currently covers the DC-only residual syntax where higher AC contexts are not yet
@@ -288,9 +309,19 @@ public final class TileSyntaxReader {
     /// @param chroma whether the syntax belongs to a chroma plane
     /// @return the decoded high token in `[3, 15]`
     public int readDcHighToken(TransformSize transformSize, boolean chroma) {
+        return readHighToken(Objects.requireNonNull(transformSize, "transformSize"), chroma, 0);
+    }
+
+    /// Decodes one coefficient high token from the supplied `br_tok` context.
+    ///
+    /// @param transformSize the active transform size
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param context the zero-based `br_tok` context index
+    /// @return the decoded high token in `[3, 15]`
+    public int readHighToken(TransformSize transformSize, boolean chroma, int context) {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         return msacDecoder.decodeHighToken(
-                cdfContext.mutableDcHighTokenCdf(Math.min(nonNullTransformSize.coefficientContextIndex(), 3), chroma)
+                cdfContext.mutableHighTokenCdf(Math.min(nonNullTransformSize.coefficientContextIndex(), 3), chroma, context)
         );
     }
 
@@ -301,6 +332,13 @@ public final class TileSyntaxReader {
     /// @return whether the decoded DC coefficient is negative
     public boolean readDcSignFlag(boolean chroma, int context) {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableDcSignCdf(chroma, context));
+    }
+
+    /// Decodes one coefficient sign flag from the equiprobable residual-sign path.
+    ///
+    /// @return whether the decoded coefficient is negative
+    public boolean readCoefficientSignFlag() {
+        return msacDecoder.decodeBooleanEqui();
     }
 
     /// Decodes one AV1 coefficient Golomb extension value.

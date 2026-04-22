@@ -23,8 +23,8 @@ import java.util.Objects;
 /// One transform residual unit after the current coefficient-side syntax pass.
 ///
 /// Coefficients are stored as signed transform-domain levels in natural raster order. The current
-/// implementation supports all-zero units and DC-only units, while higher-order AC token decoding
-/// is still introduced incrementally.
+/// implementation supports all-zero units, DC-only units, and the first scanned AC coefficient,
+/// while higher-order AC token decoding is still introduced incrementally.
 @NotNullByDefault
 public final class TransformResidualUnit {
     /// The tile-relative luma-grid origin of this transform residual unit.
