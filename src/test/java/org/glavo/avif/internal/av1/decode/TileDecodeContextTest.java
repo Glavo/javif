@@ -140,7 +140,11 @@ final class TileDecodeContextTest {
         TileDecodeContext context = TileDecodeContext.create(assembly, 0, temporalMotionField);
 
         assertSame(temporalMotionField, context.temporalMotionField());
+        assertNotSame(temporalMotionField, context.decodedTemporalMotionField());
         assertSame(temporalBlock, context.temporalMotionField().block(3, 4));
+        assertEquals(temporalMotionField.width8(), context.decodedTemporalMotionField().width8());
+        assertEquals(temporalMotionField.height8(), context.decodedTemporalMotionField().height8());
+        assertTrue(context.decodedTemporalMotionField().block(3, 4) == null);
     }
 
     /// Creates a synthetic assembled frame with one tile group that already covers all tiles.

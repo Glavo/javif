@@ -52,6 +52,9 @@ public final class TileDecodeContext {
     /// The tile-local temporal motion field sampled from refreshed reference frames.
     private final TemporalMotionField temporalMotionField;
 
+    /// The tile-local temporal motion field being produced while decoding the current frame.
+    private final TemporalMotionField decodedTemporalMotionField;
+
     /// The zero-based tile index within the frame.
     private final int tileIndex;
 
@@ -97,6 +100,7 @@ public final class TileDecodeContext {
     /// @param msacDecoder the tile-local arithmetic decoder
     /// @param cdfContext the tile-local mutable CDF context
     /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
+    /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
     /// @param tileIndex the zero-based tile index within the frame
     /// @param tileRow the zero-based tile row within the frame
     /// @param tileColumn the zero-based tile column within the frame
@@ -117,6 +121,7 @@ public final class TileDecodeContext {
             MsacDecoder msacDecoder,
             CdfContext cdfContext,
             TemporalMotionField temporalMotionField,
+            TemporalMotionField decodedTemporalMotionField,
             int tileIndex,
             int tileRow,
             int tileColumn,
@@ -137,6 +142,7 @@ public final class TileDecodeContext {
         this.msacDecoder = Objects.requireNonNull(msacDecoder, "msacDecoder");
         this.cdfContext = Objects.requireNonNull(cdfContext, "cdfContext");
         this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
+        this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
         this.tileIndex = tileIndex;
         this.tileRow = tileRow;
         this.tileColumn = tileColumn;
@@ -240,6 +246,7 @@ public final class TileDecodeContext {
                 tileBitstream.openMsacDecoder(frameHeader.disableCdfUpdate()),
                 copiedCdfContext,
                 effectiveTemporalMotionField,
+                new TemporalMotionField(width8, height8),
                 tileIndex,
                 tileRow,
                 tileColumn,
@@ -302,6 +309,13 @@ public final class TileDecodeContext {
     /// @return the tile-local temporal motion field sampled from refreshed reference frames
     public TemporalMotionField temporalMotionField() {
         return temporalMotionField;
+    }
+
+    /// Returns the tile-local temporal motion field produced while decoding the current frame.
+    ///
+    /// @return the tile-local temporal motion field produced while decoding the current frame
+    public TemporalMotionField decodedTemporalMotionField() {
+        return decodedTemporalMotionField;
     }
 
     /// Returns the zero-based tile index within the frame.
@@ -451,6 +465,14 @@ public final class TileDecodeContext {
         /// @param block the temporal motion block to store
         public void setBlock(int x8, int y8, TemporalMotionBlock block) {
             blocks[index(x8, y8)] = Objects.requireNonNull(block, "block");
+        }
+
+        /// Clears the temporal motion block stored at the supplied tile-relative 8x8 coordinate.
+        ///
+        /// @param x8 the tile-relative X coordinate in 8x8 units
+        /// @param y8 the tile-relative Y coordinate in 8x8 units
+        public void clearBlock(int x8, int y8) {
+            blocks[index(x8, y8)] = null;
         }
 
         /// Returns the temporal motion block stored at the supplied tile-relative 8x8 coordinate, or `null`.

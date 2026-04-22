@@ -60,6 +60,9 @@ public final class BlockNeighborContext {
     /// The tile-local temporal motion field sampled from refreshed reference frames.
     private final TileDecodeContext.TemporalMotionField temporalMotionField;
 
+    /// The tile-local temporal motion field produced while decoding the current frame.
+    private final TileDecodeContext.TemporalMotionField decodedTemporalMotionField;
+
     /// The stored decoded block map indexed in tile-relative 4x4 units.
     private final StoredBlock[] storedBlocks;
 
@@ -165,6 +168,7 @@ public final class BlockNeighborContext {
     /// @param tileHeight4 the tile height rounded up to 4x4 units
     /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
     /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
+    /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
     /// @param storedBlocks the stored decoded block map indexed in tile-relative 4x4 units
     /// @param aboveIntra the above-edge intra flags indexed in 4x4 units
     /// @param leftIntra the left-edge intra flags indexed in 4x4 units
@@ -203,6 +207,7 @@ public final class BlockNeighborContext {
             int tileHeight4,
             boolean useReferenceFrameMotionVectors,
             TileDecodeContext.TemporalMotionField temporalMotionField,
+            TileDecodeContext.TemporalMotionField decodedTemporalMotionField,
             StoredBlock[] storedBlocks,
             byte[] aboveIntra,
             byte[] leftIntra,
@@ -241,6 +246,7 @@ public final class BlockNeighborContext {
         this.tileHeight4 = tileHeight4;
         this.useReferenceFrameMotionVectors = useReferenceFrameMotionVectors;
         this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
+        this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
         this.storedBlocks = Objects.requireNonNull(storedBlocks, "storedBlocks");
         this.aboveIntra = Objects.requireNonNull(aboveIntra, "aboveIntra");
         this.leftIntra = Objects.requireNonNull(leftIntra, "leftIntra");
@@ -321,6 +327,7 @@ public final class BlockNeighborContext {
                 tileHeight4,
                 nonNullTileContext.frameHeader().useReferenceFrameMotionVectors(),
                 nonNullTileContext.temporalMotionField(),
+                nonNullTileContext.decodedTemporalMotionField(),
                 new StoredBlock[tileWidth4 * tileHeight4],
                 aboveIntra,
                 leftIntra,
@@ -1232,6 +1239,85 @@ public final class BlockNeighborContext {
                 storedBlocks[blockIndex(x4, y4)] = storedBlock;
             }
         }
+        updateDecodedTemporalMotionField(nonNullHeader, endX4, endY4, motionVector0, motionVector1);
+    }
+
+    /// Updates the current-frame temporal motion field with one decoded block header.
+    ///
+    /// This write-back path intentionally stays separate from the reference temporal field used for
+    /// the current frame's `refmvs` lookup. The stored samples therefore become available only to
+    /// later pipeline stages or future frames, instead of feeding back into the same frame.
+    ///
+    /// @param header the decoded block header that should be projected into the current-frame temporal field
+    /// @param endX4 the exclusive end X coordinate of the decoded block in 4x4 units
+    /// @param endY4 the exclusive end Y coordinate of the decoded block in 4x4 units
+    /// @param motionVector0 the normalized primary motion-vector state chosen for the block
+    /// @param motionVector1 the normalized secondary motion-vector state chosen for the block
+    private void updateDecodedTemporalMotionField(
+            TileBlockHeaderReader.BlockHeader header,
+            int endX4,
+            int endY4,
+            InterMotionVector motionVector0,
+            InterMotionVector motionVector1
+    ) {
+        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
+        int startX8 = nonNullHeader.position().x8();
+        int startY8 = nonNullHeader.position().y8();
+        int endX8 = Math.min(decodedTemporalMotionField.width8(), (endX4 + 1) >> 1);
+        int endY8 = Math.min(decodedTemporalMotionField.height8(), (endY4 + 1) >> 1);
+        if (startX8 >= endX8 || startY8 >= endY8) {
+            return;
+        }
+
+        @Nullable TileDecodeContext.TemporalMotionBlock temporalMotionBlock = createDecodedTemporalMotionBlock(
+                nonNullHeader,
+                motionVector0,
+                motionVector1
+        );
+        for (int y8 = startY8; y8 < endY8; y8++) {
+            for (int x8 = startX8; x8 < endX8; x8++) {
+                if (temporalMotionBlock == null) {
+                    decodedTemporalMotionField.clearBlock(x8, y8);
+                } else {
+                    decodedTemporalMotionField.setBlock(x8, y8, temporalMotionBlock);
+                }
+            }
+        }
+    }
+
+    /// Creates the temporal motion-field sample contributed by one decoded block header, or `null`.
+    ///
+    /// Intra and `intrabc` blocks do not contribute temporal motion samples. Inter samples are
+    /// stored with the already normalized motion-vector states carried by the block header.
+    ///
+    /// @param header the decoded block header
+    /// @param motionVector0 the normalized primary motion-vector state chosen for the block
+    /// @param motionVector1 the normalized secondary motion-vector state chosen for the block
+    /// @return the temporal motion-field sample contributed by the block, or `null`
+    private static @Nullable TileDecodeContext.TemporalMotionBlock createDecodedTemporalMotionBlock(
+            TileBlockHeaderReader.BlockHeader header,
+            InterMotionVector motionVector0,
+            InterMotionVector motionVector1
+    ) {
+        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
+        if (nonNullHeader.intra() || nonNullHeader.useIntrabc() || nonNullHeader.referenceFrame0() < 0) {
+            return null;
+        }
+        if (nonNullHeader.compoundReference()) {
+            if (nonNullHeader.referenceFrame1() < 0) {
+                return null;
+            }
+            return TileDecodeContext.TemporalMotionBlock.compoundReference(
+                    nonNullHeader.referenceFrame0(),
+                    nonNullHeader.referenceFrame1(),
+                    Objects.requireNonNull(motionVector0, "motionVector0"),
+                    Objects.requireNonNull(motionVector1, "motionVector1")
+            );
+        }
+        return TileDecodeContext.TemporalMotionBlock.singleReference(
+                nonNullHeader.referenceFrame0(),
+                Objects.requireNonNull(motionVector0, "motionVector0")
+        );
     }
 
     /// Returns the flattened stored-block index for one tile-relative 4x4 coordinate.
