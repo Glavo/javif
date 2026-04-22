@@ -141,6 +141,79 @@ final class TileBlockHeaderReaderTest {
         }
     }
 
+    /// Verifies that a superblock-origin block decodes CDEF and delta-q/delta-lf side syntax.
+    @Test
+    void readsCdefIndexAndDeltaStateAtSuperblockStart() {
+        byte[] payload = findPayloadForCdefAndDeltaSyntax();
+        FrameHeader.DeltaInfo deltaInfo = new FrameHeader.DeltaInfo(true, 0, true, 0, false);
+        FrameHeader.CdefInfo cdefInfo = new FrameHeader.CdefInfo(3, 2, new int[]{0, 0, 0, 0}, new int[]{0, 0, 0, 0});
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.KEY,
+                false,
+                payload,
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                false,
+                false,
+                false,
+                100,
+                deltaInfo,
+                cdefInfo
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        int expectedCdefIndex = oracleDecoder.decodeBools(2);
+        int expectedDeltaQ = decodeSignedDeltaValue(oracleDecoder, oracleCdf.mutableDeltaQCdf(), 0);
+        int expectedDeltaLf = decodeSignedDeltaValue(oracleDecoder, oracleCdf.mutableDeltaLfCdf(0), 0);
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertFalse(expectedSkip);
+        assertFalse(header.skip());
+        assertEquals(expectedCdefIndex, header.cdefIndex());
+        assertEquals(clip(100 + expectedDeltaQ, 1, 255), header.qIndex());
+        assertArrayEquals(new int[]{clip(expectedDeltaLf, -63, 63), 0, 0, 0}, header.deltaLfValues());
+    }
+
+    /// Verifies that CDEF and delta-q/delta-lf state persist across later blocks in the same superblock.
+    @Test
+    void carriesCdefAndDeltaStateAcrossBlocksWithinSuperblock() {
+        byte[] payload = findPayloadForCdefAndDeltaSyntax();
+        FrameHeader.DeltaInfo deltaInfo = new FrameHeader.DeltaInfo(true, 0, true, 0, false);
+        FrameHeader.CdefInfo cdefInfo = new FrameHeader.CdefInfo(3, 2, new int[]{0, 0, 0, 0}, new int[]{0, 0, 0, 0});
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.KEY,
+                false,
+                payload,
+                false,
+                defaultDisabledSegmentation(),
+                false,
+                false,
+                false,
+                false,
+                100,
+                deltaInfo,
+                cdefInfo
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader first = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
+        TileBlockHeaderReader.BlockHeader second = reader.read(new BlockPosition(4, 0), BlockSize.SIZE_16X16, neighborContext);
+
+        assertTrue(first.cdefIndex() > 0);
+        assertTrue(first.qIndex() != 100);
+        assertTrue(first.deltaLfValues()[0] != 0);
+        assertEquals(first.cdefIndex(), second.cdefIndex());
+        assertEquals(first.qIndex(), second.qIndex());
+        assertArrayEquals(first.deltaLfValues(), second.deltaLfValues());
+    }
+
     /// Verifies that skipped inter blocks do not consume an intra/inter decision or intra syntax.
     @Test
     void readsSkippedInterBlockWithoutIntraSyntax() {
@@ -1755,6 +1828,38 @@ final class TileBlockHeaderReaderTest {
         throw new IllegalStateException("No deterministic payload produced palette-enabled DC/DC block syntax");
     }
 
+    /// Finds a small payload whose first key-frame block decodes non-zero CDEF and delta-q/delta-lf side syntax.
+    ///
+    /// @return a small payload whose first key-frame block decodes non-zero CDEF and delta-q/delta-lf side syntax
+    private static byte[] findPayloadForCdefAndDeltaSyntax() {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{
+                        (byte) first,
+                        (byte) second,
+                        0x45,
+                        0x67,
+                        (byte) 0x89,
+                        (byte) 0xAB,
+                        (byte) 0xCD,
+                        (byte) 0xEF
+                };
+                CdfContext oracleCdf = CdfContext.createDefault();
+                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
+                    continue;
+                }
+                int cdefIndex = oracleDecoder.decodeBools(2);
+                int deltaQ = decodeSignedDeltaValue(oracleDecoder, oracleCdf.mutableDeltaQCdf(), 0);
+                int deltaLf = decodeSignedDeltaValue(oracleDecoder, oracleCdf.mutableDeltaLfCdf(0), 0);
+                if (cdefIndex > 0 && deltaQ != 0 && deltaLf != 0) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced non-zero CDEF and delta-q/delta-lf syntax");
+    }
+
     /// Decodes one compound-reference expectation with the same contexts as `TileBlockHeaderReader`.
     ///
     /// @param decoder the oracle arithmetic decoder
@@ -2090,6 +2195,27 @@ final class TileBlockHeaderReaderTest {
         return new MotionVector(rowQuarterPel, columnQuarterPel);
     }
 
+    /// Decodes one signed delta value with the same syntax as `TileSyntaxReader`.
+    ///
+    /// @param decoder the oracle arithmetic decoder
+    /// @param cdf the oracle inverse CDF used for the delta-magnitude prefix
+    /// @param resolutionLog2 the resolution log2 applied to non-zero decoded magnitudes
+    /// @return the decoded signed and resolution-scaled delta value
+    private static int decodeSignedDeltaValue(MsacDecoder decoder, int[] cdf, int resolutionLog2) {
+        int magnitude = decoder.decodeSymbolAdapt(cdf, 3);
+        if (magnitude == 3) {
+            int bitCount = 1 + decoder.decodeBools(3);
+            magnitude = decoder.decodeBools(bitCount) + 1 + (1 << bitCount);
+        }
+        if (magnitude == 0) {
+            return 0;
+        }
+        if (decoder.decodeBooleanEqui()) {
+            magnitude = -magnitude;
+        }
+        return magnitude << resolutionLog2;
+    }
+
     /// Decodes one signed motion-vector component residual with the same syntax as `TileSyntaxReader`.
     ///
     /// @param decoder the oracle arithmetic decoder
@@ -2133,6 +2259,16 @@ final class TileBlockHeaderReaderTest {
 
         int diff = ((integerMagnitude << 3) | (fractionalPart << 1) | highPrecisionBit) + 1;
         return negative ? -diff : diff;
+    }
+
+    /// Clips one integer into the supplied inclusive range.
+    ///
+    /// @param value the value to clip
+    /// @param min the inclusive lower bound
+    /// @param max the inclusive upper bound
+    /// @return the clipped value
+    private static int clip(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /// Creates a simple tile context used by block-header tests.
@@ -2224,6 +2360,51 @@ final class TileBlockHeaderReaderTest {
             boolean allLossless,
             boolean skipModeEnabled,
             boolean switchableCompoundReferences
+    ) {
+        return createTileContext(
+                frameType,
+                allowIntrabc,
+                payload,
+                filterIntra,
+                segmentation,
+                allowScreenContentTools,
+                allLossless,
+                skipModeEnabled,
+                switchableCompoundReferences,
+                0,
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0])
+        );
+    }
+
+    /// Creates a simple tile context used by block-header tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param allowIntrabc whether the synthetic frame allows `intrabc`
+    /// @param payload the collected tile entropy payload
+    /// @param filterIntra whether the synthetic sequence enables filter intra
+    /// @param segmentation the synthetic frame segmentation state
+    /// @param allowScreenContentTools whether the synthetic frame enables screen-content tools
+    /// @param allLossless whether all segments in the synthetic frame are lossless
+    /// @param skipModeEnabled whether skip mode is enabled for the synthetic frame
+    /// @param switchableCompoundReferences whether compound-reference mode is switchable for the synthetic frame
+    /// @param baseQIndex the synthetic frame base quantizer index
+    /// @param deltaInfo the synthetic frame delta-q/delta-lf state
+    /// @param cdefInfo the synthetic frame CDEF state
+    /// @return a simple tile context used by block-header tests
+    private static TileDecodeContext createTileContext(
+            FrameType frameType,
+            boolean allowIntrabc,
+            byte[] payload,
+            boolean filterIntra,
+            FrameHeader.SegmentationInfo segmentation,
+            boolean allowScreenContentTools,
+            boolean allLossless,
+            boolean skipModeEnabled,
+            boolean switchableCompoundReferences,
+            int baseQIndex,
+            FrameHeader.DeltaInfo deltaInfo,
+            FrameHeader.CdefInfo cdefInfo
     ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
@@ -2317,9 +2498,9 @@ final class TileBlockHeaderReaderTest {
                         new int[]{0, 1},
                         0
                 ),
-                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.QuantizationInfo(baseQIndex, 0, 0, 0, 0, 0, false, 0, 0, 0),
                 segmentation,
-                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                deltaInfo,
                 allLossless,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
@@ -2331,7 +2512,7 @@ final class TileBlockHeaderReaderTest {
                         new int[]{1, 0, 0, 0, -1, 0, -1, -1},
                         new int[]{0, 0}
                 ),
-                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                cdefInfo,
                 new FrameHeader.RestorationInfo(
                         new FrameHeader.RestorationType[]{
                                 FrameHeader.RestorationType.NONE,

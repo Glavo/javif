@@ -36,8 +36,9 @@ import java.util.Objects;
 /// Reader for one leaf block header inside a tile partition tree.
 ///
 /// This implementation intentionally covers only the syntax elements already backed by
-/// `TileSyntaxReader`, including skip mode, provisional inter prediction modes, palette size
-/// signaling, `intrabc`, directional angle deltas, and block-size-aware CFL gating.
+/// `TileSyntaxReader`, including skip mode, CDEF and delta-q/delta-lf side syntax, provisional
+/// inter prediction modes, palette size signaling, `intrabc`, directional angle deltas, and
+/// block-size-aware CFL gating.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
     /// Sentinel used when a block does not carry an inter reference frame.
@@ -118,6 +119,8 @@ public final class TileBlockHeaderReader {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
+        TileDecodeContext.BlockSyntaxState blockSyntaxState = tileContext.blockSyntaxState();
+        blockSyntaxState.enterSuperblock(nonNullPosition, tileContext.superblockSize());
         FrameHeader.SegmentationInfo segmentation = tileContext.frameHeader().segmentation();
         FrameType frameType = tileContext.frameHeader().frameType();
         boolean hasChroma = hasChroma(nonNullPosition, nonNullSize);
@@ -154,6 +157,10 @@ public final class TileBlockHeaderReader {
             }
             segmentData = segmentDataBeforeSkip;
         }
+
+        int cdefIndex = resolveCdefIndex(nonNullPosition, nonNullSize, skip, blockSyntaxState);
+        int qIndex = applyDeltaSyntax(nonNullPosition, nonNullSize, skip, hasChroma, blockSyntaxState);
+        int[] deltaLfValues = blockSyntaxState.currentDeltaLfValues();
 
         boolean useIntrabc = false;
         boolean intra;
@@ -314,6 +321,9 @@ public final class TileBlockHeaderReader {
                 motionVector1,
                 segmentPredicted,
                 segmentId,
+                cdefIndex,
+                qIndex,
+                deltaLfValues,
                 yMode,
                 uvMode,
                 yPaletteSize,
@@ -334,6 +344,140 @@ public final class TileBlockHeaderReader {
             nonNullNeighborContext.updateDefaultTransformContext(nonNullPosition, nonNullSize);
         }
         return header;
+    }
+
+    /// Resolves the effective CDEF index for one block, decoding and caching it when needed.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the current block size
+    /// @param skip whether the current block is skipped
+    /// @param blockSyntaxState the mutable tile-local block syntax state
+    /// @return the effective CDEF index for the current block, or `-1` when not yet known
+    private int resolveCdefIndex(
+            BlockPosition position,
+            BlockSize size,
+            boolean skip,
+            TileDecodeContext.BlockSyntaxState blockSyntaxState
+    ) {
+        FrameHeader.CdefInfo cdef = tileContext.frameHeader().cdef();
+        int quadrantIndex = cdefQuadrantIndex(position);
+        int cachedIndex = blockSyntaxState.cdefIndex(quadrantIndex);
+        if (skip) {
+            return cachedIndex;
+        }
+        if (cachedIndex >= 0) {
+            return cachedIndex;
+        }
+
+        int cdefIndex = cdef.bits() == 0 ? 0 : syntaxReader.readUnsignedBits(cdef.bits());
+        fillCdefIndices(blockSyntaxState, quadrantIndex, size, cdefIndex);
+        return cdefIndex;
+    }
+
+    /// Applies superblock-level delta-q and delta-lf syntax when the current block starts a superblock.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the current block size
+    /// @param skip whether the current block is skipped
+    /// @param hasChroma whether the current block has chroma samples in the active frame layout
+    /// @param blockSyntaxState the mutable tile-local block syntax state
+    /// @return the current luma AC quantizer index after any delta syntax was applied
+    private int applyDeltaSyntax(
+            BlockPosition position,
+            BlockSize size,
+            boolean skip,
+            boolean hasChroma,
+            TileDecodeContext.BlockSyntaxState blockSyntaxState
+    ) {
+        if (!isSuperblockOrigin(position)) {
+            return blockSyntaxState.currentQIndex();
+        }
+
+        FrameHeader.DeltaInfo delta = tileContext.frameHeader().delta();
+        boolean haveDeltaQ = delta.deltaQPresent()
+                && (size.widthPixels() != tileContext.superblockSize()
+                || size.heightPixels() != tileContext.superblockSize()
+                || !skip);
+        if (!haveDeltaQ) {
+            return blockSyntaxState.currentQIndex();
+        }
+
+        int currentQIndex = clip(blockSyntaxState.currentQIndex() + syntaxReader.readDeltaQValue(delta.deltaQResLog2()), 1, 255);
+        blockSyntaxState.setCurrentQIndex(currentQIndex);
+        if (delta.deltaLfPresent()) {
+            int deltaLfCount = delta.deltaLfMulti()
+                    ? (hasChroma ? 4 : 2)
+                    : 1;
+            int contextOffset = delta.deltaLfMulti() ? 1 : 0;
+            for (int i = 0; i < deltaLfCount; i++) {
+                int slot = contextOffset == 0 ? 0 : i;
+                int updatedValue = clip(
+                        blockSyntaxState.currentDeltaLfValue(slot)
+                                + syntaxReader.readDeltaLfValue(i + contextOffset, delta.deltaLfResLog2()),
+                        -63,
+                        63
+                );
+                blockSyntaxState.setCurrentDeltaLfValue(slot, updatedValue);
+            }
+        }
+        return currentQIndex;
+    }
+
+    /// Returns whether the supplied block origin starts a new superblock.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @return whether the supplied block origin starts a new superblock
+    private boolean isSuperblockOrigin(BlockPosition position) {
+        int superblockSize4 = tileContext.superblockSize() >> 2;
+        return position.x4() % superblockSize4 == 0 && position.y4() % superblockSize4 == 0;
+    }
+
+    /// Returns the current CDEF quadrant index inside the active superblock.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @return the current CDEF quadrant index inside the active superblock
+    private int cdefQuadrantIndex(BlockPosition position) {
+        if (tileContext.superblockSize() == 64) {
+            return 0;
+        }
+        return ((position.x4() & 16) >> 4) + ((position.y4() & 16) >> 3);
+    }
+
+    /// Fills the cached CDEF indices covered by the supplied block.
+    ///
+    /// @param blockSyntaxState the mutable tile-local block syntax state
+    /// @param quadrantIndex the zero-based starting CDEF quadrant index
+    /// @param size the current block size
+    /// @param cdefIndex the decoded CDEF index
+    private void fillCdefIndices(
+            TileDecodeContext.BlockSyntaxState blockSyntaxState,
+            int quadrantIndex,
+            BlockSize size,
+            int cdefIndex
+    ) {
+        blockSyntaxState.setCdefIndex(quadrantIndex, cdefIndex);
+        if (tileContext.superblockSize() == 64) {
+            return;
+        }
+        if (size.width4() > 16 && quadrantIndex + 1 < 4) {
+            blockSyntaxState.setCdefIndex(quadrantIndex + 1, cdefIndex);
+        }
+        if (size.height4() > 16 && quadrantIndex + 2 < 4) {
+            blockSyntaxState.setCdefIndex(quadrantIndex + 2, cdefIndex);
+        }
+        if (size.width4() == 32 && size.height4() == 32) {
+            blockSyntaxState.setCdefIndex(3, cdefIndex);
+        }
+    }
+
+    /// Clips one integer into the supplied inclusive range.
+    ///
+    /// @param value the value to clip
+    /// @param min the inclusive lower bound
+    /// @param max the inclusive upper bound
+    /// @return the clipped value
+    private static int clip(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /// Returns whether the supplied block has chroma samples in the active frame layout.
@@ -1329,6 +1473,15 @@ public final class TileBlockHeaderReader {
         /// The decoded segment identifier for the block.
         private final int segmentId;
 
+        /// The decoded CDEF index for the current superblock quadrant, or `-1` when still unknown.
+        private final int cdefIndex;
+
+        /// The current luma AC quantizer index after any superblock-level delta-q update.
+        private final int qIndex;
+
+        /// The current delta-lf runtime slots after any superblock-level updates.
+        private final int[] deltaLfValues;
+
         /// The decoded luma intra prediction mode, or `null` for non-intra blocks.
         private final @Nullable LumaIntraPredictionMode yMode;
 
@@ -1372,6 +1525,179 @@ public final class TileBlockHeaderReader {
         private final int cflAlphaV;
 
         /// Creates one decoded leaf block header.
+        ///
+        /// @param position the local tile-relative block origin
+        /// @param size the decoded block size
+        /// @param hasChroma whether the block has chroma samples in the active frame layout
+        /// @param skip the decoded skip flag
+        /// @param skipMode the decoded skip-mode flag
+        /// @param intra whether the block is intra-coded
+        /// @param useIntrabc whether the block uses `intrabc`
+        /// @param compoundReference whether the block uses compound inter references
+        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param singleInterMode the decoded single-reference inter mode, or `null`
+        /// @param compoundInterMode the decoded compound inter mode, or `null`
+        /// @param drlIndex the decoded dynamic-reference-list index, or `-1`
+        /// @param motionVector0 the primary motion vector chosen for the block, or `null`
+        /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
+        /// @param segmentPredicted whether the block used temporal segmentation prediction
+        /// @param segmentId the decoded segment identifier for the block
+        /// @param cdefIndex the decoded CDEF index for the current superblock quadrant, or `-1`
+        /// @param qIndex the current luma AC quantizer index after any superblock-level delta-q update
+        /// @param deltaLfValues the current delta-lf runtime slots after any superblock-level updates
+        /// @param yMode the decoded luma intra prediction mode, or `null`
+        /// @param uvMode the decoded chroma intra prediction mode, or `null`
+        /// @param yPaletteSize the decoded luma palette size in `[0, 8]`, or `0`
+        /// @param uvPaletteSize the decoded chroma palette size in `[0, 8]`, or `0`
+        /// @param yPaletteColors the decoded luma palette entries, or an empty array
+        /// @param uPaletteColors the decoded U chroma palette entries, or an empty array
+        /// @param vPaletteColors the decoded V chroma palette entries, or an empty array
+        /// @param yPaletteIndices the packed luma palette indices, or an empty array
+        /// @param uvPaletteIndices the packed chroma palette indices, or an empty array
+        /// @param filterIntraMode the decoded filter-intra mode, or `null`
+        /// @param yAngle the decoded signed luma angle delta in `[-3, 3]`
+        /// @param uvAngle the decoded signed chroma angle delta in `[-3, 3]`
+        /// @param cflAlphaU the decoded signed CFL alpha for chroma U
+        /// @param cflAlphaV the decoded signed CFL alpha for chroma V
+        public BlockHeader(
+                BlockPosition position,
+                BlockSize size,
+                boolean hasChroma,
+                boolean skip,
+                boolean skipMode,
+                boolean intra,
+                boolean useIntrabc,
+                boolean compoundReference,
+                int referenceFrame0,
+                int referenceFrame1,
+                @Nullable SingleInterPredictionMode singleInterMode,
+                @Nullable CompoundInterPredictionMode compoundInterMode,
+                int drlIndex,
+                @Nullable InterMotionVector motionVector0,
+                @Nullable InterMotionVector motionVector1,
+                boolean segmentPredicted,
+                int segmentId,
+                int cdefIndex,
+                int qIndex,
+                int[] deltaLfValues,
+                @Nullable LumaIntraPredictionMode yMode,
+                @Nullable UvIntraPredictionMode uvMode,
+                int yPaletteSize,
+                int uvPaletteSize,
+                int[] yPaletteColors,
+                int[] uPaletteColors,
+                int[] vPaletteColors,
+                byte[] yPaletteIndices,
+                byte[] uvPaletteIndices,
+                @Nullable FilterIntraMode filterIntraMode,
+                int yAngle,
+                int uvAngle,
+                int cflAlphaU,
+                int cflAlphaV
+        ) {
+            this.position = Objects.requireNonNull(position, "position");
+            this.size = Objects.requireNonNull(size, "size");
+            this.hasChroma = hasChroma;
+            this.skip = skip;
+            this.skipMode = skipMode;
+            this.intra = intra;
+            this.useIntrabc = useIntrabc;
+            this.compoundReference = compoundReference;
+            this.referenceFrame0 = referenceFrame0;
+            this.referenceFrame1 = referenceFrame1;
+            this.singleInterMode = singleInterMode;
+            this.compoundInterMode = compoundInterMode;
+            this.drlIndex = drlIndex;
+            this.motionVector0 = motionVector0;
+            this.motionVector1 = motionVector1;
+            this.segmentPredicted = segmentPredicted;
+            this.segmentId = segmentId;
+            this.cdefIndex = cdefIndex;
+            this.qIndex = qIndex;
+            this.deltaLfValues = Arrays.copyOf(Objects.requireNonNull(deltaLfValues, "deltaLfValues"), deltaLfValues.length);
+            this.yMode = yMode;
+            this.uvMode = uvMode;
+            this.yPaletteSize = yPaletteSize;
+            this.uvPaletteSize = uvPaletteSize;
+            this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
+            this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
+            this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
+            this.yPaletteIndices = Arrays.copyOf(Objects.requireNonNull(yPaletteIndices, "yPaletteIndices"), yPaletteIndices.length);
+            this.uvPaletteIndices = Arrays.copyOf(Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices"), uvPaletteIndices.length);
+            this.filterIntraMode = filterIntraMode;
+            this.yAngle = yAngle;
+            this.uvAngle = uvAngle;
+            this.cflAlphaU = cflAlphaU;
+            this.cflAlphaV = cflAlphaV;
+            if (this.yPaletteColors.length != yPaletteSize) {
+                throw new IllegalArgumentException("yPaletteColors length does not match yPaletteSize");
+            }
+            if (this.uPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("uPaletteColors length does not match uvPaletteSize");
+            }
+            if (this.vPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
+            }
+            if (yPaletteSize == 0 && this.yPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("yPaletteIndices must be empty when yPaletteSize == 0");
+            }
+            if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
+            }
+            if (cdefIndex < -1) {
+                throw new IllegalArgumentException("cdefIndex < -1: " + cdefIndex);
+            }
+            if (qIndex < 0 || qIndex > 255) {
+                throw new IllegalArgumentException("qIndex out of range: " + qIndex);
+            }
+            if (this.deltaLfValues.length != 4) {
+                throw new IllegalArgumentException("deltaLfValues length must be 4");
+            }
+            if (drlIndex < -1 || drlIndex > 3) {
+                throw new IllegalArgumentException("drlIndex out of range: " + drlIndex);
+            }
+            if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
+            }
+            if ((intra || useIntrabc)
+                    && (singleInterMode != null || compoundInterMode != null || drlIndex != -1
+                    || motionVector0 != null || motionVector1 != null)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode or motion-vector state");
+            }
+            if (!intra && !useIntrabc) {
+                if (referenceFrame0 == NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Inter blocks must carry a primary reference");
+                }
+                if (compoundReference) {
+                    if (referenceFrame1 == NO_REFERENCE_FRAME) {
+                        throw new IllegalArgumentException("Compound-reference blocks must carry a secondary reference");
+                    }
+                    if (singleInterMode != null) {
+                        throw new IllegalArgumentException("Compound-reference blocks must not carry a single inter mode");
+                    }
+                } else if (referenceFrame1 != NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary reference");
+                }
+                if (!compoundReference && compoundInterMode != null) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a compound inter mode");
+                }
+                if (!compoundReference && motionVector1 != null) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary motion vector");
+                }
+                if (compoundReference && compoundInterMode == null && drlIndex != -1) {
+                    throw new IllegalArgumentException("Compound-reference blocks with DRL state must carry a compound inter mode");
+                }
+                if (!compoundReference && singleInterMode == null && drlIndex != -1) {
+                    throw new IllegalArgumentException("Single-reference blocks with DRL state must carry a single inter mode");
+                }
+                if (motionVector1 != null && referenceFrame1 == NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Blocks without a secondary reference must not carry a secondary motion vector");
+                }
+            }
+        }
+
+        /// Creates one decoded leaf block header with runtime delta state defaulted to unavailable.
         ///
         /// @param position the local tile-relative block origin
         /// @param size the decoded block size
@@ -1437,93 +1763,42 @@ public final class TileBlockHeaderReader {
                 int cflAlphaU,
                 int cflAlphaV
         ) {
-            this.position = Objects.requireNonNull(position, "position");
-            this.size = Objects.requireNonNull(size, "size");
-            this.hasChroma = hasChroma;
-            this.skip = skip;
-            this.skipMode = skipMode;
-            this.intra = intra;
-            this.useIntrabc = useIntrabc;
-            this.compoundReference = compoundReference;
-            this.referenceFrame0 = referenceFrame0;
-            this.referenceFrame1 = referenceFrame1;
-            this.singleInterMode = singleInterMode;
-            this.compoundInterMode = compoundInterMode;
-            this.drlIndex = drlIndex;
-            this.motionVector0 = motionVector0;
-            this.motionVector1 = motionVector1;
-            this.segmentPredicted = segmentPredicted;
-            this.segmentId = segmentId;
-            this.yMode = yMode;
-            this.uvMode = uvMode;
-            this.yPaletteSize = yPaletteSize;
-            this.uvPaletteSize = uvPaletteSize;
-            this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
-            this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
-            this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
-            this.yPaletteIndices = Arrays.copyOf(Objects.requireNonNull(yPaletteIndices, "yPaletteIndices"), yPaletteIndices.length);
-            this.uvPaletteIndices = Arrays.copyOf(Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices"), uvPaletteIndices.length);
-            this.filterIntraMode = filterIntraMode;
-            this.yAngle = yAngle;
-            this.uvAngle = uvAngle;
-            this.cflAlphaU = cflAlphaU;
-            this.cflAlphaV = cflAlphaV;
-            if (this.yPaletteColors.length != yPaletteSize) {
-                throw new IllegalArgumentException("yPaletteColors length does not match yPaletteSize");
-            }
-            if (this.uPaletteColors.length != uvPaletteSize) {
-                throw new IllegalArgumentException("uPaletteColors length does not match uvPaletteSize");
-            }
-            if (this.vPaletteColors.length != uvPaletteSize) {
-                throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
-            }
-            if (yPaletteSize == 0 && this.yPaletteIndices.length != 0) {
-                throw new IllegalArgumentException("yPaletteIndices must be empty when yPaletteSize == 0");
-            }
-            if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
-                throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
-            }
-            if (drlIndex < -1 || drlIndex > 3) {
-                throw new IllegalArgumentException("drlIndex out of range: " + drlIndex);
-            }
-            if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
-                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
-            }
-            if ((intra || useIntrabc)
-                    && (singleInterMode != null || compoundInterMode != null || drlIndex != -1
-                    || motionVector0 != null || motionVector1 != null)) {
-                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode or motion-vector state");
-            }
-            if (!intra && !useIntrabc) {
-                if (referenceFrame0 == NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Inter blocks must carry a primary reference");
-                }
-                if (compoundReference) {
-                    if (referenceFrame1 == NO_REFERENCE_FRAME) {
-                        throw new IllegalArgumentException("Compound-reference blocks must carry a secondary reference");
-                    }
-                    if (singleInterMode != null) {
-                        throw new IllegalArgumentException("Compound-reference blocks must not carry a single inter mode");
-                    }
-                } else if (referenceFrame1 != NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary reference");
-                }
-                if (!compoundReference && compoundInterMode != null) {
-                    throw new IllegalArgumentException("Single-reference blocks must not carry a compound inter mode");
-                }
-                if (!compoundReference && motionVector1 != null) {
-                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary motion vector");
-                }
-                if (compoundReference && compoundInterMode == null && drlIndex != -1) {
-                    throw new IllegalArgumentException("Compound-reference blocks with DRL state must carry a compound inter mode");
-                }
-                if (!compoundReference && singleInterMode == null && drlIndex != -1) {
-                    throw new IllegalArgumentException("Single-reference blocks with DRL state must carry a single inter mode");
-                }
-                if (motionVector1 != null && referenceFrame1 == NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Blocks without a secondary reference must not carry a secondary motion vector");
-                }
-            }
+            this(
+                    position,
+                    size,
+                    hasChroma,
+                    skip,
+                    skipMode,
+                    intra,
+                    useIntrabc,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    singleInterMode,
+                    compoundInterMode,
+                    drlIndex,
+                    motionVector0,
+                    motionVector1,
+                    segmentPredicted,
+                    segmentId,
+                    -1,
+                    0,
+                    new int[4],
+                    yMode,
+                    uvMode,
+                    yPaletteSize,
+                    uvPaletteSize,
+                    yPaletteColors,
+                    uPaletteColors,
+                    vPaletteColors,
+                    yPaletteIndices,
+                    uvPaletteIndices,
+                    filterIntraMode,
+                    yAngle,
+                    uvAngle,
+                    cflAlphaU,
+                    cflAlphaV
+            );
         }
 
         /// Creates one decoded leaf block header with inter-mode state defaulted to unavailable.
@@ -1600,6 +1875,9 @@ public final class TileBlockHeaderReader {
                     null,
                     segmentPredicted,
                     segmentId,
+                    -1,
+                    0,
+                    new int[4],
                     yMode,
                     uvMode,
                     yPaletteSize,
@@ -1734,6 +2012,29 @@ public final class TileBlockHeaderReader {
         /// @return the decoded segment identifier for the block
         public int segmentId() {
             return segmentId;
+        }
+
+        /// Returns the decoded CDEF index for the current superblock quadrant, or `-1` when still unknown.
+        ///
+        /// @return the decoded CDEF index for the current superblock quadrant, or `-1`
+        public int cdefIndex() {
+            return cdefIndex;
+        }
+
+        /// Returns the current luma AC quantizer index after any superblock-level delta-q update.
+        ///
+        /// @return the current luma AC quantizer index after any superblock-level delta-q update
+        public int qIndex() {
+            return qIndex;
+        }
+
+        /// Returns a copy of the current delta-lf runtime slots.
+        ///
+        /// When multi-component delta-lf is disabled, only slot `0` carries meaningful state.
+        ///
+        /// @return a copy of the current delta-lf runtime slots
+        public int[] deltaLfValues() {
+            return Arrays.copyOf(deltaLfValues, deltaLfValues.length);
         }
 
         /// Returns the decoded luma intra prediction mode, or `null` for non-intra blocks.

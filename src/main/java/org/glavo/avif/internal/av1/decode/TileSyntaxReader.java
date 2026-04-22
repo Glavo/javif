@@ -36,7 +36,8 @@ import java.util.Objects;
 /// This reader is intentionally small and currently covers only syntax elements already backed by
 /// `CdfContext`: partitioning, skip, skip mode, intra/inter, compound and single-reference
 /// selection, inter prediction-mode symbols, `intrabc`, Y/UV intra prediction modes, palette
-/// presence and size signaling, motion-vector residuals, filter intra, angle deltas, and CFL alpha.
+/// presence and size signaling, CDEF and delta-q/delta-lf side syntax, motion-vector residuals,
+/// filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
     /// The `mv_joint` symbol that leaves both motion-vector components unchanged.
@@ -223,6 +224,31 @@ public final class TileSyntaxReader {
     /// @return whether the current transform region splits to smaller transforms
     public boolean readTransformSplitFlag(int tableIndex, int context) {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableTransformPartitionCdf(tableIndex, context));
+    }
+
+    /// Decodes an unsigned literal made of equiprobable binary values.
+    ///
+    /// @param bitCount the number of equiprobable bits to decode
+    /// @return the decoded unsigned literal
+    public int readUnsignedBits(int bitCount) {
+        return msacDecoder.decodeBools(bitCount);
+    }
+
+    /// Decodes one signed and resolution-scaled delta-q value.
+    ///
+    /// @param resolutionLog2 the delta-q resolution log2
+    /// @return the decoded signed delta-q value after resolution scaling
+    public int readDeltaQValue(int resolutionLog2) {
+        return readSignedDeltaValue(cdfContext.mutableDeltaQCdf(), resolutionLog2);
+    }
+
+    /// Decodes one signed and resolution-scaled delta-lf value for the supplied context.
+    ///
+    /// @param context the zero-based delta-lf context index in `[0, 5)`
+    /// @param resolutionLog2 the delta-lf resolution log2
+    /// @return the decoded signed delta-lf value after resolution scaling
+    public int readDeltaLfValue(int context, int resolutionLog2) {
+        return readSignedDeltaValue(cdfContext.mutableDeltaLfCdf(context), resolutionLog2);
     }
 
     /// Decodes one `NEWMV` residual around the supplied predictor.
@@ -485,6 +511,26 @@ public final class TileSyntaxReader {
     private int decodeSignedCflAlpha(int context, boolean positive) {
         int alpha = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCflAlphaCdf(context), 15) + 1;
         return positive ? alpha : -alpha;
+    }
+
+    /// Decodes one signed delta value that uses the AV1 delta-q/delta-lf coding rule.
+    ///
+    /// @param cdf the active AV1 inverse CDF table for the delta-magnitude prefix
+    /// @param resolutionLog2 the resolution log2 applied to non-zero decoded magnitudes
+    /// @return the decoded signed and resolution-scaled delta value
+    private int readSignedDeltaValue(int[] cdf, int resolutionLog2) {
+        int magnitude = msacDecoder.decodeSymbolAdapt(cdf, 3);
+        if (magnitude == 3) {
+            int bitCount = 1 + msacDecoder.decodeBools(3);
+            magnitude = msacDecoder.decodeBools(bitCount) + 1 + (1 << bitCount);
+        }
+        if (magnitude == 0) {
+            return 0;
+        }
+        if (msacDecoder.decodeBooleanEqui()) {
+            magnitude = -magnitude;
+        }
+        return magnitude << resolutionLog2;
     }
 
     /// Decodes one signed motion-vector component residual.

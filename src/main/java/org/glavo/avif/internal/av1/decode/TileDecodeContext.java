@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
+import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
@@ -54,6 +55,9 @@ public final class TileDecodeContext {
 
     /// The tile-local temporal motion field being produced while decoding the current frame.
     private final TemporalMotionField decodedTemporalMotionField;
+
+    /// The mutable tile-local block syntax state shared across superblocks.
+    private final BlockSyntaxState blockSyntaxState;
 
     /// The zero-based tile index within the frame.
     private final int tileIndex;
@@ -101,6 +105,7 @@ public final class TileDecodeContext {
     /// @param cdfContext the tile-local mutable CDF context
     /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
+    /// @param blockSyntaxState the mutable tile-local block syntax state shared across superblocks
     /// @param tileIndex the zero-based tile index within the frame
     /// @param tileRow the zero-based tile row within the frame
     /// @param tileColumn the zero-based tile column within the frame
@@ -122,6 +127,7 @@ public final class TileDecodeContext {
             CdfContext cdfContext,
             TemporalMotionField temporalMotionField,
             TemporalMotionField decodedTemporalMotionField,
+            BlockSyntaxState blockSyntaxState,
             int tileIndex,
             int tileRow,
             int tileColumn,
@@ -143,6 +149,7 @@ public final class TileDecodeContext {
         this.cdfContext = Objects.requireNonNull(cdfContext, "cdfContext");
         this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
         this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
+        this.blockSyntaxState = Objects.requireNonNull(blockSyntaxState, "blockSyntaxState");
         this.tileIndex = tileIndex;
         this.tileRow = tileRow;
         this.tileColumn = tileColumn;
@@ -247,6 +254,7 @@ public final class TileDecodeContext {
                 copiedCdfContext,
                 effectiveTemporalMotionField,
                 new TemporalMotionField(width8, height8),
+                new BlockSyntaxState(frameHeader.quantization().baseQIndex()),
                 tileIndex,
                 tileRow,
                 tileColumn,
@@ -316,6 +324,13 @@ public final class TileDecodeContext {
     /// @return the tile-local temporal motion field produced while decoding the current frame
     public TemporalMotionField decodedTemporalMotionField() {
         return decodedTemporalMotionField;
+    }
+
+    /// Returns the mutable tile-local block syntax state shared across superblocks.
+    ///
+    /// @return the mutable tile-local block syntax state shared across superblocks
+    public BlockSyntaxState blockSyntaxState() {
+        return blockSyntaxState;
     }
 
     /// Returns the zero-based tile index within the frame.
@@ -627,6 +642,105 @@ public final class TileDecodeContext {
         /// @return the secondary temporal motion-vector state, or `null`
         public @org.jetbrains.annotations.Nullable InterMotionVector motionVector1() {
             return motionVector1;
+        }
+    }
+
+    /// Mutable tile-local block syntax state shared across superblocks.
+    @NotNullByDefault
+    public static final class BlockSyntaxState {
+        /// The current luma AC quantizer index carried across superblocks.
+        private int currentQIndex;
+
+        /// The current delta-lf state carried across superblocks.
+        private final int[] currentDeltaLfValues;
+
+        /// The current superblock origin X coordinate in tile-relative 4x4 units, or `-1`.
+        private int currentSuperblockOriginX4;
+
+        /// The current superblock origin Y coordinate in tile-relative 4x4 units, or `-1`.
+        private int currentSuperblockOriginY4;
+
+        /// The current superblock CDEF indices in raster quadrant order.
+        private final int[] cdefIndices;
+
+        /// Creates one tile-local block syntax state.
+        ///
+        /// @param baseQIndex the initial frame-level base quantizer index
+        public BlockSyntaxState(int baseQIndex) {
+            this.currentQIndex = baseQIndex;
+            this.currentDeltaLfValues = new int[4];
+            this.currentSuperblockOriginX4 = -1;
+            this.currentSuperblockOriginY4 = -1;
+            this.cdefIndices = new int[]{-1, -1, -1, -1};
+        }
+
+        /// Returns the current luma AC quantizer index carried across superblocks.
+        ///
+        /// @return the current luma AC quantizer index carried across superblocks
+        public int currentQIndex() {
+            return currentQIndex;
+        }
+
+        /// Sets the current luma AC quantizer index carried across superblocks.
+        ///
+        /// @param currentQIndex the replacement current luma AC quantizer index
+        public void setCurrentQIndex(int currentQIndex) {
+            this.currentQIndex = currentQIndex;
+        }
+
+        /// Returns the current delta-lf value for one runtime slot.
+        ///
+        /// @param index the zero-based delta-lf runtime slot index in `[0, 4)`
+        /// @return the current delta-lf value for the supplied runtime slot
+        public int currentDeltaLfValue(int index) {
+            return currentDeltaLfValues[Objects.checkIndex(index, currentDeltaLfValues.length)];
+        }
+
+        /// Updates the current delta-lf value for one runtime slot.
+        ///
+        /// @param index the zero-based delta-lf runtime slot index in `[0, 4)`
+        /// @param value the replacement delta-lf value
+        public void setCurrentDeltaLfValue(int index, int value) {
+            currentDeltaLfValues[Objects.checkIndex(index, currentDeltaLfValues.length)] = value;
+        }
+
+        /// Returns a copy of the current delta-lf runtime slots.
+        ///
+        /// @return a copy of the current delta-lf runtime slots
+        public int[] currentDeltaLfValues() {
+            return java.util.Arrays.copyOf(currentDeltaLfValues, currentDeltaLfValues.length);
+        }
+
+        /// Resets the current-superblock CDEF cache when decoding enters a different superblock.
+        ///
+        /// @param position the current block origin in tile-relative 4x4 units
+        /// @param superblockSize the active superblock size in pixels
+        public void enterSuperblock(BlockPosition position, int superblockSize) {
+            BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+            int superblockSize4 = superblockSize >> 2;
+            int superblockOriginX4 = (nonNullPosition.x4() / superblockSize4) * superblockSize4;
+            int superblockOriginY4 = (nonNullPosition.y4() / superblockSize4) * superblockSize4;
+            if (superblockOriginX4 != currentSuperblockOriginX4 || superblockOriginY4 != currentSuperblockOriginY4) {
+                currentSuperblockOriginX4 = superblockOriginX4;
+                currentSuperblockOriginY4 = superblockOriginY4;
+                java.util.Arrays.fill(cdefIndices, -1);
+            }
+        }
+
+        /// Returns the current cached CDEF index for one superblock quadrant, or `-1`.
+        ///
+        /// @param index the zero-based quadrant index in `[0, 4)`
+        /// @return the current cached CDEF index for one superblock quadrant, or `-1`
+        public int cdefIndex(int index) {
+            return cdefIndices[Objects.checkIndex(index, cdefIndices.length)];
+        }
+
+        /// Updates the cached CDEF index for one superblock quadrant.
+        ///
+        /// @param index the zero-based quadrant index in `[0, 4)`
+        /// @param value the replacement cached CDEF index, or `-1`
+        public void setCdefIndex(int index, int value) {
+            cdefIndices[Objects.checkIndex(index, cdefIndices.length)] = value;
         }
     }
 }

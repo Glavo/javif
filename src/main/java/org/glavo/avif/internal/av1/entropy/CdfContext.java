@@ -190,6 +190,18 @@ public final class CdfContext {
             {16088}
     });
 
+    /// The transformed default delta-q CDF.
+    private static final int[] DEFAULT_DELTA_Q_CDF = inverse(608, 648, 91);
+
+    /// The transformed default delta-lf CDFs.
+    private static final int[][] DEFAULT_DELTA_LF_CDFS = inverse2d(new int[][]{
+            {608, 648, 91},
+            {608, 648, 91},
+            {608, 648, 91},
+            {608, 648, 91},
+            {608, 648, 91}
+    });
+
     /// The transformed default motion-vector joint CDF.
     private static final int[] DEFAULT_MOTION_VECTOR_JOINT_CDF = inverse(4096, 11264, 19328);
 
@@ -604,6 +616,12 @@ public final class CdfContext {
     /// The mutable inter transform-partition CDFs.
     private final int[][] transformPartitionCdfs;
 
+    /// The mutable delta-q CDF.
+    private final int[] deltaQCdf;
+
+    /// The mutable delta-lf CDFs.
+    private final int[][] deltaLfCdfs;
+
     /// The mutable motion-vector joint CDF.
     private final int[] motionVectorJointCdf;
 
@@ -697,6 +715,8 @@ public final class CdfContext {
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
     /// @param transformSizeCdfs the mutable transform-size CDFs
     /// @param transformPartitionCdfs the mutable inter transform-partition CDFs
+    /// @param deltaQCdf the mutable delta-q CDF
+    /// @param deltaLfCdfs the mutable delta-lf CDFs
     /// @param motionVectorJointCdf the mutable motion-vector joint CDF
     /// @param motionVectorClassCdfs the mutable motion-vector class CDFs
     /// @param motionVectorSignCdfs the mutable motion-vector sign CDFs
@@ -739,6 +759,8 @@ public final class CdfContext {
             int[][] compoundInterModeCdfs,
             int[][][] transformSizeCdfs,
             int[][] transformPartitionCdfs,
+            int[] deltaQCdf,
+            int[][] deltaLfCdfs,
             int[] motionVectorJointCdf,
             int[][] motionVectorClassCdfs,
             int[][] motionVectorSignCdfs,
@@ -781,6 +803,8 @@ public final class CdfContext {
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
         this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
         this.transformPartitionCdfs = Objects.requireNonNull(transformPartitionCdfs, "transformPartitionCdfs");
+        this.deltaQCdf = Objects.requireNonNull(deltaQCdf, "deltaQCdf");
+        this.deltaLfCdfs = Objects.requireNonNull(deltaLfCdfs, "deltaLfCdfs");
         this.motionVectorJointCdf = Objects.requireNonNull(motionVectorJointCdf, "motionVectorJointCdf");
         this.motionVectorClassCdfs = Objects.requireNonNull(motionVectorClassCdfs, "motionVectorClassCdfs");
         this.motionVectorSignCdfs = Objects.requireNonNull(motionVectorSignCdfs, "motionVectorSignCdfs");
@@ -829,6 +853,8 @@ public final class CdfContext {
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_PARTITION_CDFS),
+                Arrays.copyOf(DEFAULT_DELTA_Q_CDF, DEFAULT_DELTA_Q_CDF.length),
+                deepCopy(DEFAULT_DELTA_LF_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
                 deepCopy(DEFAULT_MOTION_VECTOR_CLASS_CDFS),
                 deepCopy(DEFAULT_MOTION_VECTOR_SIGN_CDFS),
@@ -878,6 +904,8 @@ public final class CdfContext {
                 deepCopy(compoundInterModeCdfs),
                 deepCopy(transformSizeCdfs),
                 deepCopy(transformPartitionCdfs),
+                Arrays.copyOf(deltaQCdf, deltaQCdf.length),
+                deepCopy(deltaLfCdfs),
                 Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
                 deepCopy(motionVectorClassCdfs),
                 deepCopy(motionVectorSignCdfs),
@@ -1046,6 +1074,21 @@ public final class CdfContext {
     public int[] mutableTransformPartitionCdf(int tableIndex, int context) {
         int baseIndex = Objects.checkIndex(tableIndex, 7) * 3;
         return transformPartitionCdfs[baseIndex + Objects.checkIndex(context, 3)];
+    }
+
+    /// Returns the live mutable delta-q CDF.
+    ///
+    /// @return the live mutable delta-q CDF
+    public int[] mutableDeltaQCdf() {
+        return deltaQCdf;
+    }
+
+    /// Returns the live mutable delta-lf CDF for the supplied context index.
+    ///
+    /// @param context the zero-based delta-lf context index in `[0, 5)`
+    /// @return the live mutable delta-lf CDF for the supplied context index
+    public int[] mutableDeltaLfCdf(int context) {
+        return deltaLfCdfs[Objects.checkIndex(context, deltaLfCdfs.length)];
     }
 
     /// Returns the live mutable motion-vector joint CDF.
