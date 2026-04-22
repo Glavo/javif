@@ -390,6 +390,49 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(2).motionVector0());
     }
 
+    /// Verifies that top-left spatial neighbors contribute to the provisional `refmvs` stack.
+    @Test
+    void provisionalInterModeContextsIncludeTopLeftMatches() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_8X8,
+                4,
+                null,
+                InterMotionVector.resolved(new MotionVector(8, -4))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X8,
+                4,
+                null,
+                InterMotionVector.resolved(new MotionVector(12, 4))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(2, 2),
+                BlockSize.SIZE_8X8,
+                0,
+                SingleInterPredictionMode.NEWMV,
+                InterMotionVector.resolved(new MotionVector(-20, 8))
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_8X8, false, 0, -1);
+
+        assertEquals(1, provisionalContext.singleNewMvContext());
+        assertEquals(1, provisionalContext.singleReferenceMvContext());
+        assertEquals(1, provisionalContext.compoundInterModeContext());
+        assertEquals(4, provisionalContext.candidateCount());
+        assertEquals(640, provisionalContext.candidateWeight(0));
+        assertEquals(320, provisionalContext.candidateWeight(1));
+        assertEquals(256, provisionalContext.candidateWeight(2));
+        assertEquals(256, provisionalContext.candidateWeight(3));
+        assertEquals(3, provisionalContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.resolved(new MotionVector(-20, 8)), provisionalContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(2).motionVector0());
+    }
+
     /// Verifies inter-frame initialization starts with non-intra neighbors.
     @Test
     void initializesInterFrameNeighborState() {

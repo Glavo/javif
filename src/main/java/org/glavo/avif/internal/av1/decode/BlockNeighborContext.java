@@ -39,6 +39,9 @@ public final class BlockNeighborContext {
     /// The weight penalty applied to top-right spatial candidates relative to direct-edge candidates.
     private static final int TOP_RIGHT_SPATIAL_WEIGHT_PENALTY = 64;
 
+    /// The weight penalty applied to top-left spatial candidates relative to direct-edge candidates.
+    private static final int TOP_LEFT_SPATIAL_WEIGHT_PENALTY = 320;
+
     /// The tile width rounded up to 4x4 units.
     private final int tileWidth4;
 
@@ -596,8 +599,9 @@ public final class BlockNeighborContext {
     /// Builds a provisional inter-mode syntax context from already-decoded spatial neighbors.
     ///
     /// This helper scans the direct top row and left column across the full current-block span,
-    /// then augments that with a bounded secondary spatial scan. It still omits temporal
-    /// neighbors and therefore remains an incomplete `refmvs` implementation.
+    /// then augments that with a bounded secondary spatial scan plus dedicated top-right and
+    /// top-left spatial candidates. It still omits temporal neighbors and therefore remains an
+    /// incomplete `refmvs` implementation.
     ///
     /// @param position the current block position
     /// @param size the current block size
@@ -733,6 +737,21 @@ public final class BlockNeighborContext {
             candidateCount = topRightScan.candidateCount();
             rowReferenceMatch |= topRightScan.referenceMatch();
             haveNewMotionVectorMatch |= topRightScan.haveNewMotionVectorMatch();
+        }
+        if (x4 > 0 && y4 > 0) {
+            SpatialScanResult topLeftScan = scanStoredBlockCoordinate(
+                    x4 - 1,
+                    y4 - 1,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    TOP_LEFT_SPATIAL_WEIGHT_PENALTY,
+                    candidates,
+                    candidateCount
+            );
+            candidateCount = topLeftScan.candidateCount();
+            rowReferenceMatch |= topLeftScan.referenceMatch();
+            haveNewMotionVectorMatch |= topLeftScan.haveNewMotionVectorMatch();
         }
 
         sortDescending(candidates, candidateCount);
@@ -1161,6 +1180,66 @@ public final class BlockNeighborContext {
             }
         }
         return new SpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch);
+    }
+
+    /// Scans one stored block at a single tile-relative 4x4 coordinate.
+    ///
+    /// @param x4 the tile-relative X coordinate in 4x4 units
+    /// @param y4 the tile-relative Y coordinate in 4x4 units
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param weightPenalty the candidate-weight penalty applied to the scanned block
+    /// @param destination the destination candidate array
+    /// @param count the number of valid candidates already stored in `destination`
+    /// @return the result of scanning one stored block at a single tile-relative 4x4 coordinate
+    private SpatialScanResult scanStoredBlockCoordinate(
+            int x4,
+            int y4,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            int weightPenalty,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        @Nullable StoredBlock storedBlock = storedBlockAt(x4, y4);
+        if (storedBlock == null || storedBlock.intra()) {
+            return new SpatialScanResult(count, false, false);
+        }
+        boolean referenceMatch = sharesAnyReference(
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                storedBlock.compoundReference(),
+                storedBlock.referenceFrame0(),
+                storedBlock.referenceFrame1()
+        );
+        int baseWeight = provisionalNeighborWeight(
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                storedBlock.compoundReference(),
+                storedBlock.referenceFrame0(),
+                storedBlock.referenceFrame1()
+        );
+        int weight = Math.max(128, baseWeight - weightPenalty);
+        count = appendProvisionalCandidateWeights(
+                destination,
+                count,
+                provisionalMotionVectorCandidate(
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        storedBlock.compoundReference(),
+                        storedBlock.referenceFrame0(),
+                        storedBlock.referenceFrame1(),
+                        storedBlock.motionVector0(),
+                        storedBlock.motionVector1(),
+                        weight
+                )
+        );
+        return new SpatialScanResult(count, referenceMatch, referenceMatch && storedBlock.usesNewMotionVector());
     }
 
     /// Returns whether one stored-block list prefix already contains the supplied block instance.
