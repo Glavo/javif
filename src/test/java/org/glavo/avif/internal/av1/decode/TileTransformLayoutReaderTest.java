@@ -20,19 +20,17 @@ import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
-import org.glavo.avif.internal.av1.entropy.CdfContext;
-import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -46,16 +44,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `TileTransformLayoutReader`.
 @NotNullByDefault
 final class TileTransformLayoutReaderTest {
+    /// One fixed key-frame payload whose first switchable transform-depth symbol decodes to `2`.
+    private static final byte[] KEY_FRAME_DEPTH_TWO_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/key-transform-depth-2.hex");
+
+    /// One fixed inter payload whose first 8x8 block splits into four 4x4 transform units.
+    private static final byte[] INTER_8X8_SPLIT_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/inter-transform-8x8-split.hex");
+
+    /// One fixed inter payload whose first 16x16 block splits into four 8x8 transform units.
+    private static final byte[] INTER_16X16_SPLIT_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/inter-transform-16x16-split.hex");
+
     /// Verifies that switchable key-frame transform syntax selects a smaller repeated luma transform size.
     @Test
     void readsSwitchableKeyFrameTransformLayout() {
-        byte[] payload = findPayloadForKeyFrameTransformDepth(2);
         TileDecodeContext tileContext = createTileContext(
                 FrameType.KEY,
                 PixelFormat.I400,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
-                payload,
+                KEY_FRAME_DEPTH_TWO_PAYLOAD,
                 64,
                 64
         );
@@ -74,6 +83,11 @@ final class TileTransformLayoutReaderTest {
         assertEquals(TransformSize.TX_8X8, uniformLumaTransformSize);
         assertNull(layout.chromaTransformSize());
         assertEquals(16, layout.lumaUnits().length);
+        assertEquals(0, layout.lumaUnits()[0].position().x4());
+        assertEquals(0, layout.lumaUnits()[0].position().y4());
+        assertEquals(6, layout.lumaUnits()[15].position().x4());
+        assertEquals(6, layout.lumaUnits()[15].position().y4());
+        assertEquals(TransformSize.TX_8X8, layout.lumaUnits()[15].size());
         assertEquals(0, neighborContext.transformSizeContext(new BlockPosition(8, 0), TransformSize.TX_32X32));
     }
 
@@ -105,13 +119,12 @@ final class TileTransformLayoutReaderTest {
     /// Verifies that switchable inter var-tx can split an 8x8 block into repeated 4x4 luma units.
     @Test
     void readsSwitchableInterEightByEightTransformTree() {
-        byte[] payload = findPayloadForInterTransformLayout(BlockSize.SIZE_8X8, 4, TransformSize.TX_4X4);
         TileDecodeContext tileContext = createTileContext(
                 FrameType.INTER,
                 PixelFormat.I400,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
-                payload,
+                INTER_8X8_SPLIT_PAYLOAD,
                 64,
                 64
         );
@@ -126,18 +139,25 @@ final class TileTransformLayoutReaderTest {
         assertTrue(layout.variableLumaTransformTree());
         assertEquals(4, layout.lumaUnits().length);
         assertEquals(TransformSize.TX_4X4, layout.lumaUnits()[0].size());
+        assertEquals(0, layout.lumaUnits()[0].position().x4());
+        assertEquals(0, layout.lumaUnits()[0].position().y4());
+        assertEquals(1, layout.lumaUnits()[1].position().x4());
+        assertEquals(0, layout.lumaUnits()[1].position().y4());
+        assertEquals(0, layout.lumaUnits()[2].position().x4());
+        assertEquals(1, layout.lumaUnits()[2].position().y4());
+        assertEquals(1, layout.lumaUnits()[3].position().x4());
+        assertEquals(1, layout.lumaUnits()[3].position().y4());
     }
 
     /// Verifies that switchable inter var-tx can split a 16x16 block to four 8x8 luma units.
     @Test
     void readsSwitchableInterSixteenBySixteenTransformTree() {
-        byte[] payload = findPayloadForInterTransformLayout(BlockSize.SIZE_16X16, 4, TransformSize.TX_8X8);
         TileDecodeContext tileContext = createTileContext(
                 FrameType.INTER,
                 PixelFormat.I400,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
-                payload,
+                INTER_16X16_SPLIT_PAYLOAD,
                 64,
                 64
         );
@@ -152,6 +172,14 @@ final class TileTransformLayoutReaderTest {
         assertTrue(layout.variableLumaTransformTree());
         assertEquals(4, layout.lumaUnits().length);
         assertEquals(TransformSize.TX_8X8, layout.lumaUnits()[0].size());
+        assertEquals(0, layout.lumaUnits()[0].position().x4());
+        assertEquals(0, layout.lumaUnits()[0].position().y4());
+        assertEquals(2, layout.lumaUnits()[1].position().x4());
+        assertEquals(0, layout.lumaUnits()[1].position().y4());
+        assertEquals(0, layout.lumaUnits()[2].position().x4());
+        assertEquals(2, layout.lumaUnits()[2].position().y4());
+        assertEquals(2, layout.lumaUnits()[3].position().x4());
+        assertEquals(2, layout.lumaUnits()[3].position().y4());
     }
 
     /// Verifies that partition-tree leaves carry the decoded transform layout.
@@ -182,87 +210,6 @@ final class TileTransformLayoutReaderTest {
         assertEquals(TransformSize.TX_64X64, residualLayout.lumaUnits()[0].size());
         assertEquals(0, lumaUnits[0].position().x4());
         assertEquals(0, lumaUnits[0].position().y4());
-    }
-
-    /// Finds a small payload whose first key-frame transform-depth symbol matches the requested depth.
-    ///
-    /// @param expectedDepth the requested transform depth
-    /// @return a small payload whose first key-frame transform-depth symbol matches the requested depth
-    private static byte[] findPayloadForKeyFrameTransformDepth(int expectedDepth) {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-                    LumaIntraPredictionMode yMode = LumaIntraPredictionMode.fromSymbolIndex(
-                            oracleDecoder.decodeSymbolAdapt(
-                                    oracleCdf.mutableKeyFrameYModeCdf(
-                                            LumaIntraPredictionMode.DC.contextIndex(),
-                                            LumaIntraPredictionMode.DC.contextIndex()
-                                    ),
-                                    12
-                            )
-                    );
-                    if (yMode.isDirectional()) {
-                        oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(yMode.angleDeltaContextIndex()), 6);
-                    }
-                    int depth = oracleDecoder.decodeSymbolAdapt(
-                            oracleCdf.mutableTransformSizeCdf(TransformSize.TX_32X32.maxSquareLevel() - 1, 0),
-                            Math.min(TransformSize.TX_32X32.maxSquareLevel(), 2)
-                    );
-                    if (depth == expectedDepth) {
-                        return payload;
-                    }
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced the requested key-frame transform depth");
-    }
-
-    /// Finds a small payload whose first inter block decodes a switchable transform layout that matches expectations.
-    ///
-    /// @param blockSize the coded block size whose transform layout should be decoded
-    /// @param expectedUnitCount the expected number of luma transform units
-    /// @param expectedFirstUnitSize the expected size of the first luma transform unit
-    /// @return a small payload whose first inter block decodes a matching switchable transform layout
-    private static byte[] findPayloadForInterTransformLayout(
-            BlockSize blockSize,
-            int expectedUnitCount,
-            TransformSize expectedFirstUnitSize
-    ) {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    TileDecodeContext tileContext = createTileContext(
-                            FrameType.INTER,
-                            PixelFormat.I400,
-                            FrameHeader.TransformMode.SWITCHABLE,
-                            false,
-                            payload,
-                            64,
-                            64
-                    );
-                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                    TileBlockHeaderReader.BlockHeader header =
-                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-                    if (header.skip() || header.intra()) {
-                        continue;
-                    }
-                    TransformLayout layout = transformLayoutReader.read(header, neighborContext);
-                    if (layout.variableLumaTransformTree()
-                            && layout.lumaUnits().length == expectedUnitCount
-                            && layout.lumaUnits()[0].size() == expectedFirstUnitSize) {
-                        return payload;
-                    }
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced the requested inter transform layout");
     }
 
     /// Creates one synthetic tile-local decode context used by transform-layout tests.

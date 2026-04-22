@@ -23,9 +23,9 @@ import java.util.Objects;
 /// One transform residual unit after the current coefficient-side syntax pass.
 ///
 /// Coefficients are stored as signed transform-domain levels in natural raster order. The current
-/// implementation fully decodes two-dimensional luma `TX_4X4` units and retains the earlier
-/// all-zero / DC-only / first-scanned-AC support for larger transform sizes while higher-order AC
-/// token decoding is introduced incrementally.
+/// implementation fully decodes the modeled two-dimensional luma residual path, including
+/// multi-coefficient larger-transform units that reuse the current simplified non-chroma token
+/// contexts while chroma residual syntax remains out of scope.
 @NotNullByDefault
 public final class TransformResidualUnit {
     /// The tile-relative luma-grid origin of this transform residual unit.

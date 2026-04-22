@@ -22,8 +22,9 @@ import java.util.Objects;
 
 /// One block-level residual layout produced after the current coefficient-side syntax pass.
 ///
-/// The current implementation covers all-zero units and DC-only luma coefficient decoding. Higher
-/// AC token trees are still introduced incrementally on top of this structure.
+/// The current implementation covers all-zero units plus the current two-dimensional luma
+/// coefficient syntax supported by `TileResidualSyntaxReader`. Chroma residual syntax is still
+/// introduced incrementally on top of this structure.
 @NotNullByDefault
 public final class ResidualLayout {
     /// The local tile-relative luma-grid origin of the owning block.

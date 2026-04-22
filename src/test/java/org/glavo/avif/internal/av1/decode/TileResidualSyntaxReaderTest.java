@@ -139,6 +139,31 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(expectedCoefficientContextByte(coefficients), residualUnit.coefficientContextByte());
     }
 
+    /// Verifies that the larger-transform residual path now supports multi-coefficient `TX_8X8` units.
+    @Test
+    void readsMultiCoefficientResidualForLargestEightByEightTransformBlock() {
+        byte[] payload = findPayloadForLargestTransformMultiCoefficientResidual(BlockSize.SIZE_8X8);
+        TileDecodeContext tileContext = createTileContext(payload, FrameHeader.TransformMode.LARGEST);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+        int[] coefficients = residualUnit.coefficients();
+
+        assertEquals(TransformSize.TX_8X8, transformLayout.uniformLumaTransformSize());
+        assertEquals(TransformSize.TX_8X8, residualUnit.size());
+        assertFalse(residualUnit.allZero());
+        assertTrue(residualUnit.endOfBlockIndex() > 1);
+        assertTrue(coefficients[expectedOutputIndex(residualUnit.size(), residualUnit.endOfBlockIndex())] != 0);
+        assertTrue(countNonZeroCoefficients(coefficients) >= 2);
+        assertEquals(expectedCoefficientContextByte(coefficients), residualUnit.coefficientContextByte());
+    }
+
     /// Verifies that non-zero coefficient state from one 4x4 unit affects the next unit's skip context.
     @Test
     void propagatesCoefficientSkipContextAcrossFourByFourUnits() {
@@ -301,6 +326,42 @@ final class TileResidualSyntaxReaderTest {
         throw new IllegalStateException("No deterministic payload produced a supported multi-coefficient residual");
     }
 
+    /// Finds a payload whose first residual unit exposes a supported multi-coefficient larger transform.
+    ///
+    /// @param blockSize the coded block size whose largest-transform residual should be decoded
+    /// @return a payload whose first residual unit exposes a supported multi-coefficient larger transform
+    private static byte[] findPayloadForLargestTransformMultiCoefficientResidual(BlockSize blockSize) {
+        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
+            int limit = 1 << (searchBytes << 3);
+            for (int value = 0; value < limit; value++) {
+                byte[] payload = new byte[8];
+                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
+                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
+                }
+
+                TileDecodeContext tileContext = createTileContext(payload, FrameHeader.TransformMode.LARGEST);
+                TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+                TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+                TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+                BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+                TileBlockHeaderReader.BlockHeader header =
+                        blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
+                if (header.skip()) {
+                    continue;
+                }
+                TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+                if (transformLayout.lumaUnits().length != 1 || transformLayout.lumaUnits()[0].size() == TransformSize.TX_4X4) {
+                    continue;
+                }
+                TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+                if (residualUnit.endOfBlockIndex() > 1 && countNonZeroCoefficients(residualUnit.coefficients()) >= 2) {
+                    return payload;
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a supported larger-transform residual");
+    }
+
     /// Finds a payload whose first residual flags match the requested sequence, or `null`.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
@@ -394,6 +455,47 @@ final class TileResidualSyntaxReaderTest {
         return scan[scanIndex];
     }
 
+    /// Returns the natural-raster output index for one larger-transform scan position.
+    ///
+    /// @param transformSize the active transform size
+    /// @param scanIndex the zero-based scan index
+    /// @return the natural-raster output index for the supplied scan position
+    private static int expectedOutputIndex(TransformSize transformSize, int scanIndex) {
+        if (transformSize == TransformSize.TX_4X4) {
+            return expectedFourByFourOutputIndex(scanIndex);
+        }
+        return expectedScan(transformSize)[scanIndex];
+    }
+
+    /// Builds the diagonal default scan used by the larger-transform residual test oracle.
+    ///
+    /// @param transformSize the active transform size
+    /// @return the diagonal default scan for the supplied transform size
+    private static int[] expectedScan(TransformSize transformSize) {
+        int width = transformSize.widthPixels();
+        int height = transformSize.heightPixels();
+        int[] scan = new int[width * height];
+        boolean wide = width > height;
+        int nextIndex = 0;
+        for (int diagonal = 0; diagonal < width + height - 1; diagonal++) {
+            int rowStart = Math.max(0, diagonal - (width - 1));
+            int rowEnd = Math.min(height - 1, diagonal);
+            boolean descendingRows = (((diagonal & 1) == 1) ^ wide);
+            if (descendingRows) {
+                for (int row = rowEnd; row >= rowStart; row--) {
+                    int column = diagonal - row;
+                    scan[nextIndex++] = row * width + column;
+                }
+            } else {
+                for (int row = rowStart; row <= rowEnd; row++) {
+                    int column = diagonal - row;
+                    scan[nextIndex++] = row * width + column;
+                }
+            }
+        }
+        return scan;
+    }
+
     /// Counts the number of non-zero coefficients in one dense transform-domain coefficient array.
     ///
     /// @param coefficients the dense transform-domain coefficient array in natural raster order
@@ -421,6 +523,15 @@ final class TileResidualSyntaxReaderTest {
     /// @param payload the collected tile entropy payload
     /// @return one synthetic tile-local decode context used by residual-syntax tests
     private static TileDecodeContext createTileContext(byte[] payload) {
+        return createTileContext(payload, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY);
+    }
+
+    /// Creates one synthetic tile-local decode context used by residual-syntax tests.
+    ///
+    /// @param payload the collected tile entropy payload
+    /// @param transformMode the synthetic frame transform mode
+    /// @return one synthetic tile-local decode context used by residual-syntax tests
+    private static TileDecodeContext createTileContext(byte[] payload, FrameHeader.TransformMode transformMode) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -537,7 +648,7 @@ final class TileResidualSyntaxReaderTest {
                         0,
                         0
                 ),
-                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                transformMode,
                 false,
                 false,
                 false,

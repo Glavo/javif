@@ -21,7 +21,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
-import org.glavo.avif.internal.av1.entropy.MsacDecoder;
+import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
@@ -29,28 +29,44 @@ import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FrameSyntaxDecoder`.
 @NotNullByDefault
 final class FrameSyntaxDecoderTest {
+    /// One fixed inter-tile payload whose first block decodes as `skip = false` and `intra = false`.
+    private static final byte[] INTER_BLOCK_PAYLOAD = HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+
+    /// One fixed payload whose first skip decision changes when the skip CDF is inherited.
+    private static final byte[] DIFFERENT_INHERITED_SKIP_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/frame-cdf-different-skip.hex");
+
     /// Verifies that structural frame decoding expands tile syntax and produces a temporal motion field.
     @Test
     void decodeFrameProducesTileRootsAndTemporalMotionField() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, findPayloadForInterBlockWithoutSkipOrIntra(), false);
+        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
 
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
+        TilePartitionTreeReader.Node[] roots = result.tileRoots(0);
+        TilePartitionTreeReader.LeafNode leaf = firstLeaf(roots);
 
         assertEquals(1, result.tileCount());
-        assertTrue(result.tileRoots(0).length > 0);
-        assertTrue(firstLeaf(result.tileRoots(0)).transformLayout().lumaUnits().length > 0);
-        assertTrue(firstLeaf(result.tileRoots(0)).residualLayout().lumaUnits().length > 0);
+        assertEquals(1, roots.length);
+        assertEquals(BlockSize.SIZE_64X64, roots[0].size());
+        assertEquals(0, leaf.header().position().x4());
+        assertEquals(0, leaf.header().position().y4());
+        assertEquals(BlockSize.SIZE_64X64, leaf.header().size());
+        assertFalse(leaf.header().skip());
+        assertFalse(leaf.header().intra());
+        assertEquals(1, leaf.transformLayout().lumaUnits().length);
+        assertEquals(1, leaf.residualLayout().lumaUnits().length);
         TileDecodeContext.TemporalMotionBlock temporalBlock = result.decodedTemporalMotionField(0).block(0, 0);
         assertNotNull(temporalBlock);
         assertEquals(0, temporalBlock.referenceFrame0());
@@ -60,14 +76,11 @@ final class FrameSyntaxDecoderTest {
     /// Verifies that structural frame decoding captures the final tile-local CDF state.
     @Test
     void decodeFrameCapturesFinalTileCdfState() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, findPayloadForInterBlockWithoutSkipOrIntra(), false);
+        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
 
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
 
-        assertNotEquals(
-                CdfContext.createDefault().mutableSkipCdf(0)[0],
-                result.finalTileCdfContext(0).mutableSkipCdf(0)[0]
-        );
+        assertEquals(1029, result.finalTileCdfContext(0).mutableSkipCdf(0)[0]);
     }
 
     /// Verifies that reference-frame CDF snapshots seed subsequent tile syntax decoding.
@@ -75,8 +88,7 @@ final class FrameSyntaxDecoderTest {
     void decodeFrameSeedsTileSyntaxFromReferenceCdfState() {
         CdfContext inheritedCdf = CdfContext.createDefault();
         inheritedCdf.mutableSkipCdf(0)[0] = 32000;
-        byte[] payload = findPayloadWithDifferentSkipDecision(inheritedCdf);
-        FrameAssembly assembly = createAssembly(FrameType.INTER, payload, false, 8, 8);
+        FrameAssembly assembly = createAssembly(FrameType.INTER, DIFFERENT_INHERITED_SKIP_PAYLOAD, false, 8, 8);
         FrameSyntaxDecodeResult referenceResult = new FrameSyntaxDecodeResult(
                 assembly,
                 new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
@@ -89,7 +101,8 @@ final class FrameSyntaxDecoderTest {
 
         boolean defaultSkip = firstLeaf(defaultResult.tileRoots(0)).header().skip();
         boolean seededSkip = firstLeaf(seededResult.tileRoots(0)).header().skip();
-        assertNotEquals(defaultSkip, seededSkip);
+        assertFalse(defaultSkip);
+        assertTrue(seededSkip);
     }
 
     /// Verifies that CDF inheritance can be enabled without also inheriting temporal motion fields.
@@ -97,8 +110,7 @@ final class FrameSyntaxDecoderTest {
     void decodeFrameCanUseSeparateCdfAndTemporalReferenceSnapshots() {
         CdfContext inheritedCdf = CdfContext.createDefault();
         inheritedCdf.mutableSkipCdf(0)[0] = 32000;
-        byte[] payload = findPayloadWithDifferentSkipDecision(inheritedCdf);
-        FrameAssembly assembly = createAssembly(FrameType.INTER, payload, false, 8, 8);
+        FrameAssembly assembly = createAssembly(FrameType.INTER, DIFFERENT_INHERITED_SKIP_PAYLOAD, false, 8, 8);
         FrameSyntaxDecodeResult cdfReferenceResult = new FrameSyntaxDecodeResult(
                 assembly,
                 new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
@@ -111,13 +123,14 @@ final class FrameSyntaxDecoderTest {
 
         boolean defaultSkip = firstLeaf(defaultResult.tileRoots(0)).header().skip();
         boolean cdfOnlySkip = firstLeaf(cdfOnlyResult.tileRoots(0)).header().skip();
-        assertNotEquals(defaultSkip, cdfOnlySkip);
+        assertFalse(defaultSkip);
+        assertTrue(cdfOnlySkip);
     }
 
     /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.
     @Test
     void frameSyntaxDecodeResultCanReplaceStoredTileCdfContexts() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, findPayloadForInterBlockWithoutSkipOrIntra(), false);
+        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
         CdfContext replacementCdf = CdfContext.createDefault();
         replacementCdf.mutableSkipCdf(0)[0] = 32000;
@@ -126,70 +139,6 @@ final class FrameSyntaxDecoderTest {
 
         assertEquals(32000, replaced.finalTileCdfContext(0).mutableSkipCdf(0)[0]);
         assertEquals(result.decodedTemporalMotionField(0).block(0, 0), replaced.decodedTemporalMotionField(0).block(0, 0));
-    }
-
-    /// Finds a small payload whose first inter block decodes `skip = false` and `intra = false`.
-    ///
-    /// @return a small payload whose first inter block decodes `skip = false` and `intra = false`
-    private static byte[] findPayloadForInterBlockWithoutSkipOrIntra() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-                try {
-                    FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(
-                            createAssembly(FrameType.INTER, payload, false)
-                    );
-                    TilePartitionTreeReader.LeafNode leafNode = firstLeaf(result.tileRoots(0));
-                    if (!leafNode.header().skip() && !leafNode.header().intra()) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported AC residual payloads are skipped while searching for a supported fixture.
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced skip=false and intra=false");
-    }
-
-    /// Finds a small payload whose first skip decision differs between the default and supplied CDF states.
-    ///
-    /// @param overriddenCdf the overridden skip CDF to test against the default state
-    /// @return a small payload whose first skip decision differs between the default and supplied CDF states
-    private static byte[] findPayloadWithDifferentSkipDecision(CdfContext overriddenCdf) {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-                CdfContext defaultCdf = CdfContext.createDefault();
-                MsacDecoder defaultDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                boolean defaultSkip = defaultDecoder.decodeBooleanAdapt(defaultCdf.mutableSkipCdf(0));
-
-                CdfContext inherited = overriddenCdf.copy();
-                MsacDecoder inheritedDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                boolean inheritedSkip = inheritedDecoder.decodeBooleanAdapt(inherited.mutableSkipCdf(0));
-                if (defaultSkip == inheritedSkip) {
-                    continue;
-                }
-
-                FrameAssembly assembly = createAssembly(FrameType.INTER, payload, false, 8, 8);
-                FrameSyntaxDecodeResult cdfReferenceResult = new FrameSyntaxDecodeResult(
-                        assembly,
-                        new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
-                        new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)},
-                        new CdfContext[]{overriddenCdf.copy()}
-                );
-                try {
-                    FrameSyntaxDecodeResult defaultResult = new FrameSyntaxDecoder(null).decode(assembly);
-                    FrameSyntaxDecodeResult seededResult = new FrameSyntaxDecoder(cdfReferenceResult).decode(assembly);
-                    if (firstLeaf(defaultResult.tileRoots(0)).header().skip()
-                            != firstLeaf(seededResult.tileRoots(0)).header().skip()) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported AC residual payloads are skipped while searching for a supported fixture.
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced a different inherited skip decision");
     }
 
     /// Creates a synthetic frame assembly used by structural frame-decoder tests.

@@ -24,53 +24,65 @@ import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `TilePartitionTreeReader`.
 @NotNullByDefault
 final class TilePartitionTreeReaderTest {
-    /// One supported 64x64 key-frame tile payload for partition-tree tests.
-    private static final byte[] SUPPORTED_FULL_TILE_PAYLOAD = findSupportedPayload(FrameType.KEY, 64, 64);
-
-    /// One supported clipped key-frame tile payload for partition-tree tests.
-    private static final byte[] SUPPORTED_CLIPPED_TILE_PAYLOAD = findSupportedPayload(FrameType.KEY, 40, 28);
+    /// One fixed tile payload that the current partition-tree reader fully decodes.
+    private static final byte[] FIXED_TILE_PAYLOAD = HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
 
     /// Verifies that one 64x64 tile can be expanded into a non-empty partition tree with in-bounds leaves.
     @Test
     void readsTilePartitionTree() {
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createTileContext(FrameType.KEY, SUPPORTED_FULL_TILE_PAYLOAD)
+                createTileContext(FrameType.KEY, FIXED_TILE_PAYLOAD)
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
+        TilePartitionTreeReader.LeafNode leafNode = firstLeaf(roots[0]);
 
         assertEquals(1, roots.length);
         assertEquals(new BlockPosition(0, 0).x4(), roots[0].position().x4());
         assertEquals(new BlockPosition(0, 0).y4(), roots[0].position().y4());
         assertEquals(BlockSize.SIZE_64X64, roots[0].size());
-        assertTrue(countLeaves(roots[0]) > 0);
-        assertTrue(allLeavesInBounds(roots[0], 16, 16));
+        assertEquals(1, countLeaves(roots[0]));
+        assertEquals(0, leafNode.header().position().x4());
+        assertEquals(0, leafNode.header().position().y4());
+        assertEquals(BlockSize.SIZE_64X64, leafNode.header().size());
+        assertEquals(TransformSize.TX_64X64, leafNode.transformLayout().uniformLumaTransformSize());
+        assertEquals(1, leafNode.transformLayout().lumaUnits().length);
+        assertFalse(hasInvalidLeafOrigin(roots[0], 16, 16));
     }
 
     /// Verifies that clipped tiles can still be expanded into a partition tree without emitting out-of-bounds leaves.
     @Test
     void readsClippedTilePartitionTree() {
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createClippedTileContext(SUPPORTED_CLIPPED_TILE_PAYLOAD)
+                createClippedTileContext(FIXED_TILE_PAYLOAD)
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
+        TilePartitionTreeReader.LeafNode leafNode = firstLeaf(roots[0]);
 
         assertEquals(1, roots.length);
+        assertEquals(BlockSize.SIZE_64X64, roots[0].size());
+        assertEquals(1, countLeaves(roots[0]));
+        assertEquals(0, leafNode.header().position().x4());
+        assertEquals(0, leafNode.header().position().y4());
+        assertEquals(BlockSize.SIZE_64X32, leafNode.header().size());
+        assertEquals(TransformSize.RTX_64X32, leafNode.transformLayout().uniformLumaTransformSize());
+        assertEquals(10, leafNode.transformLayout().visibleWidth4());
+        assertEquals(7, leafNode.transformLayout().visibleHeight4());
         assertFalse(hasInvalidLeafOrigin(roots[0], 10, 7));
     }
 
@@ -88,16 +100,6 @@ final class TilePartitionTreeReaderTest {
             count += countLeaves(child);
         }
         return count;
-    }
-
-    /// Returns whether every leaf node starts within the supplied tile bounds.
-    ///
-    /// @param node the tree node to validate
-    /// @param tileWidth4 the tile width in 4x4 units
-    /// @param tileHeight4 the tile height in 4x4 units
-    /// @return whether every leaf node starts within the supplied tile bounds
-    private static boolean allLeavesInBounds(TilePartitionTreeReader.Node node, int tileWidth4, int tileHeight4) {
-        return !hasInvalidLeafOrigin(node, tileWidth4, tileHeight4);
     }
 
     /// Returns whether any leaf node starts outside the supplied tile bounds.
@@ -120,31 +122,6 @@ final class TilePartitionTreeReaderTest {
         return false;
     }
 
-    /// Finds one payload that the current partition-tree reader can fully consume.
-    ///
-    /// @param frameType the synthetic frame type
-    /// @param codedWidth the coded frame width
-    /// @param codedHeight the coded frame height
-    /// @return one payload that the current partition-tree reader can fully consume
-    private static byte[] findSupportedPayload(FrameType frameType, int codedWidth, int codedHeight) {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-                try {
-                    TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                            createContext(frameType, codedWidth, codedHeight, payload)
-                    );
-                    if (reader.readTile().length > 0) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported AC residual payloads are skipped while searching for a supported fixture.
-                }
-            }
-        }
-        throw new IllegalStateException("No supported partition-tree payload was found");
-    }
-
     /// Creates a simple 64x64 tile context used by partition-tree tests.
     ///
     /// @param frameType the synthetic frame type
@@ -160,6 +137,18 @@ final class TilePartitionTreeReaderTest {
     /// @return a clipped tile context whose coded size is smaller than one full 64x64 superblock
     private static TileDecodeContext createClippedTileContext(byte[] payload) {
         return createContext(FrameType.KEY, 40, 28, payload);
+    }
+
+    /// Returns the first leaf node in raster order from one partition subtree.
+    ///
+    /// @param node the subtree root
+    /// @return the first leaf node in raster order
+    private static TilePartitionTreeReader.LeafNode firstLeaf(TilePartitionTreeReader.Node node) {
+        if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
+            return leafNode;
+        }
+        TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
+        return firstLeaf(partitionNode.children()[0]);
     }
 
     /// Creates a synthetic tile context used by partition-tree tests.

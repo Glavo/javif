@@ -20,16 +20,19 @@ import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.Channels;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `Av1ImageReader`.
 @NotNullByDefault
@@ -76,10 +79,24 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameConsumesSequenceHeaderOnlyStream() throws IOException {
         byte[] stream = obu(1, reducedStillPicturePayload());
+        assertAcrossBufferedInputs(stream, reader -> {
+            assertNull(reader.readFrame());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
+        });
+    }
+
+    /// Verifies that `readAllFrames()` returns an empty list when the stream only contains a sequence header.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readAllFramesReturnsEmptyListForSequenceHeaderOnlyStream() throws IOException {
+        byte[] stream = obu(1, reducedStillPicturePayload());
         try (Av1ImageReader reader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
-            assertNull(reader.readFrame());
+            List<DecodedFrame> frames = reader.readAllFrames();
+            assertTrue(frames.isEmpty());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
         }
     }
 
@@ -113,6 +130,28 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+    }
+
+    /// Verifies that all buffered-input adapters report the same current decode boundary and refresh the same reference state.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReportsSameDecodeBoundaryAcrossBufferedInputs() throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload())
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
+            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
+            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+            FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertTrue(syntaxResult != null);
+            for (int i = 0; i < 8; i++) {
+                assertSame(syntaxResult, reader.referenceFrameSyntaxResult(i));
+            }
+        });
     }
 
     /// Verifies that an incomplete standalone frame assembly is rejected at end-of-stream.
@@ -214,6 +253,85 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
     }
 
+    /// Verifies that a new sequence header is rejected while a standalone frame assembly is still waiting for tile groups.
+    @Test
+    void readFrameRejectsSequenceHeaderWhileFrameAssemblyIsPending() {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(3, reducedStillPictureFrameHeaderPayload()),
+                obu(1, reducedStillPicturePayload())
+        );
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
+        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+        assertEquals("Sequence header OBU appeared before the current frame was completed", exception.getMessage());
+    }
+
+    /// Verifies that frame-size limits are enforced before structural frame decode begins.
+    @Test
+    void readFrameRejectsFramesLargerThanConfiguredLimit() {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(3, reducedStillPictureFrameHeaderPayload())
+        );
+        Av1DecoderConfig config = Av1DecoderConfig.builder().frameSizeLimit(4095).build();
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
+                    config
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
+        assertEquals(DecodeStage.FRAME_HEADER_PARSE, exception.stage());
+        assertEquals("Frame size exceeds the configured limit: 64x64", exception.getMessage());
+    }
+
+    /// Verifies that `show_existing_frame` cannot reference an empty reference slot.
+    @Test
+    void readFrameRejectsShowExistingFrameWithUnpopulatedSlot() {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload()),
+                obu(3, showExistingFrameHeaderPayload(0))
+        );
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
+        assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+        assertEquals("show_existing_frame references a frame slot that has not been populated", exception.getMessage());
+    }
+
+    /// Verifies that combined `FRAME` OBUs reject trailing tile data when `show_existing_frame` is set.
+    @Test
+    void readFrameRejectsCombinedShowExistingFrameWithTrailingTileData() {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload()),
+                obu(6, concat(showExistingFrameHeaderPayload(0), new byte[]{0x00}))
+        );
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+        assertEquals("Combined frame OBU must not carry tile data when show_existing_frame is set", exception.getMessage());
+    }
+
     /// Verifies that the reader exposes the supplied immutable configuration.
     @Test
     void configReturnsSuppliedConfiguration() {
@@ -225,6 +343,29 @@ final class Av1ImageReaderTest {
             assertSame(config, reader.config());
         } catch (IOException ex) {
             throw new AssertionError(ex);
+        }
+    }
+
+    /// Runs the supplied assertion across all currently supported buffered-input adapters.
+    ///
+    /// @param stream the raw test stream
+    /// @param assertion the reader assertion to run for every adapter
+    /// @throws IOException if one adapter cannot be opened or consumed
+    private static void assertAcrossBufferedInputs(byte[] stream, ReaderAssertion assertion) throws IOException {
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertion.accept(reader);
+        }
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))
+        )) {
+            assertion.accept(reader);
+        }
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteChannel(Channels.newChannel(new ByteArrayInputStream(stream)))
+        )) {
+            assertion.accept(reader);
         }
     }
 
@@ -302,12 +443,102 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one full sequence header payload that enables `show_existing_frame`.
+    ///
+    /// @return one full sequence header payload that enables `show_existing_frame`
+    private static byte[] fullSequenceHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writer.writeBits(2, 3);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(1000, 32);
+        writer.writeBits(60_000, 32);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(4, 5);
+        writer.writeBits(100, 32);
+        writer.writeBits(3, 5);
+        writer.writeBits(2, 5);
+        writer.writeFlag(true);
+        writer.writeBits(1, 5);
+
+        writer.writeBits(0x101, 12);
+        writer.writeBits(3, 3);
+        writer.writeBits(1, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(17, 5);
+        writer.writeBits(3, 5);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(2, 4);
+
+        writer.writeBits(0, 12);
+        writer.writeBits(1, 3);
+        writer.writeBits(0, 2);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+
+        writer.writeBits(11, 4);
+        writer.writeBits(10, 4);
+        writer.writeBits(2047, 12);
+        writer.writeBits(1023, 11);
+        writer.writeFlag(true);
+        writer.writeBits(2, 4);
+        writer.writeBits(1, 3);
+
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(4, 3);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(1, 8);
+        writer.writeBits(13, 8);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
     /// Creates a reduced still-picture key frame header payload.
     ///
     /// @return the reduced still-picture key frame header payload
     private static byte[] reducedStillPictureFrameHeaderPayload() {
         BitWriter writer = new BitWriter();
         writeReducedStillPictureFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a minimal standalone `show_existing_frame` header payload.
+    ///
+    /// @param existingFrameIndex the referenced frame slot
+    /// @return a minimal standalone `show_existing_frame` header payload
+    private static byte[] showExistingFrameHeaderPayload(int existingFrameIndex) {
+        BitWriter writer = new BitWriter();
+        writer.writeFlag(true);
+        writer.writeBits(existingFrameIndex, 3);
+        writer.writeBits(0, 3);
+        writer.writeBits(0, 6);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -429,5 +660,16 @@ final class Av1ImageReaderTest {
                 bitCount = 0;
             }
         }
+    }
+
+    /// Reader assertion used by buffered-input source-equivalence tests.
+    @FunctionalInterface
+    @NotNullByDefault
+    private interface ReaderAssertion {
+        /// Runs the assertion against one freshly opened reader.
+        ///
+        /// @param reader the freshly opened reader
+        /// @throws IOException if the reader cannot be consumed
+        void accept(Av1ImageReader reader) throws IOException;
     }
 }

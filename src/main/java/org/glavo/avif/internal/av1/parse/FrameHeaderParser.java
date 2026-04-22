@@ -50,6 +50,10 @@ public final class FrameHeaderParser {
     private static final int REFERENCES_PER_FRAME = 7;
     /// The AV1 maximum CDEF strength count.
     private static final int MAX_CDEF_STRENGTHS = 8;
+    /// The AV1 maximum luma film grain point count.
+    private static final int MAX_FILM_GRAIN_Y_POINTS = 14;
+    /// The AV1 maximum chroma film grain point count.
+    private static final int MAX_FILM_GRAIN_UV_POINTS = 10;
     /// The default loop filter reference deltas.
     private static final int[] DEFAULT_REFERENCE_DELTAS = new int[]{1, 0, 0, 0, -1, 0, -1, -1};
     /// The default loop filter mode deltas.
@@ -463,13 +467,15 @@ public final class FrameHeaderParser {
             warpedMotion = reader.readFlag();
         }
         boolean reducedTransformSet = reader.readFlag();
-        boolean filmGrainPresent = false;
-        if (sequenceHeader.features().filmGrainPresent() && (showFrame || showableFrame)) {
-            filmGrainPresent = reader.readFlag();
-            if (filmGrainPresent) {
-                throw unsupported("Frame headers with film grain parameters are not implemented yet");
-            }
-        }
+        FrameHeader.FilmGrainParams filmGrain = parseFilmGrain(
+                reader,
+                sequenceHeader,
+                frameType,
+                showFrame,
+                showableFrame,
+                referenceFrameHeaders,
+                referenceFrameIndices
+        );
 
         return new FrameHeader(
                 temporalId,
@@ -514,7 +520,7 @@ public final class FrameHeaderParser {
                 skipMode.referenceIndices,
                 warpedMotion,
                 reducedTransformSet,
-                filmGrainPresent
+                filmGrain
         );
     }
 
@@ -1269,6 +1275,231 @@ public final class FrameHeaderParser {
         }
 
         return new FrameHeader.RestorationInfo(types, unitSizeLog2Y, unitSizeLog2Uv);
+    }
+
+    /// Parses normalized film grain parameters.
+    ///
+    /// @param reader the payload bit reader
+    /// @param sequenceHeader the active sequence header
+    /// @param frameType the current AV1 frame type
+    /// @param showFrame whether the frame is shown immediately
+    /// @param showableFrame whether the frame can be shown later
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceFrameIndices the decoded LAST..ALTREF slot indices
+    /// @return the normalized film grain parameters
+    /// @throws IOException if the payload is truncated or invalid
+    private static FrameHeader.FilmGrainParams parseFilmGrain(
+            BitReader reader,
+            SequenceHeader sequenceHeader,
+            FrameType frameType,
+            boolean showFrame,
+            boolean showableFrame,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices
+    ) throws IOException {
+        if (!sequenceHeader.features().filmGrainPresent() || (!showFrame && !showableFrame)) {
+            return FrameHeader.FilmGrainParams.disabled();
+        }
+
+        if (!reader.readFlag()) {
+            return FrameHeader.FilmGrainParams.disabled();
+        }
+
+        int grainSeed = readInt(reader, 16);
+        boolean updated = frameType != FrameType.INTER || reader.readFlag();
+        if (!updated) {
+            int referenceFrameIndex = readInt(reader, 3);
+            if (!usesReferenceFrameIndex(referenceFrameIndices, referenceFrameIndex)) {
+                fail("film_grain_params_ref_idx must match one of the frame reference slots");
+            }
+
+            @Nullable FrameHeader referenceFrameHeader = referenceFrameHeaders[referenceFrameIndex];
+            if (referenceFrameHeader == null) {
+                fail("film_grain_params_ref_idx requires an available refreshed reference header");
+            }
+
+            FrameHeader.FilmGrainParams referencedFilmGrain = referenceFrameHeader.filmGrain();
+            return new FrameHeader.FilmGrainParams(
+                    true,
+                    grainSeed,
+                    false,
+                    referenceFrameIndex,
+                    referencedFilmGrain.yPoints(),
+                    referencedFilmGrain.chromaScalingFromLuma(),
+                    referencedFilmGrain.cbPoints(),
+                    referencedFilmGrain.crPoints(),
+                    referencedFilmGrain.scalingShift(),
+                    referencedFilmGrain.arCoeffLag(),
+                    referencedFilmGrain.arCoefficientsY(),
+                    referencedFilmGrain.arCoefficientsCb(),
+                    referencedFilmGrain.arCoefficientsCr(),
+                    referencedFilmGrain.arCoeffShift(),
+                    referencedFilmGrain.grainScaleShift(),
+                    referencedFilmGrain.cbMult(),
+                    referencedFilmGrain.cbLumaMult(),
+                    referencedFilmGrain.cbOffset(),
+                    referencedFilmGrain.crMult(),
+                    referencedFilmGrain.crLumaMult(),
+                    referencedFilmGrain.crOffset(),
+                    referencedFilmGrain.overlapEnabled(),
+                    referencedFilmGrain.clipToRestrictedRange()
+            );
+        }
+
+        int numYPoints = readInt(reader, 4);
+        if (numYPoints > MAX_FILM_GRAIN_Y_POINTS) {
+            fail("Film grain luma point count exceeds the AV1 maximum of 14");
+        }
+        FrameHeader.FilmGrainPoint[] yPoints = parseFilmGrainPoints(reader, numYPoints, "luma");
+
+        boolean monochrome = sequenceHeader.colorConfig().monochrome();
+        boolean chromaScalingFromLuma = !monochrome && reader.readFlag();
+        boolean subsamplingX = sequenceHeader.colorConfig().chromaSubsamplingX();
+        boolean subsamplingY = sequenceHeader.colorConfig().chromaSubsamplingY();
+
+        FrameHeader.FilmGrainPoint[] cbPoints;
+        FrameHeader.FilmGrainPoint[] crPoints;
+        if (monochrome || chromaScalingFromLuma || (subsamplingX && subsamplingY && numYPoints == 0)) {
+            cbPoints = new FrameHeader.FilmGrainPoint[0];
+            crPoints = new FrameHeader.FilmGrainPoint[0];
+        } else {
+            int numCbPoints = readInt(reader, 4);
+            if (numCbPoints > MAX_FILM_GRAIN_UV_POINTS) {
+                fail("Film grain Cb point count exceeds the AV1 maximum of 10");
+            }
+            cbPoints = parseFilmGrainPoints(reader, numCbPoints, "Cb");
+
+            int numCrPoints = readInt(reader, 4);
+            if (numCrPoints > MAX_FILM_GRAIN_UV_POINTS) {
+                fail("Film grain Cr point count exceeds the AV1 maximum of 10");
+            }
+            crPoints = parseFilmGrainPoints(reader, numCrPoints, "Cr");
+
+            if (subsamplingX && subsamplingY) {
+                if (numCbPoints == 0 && numCrPoints != 0) {
+                    fail("4:2:0 film grain must not signal Cr points without Cb points");
+                }
+                if (numCbPoints != 0 && numCrPoints == 0) {
+                    fail("4:2:0 film grain must signal Cr points when Cb points are present");
+                }
+            }
+        }
+
+        int scalingShift = readInt(reader, 2) + 8;
+        int arCoeffLag = readInt(reader, 2);
+        int numPosLuma = 2 * arCoeffLag * (arCoeffLag + 1);
+        int numPosChroma = yPoints.length > 0 ? numPosLuma + 1 : numPosLuma;
+
+        int[] arCoefficientsY = yPoints.length > 0 ? parseFilmGrainCoefficients(reader, numPosLuma) : new int[0];
+        int[] arCoefficientsCb = chromaScalingFromLuma || cbPoints.length > 0
+                ? parseFilmGrainCoefficients(reader, numPosChroma)
+                : new int[0];
+        int[] arCoefficientsCr = chromaScalingFromLuma || crPoints.length > 0
+                ? parseFilmGrainCoefficients(reader, numPosChroma)
+                : new int[0];
+
+        int arCoeffShift = readInt(reader, 2) + 6;
+        int grainScaleShift = readInt(reader, 2);
+
+        int cbMult = 0;
+        int cbLumaMult = 0;
+        int cbOffset = 0;
+        if (cbPoints.length > 0) {
+            cbMult = readInt(reader, 8);
+            cbLumaMult = readInt(reader, 8);
+            cbOffset = readInt(reader, 9);
+        }
+
+        int crMult = 0;
+        int crLumaMult = 0;
+        int crOffset = 0;
+        if (crPoints.length > 0) {
+            crMult = readInt(reader, 8);
+            crLumaMult = readInt(reader, 8);
+            crOffset = readInt(reader, 9);
+        }
+
+        boolean overlapEnabled = reader.readFlag();
+        boolean clipToRestrictedRange = reader.readFlag();
+        return new FrameHeader.FilmGrainParams(
+                true,
+                grainSeed,
+                true,
+                -1,
+                yPoints,
+                chromaScalingFromLuma,
+                cbPoints,
+                crPoints,
+                scalingShift,
+                arCoeffLag,
+                arCoefficientsY,
+                arCoefficientsCb,
+                arCoefficientsCr,
+                arCoeffShift,
+                grainScaleShift,
+                cbMult,
+                cbLumaMult,
+                cbOffset,
+                crMult,
+                crLumaMult,
+                crOffset,
+                overlapEnabled,
+                clipToRestrictedRange
+        );
+    }
+
+    /// Parses ordered film grain scaling points for one component.
+    ///
+    /// @param reader the payload bit reader
+    /// @param pointCount the number of points to parse
+    /// @param componentName the component name used in validation messages
+    /// @return the parsed scaling points
+    /// @throws IOException if the payload is truncated or invalid
+    private static FrameHeader.FilmGrainPoint[] parseFilmGrainPoints(
+            BitReader reader,
+            int pointCount,
+            String componentName
+    ) throws IOException {
+        FrameHeader.FilmGrainPoint[] points = new FrameHeader.FilmGrainPoint[pointCount];
+        int previousValue = -1;
+        for (int i = 0; i < pointCount; i++) {
+            int value = readInt(reader, 8);
+            int scaling = readInt(reader, 8);
+            if (value <= previousValue) {
+                fail(componentName + " film grain point values must increase strictly");
+            }
+            points[i] = new FrameHeader.FilmGrainPoint(value, scaling);
+            previousValue = value;
+        }
+        return points;
+    }
+
+    /// Parses normalized film grain auto-regressive coefficients.
+    ///
+    /// @param reader the payload bit reader
+    /// @param coefficientCount the number of coefficients to parse
+    /// @return the normalized coefficients with the spec's `+128` offset removed
+    /// @throws IOException if the payload is truncated
+    private static int[] parseFilmGrainCoefficients(BitReader reader, int coefficientCount) throws IOException {
+        int[] coefficients = new int[coefficientCount];
+        for (int i = 0; i < coefficientCount; i++) {
+            coefficients[i] = readInt(reader, 8) - 128;
+        }
+        return coefficients;
+    }
+
+    /// Returns whether the current frame references the supplied frame slot.
+    ///
+    /// @param referenceFrameIndices the decoded LAST..ALTREF slot indices
+    /// @param referenceFrameIndex the frame slot to look for
+    /// @return whether the current frame references the supplied frame slot
+    private static boolean usesReferenceFrameIndex(int[] referenceFrameIndices, int referenceFrameIndex) {
+        for (int decodedReferenceIndex : referenceFrameIndices) {
+            if (decodedReferenceIndex == referenceFrameIndex) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Reads the frame-level screen content tools flag.

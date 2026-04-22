@@ -26,14 +26,20 @@ import java.util.Objects;
 
 /// Reader for the first coefficient-side syntax elements inside one tile bitstream.
 ///
-/// The current implementation fully decodes the two-dimensional luma `TX_4X4` residual syntax and
-/// retains the earlier DC-only / first-AC support for larger transform sizes. Higher-order AC
-/// token trees for non-`TX_4X4` transforms are still introduced incrementally on top of this
-/// foundation.
+/// The current implementation fully decodes the currently modeled two-dimensional luma residual
+/// path. `TX_4X4` keeps its dedicated context helpers, while larger transform sizes reuse the
+/// existing simplified non-chroma token-context path instead of failing once multiple coefficients
+/// are present.
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
+
+    /// The shared fallback `coeff_base` context used by the current larger-transform path.
+    private static final int GENERIC_BASE_TOKEN_CONTEXT = 0;
+
+    /// The shared fallback `br_tok` context used by the current larger-transform path.
+    private static final int GENERIC_HIGH_TOKEN_CONTEXT = 7;
 
     /// The `dav1d` natural-order scan for two-dimensional `TX_4X4` transforms.
     private static final int[] FOUR_BY_FOUR_SCAN = {
@@ -42,6 +48,9 @@ public final class TileResidualSyntaxReader {
             6, 3, 7, 10,
             13, 14, 11, 15
     };
+
+    /// The default two-dimensional scan tables for every modeled transform size.
+    private static final int[][] DEFAULT_SCANS = createDefaultScans();
 
     /// The `dav1d` low-token context offsets for square transforms.
     private static final int[][] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
@@ -121,65 +130,7 @@ public final class TileResidualSyntaxReader {
         if (nonNullTransformUnit.size() == TransformSize.TX_4X4) {
             return readFourByFourLumaResidualUnit(nonNullTransformUnit, endOfBlockIndex, nonNullNeighborContext);
         }
-        if (endOfBlockIndex > 1) {
-            throw new IllegalStateException("AC coefficient decoding is not implemented yet");
-        }
-
-        int[] coefficients = new int[nonNullTransformUnit.size().widthPixels() * nonNullTransformUnit.size().heightPixels()];
-        int cumulativeLevel = 0;
-        int acToken = 0;
-        int acCoefficientIndex = -1;
-
-        if (endOfBlockIndex == 1) {
-            acCoefficientIndex = naturalCoefficientIndex(nonNullTransformUnit.size(), endOfBlockIndex);
-            acToken = syntaxReader.readEndOfBlockBaseToken(
-                    nonNullTransformUnit.size(),
-                    false,
-                    endOfBlockTokenContext(endOfBlockIndex, nonNullTransformUnit.size())
-            );
-            if (acToken == 3) {
-                acToken = syntaxReader.readHighToken(nonNullTransformUnit.size(), false, 7);
-            }
-        }
-
-        int dcToken = endOfBlockIndex == 0
-                ? syntaxReader.readEndOfBlockBaseToken(nonNullTransformUnit.size(), false, 0)
-                : syntaxReader.readBaseToken(nonNullTransformUnit.size(), false, 0);
-        if (dcToken == 3) {
-            dcToken = syntaxReader.readHighToken(nonNullTransformUnit.size(), false, 0);
-        }
-        if (dcToken == 15) {
-            dcToken += syntaxReader.readCoefficientGolomb();
-        }
-
-        int signedDcLevel = 0;
-        if (dcToken != 0) {
-            boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
-            if (dcToken == 15) {
-                dcToken += syntaxReader.readCoefficientGolomb();
-            }
-            signedDcLevel = negative ? -dcToken : dcToken;
-            coefficients[0] = signedDcLevel;
-            cumulativeLevel += dcToken;
-        }
-
-        if (endOfBlockIndex == 1 && acToken != 0) {
-            boolean negative = syntaxReader.readCoefficientSignFlag();
-            if (acToken == 15) {
-                acToken += syntaxReader.readCoefficientGolomb();
-            }
-            coefficients[acCoefficientIndex] = negative ? -acToken : acToken;
-            cumulativeLevel += acToken;
-        }
-
-        int coefficientContextByte = createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel);
-        return new TransformResidualUnit(
-                nonNullTransformUnit.position(),
-                nonNullTransformUnit.size(),
-                endOfBlockIndex,
-                coefficients,
-                coefficientContextByte
-        );
+        return readGenericLumaResidualUnit(nonNullTransformUnit, endOfBlockIndex, nonNullNeighborContext);
     }
 
     /// Decodes the fully supported two-dimensional `TX_4X4` luma residual syntax.
@@ -280,6 +231,84 @@ public final class TileResidualSyntaxReader {
         );
     }
 
+    /// Decodes one non-`TX_4X4` luma residual unit with the shared larger-transform token contexts.
+    ///
+    /// @param transformUnit the current luma transform unit
+    /// @param endOfBlockIndex the already-decoded end-of-block scan index
+    /// @param neighborContext the mutable neighbor context that supplies the DC-sign context
+    /// @return the decoded larger-transform luma residual unit
+    private TransformResidualUnit readGenericLumaResidualUnit(
+            TransformUnit transformUnit,
+            int endOfBlockIndex,
+            BlockNeighborContext neighborContext
+    ) {
+        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+        TransformSize transformSize = nonNullTransformUnit.size();
+        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
+        if (endOfBlockIndex > 0) {
+            int lastToken = syntaxReader.readEndOfBlockBaseToken(
+                    transformSize,
+                    false,
+                    endOfBlockTokenContext(endOfBlockIndex, transformSize)
+            );
+            if (lastToken == 3) {
+                lastToken = syntaxReader.readHighToken(transformSize, false, GENERIC_HIGH_TOKEN_CONTEXT);
+            }
+            coefficientTokens[endOfBlockIndex] = lastToken;
+
+            for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
+                int token = syntaxReader.readBaseToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT);
+                if (token == 3) {
+                    token = syntaxReader.readHighToken(transformSize, false, GENERIC_HIGH_TOKEN_CONTEXT);
+                }
+                coefficientTokens[scanIndex] = token;
+            }
+        }
+
+        int dcToken = endOfBlockIndex == 0
+                ? syntaxReader.readEndOfBlockBaseToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT)
+                : syntaxReader.readBaseToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT);
+        if (dcToken == 3) {
+            dcToken = syntaxReader.readHighToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT);
+        }
+
+        BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
+        int cumulativeLevel = 0;
+        int signedDcLevel = 0;
+        if (dcToken != 0) {
+            boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
+            if (dcToken == 15) {
+                dcToken += syntaxReader.readCoefficientGolomb();
+            }
+            signedDcLevel = negative ? -dcToken : dcToken;
+            coefficients[0] = signedDcLevel;
+            cumulativeLevel += dcToken;
+        }
+
+        int[] scan = DEFAULT_SCANS[transformSize.ordinal()];
+        for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
+            int token = coefficientTokens[scanIndex];
+            if (token == 0) {
+                continue;
+            }
+            boolean negative = syntaxReader.readCoefficientSignFlag();
+            if (token == 15) {
+                token += syntaxReader.readCoefficientGolomb();
+            }
+            coefficients[scan[scanIndex]] = negative ? -token : token;
+            cumulativeLevel += token;
+        }
+
+        return new TransformResidualUnit(
+                nonNullTransformUnit.position(),
+                transformSize,
+                endOfBlockIndex,
+                coefficients,
+                createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel)
+        );
+    }
+
     /// Creates one all-zero transform residual unit.
     ///
     /// @param transformUnit the transform unit whose residual syntax is all-zero
@@ -293,29 +322,6 @@ public final class TileResidualSyntaxReader {
                 new int[nonNullTransformUnit.size().widthPixels() * nonNullTransformUnit.size().heightPixels()],
                 ALL_ZERO_COEFFICIENT_CONTEXT_BYTE
         );
-    }
-
-    /// Returns the natural-raster coefficient index for one supported limited-path scan index.
-    ///
-    /// The current implementation supports only scan indices `0` and `1` for the non-`TX_4X4`
-    /// fallback path. For 2D transforms the first scanned AC coefficient follows the dominant
-    /// transform axis, which matches the first `dav1d` scan entry for each supported transform
-    /// size.
-    ///
-    /// @param transformSize the active transform size
-    /// @param endOfBlockIndex the supported scan index
-    /// @return the natural-raster coefficient index for the supplied scan index
-    private static int naturalCoefficientIndex(TransformSize transformSize, int endOfBlockIndex) {
-        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
-        if (endOfBlockIndex == 0) {
-            return 0;
-        }
-        if (endOfBlockIndex != 1) {
-            throw new IllegalArgumentException("Unsupported scan index: " + endOfBlockIndex);
-        }
-        return nonNullTransformSize.widthPixels() > nonNullTransformSize.heightPixels()
-                ? 1
-                : nonNullTransformSize.widthPixels();
     }
 
     /// Returns the end-of-block base-token context for one supported end-of-block index.
@@ -410,5 +416,50 @@ public final class TileResidualSyntaxReader {
             return magnitude | 0x40;
         }
         return magnitude | (signedDcLevel > 0 ? 0x80 : 0);
+    }
+
+    /// Creates the default two-dimensional scan table for every modeled transform size.
+    ///
+    /// @return the default two-dimensional scan table for every modeled transform size
+    private static int[][] createDefaultScans() {
+        TransformSize[] transformSizes = TransformSize.values();
+        int[][] scans = new int[transformSizes.length][];
+        for (TransformSize transformSize : transformSizes) {
+            scans[transformSize.ordinal()] = createDefaultScan(transformSize);
+        }
+        return scans;
+    }
+
+    /// Creates the default two-dimensional scan table for one modeled transform size.
+    ///
+    /// The current scan matches the `TX_4X4` `dav1d` table and extends the same diagonal-walk rule
+    /// to the larger rectangular transforms already represented by `TransformSize`.
+    ///
+    /// @param transformSize the modeled transform size whose scan should be created
+    /// @return the default two-dimensional scan table for the supplied transform size
+    private static int[] createDefaultScan(TransformSize transformSize) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int width = nonNullTransformSize.widthPixels();
+        int height = nonNullTransformSize.heightPixels();
+        int[] scan = new int[width * height];
+        boolean wide = width > height;
+        int nextIndex = 0;
+        for (int diagonal = 0; diagonal < width + height - 1; diagonal++) {
+            int rowStart = Math.max(0, diagonal - (width - 1));
+            int rowEnd = Math.min(height - 1, diagonal);
+            boolean descendingRows = (((diagonal & 1) == 1) ^ wide);
+            if (descendingRows) {
+                for (int row = rowEnd; row >= rowStart; row--) {
+                    int column = diagonal - row;
+                    scan[nextIndex++] = row * width + column;
+                }
+            } else {
+                for (int row = rowStart; row <= rowEnd; row++) {
+                    int column = diagonal - row;
+                    scan[nextIndex++] = row * width + column;
+                }
+            }
+        }
+        return scan;
     }
 }

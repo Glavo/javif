@@ -110,6 +110,8 @@ public final class FrameHeader {
     private final boolean reducedTransformSet;
     /// Whether film grain is present for this frame.
     private final boolean filmGrainPresent;
+    /// The normalized film grain parameters for this frame.
+    private final FilmGrainParams filmGrain;
 
     /// Creates a parsed frame header with inter-specific fields defaulted to disabled values.
     ///
@@ -197,6 +199,110 @@ public final class FrameHeader {
                 primaryRefFrame,
                 frameOffset,
                 refreshFrameFlags,
+                frameSize,
+                superResolution,
+                allowIntrabc,
+                refreshContext,
+                tiling,
+                quantization,
+                segmentation,
+                delta,
+                allLossless,
+                loopFilter,
+                cdef,
+                restoration,
+                transformMode,
+                reducedTransformSet,
+                defaultFilmGrain(filmGrainPresent)
+        );
+    }
+
+    /// Creates a parsed frame header with inter-specific fields defaulted to disabled values and normalized film grain parameters.
+    ///
+    /// @param temporalId the temporal layer identifier
+    /// @param spatialId the spatial layer identifier
+    /// @param showExistingFrame whether this is a show-existing-frame header
+    /// @param existingFrameIndex the referenced frame slot when `showExistingFrame` is true
+    /// @param frameId the frame identifier when present
+    /// @param framePresentationDelay the frame presentation delay when present
+    /// @param frameType the AV1 frame type
+    /// @param showFrame whether the frame is shown immediately
+    /// @param showableFrame whether the frame can be shown later
+    /// @param errorResilientMode whether error resilient mode is enabled
+    /// @param disableCdfUpdate whether CDF updates are disabled
+    /// @param allowScreenContentTools whether screen content tools are enabled
+    /// @param forceIntegerMotionVectors whether integer motion vectors are forced
+    /// @param frameSizeOverride whether frame size override signaling is enabled
+    /// @param primaryRefFrame the primary reference frame index, or `7` when none is used
+    /// @param frameOffset the frame order hint when present
+    /// @param refreshFrameFlags the refresh frame flags bitset
+    /// @param frameSize the frame dimensions and render size
+    /// @param superResolution the super-resolution settings
+    /// @param allowIntrabc whether `allow_intrabc` is enabled
+    /// @param refreshContext whether context refresh is enabled
+    /// @param tiling the tile layout information
+    /// @param quantization the quantization parameters
+    /// @param segmentation the segmentation parameters
+    /// @param delta the delta-q and delta-lf signaling flags
+    /// @param allLossless whether all segments are lossless
+    /// @param loopFilter the loop filter parameters
+    /// @param cdef the CDEF parameters
+    /// @param restoration the loop restoration parameters
+    /// @param transformMode the transform mode for this frame
+    /// @param reducedTransformSet whether the reduced transform type set is used
+    /// @param filmGrain the normalized film grain parameters
+    public FrameHeader(
+            int temporalId,
+            int spatialId,
+            boolean showExistingFrame,
+            int existingFrameIndex,
+            long frameId,
+            long framePresentationDelay,
+            FrameType frameType,
+            boolean showFrame,
+            boolean showableFrame,
+            boolean errorResilientMode,
+            boolean disableCdfUpdate,
+            boolean allowScreenContentTools,
+            boolean forceIntegerMotionVectors,
+            boolean frameSizeOverride,
+            int primaryRefFrame,
+            int frameOffset,
+            int refreshFrameFlags,
+            FrameSize frameSize,
+            SuperResolutionInfo superResolution,
+            boolean allowIntrabc,
+            boolean refreshContext,
+            TilingInfo tiling,
+            QuantizationInfo quantization,
+            SegmentationInfo segmentation,
+            DeltaInfo delta,
+            boolean allLossless,
+            LoopFilterInfo loopFilter,
+            CdefInfo cdef,
+            RestorationInfo restoration,
+            TransformMode transformMode,
+            boolean reducedTransformSet,
+            FilmGrainParams filmGrain
+    ) {
+        this(
+                temporalId,
+                spatialId,
+                showExistingFrame,
+                existingFrameIndex,
+                frameId,
+                framePresentationDelay,
+                frameType,
+                showFrame,
+                showableFrame,
+                errorResilientMode,
+                disableCdfUpdate,
+                allowScreenContentTools,
+                forceIntegerMotionVectors,
+                frameSizeOverride,
+                primaryRefFrame,
+                frameOffset,
+                refreshFrameFlags,
                 false,
                 new int[]{-1, -1, -1, -1, -1, -1, -1},
                 frameSize,
@@ -222,7 +328,7 @@ public final class FrameHeader {
                 new int[]{-1, -1},
                 false,
                 reducedTransformSet,
-                filmGrainPresent
+                filmGrain
         );
     }
 
@@ -316,6 +422,143 @@ public final class FrameHeader {
             boolean reducedTransformSet,
             boolean filmGrainPresent
     ) {
+        this(
+                temporalId,
+                spatialId,
+                showExistingFrame,
+                existingFrameIndex,
+                frameId,
+                framePresentationDelay,
+                frameType,
+                showFrame,
+                showableFrame,
+                errorResilientMode,
+                disableCdfUpdate,
+                allowScreenContentTools,
+                forceIntegerMotionVectors,
+                frameSizeOverride,
+                primaryRefFrame,
+                frameOffset,
+                refreshFrameFlags,
+                frameReferenceShortSignaling,
+                referenceFrameIndices,
+                frameSize,
+                superResolution,
+                allowIntrabc,
+                allowHighPrecisionMotionVectors,
+                subpelFilterMode,
+                switchableMotionMode,
+                useReferenceFrameMotionVectors,
+                refreshContext,
+                tiling,
+                quantization,
+                segmentation,
+                delta,
+                allLossless,
+                loopFilter,
+                cdef,
+                restoration,
+                transformMode,
+                switchableCompoundReferences,
+                skipModeAllowed,
+                skipModeEnabled,
+                skipModeReferenceIndices,
+                warpedMotion,
+                reducedTransformSet,
+                defaultFilmGrain(filmGrainPresent)
+        );
+    }
+
+    /// Creates a parsed frame header with normalized film grain parameters.
+    ///
+    /// @param temporalId the temporal layer identifier
+    /// @param spatialId the spatial layer identifier
+    /// @param showExistingFrame whether this is a show-existing-frame header
+    /// @param existingFrameIndex the referenced frame slot when `showExistingFrame` is true
+    /// @param frameId the frame identifier when present
+    /// @param framePresentationDelay the frame presentation delay when present
+    /// @param frameType the AV1 frame type
+    /// @param showFrame whether the frame is shown immediately
+    /// @param showableFrame whether the frame can be shown later
+    /// @param errorResilientMode whether error resilient mode is enabled
+    /// @param disableCdfUpdate whether CDF updates are disabled
+    /// @param allowScreenContentTools whether screen content tools are enabled
+    /// @param forceIntegerMotionVectors whether integer motion vectors are forced
+    /// @param frameSizeOverride whether frame size override signaling is enabled
+    /// @param primaryRefFrame the primary reference frame index, or `7` when none is used
+    /// @param frameOffset the frame order hint when present
+    /// @param refreshFrameFlags the refresh frame flags bitset
+    /// @param frameReferenceShortSignaling whether short signaling was used for references
+    /// @param referenceFrameIndices the decoded reference-frame slot indices for LAST..ALTREF
+    /// @param frameSize the frame dimensions and render size
+    /// @param superResolution the super-resolution settings
+    /// @param allowIntrabc whether `allow_intrabc` is enabled
+    /// @param allowHighPrecisionMotionVectors whether high-precision motion vectors are allowed
+    /// @param subpelFilterMode the interpolation filter mode used for inter prediction
+    /// @param switchableMotionMode whether motion mode signaling is switchable
+    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
+    /// @param refreshContext whether context refresh is enabled
+    /// @param tiling the tile layout information
+    /// @param quantization the quantization parameters
+    /// @param segmentation the segmentation parameters
+    /// @param delta the delta-q and delta-lf signaling flags
+    /// @param allLossless whether all segments are lossless
+    /// @param loopFilter the loop filter parameters
+    /// @param cdef the CDEF parameters
+    /// @param restoration the loop restoration parameters
+    /// @param transformMode the transform mode for this frame
+    /// @param switchableCompoundReferences whether compound reference mode is switchable
+    /// @param skipModeAllowed whether skip mode is permitted
+    /// @param skipModeEnabled whether skip mode is enabled
+    /// @param skipModeReferenceIndices the two skip-mode reference indices, or `-1`
+    /// @param warpedMotion whether warped motion is enabled
+    /// @param reducedTransformSet whether the reduced transform type set is used
+    /// @param filmGrain the normalized film grain parameters
+    public FrameHeader(
+            int temporalId,
+            int spatialId,
+            boolean showExistingFrame,
+            int existingFrameIndex,
+            long frameId,
+            long framePresentationDelay,
+            FrameType frameType,
+            boolean showFrame,
+            boolean showableFrame,
+            boolean errorResilientMode,
+            boolean disableCdfUpdate,
+            boolean allowScreenContentTools,
+            boolean forceIntegerMotionVectors,
+            boolean frameSizeOverride,
+            int primaryRefFrame,
+            int frameOffset,
+            int refreshFrameFlags,
+            boolean frameReferenceShortSignaling,
+            int[] referenceFrameIndices,
+            FrameSize frameSize,
+            SuperResolutionInfo superResolution,
+            boolean allowIntrabc,
+            boolean allowHighPrecisionMotionVectors,
+            InterpolationFilter subpelFilterMode,
+            boolean switchableMotionMode,
+            boolean useReferenceFrameMotionVectors,
+            boolean refreshContext,
+            TilingInfo tiling,
+            QuantizationInfo quantization,
+            SegmentationInfo segmentation,
+            DeltaInfo delta,
+            boolean allLossless,
+            LoopFilterInfo loopFilter,
+            CdefInfo cdef,
+            RestorationInfo restoration,
+            TransformMode transformMode,
+            boolean switchableCompoundReferences,
+            boolean skipModeAllowed,
+            boolean skipModeEnabled,
+            int[] skipModeReferenceIndices,
+            boolean warpedMotion,
+            boolean reducedTransformSet,
+            FilmGrainParams filmGrain
+    ) {
         this.temporalId = temporalId;
         this.spatialId = spatialId;
         this.showExistingFrame = showExistingFrame;
@@ -364,7 +607,8 @@ public final class FrameHeader {
         this.skipModeReferenceIndices = Arrays.copyOf(skipModeReferenceIndices, skipModeReferenceIndices.length);
         this.warpedMotion = warpedMotion;
         this.reducedTransformSet = reducedTransformSet;
-        this.filmGrainPresent = filmGrainPresent;
+        this.filmGrain = Objects.requireNonNull(filmGrain, "filmGrain");
+        this.filmGrainPresent = filmGrain.applyGrain();
     }
 
     /// Returns the temporal layer identifier copied from the OBU header.
@@ -682,6 +926,48 @@ public final class FrameHeader {
     /// @return whether film grain is present for this frame
     public boolean filmGrainPresent() {
         return filmGrainPresent;
+    }
+
+    /// Returns the normalized film grain parameters for this frame.
+    ///
+    /// @return the normalized film grain parameters for this frame
+    public FilmGrainParams filmGrain() {
+        return filmGrain;
+    }
+
+    /// Creates default film grain state for compatibility constructors.
+    ///
+    /// @param applyGrain whether film grain should be treated as present
+    /// @return the default film grain state
+    private static FilmGrainParams defaultFilmGrain(boolean applyGrain) {
+        if (!applyGrain) {
+            return FilmGrainParams.disabled();
+        }
+        return new FilmGrainParams(
+                true,
+                0,
+                true,
+                -1,
+                new FilmGrainPoint[0],
+                false,
+                new FilmGrainPoint[0],
+                new FilmGrainPoint[0],
+                8,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                6,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                false,
+                false
+        );
     }
 
     /// Transform mode values used by AV1 frame headers.
@@ -1647,6 +1933,356 @@ public final class FrameHeader {
         /// @return the restoration unit size log2 for chroma
         public int unitSizeLog2Uv() {
             return unitSizeLog2Uv;
+        }
+    }
+
+    /// One control point in a film grain scaling function.
+    @NotNullByDefault
+    public static final class FilmGrainPoint {
+        /// The sample-domain x coordinate in the range `0..255`.
+        private final int value;
+        /// The scaling-function y coordinate in the range `0..255`.
+        private final int scaling;
+
+        /// Creates a film grain scaling point.
+        ///
+        /// @param value the sample-domain x coordinate
+        /// @param scaling the scaling-function y coordinate
+        public FilmGrainPoint(int value, int scaling) {
+            this.value = value;
+            this.scaling = scaling;
+        }
+
+        /// Returns the sample-domain x coordinate in the range `0..255`.
+        ///
+        /// @return the sample-domain x coordinate
+        public int value() {
+            return value;
+        }
+
+        /// Returns the scaling-function y coordinate in the range `0..255`.
+        ///
+        /// @return the scaling-function y coordinate
+        public int scaling() {
+            return scaling;
+        }
+    }
+
+    /// Normalized film grain parameters for a frame.
+    @NotNullByDefault
+    public static final class FilmGrainParams {
+        /// Whether film grain should be synthesized for the frame.
+        private final boolean applyGrain;
+        /// The pseudo-random seed used during film grain synthesis.
+        private final int grainSeed;
+        /// Whether this frame signaled a fresh parameter set instead of referencing an earlier frame.
+        private final boolean updated;
+        /// The referenced frame slot when parameters were inherited, or `-1` when self-contained.
+        private final int referenceFrameIndex;
+        /// The luma scaling points.
+        private final FilmGrainPoint[] yPoints;
+        /// Whether chroma scaling is derived from the luma scaling function.
+        private final boolean chromaScalingFromLuma;
+        /// The Cb scaling points.
+        private final FilmGrainPoint[] cbPoints;
+        /// The Cr scaling points.
+        private final FilmGrainPoint[] crPoints;
+        /// The normalized grain scaling shift, equal to `grain_scaling_minus_8 + 8`.
+        private final int scalingShift;
+        /// The auto-regressive coefficient neighborhood lag.
+        private final int arCoeffLag;
+        /// The normalized luma auto-regressive coefficients with the bitstream `+128` offset removed.
+        private final int[] arCoefficientsY;
+        /// The normalized Cb auto-regressive coefficients with the bitstream `+128` offset removed.
+        private final int[] arCoefficientsCb;
+        /// The normalized Cr auto-regressive coefficients with the bitstream `+128` offset removed.
+        private final int[] arCoefficientsCr;
+        /// The normalized auto-regressive coefficient shift, equal to `ar_coeff_shift_minus_6 + 6`.
+        private final int arCoeffShift;
+        /// The grain scale shift used during synthesis.
+        private final int grainScaleShift;
+        /// The Cb component multiplier for chroma scaling.
+        private final int cbMult;
+        /// The luma multiplier contributing to the Cb scaling index.
+        private final int cbLumaMult;
+        /// The Cb scaling-function input offset.
+        private final int cbOffset;
+        /// The Cr component multiplier for chroma scaling.
+        private final int crMult;
+        /// The luma multiplier contributing to the Cr scaling index.
+        private final int crLumaMult;
+        /// The Cr scaling-function input offset.
+        private final int crOffset;
+        /// Whether overlap between neighboring grain blocks is enabled.
+        private final boolean overlapEnabled;
+        /// Whether synthesized samples should be clipped to the restricted range.
+        private final boolean clipToRestrictedRange;
+
+        /// Creates normalized film grain parameters.
+        ///
+        /// @param applyGrain whether film grain should be synthesized for the frame
+        /// @param grainSeed the pseudo-random seed used during synthesis
+        /// @param updated whether this frame signaled a fresh parameter set
+        /// @param referenceFrameIndex the referenced frame slot when parameters were inherited, or `-1`
+        /// @param yPoints the luma scaling points
+        /// @param chromaScalingFromLuma whether chroma scaling is derived from luma
+        /// @param cbPoints the Cb scaling points
+        /// @param crPoints the Cr scaling points
+        /// @param scalingShift the normalized grain scaling shift
+        /// @param arCoeffLag the auto-regressive coefficient neighborhood lag
+        /// @param arCoefficientsY the normalized luma auto-regressive coefficients
+        /// @param arCoefficientsCb the normalized Cb auto-regressive coefficients
+        /// @param arCoefficientsCr the normalized Cr auto-regressive coefficients
+        /// @param arCoeffShift the normalized auto-regressive coefficient shift
+        /// @param grainScaleShift the grain scale shift used during synthesis
+        /// @param cbMult the Cb component multiplier for chroma scaling
+        /// @param cbLumaMult the luma multiplier contributing to the Cb scaling index
+        /// @param cbOffset the Cb scaling-function input offset
+        /// @param crMult the Cr component multiplier for chroma scaling
+        /// @param crLumaMult the luma multiplier contributing to the Cr scaling index
+        /// @param crOffset the Cr scaling-function input offset
+        /// @param overlapEnabled whether overlap between neighboring grain blocks is enabled
+        /// @param clipToRestrictedRange whether synthesized samples should be clipped to the restricted range
+        public FilmGrainParams(
+                boolean applyGrain,
+                int grainSeed,
+                boolean updated,
+                int referenceFrameIndex,
+                FilmGrainPoint[] yPoints,
+                boolean chromaScalingFromLuma,
+                FilmGrainPoint[] cbPoints,
+                FilmGrainPoint[] crPoints,
+                int scalingShift,
+                int arCoeffLag,
+                int[] arCoefficientsY,
+                int[] arCoefficientsCb,
+                int[] arCoefficientsCr,
+                int arCoeffShift,
+                int grainScaleShift,
+                int cbMult,
+                int cbLumaMult,
+                int cbOffset,
+                int crMult,
+                int crLumaMult,
+                int crOffset,
+                boolean overlapEnabled,
+                boolean clipToRestrictedRange
+        ) {
+            this.applyGrain = applyGrain;
+            this.grainSeed = grainSeed;
+            this.updated = updated;
+            this.referenceFrameIndex = referenceFrameIndex;
+            this.yPoints = Arrays.copyOf(Objects.requireNonNull(yPoints, "yPoints"), yPoints.length);
+            this.chromaScalingFromLuma = chromaScalingFromLuma;
+            this.cbPoints = Arrays.copyOf(Objects.requireNonNull(cbPoints, "cbPoints"), cbPoints.length);
+            this.crPoints = Arrays.copyOf(Objects.requireNonNull(crPoints, "crPoints"), crPoints.length);
+            this.scalingShift = scalingShift;
+            this.arCoeffLag = arCoeffLag;
+            this.arCoefficientsY = Arrays.copyOf(Objects.requireNonNull(arCoefficientsY, "arCoefficientsY"), arCoefficientsY.length);
+            this.arCoefficientsCb = Arrays.copyOf(Objects.requireNonNull(arCoefficientsCb, "arCoefficientsCb"), arCoefficientsCb.length);
+            this.arCoefficientsCr = Arrays.copyOf(Objects.requireNonNull(arCoefficientsCr, "arCoefficientsCr"), arCoefficientsCr.length);
+            this.arCoeffShift = arCoeffShift;
+            this.grainScaleShift = grainScaleShift;
+            this.cbMult = cbMult;
+            this.cbLumaMult = cbLumaMult;
+            this.cbOffset = cbOffset;
+            this.crMult = crMult;
+            this.crLumaMult = crLumaMult;
+            this.crOffset = crOffset;
+            this.overlapEnabled = overlapEnabled;
+            this.clipToRestrictedRange = clipToRestrictedRange;
+        }
+
+        /// Returns disabled film grain parameters.
+        ///
+        /// @return disabled film grain parameters
+        public static FilmGrainParams disabled() {
+            return new FilmGrainParams(
+                    false,
+                    0,
+                    false,
+                    -1,
+                    new FilmGrainPoint[0],
+                    false,
+                    new FilmGrainPoint[0],
+                    new FilmGrainPoint[0],
+                    8,
+                    0,
+                    new int[0],
+                    new int[0],
+                    new int[0],
+                    6,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    false,
+                    false
+            );
+        }
+
+        /// Returns whether film grain should be synthesized for the frame.
+        ///
+        /// @return whether film grain should be synthesized for the frame
+        public boolean applyGrain() {
+            return applyGrain;
+        }
+
+        /// Returns the pseudo-random seed used during synthesis.
+        ///
+        /// @return the pseudo-random seed used during synthesis
+        public int grainSeed() {
+            return grainSeed;
+        }
+
+        /// Returns whether this frame signaled a fresh parameter set.
+        ///
+        /// @return whether this frame signaled a fresh parameter set
+        public boolean updated() {
+            return updated;
+        }
+
+        /// Returns the referenced frame slot when parameters were inherited, or `-1`.
+        ///
+        /// @return the referenced frame slot when parameters were inherited, or `-1`
+        public int referenceFrameIndex() {
+            return referenceFrameIndex;
+        }
+
+        /// Returns the luma scaling points.
+        ///
+        /// @return the luma scaling points
+        public FilmGrainPoint[] yPoints() {
+            return Arrays.copyOf(yPoints, yPoints.length);
+        }
+
+        /// Returns whether chroma scaling is derived from the luma scaling function.
+        ///
+        /// @return whether chroma scaling is derived from the luma scaling function
+        public boolean chromaScalingFromLuma() {
+            return chromaScalingFromLuma;
+        }
+
+        /// Returns the Cb scaling points.
+        ///
+        /// @return the Cb scaling points
+        public FilmGrainPoint[] cbPoints() {
+            return Arrays.copyOf(cbPoints, cbPoints.length);
+        }
+
+        /// Returns the Cr scaling points.
+        ///
+        /// @return the Cr scaling points
+        public FilmGrainPoint[] crPoints() {
+            return Arrays.copyOf(crPoints, crPoints.length);
+        }
+
+        /// Returns the normalized grain scaling shift.
+        ///
+        /// @return the normalized grain scaling shift
+        public int scalingShift() {
+            return scalingShift;
+        }
+
+        /// Returns the auto-regressive coefficient neighborhood lag.
+        ///
+        /// @return the auto-regressive coefficient neighborhood lag
+        public int arCoeffLag() {
+            return arCoeffLag;
+        }
+
+        /// Returns the normalized luma auto-regressive coefficients.
+        ///
+        /// @return the normalized luma auto-regressive coefficients
+        public int[] arCoefficientsY() {
+            return Arrays.copyOf(arCoefficientsY, arCoefficientsY.length);
+        }
+
+        /// Returns the normalized Cb auto-regressive coefficients.
+        ///
+        /// @return the normalized Cb auto-regressive coefficients
+        public int[] arCoefficientsCb() {
+            return Arrays.copyOf(arCoefficientsCb, arCoefficientsCb.length);
+        }
+
+        /// Returns the normalized Cr auto-regressive coefficients.
+        ///
+        /// @return the normalized Cr auto-regressive coefficients
+        public int[] arCoefficientsCr() {
+            return Arrays.copyOf(arCoefficientsCr, arCoefficientsCr.length);
+        }
+
+        /// Returns the normalized auto-regressive coefficient shift.
+        ///
+        /// @return the normalized auto-regressive coefficient shift
+        public int arCoeffShift() {
+            return arCoeffShift;
+        }
+
+        /// Returns the grain scale shift used during synthesis.
+        ///
+        /// @return the grain scale shift used during synthesis
+        public int grainScaleShift() {
+            return grainScaleShift;
+        }
+
+        /// Returns the Cb component multiplier for chroma scaling.
+        ///
+        /// @return the Cb component multiplier for chroma scaling
+        public int cbMult() {
+            return cbMult;
+        }
+
+        /// Returns the luma multiplier contributing to the Cb scaling index.
+        ///
+        /// @return the luma multiplier contributing to the Cb scaling index
+        public int cbLumaMult() {
+            return cbLumaMult;
+        }
+
+        /// Returns the Cb scaling-function input offset.
+        ///
+        /// @return the Cb scaling-function input offset
+        public int cbOffset() {
+            return cbOffset;
+        }
+
+        /// Returns the Cr component multiplier for chroma scaling.
+        ///
+        /// @return the Cr component multiplier for chroma scaling
+        public int crMult() {
+            return crMult;
+        }
+
+        /// Returns the luma multiplier contributing to the Cr scaling index.
+        ///
+        /// @return the luma multiplier contributing to the Cr scaling index
+        public int crLumaMult() {
+            return crLumaMult;
+        }
+
+        /// Returns the Cr scaling-function input offset.
+        ///
+        /// @return the Cr scaling-function input offset
+        public int crOffset() {
+            return crOffset;
+        }
+
+        /// Returns whether overlap between neighboring grain blocks is enabled.
+        ///
+        /// @return whether overlap between neighboring grain blocks is enabled
+        public boolean overlapEnabled() {
+            return overlapEnabled;
+        }
+
+        /// Returns whether synthesized samples should be clipped to the restricted range.
+        ///
+        /// @return whether synthesized samples should be clipped to the restricted range
+        public boolean clipToRestrictedRange() {
+            return clipToRestrictedRange;
         }
     }
 }
