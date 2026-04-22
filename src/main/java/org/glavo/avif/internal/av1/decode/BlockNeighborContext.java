@@ -595,9 +595,9 @@ public final class BlockNeighborContext {
 
     /// Builds a provisional inter-mode syntax context from already-decoded spatial neighbors.
     ///
-    /// This helper keeps the existing direct top/left edge model for the nearest contexts while
-    /// also consulting the stored block map for a bounded secondary spatial scan. It still omits
-    /// temporal neighbors and therefore remains an incomplete `refmvs` implementation.
+    /// This helper scans the direct top row and left column across the full current-block span,
+    /// then augments that with a bounded secondary spatial scan. It still omits temporal
+    /// neighbors and therefore remains an incomplete `refmvs` implementation.
     ///
     /// @param position the current block position
     /// @param size the current block size
@@ -644,87 +644,41 @@ public final class BlockNeighborContext {
                 );
         int candidateCount = 1;
 
-        if (hasTopNeighbor(nonNullPosition) && aboveIntra[x4] == 0) {
-            int neighborReferenceFrame0 = aboveReferenceFrame0[x4];
-            int neighborReferenceFrame1 = aboveReferenceFrame1[x4];
-            boolean neighborCompound = aboveCompoundReference[x4] != 0;
-            boolean referenceMatch = sharesAnyReference(
+        if (hasTopNeighbor(nonNullPosition)) {
+            SpatialScanResult directTopScan = scanStoredBlocksAlongSpan(
+                    true,
+                    y4 - 1,
+                    x4,
+                    endX4,
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
-                    neighborCompound,
-                    neighborReferenceFrame0,
-                    neighborReferenceFrame1
-            );
-            int baseWeight = provisionalNeighborWeight(
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    neighborCompound,
-                    neighborReferenceFrame0,
-                    neighborReferenceFrame1
-            );
-            candidateCount = appendProvisionalCandidateWeights(
+                    0,
                     candidates,
-                    candidateCount,
-                    provisionalMotionVectorCandidate(
-                            compoundReference,
-                            referenceFrame0,
-                            referenceFrame1,
-                            neighborCompound,
-                            neighborReferenceFrame0,
-                            neighborReferenceFrame1,
-                            aboveMotionVector0[x4],
-                            aboveMotionVector1[x4],
-                            baseWeight
-                    )
+                    candidateCount
             );
-            if (referenceMatch) {
-                directRowMatch = true;
-                rowReferenceMatch = true;
-                haveNewMotionVectorMatch |= aboveUsesNewMotionVector[x4] != 0;
-            }
+            candidateCount = directTopScan.candidateCount();
+            directRowMatch = directTopScan.referenceMatch();
+            rowReferenceMatch = directTopScan.referenceMatch();
+            haveNewMotionVectorMatch |= directTopScan.haveNewMotionVectorMatch();
         }
-        if (hasLeftNeighbor(nonNullPosition) && leftIntra[y4] == 0) {
-            int neighborReferenceFrame0 = leftReferenceFrame0[y4];
-            int neighborReferenceFrame1 = leftReferenceFrame1[y4];
-            boolean neighborCompound = leftCompoundReference[y4] != 0;
-            boolean referenceMatch = sharesAnyReference(
+        if (hasLeftNeighbor(nonNullPosition)) {
+            SpatialScanResult directLeftScan = scanStoredBlocksAlongSpan(
+                    false,
+                    x4 - 1,
+                    y4,
+                    endY4,
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
-                    neighborCompound,
-                    neighborReferenceFrame0,
-                    neighborReferenceFrame1
-            );
-            int baseWeight = provisionalNeighborWeight(
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    neighborCompound,
-                    neighborReferenceFrame0,
-                    neighborReferenceFrame1
-            );
-            candidateCount = appendProvisionalCandidateWeights(
+                    0,
                     candidates,
-                    candidateCount,
-                    provisionalMotionVectorCandidate(
-                            compoundReference,
-                            referenceFrame0,
-                            referenceFrame1,
-                            neighborCompound,
-                            neighborReferenceFrame0,
-                            neighborReferenceFrame1,
-                            leftMotionVector0[y4],
-                            leftMotionVector1[y4],
-                            baseWeight
-                    )
+                    candidateCount
             );
-            if (referenceMatch) {
-                directColumnMatch = true;
-                columnReferenceMatch = true;
-                haveNewMotionVectorMatch |= leftUsesNewMotionVector[y4] != 0;
-            }
+            candidateCount = directLeftScan.candidateCount();
+            directColumnMatch = directLeftScan.referenceMatch();
+            columnReferenceMatch = directLeftScan.referenceMatch();
+            haveNewMotionVectorMatch |= directLeftScan.haveNewMotionVectorMatch();
         }
 
         int secondaryY4 = y4 - nonNullSize.height4() - 1;

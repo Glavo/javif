@@ -2503,8 +2503,8 @@ final class TileBlockHeaderReaderTest {
     /// @param neighborContext the mutable neighbor context to seed
     private static void seedInterReferenceNeighbors(BlockNeighborContext neighborContext) {
         neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(4, 0),
-                BlockSize.SIZE_8X8,
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
                 true,
                 false,
                 false,
@@ -2536,8 +2536,8 @@ final class TileBlockHeaderReaderTest {
                 0
         ));
         neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(0, 4),
-                BlockSize.SIZE_8X8,
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
                 true,
                 false,
                 false,

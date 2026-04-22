@@ -108,71 +108,21 @@ final class BlockNeighborContextTest {
     void derivesInterReferenceContextsFromUpdatedNeighbors() {
         BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
 
-        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(4, 0),
-                BlockSize.SIZE_8X8,
-                true,
-                false,
-                false,
-                false,
-                false,
-                false,
-                0,
-                -1,
-                null,
-                null,
-                -1,
-                InterMotionVector.resolved(new MotionVector(8, -4)),
-                null,
-                false,
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
                 0,
                 null,
-                null,
-                0,
-                0,
-                new int[0],
-                new int[0],
-                new int[0],
-                new byte[0],
-                new byte[0],
-                null,
-                0,
-                0,
-                0,
-                0
+                InterMotionVector.resolved(new MotionVector(8, -4))
         ));
-        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(0, 4),
-                BlockSize.SIZE_8X8,
-                true,
-                false,
-                false,
-                false,
-                false,
-                true,
+        context.updateFromBlockHeader(compoundInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
                 0,
                 4,
                 null,
-                null,
-                -1,
                 InterMotionVector.resolved(new MotionVector(12, 4)),
-                InterMotionVector.predicted(new MotionVector(-8, 16)),
-                false,
-                0,
-                null,
-                null,
-                0,
-                0,
-                new int[0],
-                new int[0],
-                new int[0],
-                new byte[0],
-                new byte[0],
-                null,
-                0,
-                0,
-                0,
-                0
+                InterMotionVector.predicted(new MotionVector(-8, 16))
         ));
 
         BlockPosition position = new BlockPosition(4, 4);
@@ -192,71 +142,21 @@ final class BlockNeighborContextTest {
     void derivesProvisionalInterModeContextsFromUpdatedNeighbors() {
         BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
 
-        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(4, 0),
-                BlockSize.SIZE_8X8,
-                true,
-                false,
-                false,
-                false,
-                false,
-                false,
-                0,
-                -1,
-                null,
-                null,
-                -1,
-                InterMotionVector.resolved(new MotionVector(8, -4)),
-                null,
-                false,
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
                 0,
                 null,
-                null,
-                0,
-                0,
-                new int[0],
-                new int[0],
-                new int[0],
-                new byte[0],
-                new byte[0],
-                null,
-                0,
-                0,
-                0,
-                0
+                InterMotionVector.resolved(new MotionVector(8, -4))
         ));
-        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(0, 4),
-                BlockSize.SIZE_8X8,
-                true,
-                false,
-                false,
-                false,
-                false,
-                true,
+        context.updateFromBlockHeader(compoundInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
                 0,
                 4,
                 null,
-                null,
-                -1,
                 InterMotionVector.resolved(new MotionVector(12, 4)),
-                InterMotionVector.predicted(new MotionVector(-8, 16)),
-                false,
-                0,
-                null,
-                null,
-                0,
-                0,
-                new int[0],
-                new int[0],
-                new int[0],
-                new byte[0],
-                new byte[0],
-                null,
-                0,
-                0,
-                0,
-                0
+                InterMotionVector.predicted(new MotionVector(-8, 16))
         ));
 
         BlockPosition position = new BlockPosition(4, 4);
@@ -315,71 +215,21 @@ final class BlockNeighborContextTest {
     @Test
     void provisionalInterModeContextsTrackNewMvMatches() {
         BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
-        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(4, 0),
-                BlockSize.SIZE_8X8,
-                true,
-                false,
-                false,
-                false,
-                false,
-                false,
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
                 0,
-                -1,
-                org.glavo.avif.internal.av1.model.SingleInterPredictionMode.NEWMV,
-                null,
-                1,
-                InterMotionVector.resolved(new MotionVector(8, -4)),
-                null,
-                false,
-                0,
-                null,
-                null,
-                0,
-                0,
-                new int[0],
-                new int[0],
-                new int[0],
-                new byte[0],
-                new byte[0],
-                null,
-                0,
-                0,
-                0,
-                0
+                SingleInterPredictionMode.NEWMV,
+                InterMotionVector.resolved(new MotionVector(8, -4))
         ));
-        context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(0, 4),
-                BlockSize.SIZE_8X8,
-                true,
-                false,
-                false,
-                false,
-                false,
-                true,
+        context.updateFromBlockHeader(compoundInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
                 0,
                 4,
                 null,
-                null,
-                -1,
                 InterMotionVector.resolved(new MotionVector(12, 4)),
-                InterMotionVector.predicted(new MotionVector(-8, 16)),
-                false,
-                0,
-                null,
-                null,
-                0,
-                0,
-                new int[0],
-                new int[0],
-                new int[0],
-                new byte[0],
-                new byte[0],
-                null,
-                0,
-                0,
-                0,
-                0
+                InterMotionVector.predicted(new MotionVector(-8, 16))
         ));
 
         BlockNeighborContext.ProvisionalInterModeContext singleContext =
@@ -388,6 +238,60 @@ final class BlockNeighborContextTest {
         assertEquals(4, singleContext.singleNewMvContext());
         assertEquals(5, singleContext.singleReferenceMvContext());
         assertEquals(7, singleContext.compoundInterModeContext());
+    }
+
+    /// Verifies that direct row and column scans cover the full current-block span instead of only its first cell.
+    @Test
+    void provisionalInterModeContextsScanDirectSpans() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_8X8,
+                4,
+                null,
+                InterMotionVector.resolved(new MotionVector(-12, -4))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(6, 2),
+                BlockSize.SIZE_8X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(20, -8))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X8,
+                4,
+                null,
+                InterMotionVector.resolved(new MotionVector(-8, 16))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(2, 6),
+                BlockSize.SIZE_8X8,
+                0,
+                SingleInterPredictionMode.NEWMV,
+                InterMotionVector.resolved(new MotionVector(24, 12))
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
+
+        assertEquals(4, provisionalContext.singleNewMvContext());
+        assertEquals(5, provisionalContext.singleReferenceMvContext());
+        assertEquals(7, provisionalContext.compoundInterModeContext());
+        assertEquals(7, provisionalContext.candidateCount());
+        assertEquals(640, provisionalContext.candidateWeight(0));
+        assertEquals(640, provisionalContext.candidateWeight(1));
+        assertEquals(640, provisionalContext.candidateWeight(2));
+        assertEquals(512, provisionalContext.candidateWeight(3));
+        assertEquals(512, provisionalContext.candidateWeight(4));
+        assertEquals(256, provisionalContext.candidateWeight(5));
+        assertEquals(256, provisionalContext.candidateWeight(6));
+        assertEquals(4, provisionalContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.resolved(new MotionVector(20, -8)), provisionalContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(InterMotionVector.resolved(new MotionVector(24, 12)), provisionalContext.motionVectorCandidate(1).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(2).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(3).motionVector0());
     }
 
     /// Verifies that bounded secondary spatial scans contribute `refmvs` contexts even after direct edges diverge.
@@ -474,14 +378,12 @@ final class BlockNeighborContextTest {
         assertEquals(1, provisionalContext.singleNewMvContext());
         assertEquals(1, provisionalContext.singleReferenceMvContext());
         assertEquals(1, provisionalContext.compoundInterModeContext());
-        assertEquals(7, provisionalContext.candidateCount());
+        assertEquals(5, provisionalContext.candidateCount());
         assertEquals(640, provisionalContext.candidateWeight(0));
         assertEquals(576, provisionalContext.candidateWeight(1));
         assertEquals(384, provisionalContext.candidateWeight(2));
-        assertEquals(256, provisionalContext.candidateWeight(3));
-        assertEquals(256, provisionalContext.candidateWeight(4));
-        assertEquals(128, provisionalContext.candidateWeight(5));
-        assertEquals(128, provisionalContext.candidateWeight(6));
+        assertEquals(128, provisionalContext.candidateWeight(3));
+        assertEquals(128, provisionalContext.candidateWeight(4));
         assertEquals(3, provisionalContext.motionVectorCandidateCount());
         assertEquals(InterMotionVector.resolved(new MotionVector(-20, 8)), provisionalContext.motionVectorCandidate(0).motionVector0());
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
@@ -671,6 +573,60 @@ final class BlockNeighborContextTest {
                 -1,
                 motionVector0,
                 null,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
+    /// Creates one compact compound-reference inter block header used by neighbor-context tests.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order
+    /// @param compoundInterMode the decoded compound inter mode, or `null`
+    /// @param motionVector0 the primary motion-vector state chosen for the block
+    /// @param motionVector1 the secondary motion-vector state chosen for the block
+    /// @return one compact compound-reference inter block header used by neighbor-context tests
+    private static TileBlockHeaderReader.BlockHeader compoundInterBlock(
+            BlockPosition position,
+            BlockSize size,
+            int referenceFrame0,
+            int referenceFrame1,
+            @org.jetbrains.annotations.Nullable org.glavo.avif.internal.av1.model.CompoundInterPredictionMode compoundInterMode,
+            InterMotionVector motionVector0,
+            InterMotionVector motionVector1
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+                referenceFrame0,
+                referenceFrame1,
+                null,
+                compoundInterMode,
+                -1,
+                motionVector0,
+                motionVector1,
                 false,
                 0,
                 null,
