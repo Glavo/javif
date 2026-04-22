@@ -22,11 +22,48 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 /// Minimal intra predictor used by the first reconstruction-capable decode path.
 ///
-/// The current implementation supports the non-directional AV1 intra modes, luma filter-intra,
-/// and `I420` CFL chroma prediction. It uses frame-edge midpoint samples when top or left
-/// neighbors are unavailable.
+/// The current implementation supports the AV1 non-directional intra modes, directional intra
+/// prediction with signed `angle_delta`, luma filter-intra, and `I420` CFL chroma prediction. It
+/// uses frame-edge midpoint samples when top or left neighbors are unavailable.
 @NotNullByDefault
 final class IntraPredictor {
+    /// The AV1 directional base angles in `VERTICAL`-through-`VERTICAL_LEFT` order.
+    private static final int[] DIRECTIONAL_BASE_ANGLES = {
+            90, 180, 45, 135, 113, 157, 203, 67
+    };
+
+    /// The AV1 directional derivative table indexed by half-angle.
+    private static final int[] DIRECTIONAL_DERIVATIVES = {
+            0,
+            1023, 0,
+            547,
+            372, 0, 0,
+            273,
+            215, 0,
+            178,
+            151, 0,
+            132,
+            116, 0,
+            102, 0,
+            90,
+            80, 0,
+            71,
+            64, 0,
+            57,
+            51, 0,
+            45, 0,
+            40,
+            35, 0,
+            31,
+            27, 0,
+            23,
+            19, 0,
+            15, 0,
+            11, 0,
+            7,
+            3
+    };
+
     /// The AV1 filter-intra tap sets in `FilterIntraMode` order.
     ///
     /// Each mode stores eight per-pixel tap vectors for the 4x2 recursive prediction unit in
@@ -307,16 +344,16 @@ final class IntraPredictor {
             case DC -> PredictionMode.DC;
             case VERTICAL -> PredictionMode.VERTICAL;
             case HORIZONTAL -> PredictionMode.HORIZONTAL;
+            case DIAGONAL_DOWN_LEFT -> PredictionMode.DIAGONAL_DOWN_LEFT;
+            case DIAGONAL_DOWN_RIGHT -> PredictionMode.DIAGONAL_DOWN_RIGHT;
+            case VERTICAL_RIGHT -> PredictionMode.VERTICAL_RIGHT;
+            case HORIZONTAL_DOWN -> PredictionMode.HORIZONTAL_DOWN;
+            case HORIZONTAL_UP -> PredictionMode.HORIZONTAL_UP;
+            case VERTICAL_LEFT -> PredictionMode.VERTICAL_LEFT;
             case SMOOTH -> PredictionMode.SMOOTH;
             case SMOOTH_VERTICAL -> PredictionMode.SMOOTH_VERTICAL;
             case SMOOTH_HORIZONTAL -> PredictionMode.SMOOTH_HORIZONTAL;
             case PAETH -> PredictionMode.PAETH;
-            case DIAGONAL_DOWN_LEFT,
-                    DIAGONAL_DOWN_RIGHT,
-                    VERTICAL_RIGHT,
-                    HORIZONTAL_DOWN,
-                    HORIZONTAL_UP,
-                    VERTICAL_LEFT -> throw unsupportedDirectionalMode(mode.name(), angleDelta);
         };
     }
 
@@ -330,29 +367,18 @@ final class IntraPredictor {
             case DC -> PredictionMode.DC;
             case VERTICAL -> PredictionMode.VERTICAL;
             case HORIZONTAL -> PredictionMode.HORIZONTAL;
+            case DIAGONAL_DOWN_LEFT -> PredictionMode.DIAGONAL_DOWN_LEFT;
+            case DIAGONAL_DOWN_RIGHT -> PredictionMode.DIAGONAL_DOWN_RIGHT;
+            case VERTICAL_RIGHT -> PredictionMode.VERTICAL_RIGHT;
+            case HORIZONTAL_DOWN -> PredictionMode.HORIZONTAL_DOWN;
+            case HORIZONTAL_UP -> PredictionMode.HORIZONTAL_UP;
+            case VERTICAL_LEFT -> PredictionMode.VERTICAL_LEFT;
             case SMOOTH -> PredictionMode.SMOOTH;
             case SMOOTH_VERTICAL -> PredictionMode.SMOOTH_VERTICAL;
             case SMOOTH_HORIZONTAL -> PredictionMode.SMOOTH_HORIZONTAL;
             case PAETH -> PredictionMode.PAETH;
             case CFL -> throw new IllegalStateException("CFL chroma prediction is not implemented yet");
-            case DIAGONAL_DOWN_LEFT,
-                    DIAGONAL_DOWN_RIGHT,
-                    VERTICAL_RIGHT,
-                    HORIZONTAL_DOWN,
-                    HORIZONTAL_UP,
-                    VERTICAL_LEFT -> throw unsupportedDirectionalMode(mode.name(), angleDelta);
         };
-    }
-
-    /// Creates one stable unsupported-directional-mode failure.
-    ///
-    /// @param modeName the source prediction-mode name
-    /// @param angleDelta the signed directional angle delta
-    /// @return one stable unsupported-directional-mode failure
-    private static IllegalStateException unsupportedDirectionalMode(String modeName, int angleDelta) {
-        return new IllegalStateException(
-                "Directional intra prediction is not implemented yet: " + modeName + " angle_delta=" + angleDelta
-        );
     }
 
     /// Reconstructs one supported intra-predicted block directly into the destination plane.
@@ -379,8 +405,10 @@ final class IntraPredictor {
         if (height <= 0) {
             throw new IllegalArgumentException("height <= 0: " + height);
         }
-        if (angleDelta != 0) {
-            throw new IllegalStateException("Directional angle-delta prediction is not implemented yet: " + angleDelta);
+
+        if (mode.usesDirectionalPrediction(angleDelta)) {
+            predictDirectional(plane, x, y, width, height, mode, angleDelta);
+            return;
         }
 
         int defaultSample = 1 << (plane.bitDepth() - 1);
@@ -402,6 +430,200 @@ final class IntraPredictor {
             case SMOOTH -> predictSmooth(plane, x, y, width, height, top, left);
             case SMOOTH_VERTICAL -> predictSmoothVertical(plane, x, y, width, height, top, left);
             case SMOOTH_HORIZONTAL -> predictSmoothHorizontal(plane, x, y, width, height, top, left);
+        }
+    }
+
+    /// Reconstructs one directional intra-predicted block.
+    ///
+    /// The current implementation follows the AV1 zone-1/2/3 directional interpolation model
+    /// without intra-edge filtering or upsampling. This is sufficient for the current
+    /// reconstruction-capable subset and advances the reader beyond the legacy directional
+    /// boundary.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param mode the directional-capable prediction mode
+    /// @param angleDelta the signed directional angle delta
+    private static void predictDirectional(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            PredictionMode mode,
+            int angleDelta
+    ) {
+        int angle = mode.directionalBaseAngle() + 3 * angleDelta;
+        if (angle < 0 || angle > 270) {
+            throw new IllegalStateException("Directional angle is out of range: " + angle);
+        }
+
+        int defaultSample = 1 << (plane.bitDepth() - 1);
+        if (angle == 90) {
+            predictVertical(plane, x, y, width, height, topDirectionalReferences(plane, x, y, width, height, defaultSample, width));
+            return;
+        }
+        if (angle == 180) {
+            predictHorizontal(plane, x, y, width, height, leftDirectionalReferences(plane, x, y, width, height, defaultSample, height));
+            return;
+        }
+        if (angle < 90) {
+            predictDirectionalZone1(plane, x, y, width, height, angle, defaultSample);
+            return;
+        }
+        if (angle < 180) {
+            predictDirectionalZone2(plane, x, y, width, height, angle, defaultSample);
+            return;
+        }
+        predictDirectionalZone3(plane, x, y, width, height, angle, defaultSample);
+    }
+
+    /// Reconstructs one zone-1 directional block that projects from the top edge.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param angle the absolute AV1 intra prediction angle
+    /// @param defaultSample the frame-edge default sample
+    private static void predictDirectionalZone1(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            int angle,
+            int defaultSample
+    ) {
+        int[] top = topDirectionalReferences(
+                plane,
+                x,
+                y,
+                width,
+                height,
+                defaultSample,
+                width + Math.min(width, height)
+        );
+        int dx = directionalDerivative(angle >> 1);
+        int maxBase = top.length - 1;
+        for (int row = 0, xpos = dx; row < height; row++, xpos += dx) {
+            int frac = xpos & 0x3E;
+            for (int column = 0, base = xpos >> 6; column < width; column++, base++) {
+                if (base < maxBase) {
+                    plane.setSample(x + column, y + row, interpolate(top[base], top[base + 1], frac));
+                } else {
+                    for (int remaining = column; remaining < width; remaining++) {
+                        plane.setSample(x + remaining, y + row, top[maxBase]);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Reconstructs one zone-2 directional block that blends the top and left edges.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param angle the absolute AV1 intra prediction angle
+    /// @param defaultSample the frame-edge default sample
+    private static void predictDirectionalZone2(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            int angle,
+            int defaultSample
+    ) {
+        int[] top = topDirectionalReferences(
+                plane,
+                x,
+                y,
+                width,
+                height,
+                defaultSample,
+                width + Math.min(width, height)
+        );
+        int[] left = leftDirectionalReferences(
+                plane,
+                x,
+                y,
+                width,
+                height,
+                defaultSample,
+                height + Math.min(width, height)
+        );
+        int topLeft = defaultTopLeft(plane, x, y, defaultSample);
+        int dy = directionalDerivative((angle - 90) >> 1);
+        int dx = directionalDerivative((180 - angle) >> 1);
+        for (int row = 0, xpos = 64 - dx; row < height; row++, xpos -= dx) {
+            int baseX = xpos >> 6;
+            int fracX = xpos & 0x3E;
+            for (int column = 0, ypos = (row << 6) - dy; column < width; column++, baseX++, ypos -= dy) {
+                if (baseX >= 0) {
+                    int sample0 = zone2Reference(topLeft, top, left, baseX);
+                    int sample1 = zone2Reference(topLeft, top, left, baseX + 1);
+                    plane.setSample(x + column, y + row, interpolate(sample0, sample1, fracX));
+                } else {
+                    int baseY = ypos >> 6;
+                    int fracY = ypos & 0x3E;
+                    int sample0 = zone2Reference(topLeft, top, left, -baseY - 1);
+                    int sample1 = zone2Reference(topLeft, top, left, -baseY - 2);
+                    plane.setSample(x + column, y + row, interpolate(sample0, sample1, fracY));
+                }
+            }
+        }
+    }
+
+    /// Reconstructs one zone-3 directional block that projects from the left edge.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param angle the absolute AV1 intra prediction angle
+    /// @param defaultSample the frame-edge default sample
+    private static void predictDirectionalZone3(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            int angle,
+            int defaultSample
+    ) {
+        int[] left = leftDirectionalReferences(
+                plane,
+                x,
+                y,
+                width,
+                height,
+                defaultSample,
+                height + Math.min(width, height)
+        );
+        int dy = directionalDerivative((270 - angle) >> 1);
+        int maxBase = left.length - 1;
+        for (int column = 0, ypos = dy; column < width; column++, ypos += dy) {
+            int frac = ypos & 0x3E;
+            for (int row = 0, base = ypos >> 6; row < height; row++, base++) {
+                if (base < maxBase) {
+                    plane.setSample(x + column, y + row, interpolate(left[base], left[base + 1], frac));
+                } else {
+                    for (int remaining = row; remaining < height; remaining++) {
+                        plane.setSample(x + column, y + remaining, left[maxBase]);
+                    }
+                    break;
+                }
+            }
         }
     }
 
@@ -735,6 +957,118 @@ final class IntraPredictor {
         }
     }
 
+    /// Returns one top-edge directional reference buffer with top-right extension.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param defaultSample the frame-edge default sample
+    /// @param length the required reference-buffer length
+    /// @return one top-edge directional reference buffer with top-right extension
+    private static int[] topDirectionalReferences(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            int defaultSample,
+            int length
+    ) {
+        int[] references = new int[length];
+        if (y <= 0) {
+            for (int i = 0; i < references.length; i++) {
+                references[i] = defaultSample;
+            }
+            return references;
+        }
+        int maxX = plane.width() - 1;
+        for (int i = 0; i < references.length; i++) {
+            int sampleX = x + i;
+            if (sampleX > maxX) {
+                sampleX = maxX;
+            }
+            references[i] = plane.sample(sampleX, y - 1);
+        }
+        return references;
+    }
+
+    /// Returns one left-edge directional reference buffer with bottom-left extension.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param defaultSample the frame-edge default sample
+    /// @param length the required reference-buffer length
+    /// @return one left-edge directional reference buffer with bottom-left extension
+    private static int[] leftDirectionalReferences(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            int defaultSample,
+            int length
+    ) {
+        int[] references = new int[length];
+        if (x <= 0) {
+            for (int i = 0; i < references.length; i++) {
+                references[i] = defaultSample;
+            }
+            return references;
+        }
+        int maxY = plane.height() - 1;
+        for (int i = 0; i < references.length; i++) {
+            int sampleY = y + i;
+            if (sampleY > maxY) {
+                sampleY = maxY;
+            }
+            references[i] = plane.sample(x - 1, sampleY);
+        }
+        return references;
+    }
+
+    /// Returns one conceptual zone-2 edge sample addressed by signed edge index.
+    ///
+    /// Index `0` addresses the top-left sample, positive indices address the top edge, and
+    /// negative indices address the left edge.
+    ///
+    /// @param topLeft the top-left reference sample
+    /// @param top the top-edge directional reference buffer
+    /// @param left the left-edge directional reference buffer
+    /// @param index the conceptual signed edge index
+    /// @return one conceptual zone-2 edge sample addressed by signed edge index
+    private static int zone2Reference(int topLeft, int[] top, int[] left, int index) {
+        if (index == 0) {
+            return topLeft;
+        }
+        if (index > 0) {
+            int topIndex = index - 1;
+            if (topIndex >= top.length) {
+                return top[top.length - 1];
+            }
+            return top[topIndex];
+        }
+        int leftIndex = -index - 1;
+        if (leftIndex >= left.length) {
+            return left[left.length - 1];
+        }
+        return left[leftIndex];
+    }
+
+    /// Returns one directional interpolation result between two edge samples.
+    ///
+    /// @param sample0 the first edge sample
+    /// @param sample1 the second edge sample
+    /// @param fraction the AV1 fractional interpolation position in `[0, 62]`
+    /// @return one directional interpolation result between two edge samples
+    private static int interpolate(int sample0, int sample1, int fraction) {
+        return (sample0 * (64 - fraction) + sample1 * fraction + 32) >> 6;
+    }
+
     /// Fills one rectangular block with one constant sample value.
     ///
     /// @param plane the mutable destination plane
@@ -768,7 +1102,18 @@ final class IntraPredictor {
         };
     }
 
-    /// The internal non-directional prediction modes supported by the first reconstruction path.
+    /// Returns one AV1 directional derivative table entry.
+    ///
+    /// @param halfAngleIndex the zero-based half-angle table index
+    /// @return one AV1 directional derivative table entry
+    private static int directionalDerivative(int halfAngleIndex) {
+        if (halfAngleIndex < 0 || halfAngleIndex >= DIRECTIONAL_DERIVATIVES.length) {
+            throw new IllegalStateException("Directional derivative index out of range: " + halfAngleIndex);
+        }
+        return DIRECTIONAL_DERIVATIVES[halfAngleIndex];
+    }
+
+    /// The internal prediction modes supported by the first reconstruction path.
     @NotNullByDefault
     private enum PredictionMode {
         /// DC prediction.
@@ -780,6 +1125,24 @@ final class IntraPredictor {
         /// Horizontal prediction.
         HORIZONTAL,
 
+        /// Diagonal-down-left directional prediction.
+        DIAGONAL_DOWN_LEFT,
+
+        /// Diagonal-down-right directional prediction.
+        DIAGONAL_DOWN_RIGHT,
+
+        /// Vertical-right directional prediction.
+        VERTICAL_RIGHT,
+
+        /// Horizontal-down directional prediction.
+        HORIZONTAL_DOWN,
+
+        /// Horizontal-up directional prediction.
+        HORIZONTAL_UP,
+
+        /// Vertical-left directional prediction.
+        VERTICAL_LEFT,
+
         /// Paeth prediction.
         PAETH,
 
@@ -790,6 +1153,42 @@ final class IntraPredictor {
         SMOOTH_VERTICAL,
 
         /// Smooth horizontal prediction.
-        SMOOTH_HORIZONTAL
+        SMOOTH_HORIZONTAL;
+
+        /// Returns whether this prediction mode currently routes through the directional predictor.
+        ///
+        /// @param angleDelta the signed directional angle delta
+        /// @return whether this prediction mode currently routes through the directional predictor
+        private boolean usesDirectionalPrediction(int angleDelta) {
+            if (angleDelta != 0 && (this == VERTICAL || this == HORIZONTAL)) {
+                return true;
+            }
+            return switch (this) {
+                case DIAGONAL_DOWN_LEFT,
+                        DIAGONAL_DOWN_RIGHT,
+                        VERTICAL_RIGHT,
+                        HORIZONTAL_DOWN,
+                        HORIZONTAL_UP,
+                        VERTICAL_LEFT -> true;
+                default -> false;
+            };
+        }
+
+        /// Returns the AV1 directional base angle for one directional-capable mode.
+        ///
+        /// @return the AV1 directional base angle for one directional-capable mode
+        private int directionalBaseAngle() {
+            return switch (this) {
+                case VERTICAL -> DIRECTIONAL_BASE_ANGLES[0];
+                case HORIZONTAL -> DIRECTIONAL_BASE_ANGLES[1];
+                case DIAGONAL_DOWN_LEFT -> DIRECTIONAL_BASE_ANGLES[2];
+                case DIAGONAL_DOWN_RIGHT -> DIRECTIONAL_BASE_ANGLES[3];
+                case VERTICAL_RIGHT -> DIRECTIONAL_BASE_ANGLES[4];
+                case HORIZONTAL_DOWN -> DIRECTIONAL_BASE_ANGLES[5];
+                case HORIZONTAL_UP -> DIRECTIONAL_BASE_ANGLES[6];
+                case VERTICAL_LEFT -> DIRECTIONAL_BASE_ANGLES[7];
+                default -> throw new IllegalStateException("Mode does not use directional prediction: " + this);
+            };
+        }
     }
 }

@@ -22,9 +22,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/// Tests for the first supported intra-prediction subset.
+/// Tests for the currently supported intra-prediction paths.
 @NotNullByDefault
 final class IntraPredictorTest {
     /// Verifies that DC prediction averages the available top and left reference samples.
@@ -197,17 +196,146 @@ final class IntraPredictorTest {
         );
     }
 
-    /// Verifies that directional chroma modes remain unsupported outside the newly added CFL path.
+    /// Verifies that directional luma prediction interpolates along the top edge in the shallow-angle zone.
     @Test
-    void chromaPredictionStillRejectsDirectionalModes() {
-        MutablePlaneBuffer plane = new MutablePlaneBuffer(2, 2, 8);
-
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> IntraPredictor.predictChroma(plane, 0, 0, 2, 2, UvIntraPredictionMode.VERTICAL_LEFT, 0)
+    void directionalLumaPredictionInterpolatesFromTopEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 12, 8);
+        int x = 3;
+        int y = 3;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                77,
+                new int[]{21, 64, 93, 137, 82, 149, 205, 171},
+                new int[]{34, 58, 101, 88, 145, 179, 152, 214}
+        );
+        int[][] expected = DirectionalIntraPredictionOracle.predictLuma(
+                plane,
+                x,
+                y,
+                4,
+                4,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                1
         );
 
-        assertEquals("Directional intra prediction is not implemented yet: VERTICAL_LEFT angle_delta=0", exception.getMessage());
+        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, 1);
+
+        assertBlockEquals(plane, x, y, expected);
+    }
+
+    /// Verifies that directional luma prediction also supports negative angle deltas in the
+    /// shallow-angle zone.
+    @Test
+    void directionalLumaPredictionSupportsNegativeAngleDelta() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 12, 8);
+        int x = 3;
+        int y = 3;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                77,
+                new int[]{21, 64, 93, 137, 82, 149, 205, 171},
+                new int[]{34, 58, 101, 88, 145, 179, 152, 214}
+        );
+        int[][] expected = DirectionalIntraPredictionOracle.predictLuma(
+                plane,
+                x,
+                y,
+                4,
+                4,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                -1
+        );
+
+        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, -1);
+
+        assertBlockEquals(plane, x, y, expected);
+    }
+
+    /// Verifies that directional luma prediction crosses from top references into left references in the mid-angle zone.
+    @Test
+    void directionalLumaPredictionTransitionsFromTopToLeftReferences() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 12, 8);
+        int x = 3;
+        int y = 3;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                77,
+                new int[]{21, 64, 93, 137, 82, 149, 205, 171},
+                new int[]{34, 58, 101, 88, 145, 179, 152, 214}
+        );
+        int[][] expected = DirectionalIntraPredictionOracle.predictLuma(
+                plane,
+                x,
+                y,
+                4,
+                4,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT,
+                0
+        );
+
+        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT, 0);
+
+        assertBlockEquals(plane, x, y, expected);
+    }
+
+    /// Verifies that directional chroma prediction interpolates from the left edge in the steep-angle zone.
+    @Test
+    void directionalChromaPredictionInterpolatesFromLeftEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 12, 8);
+        int x = 3;
+        int y = 3;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                71,
+                new int[]{28, 52, 76, 109, 131, 158, 187, 213},
+                new int[]{40, 69, 95, 121, 148, 176, 205, 233}
+        );
+        int[][] expected = DirectionalIntraPredictionOracle.predictChroma(
+                plane,
+                x,
+                y,
+                4,
+                4,
+                UvIntraPredictionMode.HORIZONTAL_UP,
+                -2
+        );
+
+        IntraPredictor.predictChroma(plane, x, y, 4, 4, UvIntraPredictionMode.HORIZONTAL_UP, -2);
+
+        assertBlockEquals(plane, x, y, expected);
+    }
+
+    /// Seeds the top-left, top-row, and left-column references used by one directional prediction test.
+    ///
+    /// @param plane the mutable plane to populate
+    /// @param x the zero-based block origin X coordinate
+    /// @param y the zero-based block origin Y coordinate
+    /// @param topLeft the top-left reference sample
+    /// @param top the top-row reference samples
+    /// @param left the left-column reference samples
+    private static void seedDirectionalReferences(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int topLeft,
+            int[] top,
+            int[] left
+    ) {
+        plane.setSample(x - 1, y - 1, topLeft);
+        for (int i = 0; i < top.length; i++) {
+            plane.setSample(x + i, y - 1, top[i]);
+        }
+        for (int i = 0; i < left.length; i++) {
+            plane.setSample(x - 1, y + i, left[i]);
+        }
     }
 
     /// Asserts one rectangular block against expected sample values.

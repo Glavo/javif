@@ -16,6 +16,8 @@
 package org.glavo.avif.decode;
 
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
+import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -26,9 +28,11 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.Channels;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -49,6 +53,19 @@ final class Av1ImageReaderTest {
 
     /// The expected packed opaque gray pixel produced by the supported still-picture payload.
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
+
+    /// The stable top-left `8x8` ARGB block produced by the current legacy directional
+    /// still-picture payload.
+    private static final int[][] LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8 = {
+            {0xFF7F7F7F, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
+            {0xFF7E7E7E, 0xFF7E7E7E, 0xFF7E7E7E, 0xFF7E7E7E, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
+            {0xFF808080, 0xFF808080, 0xFF7F7F7F, 0xFF7E7E7E, 0xFF818181, 0xFF818181, 0xFF818181, 0xFF818181},
+            {0xFF828282, 0xFF848484, 0xFF868686, 0xFF868686, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
+            {0xFF868686, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
+            {0xFF848484, 0xFF808080, 0xFF818181, 0xFF818181, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
+            {0xFF848484, 0xFF828282, 0xFF7F7F7F, 0xFF818181, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
+            {0xFF848484, 0xFF848484, 0xFF808080, 0xFF838383, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF818181}
+    };
 
     /// Verifies that an empty stream returns end-of-stream instead of failing.
     ///
@@ -127,44 +144,40 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
     }
 
-    /// Verifies that the legacy reduced still-picture combined fixture now reaches the current
-    /// directional-intra reconstruction boundary.
+    /// Verifies that the legacy reduced still-picture combined fixture now reconstructs
+    /// successfully through the directional-intra path.
     @Test
-    void readFrameParsesCombinedFrameObuBeforeCurrentDirectionalIntraBoundary() {
+    void readFrameReturnsArgbIntFrameForLegacyDirectionalCombinedStillPictureStream() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
         );
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
-                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
-            )) {
-                reader.readFrame();
-            }
-        });
-        assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-        assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-        assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        }
     }
 
-    /// Verifies that all buffered-input adapters report the same current directional-intra decode
-    /// boundary for the legacy reduced still-picture fixture and still refresh reference-frame
-    /// state first.
+    /// Verifies that all buffered-input adapters reconstruct the same legacy directional
+    /// still-picture fixture and still refresh reference-frame state first.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReportsSameCurrentDirectionalIntraBoundaryAcrossBufferedInputs() throws IOException {
+    void readFrameReconstructsLegacyDirectionalStillPictureAcrossBufferedInputs() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-            assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
         });
     }
 
@@ -186,31 +199,29 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
     }
 
-    /// Verifies that the legacy reduced still-picture standalone fixture now reaches the current
-    /// directional-intra reconstruction boundary.
+    /// Verifies that the legacy reduced still-picture standalone fixture now reconstructs
+    /// successfully through the directional-intra path.
     @Test
-    void readFrameParsesStandaloneTileGroupBeforeCurrentDirectionalIntraBoundary() {
+    void readFrameReturnsArgbIntFrameForLegacyDirectionalStandaloneStillPictureStream() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(3, reducedStillPictureFrameHeaderPayload()),
                 obu(4, singleTileGroupPayload())
         );
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
-                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
-            )) {
-                reader.readFrame();
-            }
-        });
-        assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-        assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-        assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        }
     }
 
-    /// Verifies that the public reader stores structural reference state before reporting the
-    /// current directional-intra reconstruction boundary once frame syntax completed successfully.
+    /// Verifies that the public reader stores structural reference state before returning the
+    /// decoded legacy directional still-picture frame.
     @Test
-    void readFrameStoresReferenceStateBeforeCurrentDirectionalIntraBoundary() throws IOException {
+    void readFrameStoresReferenceStateForLegacyDirectionalStillPictureDecode() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -219,15 +230,14 @@ final class Av1ImageReaderTest {
         try (Av1ImageReader reader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
-            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-            assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
         }
     }
 
     /// Verifies that a new sequence header clears previously stored structural reference-frame
-    /// state even when the earlier frame already reached the current decode boundary.
+    /// state even when the earlier frame already reconstructed successfully.
     @Test
     void readFrameClearsReferenceStateOnSequenceResetAfterCurrentDecodeBoundary() throws IOException {
         byte[] stream = concat(
@@ -239,7 +249,8 @@ final class Av1ImageReaderTest {
         try (Av1ImageReader reader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
-            assertThrows(DecodeException.class, reader::readFrame);
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
             assertNull(reader.readFrame());
@@ -264,6 +275,25 @@ final class Av1ImageReaderTest {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that `readAllFrames()` preserves the current supported first-pixel combined
+    /// still-picture success path across all buffered-input adapters.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readAllFramesPreservesSupportedCombinedStillPictureSuccessPath() throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            List<DecodedFrame> frames = reader.readAllFrames();
+            assertEquals(1, frames.size());
+            assertOpaqueGrayStillPictureFrame(frames.get(0), 0);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
         });
     }
 
@@ -427,6 +457,34 @@ final class Av1ImageReaderTest {
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertOpaqueGrayStillPictureFrame(@org.jetbrains.annotations.Nullable DecodedFrame decodedFrame, long expectedPresentationIndex) {
+        assertStillPictureFrameFilledWith(decodedFrame, expectedPresentationIndex, OPAQUE_MID_GRAY);
+    }
+
+    /// Asserts that the reader returned one legacy directional opaque gray still-picture frame.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertOpaqueDirectionalStillPictureFrame(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            long expectedPresentationIndex
+    ) {
+        assertNotNull(decodedFrame);
+        assertTrue(decodedFrame instanceof ArgbIntFrame);
+        ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
+        assertDecodedStillPictureFrameMetadata(frame, expectedPresentationIndex);
+        assertArgbBlockEquals(frame, 0, 0, LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
+    }
+
+    /// Asserts that the reader returned one still-picture frame filled with one constant pixel.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    /// @param expectedPixel the expected constant packed ARGB pixel value
+    private static void assertStillPictureFrameFilledWith(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            long expectedPresentationIndex,
+            int expectedPixel
+    ) {
         assertNotNull(decodedFrame);
         assertTrue(decodedFrame instanceof ArgbIntFrame);
         ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
@@ -435,7 +493,24 @@ final class Av1ImageReaderTest {
         int[] pixels = frame.pixels();
         assertEquals(64 * 64, pixels.length);
         for (int pixel : pixels) {
-            assertEquals(OPAQUE_MID_GRAY, pixel);
+            assertEquals(expectedPixel, pixel);
+        }
+    }
+
+    /// Asserts one rectangular ARGB block against exact expected pixels.
+    ///
+    /// @param frame the decoded ARGB frame to inspect
+    /// @param originX the zero-based horizontal block origin
+    /// @param originY the zero-based vertical block origin
+    /// @param expectedPixels the expected packed ARGB pixels in row-major order
+    private static void assertArgbBlockEquals(ArgbIntFrame frame, int originX, int originY, int[][] expectedPixels) {
+        int[] pixels = frame.pixels();
+        int frameWidth = frame.width();
+        for (int y = 0; y < expectedPixels.length; y++) {
+            int rowOffset = (originY + y) * frameWidth + originX;
+            for (int x = 0; x < expectedPixels[y].length; x++) {
+                assertEquals(expectedPixels[y][x], pixels[rowOffset + x]);
+            }
         }
     }
 
@@ -471,6 +546,62 @@ final class Av1ImageReaderTest {
             assertNotNull(storedResult);
             assertSame(syntaxResult.assembly(), storedResult.assembly());
             assertEquals(syntaxResult.tileCount(), storedResult.tileCount());
+        }
+    }
+
+    /// Asserts that the legacy still-picture fixture decoded through at least one directional luma
+    /// leaf after already decoding earlier non-directional blocks.
+    ///
+    /// @param syntaxResult the structural decode result produced for the legacy fixture
+    private static void assertLegacyDirectionalLeafDecoded(
+            @org.jetbrains.annotations.Nullable FrameSyntaxDecodeResult syntaxResult
+    ) {
+        assertNotNull(syntaxResult);
+        List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxResult.tileRoots(0));
+        assertFalse(leaves.isEmpty());
+
+        int firstDirectionalLeafIndex = -1;
+        for (int i = 0; i < leaves.size(); i++) {
+            TilePartitionTreeReader.LeafNode leaf = leaves.get(i);
+            if (leaf.header().yMode() != null && leaf.header().yMode().isDirectional()) {
+                firstDirectionalLeafIndex = i;
+                break;
+            }
+        }
+
+        assertTrue(firstDirectionalLeafIndex > 0);
+        TilePartitionTreeReader.LeafNode leafNode = leaves.get(firstDirectionalLeafIndex);
+        assertEquals(LumaIntraPredictionMode.HORIZONTAL, leafNode.header().yMode());
+        assertEquals(0, leafNode.header().yAngle());
+    }
+
+    /// Returns every leaf node in raster order from one tile-root array.
+    ///
+    /// @param roots the top-level tile roots
+    /// @return every leaf node in raster order
+    private static List<TilePartitionTreeReader.LeafNode> leavesInRasterOrder(TilePartitionTreeReader.Node[] roots) {
+        List<TilePartitionTreeReader.LeafNode> leaves = new ArrayList<>();
+        for (TilePartitionTreeReader.Node root : roots) {
+            appendLeavesInRasterOrder(root, leaves);
+        }
+        return leaves;
+    }
+
+    /// Appends every leaf node in raster order from one subtree.
+    ///
+    /// @param node the subtree root
+    /// @param leaves the destination list for leaf nodes
+    private static void appendLeavesInRasterOrder(
+            TilePartitionTreeReader.Node node,
+            List<TilePartitionTreeReader.LeafNode> leaves
+    ) {
+        if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
+            leaves.add(leafNode);
+            return;
+        }
+        TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
+        for (TilePartitionTreeReader.Node child : partitionNode.children()) {
+            appendLeavesInRasterOrder(child, leaves);
         }
     }
 

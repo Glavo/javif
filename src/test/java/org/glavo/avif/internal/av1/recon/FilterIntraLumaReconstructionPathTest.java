@@ -110,6 +110,46 @@ final class FilterIntraLumaReconstructionPathTest {
         assertDecodedBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, topReference);
     }
 
+    /// Verifies that one all-zero directional leaf reuses the already reconstructed top row and
+    /// top-right samples from earlier leaves.
+    @Test
+    void reconstructsSyntheticDirectionalLeafFromReconstructedTopRow() {
+        TilePartitionTreeReader.LeafNode topLeftLeaf = createLumaLeaf(new BlockPosition(0, 0), LumaIntraPredictionMode.DC, 64);
+        TilePartitionTreeReader.LeafNode topMiddleLeaf = createAllZeroLumaLeaf(
+                new BlockPosition(1, 0),
+                LumaIntraPredictionMode.DC
+        );
+        TilePartitionTreeReader.LeafNode topRightLeaf = createLumaLeaf(new BlockPosition(2, 0), LumaIntraPredictionMode.DC, -64);
+        TilePartitionTreeReader.LeafNode bottomDirectionalLeaf = createAllZeroLumaLeaf(
+                new BlockPosition(0, 1),
+                LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT
+        );
+
+        DecodedPlane baseline = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(12, 4, topLeftLeaf, topMiddleLeaf, topRightLeaf)
+        ).lumaPlane();
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(12, 8, topLeftLeaf, topMiddleLeaf, topRightLeaf, bottomDirectionalLeaf)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertDecodedBlockEquals(
+                planes.lumaPlane(),
+                0,
+                4,
+                DirectionalIntraPredictionOracle.predictLuma(
+                        baseline,
+                        8,
+                        0,
+                        4,
+                        4,
+                        4,
+                        LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        0
+                )
+        );
+    }
+
     /// Creates one synthetic monochrome intra leaf with one signed-DC luma residual.
     ///
     /// @param position the leaf origin in 4x4 units
@@ -456,6 +496,20 @@ final class FilterIntraLumaReconstructionPathTest {
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
                 assertEquals(expectedSample, plane.sample(x + column, y + row));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane block matches the supplied expected raster.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param x the block origin X coordinate
+    /// @param y the block origin Y coordinate
+    /// @param expected the expected sample raster
+    private static void assertDecodedBlockEquals(DecodedPlane plane, int x, int y, int[][] expected) {
+        for (int row = 0; row < expected.length; row++) {
+            for (int column = 0; column < expected[row].length; column++) {
+                assertEquals(expected[row][column], plane.sample(x + column, y + row));
             }
         }
     }

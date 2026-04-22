@@ -210,6 +210,223 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Verifies that one synthetic directional `I420` leaf reconstructs successfully after top neighbors are already available.
+    @Test
+    void reconstructsDirectionalI420LeafFromReconstructedTopNeighbors() {
+        TilePartitionTreeReader.LeafNode topLeftLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 0),
+                        BlockSize.SIZE_4X4,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.CFL,
+                        FilterIntraMode.DC,
+                        0,
+                        0,
+                        0,
+                        0,
+                        4,
+                        -4
+                ),
+                createTransformLayout(new BlockPosition(0, 0), BlockSize.SIZE_4X4, PixelFormat.I420),
+                createResidualLayout(new BlockPosition(0, 0), BlockSize.SIZE_4X4, true)
+        );
+        TilePartitionTreeReader.LeafNode topRightLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(1, 0),
+                        BlockSize.SIZE_4X4,
+                        true,
+                        LumaIntraPredictionMode.HORIZONTAL,
+                        UvIntraPredictionMode.HORIZONTAL,
+                        null,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(1, 0), BlockSize.SIZE_4X4, PixelFormat.I420),
+                createResidualLayout(new BlockPosition(1, 0), BlockSize.SIZE_4X4, true)
+        );
+        TilePartitionTreeReader.LeafNode bottomLeftDirectionalLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 1),
+                        BlockSize.SIZE_4X4,
+                        true,
+                        LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        UvIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        null,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(0, 1), BlockSize.SIZE_4X4, PixelFormat.I420),
+                createResidualLayout(new BlockPosition(0, 1), BlockSize.SIZE_4X4, true)
+        );
+
+        DecodedPlanes baseline = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.KEY, 8, 8, topLeftLeaf, topRightLeaf)
+        );
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(
+                        PixelFormat.I420,
+                        FrameType.KEY,
+                        8,
+                        8,
+                        topLeftLeaf,
+                        topRightLeaf,
+                        bottomLeftDirectionalLeaf
+                )
+        );
+
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                4,
+                DirectionalIntraPredictionOracle.predictLuma(
+                        baseline.lumaPlane(),
+                        8,
+                        0,
+                        4,
+                        4,
+                        4,
+                        LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        0
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                0,
+                2,
+                DirectionalIntraPredictionOracle.predictChroma(
+                        requirePlane(baseline.chromaUPlane()),
+                        8,
+                        0,
+                        2,
+                        2,
+                        2,
+                        UvIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        0
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaVPlane()),
+                0,
+                2,
+                DirectionalIntraPredictionOracle.predictChroma(
+                        requirePlane(baseline.chromaVPlane()),
+                        8,
+                        0,
+                        2,
+                        2,
+                        2,
+                        UvIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        0
+                )
+        );
+    }
+
+    /// Verifies that one non-zero directional luma leaf adds its residual after directional
+    /// prediction without perturbing the already reconstructed reference row.
+    @Test
+    void reconstructsDirectionalI400LeafWithPositiveResidualOffset() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode topLeftLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(new BlockPosition(0, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 0), size, 64)
+        );
+        TilePartitionTreeReader.LeafNode topMiddleLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(new BlockPosition(1, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(1, 0), size, true)
+        );
+        TilePartitionTreeReader.LeafNode topRightLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(new BlockPosition(2, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(new BlockPosition(2, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(2, 0), size, -64)
+        );
+        TilePartitionTreeReader.LeafNode baselineDirectionalLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 1),
+                        size,
+                        false,
+                        LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        null,
+                        null,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(0, 1), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 1), size, true)
+        );
+        TilePartitionTreeReader.LeafNode positiveDirectionalLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 1),
+                        size,
+                        false,
+                        LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        null,
+                        null,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(0, 1), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 1), size, 64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        FrameType.KEY,
+                        12,
+                        8,
+                        topLeftLeaf,
+                        topMiddleLeaf,
+                        topRightLeaf,
+                        baselineDirectionalLeaf
+                )
+        );
+        DecodedPlanes residual = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        FrameType.KEY,
+                        12,
+                        8,
+                        topLeftLeaf,
+                        topMiddleLeaf,
+                        topRightLeaf,
+                        positiveDirectionalLeaf
+                )
+        );
+
+        assertFalse(baseline.hasChroma());
+        assertFalse(residual.hasChroma());
+        assertPlaneRegionEquals(baseline.lumaPlane(), residual.lumaPlane(), 0, 0, 12, 4);
+        assertPlaneRegionDiffersFromBaselineByUniformSignedOffset(
+                baseline.lumaPlane(),
+                residual.lumaPlane(),
+                0,
+                4,
+                4,
+                4,
+                1
+        );
+    }
+
     /// Verifies that inter blocks still fail fast in the first reconstruction subset.
     @Test
     void rejectsInterBlocks() {
@@ -403,6 +620,8 @@ final class FrameReconstructorTest {
     /// @param yMode the luma intra mode
     /// @param uvMode the chroma intra mode, or `null`
     /// @param filterIntraMode the filter-intra mode, or `null`
+    /// @param yAngle the signed luma directional angle delta
+    /// @param uvAngle the signed chroma directional angle delta
     /// @param yPaletteSize the luma palette size
     /// @param uvPaletteSize the chroma palette size
     /// @param cflAlphaU the signed CFL alpha for chroma U
@@ -415,6 +634,8 @@ final class FrameReconstructorTest {
             LumaIntraPredictionMode yMode,
             @Nullable UvIntraPredictionMode uvMode,
             @Nullable FilterIntraMode filterIntraMode,
+            int yAngle,
+            int uvAngle,
             int yPaletteSize,
             int uvPaletteSize,
             int cflAlphaU,
@@ -443,8 +664,49 @@ final class FrameReconstructorTest {
                 new byte[0],
                 new byte[0],
                 filterIntraMode,
+                yAngle,
+                uvAngle,
+                cflAlphaU,
+                cflAlphaV
+        );
+    }
+
+    /// Creates one supported intra block header with zero directional angle deltas.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param yMode the luma intra mode
+    /// @param uvMode the chroma intra mode, or `null`
+    /// @param filterIntraMode the filter-intra mode, or `null`
+    /// @param yPaletteSize the luma palette size
+    /// @param uvPaletteSize the chroma palette size
+    /// @param cflAlphaU the signed CFL alpha for chroma U
+    /// @param cflAlphaV the signed CFL alpha for chroma V
+    /// @return one supported intra block header
+    private static TileBlockHeaderReader.BlockHeader createIntraBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            LumaIntraPredictionMode yMode,
+            @Nullable UvIntraPredictionMode uvMode,
+            @Nullable FilterIntraMode filterIntraMode,
+            int yPaletteSize,
+            int uvPaletteSize,
+            int cflAlphaU,
+            int cflAlphaV
+    ) {
+        return createIntraBlockHeader(
+                position,
+                size,
+                hasChroma,
+                yMode,
+                uvMode,
+                filterIntraMode,
                 0,
                 0,
+                yPaletteSize,
+                uvPaletteSize,
                 cflAlphaU,
                 cflAlphaV
         );
@@ -586,6 +848,20 @@ final class FrameReconstructorTest {
         }
     }
 
+    /// Asserts that one decoded sub-block matches the supplied expected raster.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param x the block origin X coordinate
+    /// @param y the block origin Y coordinate
+    /// @param expected the expected sample raster
+    private static void assertPlaneBlockEquals(DecodedPlane plane, int x, int y, int[][] expected) {
+        for (int row = 0; row < expected.length; row++) {
+            for (int column = 0; column < expected[row].length; column++) {
+                assertEquals(expected[row][column], plane.sample(x + column, y + row));
+            }
+        }
+    }
+
     /// Asserts that every sample differs from the baseline by the same non-zero signed offset.
     ///
     /// @param baseline the zero-residual baseline plane
@@ -618,6 +894,56 @@ final class FrameReconstructorTest {
         for (int y = 0; y < expected.height(); y++) {
             for (int x = 0; x < expected.width(); x++) {
                 assertEquals(expected.sample(x, y), actual.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that two decoded planes carry identical samples throughout one rectangular region.
+    ///
+    /// @param expected the expected decoded plane
+    /// @param actual the actual decoded plane
+    /// @param x the region origin X coordinate
+    /// @param y the region origin Y coordinate
+    /// @param width the region width
+    /// @param height the region height
+    private static void assertPlaneRegionEquals(
+            DecodedPlane expected,
+            DecodedPlane actual,
+            int x,
+            int y,
+            int width,
+            int height
+    ) {
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                assertEquals(expected.sample(x + column, y + row), actual.sample(x + column, y + row));
+            }
+        }
+    }
+
+    /// Asserts that one rectangular region differs from the baseline by one uniform signed offset.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the non-zero residual plane
+    /// @param x the region origin X coordinate
+    /// @param y the region origin Y coordinate
+    /// @param width the region width
+    /// @param height the region height
+    /// @param expectedSign the required sign of the uniform delta, either `1` or `-1`
+    private static void assertPlaneRegionDiffersFromBaselineByUniformSignedOffset(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed,
+            int x,
+            int y,
+            int width,
+            int height,
+            int expectedSign
+    ) {
+        int firstDelta = reconstructed.sample(x, y) - baseline.sample(x, y);
+        assertEquals(expectedSign, Integer.signum(firstDelta));
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                assertEquals(firstDelta, reconstructed.sample(x + column, y + row) - baseline.sample(x + column, y + row));
             }
         }
     }
