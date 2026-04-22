@@ -96,6 +96,25 @@ public final class TileBlockHeaderReader {
     /// @param neighborContext the mutable neighbor context that supplies syntax contexts
     /// @return the decoded leaf block header
     public BlockHeader read(BlockPosition position, BlockSize size, BlockNeighborContext neighborContext) {
+        return read(position, size, neighborContext, true);
+    }
+
+    /// Decodes one leaf block header and optionally updates the supplied neighbor context.
+    ///
+    /// Callers that need to decode follow-up syntax using the pre-block neighbor state can disable
+    /// the automatic update and commit the header after later syntax stages finish.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the block size to decode
+    /// @param neighborContext the mutable neighbor context that supplies syntax contexts
+    /// @param updateNeighborContext whether the neighbor context should be updated before returning
+    /// @return the decoded leaf block header
+    public BlockHeader read(
+            BlockPosition position,
+            BlockSize size,
+            BlockNeighborContext neighborContext,
+            boolean updateNeighborContext
+    ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
@@ -310,7 +329,10 @@ public final class TileBlockHeaderReader {
                 cflAlphaU,
                 cflAlphaV
         );
-        nonNullNeighborContext.updateFromBlockHeader(header);
+        if (updateNeighborContext) {
+            nonNullNeighborContext.updateFromBlockHeader(header);
+            nonNullNeighborContext.updateDefaultTransformContext(nonNullPosition, nonNullSize);
+        }
         return header;
     }
 

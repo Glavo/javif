@@ -141,6 +141,30 @@ public final class CdfContext {
             {13046, 23214, 24505, 25942, 27435, 28442, 29330}
     });
 
+    /// The transformed default transform-size CDFs.
+    private static final int[][][] DEFAULT_TRANSFORM_SIZE_CDFS = inverse3d(new int[][][]{
+            {
+                    {19968},
+                    {19968},
+                    {24320}
+            },
+            {
+                    {12272, 30172},
+                    {12272, 30172},
+                    {18677, 30848}
+            },
+            {
+                    {12986, 15180},
+                    {12986, 15180},
+                    {24302, 25602}
+            },
+            {
+                    {5782, 11475},
+                    {5782, 11475},
+                    {16803, 22759}
+            }
+    });
+
     /// The transformed default motion-vector joint CDF.
     private static final int[] DEFAULT_MOTION_VECTOR_JOINT_CDF = inverse(4096, 11264, 19328);
 
@@ -549,6 +573,9 @@ public final class CdfContext {
     /// The mutable compound inter-mode CDFs.
     private final int[][] compoundInterModeCdfs;
 
+    /// The mutable transform-size CDFs.
+    private final int[][][] transformSizeCdfs;
+
     /// The mutable motion-vector joint CDF.
     private final int[] motionVectorJointCdf;
 
@@ -640,6 +667,7 @@ public final class CdfContext {
     /// @param singleInterReferenceMvCdfs the mutable single-reference reference-motion-vector CDFs
     /// @param drlCdfs the mutable dynamic-reference-list selection CDFs
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
+    /// @param transformSizeCdfs the mutable transform-size CDFs
     /// @param motionVectorJointCdf the mutable motion-vector joint CDF
     /// @param motionVectorClassCdfs the mutable motion-vector class CDFs
     /// @param motionVectorSignCdfs the mutable motion-vector sign CDFs
@@ -680,6 +708,7 @@ public final class CdfContext {
             int[][] singleInterReferenceMvCdfs,
             int[][] drlCdfs,
             int[][] compoundInterModeCdfs,
+            int[][][] transformSizeCdfs,
             int[] motionVectorJointCdf,
             int[][] motionVectorClassCdfs,
             int[][] motionVectorSignCdfs,
@@ -720,6 +749,7 @@ public final class CdfContext {
         this.singleInterReferenceMvCdfs = Objects.requireNonNull(singleInterReferenceMvCdfs, "singleInterReferenceMvCdfs");
         this.drlCdfs = Objects.requireNonNull(drlCdfs, "drlCdfs");
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
+        this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
         this.motionVectorJointCdf = Objects.requireNonNull(motionVectorJointCdf, "motionVectorJointCdf");
         this.motionVectorClassCdfs = Objects.requireNonNull(motionVectorClassCdfs, "motionVectorClassCdfs");
         this.motionVectorSignCdfs = Objects.requireNonNull(motionVectorSignCdfs, "motionVectorSignCdfs");
@@ -766,6 +796,7 @@ public final class CdfContext {
                 deepCopy(DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS),
                 deepCopy(DEFAULT_DRL_CDFS),
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
+                deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
                 deepCopy(DEFAULT_MOTION_VECTOR_CLASS_CDFS),
                 deepCopy(DEFAULT_MOTION_VECTOR_SIGN_CDFS),
@@ -813,6 +844,7 @@ public final class CdfContext {
                 deepCopy(singleInterReferenceMvCdfs),
                 deepCopy(drlCdfs),
                 deepCopy(compoundInterModeCdfs),
+                deepCopy(transformSizeCdfs),
                 Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
                 deepCopy(motionVectorClassCdfs),
                 deepCopy(motionVectorSignCdfs),
@@ -959,6 +991,16 @@ public final class CdfContext {
     /// @return the live mutable compound inter-mode CDF for the supplied context index
     public int[] mutableCompoundInterModeCdf(int context) {
         return compoundInterModeCdfs[Objects.checkIndex(context, compoundInterModeCdfs.length)];
+    }
+
+    /// Returns the live mutable transform-size CDF for the supplied max-size table and context.
+    ///
+    /// @param tableIndex the zero-based max-transform-size table index in `[0, 4)`
+    /// @param context the zero-based transform-size context index in `[0, 3)`
+    /// @return the live mutable transform-size CDF for the supplied inputs
+    public int[] mutableTransformSizeCdf(int tableIndex, int context) {
+        int[][] table = transformSizeCdfs[Objects.checkIndex(tableIndex, transformSizeCdfs.length)];
+        return table[Objects.checkIndex(context, table.length)];
     }
 
     /// Returns the live mutable motion-vector joint CDF.

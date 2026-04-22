@@ -21,6 +21,7 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
+import org.glavo.avif.internal.av1.model.TransformSize;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -162,6 +163,12 @@ public final class BlockNeighborContext {
     /// The left-edge partition context state indexed in 8x8 units.
     private final byte[] leftPartition;
 
+    /// The above-edge transform-context widths indexed in 4x4 units.
+    private final byte[] aboveTransformWidthLog2;
+
+    /// The left-edge transform-context heights indexed in 4x4 units.
+    private final byte[] leftTransformHeightLog2;
+
     /// Creates tile-local neighbor context state.
     ///
     /// @param tileWidth4 the tile width rounded up to 4x4 units
@@ -202,6 +209,8 @@ public final class BlockNeighborContext {
     /// @param leftMode the left-edge luma modes indexed in 4x4 units
     /// @param abovePartition the above-edge partition context state indexed in 8x8 units
     /// @param leftPartition the left-edge partition context state indexed in 8x8 units
+    /// @param aboveTransformWidthLog2 the above-edge transform-context widths indexed in 4x4 units
+    /// @param leftTransformHeightLog2 the left-edge transform-context heights indexed in 4x4 units
     private BlockNeighborContext(
             int tileWidth4,
             int tileHeight4,
@@ -240,7 +249,9 @@ public final class BlockNeighborContext {
             LumaIntraPredictionMode[] aboveMode,
             LumaIntraPredictionMode[] leftMode,
             byte[] abovePartition,
-            byte[] leftPartition
+            byte[] leftPartition,
+            byte[] aboveTransformWidthLog2,
+            byte[] leftTransformHeightLog2
     ) {
         this.tileWidth4 = tileWidth4;
         this.tileHeight4 = tileHeight4;
@@ -280,6 +291,8 @@ public final class BlockNeighborContext {
         this.leftMode = Objects.requireNonNull(leftMode, "leftMode");
         this.abovePartition = Objects.requireNonNull(abovePartition, "abovePartition");
         this.leftPartition = Objects.requireNonNull(leftPartition, "leftPartition");
+        this.aboveTransformWidthLog2 = Objects.requireNonNull(aboveTransformWidthLog2, "aboveTransformWidthLog2");
+        this.leftTransformHeightLog2 = Objects.requireNonNull(leftTransformHeightLog2, "leftTransformHeightLog2");
     }
 
     /// Creates initialized neighbor context state for one tile.
@@ -300,6 +313,8 @@ public final class BlockNeighborContext {
         byte[] leftReferenceFrame0 = new byte[tileHeight4];
         byte[] aboveReferenceFrame1 = new byte[tileWidth4];
         byte[] leftReferenceFrame1 = new byte[tileHeight4];
+        byte[] aboveTransformWidthLog2 = new byte[tileWidth4];
+        byte[] leftTransformHeightLog2 = new byte[tileHeight4];
         InterMotionVector[] aboveMotionVector0 = new InterMotionVector[tileWidth4];
         InterMotionVector[] leftMotionVector0 = new InterMotionVector[tileHeight4];
         InterMotionVector[] aboveMotionVector1 = new InterMotionVector[tileWidth4];
@@ -307,6 +322,8 @@ public final class BlockNeighborContext {
         LumaIntraPredictionMode[] aboveMode = new LumaIntraPredictionMode[tileWidth4];
         LumaIntraPredictionMode[] leftMode = new LumaIntraPredictionMode[tileHeight4];
         InterMotionVector defaultMotionVector = InterMotionVector.predicted(MotionVector.zero());
+        Arrays.fill(aboveTransformWidthLog2, (byte) -1);
+        Arrays.fill(leftTransformHeightLog2, (byte) -1);
         Arrays.fill(aboveReferenceFrame0, (byte) -1);
         Arrays.fill(leftReferenceFrame0, (byte) -1);
         Arrays.fill(aboveReferenceFrame1, (byte) -1);
@@ -360,7 +377,9 @@ public final class BlockNeighborContext {
                 aboveMode,
                 leftMode,
                 new byte[tileWidth8],
-                new byte[tileHeight8]
+                new byte[tileHeight8],
+                aboveTransformWidthLog2,
+                leftTransformHeightLog2
         );
     }
 
@@ -1149,6 +1168,74 @@ public final class BlockNeighborContext {
         int x8 = nonNullPosition.x8();
         int y8 = nonNullPosition.y8();
         return ((abovePartition[x8] >> partitionShift) & 1) + (((leftPartition[y8] >> partitionShift) & 1) << 1);
+    }
+
+    /// Returns the transform-size context for one intra-like block and maximum luma transform size.
+    ///
+    /// This matches the `dav1d` `get_tx_ctx()` rule that compares the stored top and left
+    /// transform-context dimensions against the currently allowed maximum transform size.
+    ///
+    /// @param position the current block position
+    /// @param maxTransformSize the largest luma transform size allowed for the current block
+    /// @return the transform-size context for one intra-like block
+    public int transformSizeContext(BlockPosition position, TransformSize maxTransformSize) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullMaxTransformSize = Objects.requireNonNull(maxTransformSize, "maxTransformSize");
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        return (leftTransformHeightLog2[y4] >= nonNullMaxTransformSize.log2Height4() ? 1 : 0)
+                + (aboveTransformWidthLog2[x4] >= nonNullMaxTransformSize.log2Width4() ? 1 : 0);
+    }
+
+    /// Updates the default transform-context dimensions after one block header is decoded.
+    ///
+    /// Inter blocks use their coded block dimensions for subsequent transform-size contexts, which
+    /// matches `dav1d`'s `tx_intra` edge-state updates. Intra blocks may later override this with
+    /// the chosen luma transform size once transform syntax has been read.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded coded block size
+    public void updateDefaultTransformContext(BlockPosition position, BlockSize size) {
+        updateTransformContext(
+                Objects.requireNonNull(position, "position"),
+                Objects.requireNonNull(size, "size"),
+                size.log2Width4(),
+                size.log2Height4()
+        );
+    }
+
+    /// Updates the transform-size context after one intra-like block chooses its luma transform size.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded coded block size
+    /// @param transformSize the chosen luma transform size
+    public void updateIntraTransformContext(BlockPosition position, BlockSize size, TransformSize transformSize) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        updateTransformContext(
+                Objects.requireNonNull(position, "position"),
+                Objects.requireNonNull(size, "size"),
+                nonNullTransformSize.log2Width4(),
+                nonNullTransformSize.log2Height4()
+        );
+    }
+
+    /// Writes one transform-context width/height pair across the visible edges of one block span.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded coded block size
+    /// @param widthLog2 the transform-context width in `log2(4x4 units)`
+    /// @param heightLog2 the transform-context height in `log2(4x4 units)`
+    private void updateTransformContext(BlockPosition position, BlockSize size, int widthLog2, int heightLog2) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        int endX4 = Math.min(tileWidth4, nonNullPosition.x4() + nonNullSize.width4());
+        int endY4 = Math.min(tileHeight4, nonNullPosition.y4() + nonNullSize.height4());
+        for (int x4 = nonNullPosition.x4(); x4 < endX4; x4++) {
+            aboveTransformWidthLog2[x4] = (byte) widthLog2;
+        }
+        for (int y4 = nonNullPosition.y4(); y4 < endY4; y4++) {
+            leftTransformHeightLog2[y4] = (byte) heightLog2;
+        }
     }
 
     /// Updates the neighbor state after decoding one block header.

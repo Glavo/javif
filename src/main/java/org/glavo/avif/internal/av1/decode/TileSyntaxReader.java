@@ -25,6 +25,7 @@ import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
+import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -194,6 +195,25 @@ public final class TileSyntaxReader {
     public CompoundInterPredictionMode readCompoundInterMode(int context) {
         int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCompoundInterModeCdf(context), 7);
         return CompoundInterPredictionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one luma transform-depth symbol for the supplied maximum transform size.
+    ///
+    /// AV1 only signals transform depth for switchable transform mode when the maximum transform
+    /// size exceeds 4x4. The returned depth is therefore zero for `TX_4X4`.
+    ///
+    /// @param maxTransformSize the largest luma transform size allowed for the current block
+    /// @param context the zero-based transform-size context index in `[0, 3)`
+    /// @return the decoded luma transform depth
+    public int readTransformDepth(TransformSize maxTransformSize, int context) {
+        TransformSize nonNullMaxTransformSize = Objects.requireNonNull(maxTransformSize, "maxTransformSize");
+        if (nonNullMaxTransformSize.maxSquareLevel() <= 0) {
+            return 0;
+        }
+        return msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableTransformSizeCdf(nonNullMaxTransformSize.maxSquareLevel() - 1, context),
+                Math.min(nonNullMaxTransformSize.maxSquareLevel(), 2)
+        );
     }
 
     /// Decodes one `NEWMV` residual around the supplied predictor.

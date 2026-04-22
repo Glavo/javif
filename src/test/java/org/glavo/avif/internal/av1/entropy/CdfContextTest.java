@@ -46,6 +46,8 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{8794, 0}, context.mutableSingleInterReferenceMvCdf(0));
         assertArrayEquals(new int[]{19664, 0}, context.mutableDrlCdf(0));
         assertArrayEquals(new int[]{25008, 18945, 16960, 15127, 13612, 12102, 5877, 0}, context.mutableCompoundInterModeCdf(0));
+        assertArrayEquals(new int[]{12800, 0}, context.mutableTransformSizeCdf(0, 0));
+        assertArrayEquals(new int[]{14091, 1920, 0}, context.mutableTransformSizeCdf(1, 2));
         assertArrayEquals(new int[]{28672, 21504, 13440, 0}, context.mutableMotionVectorJointCdf());
         assertArrayEquals(new int[]{4096, 1792, 910, 448, 217, 112, 28, 11, 6, 1, 0}, context.mutableMotionVectorClassCdf(0));
         assertArrayEquals(new int[]{16384, 0}, context.mutableMotionVectorSignCdf(0));
@@ -108,6 +110,7 @@ final class CdfContextTest {
         assertNotSame(original.mutableSingleInterReferenceMvCdf(0), copy.mutableSingleInterReferenceMvCdf(0));
         assertNotSame(original.mutableDrlCdf(0), copy.mutableDrlCdf(0));
         assertNotSame(original.mutableCompoundInterModeCdf(0), copy.mutableCompoundInterModeCdf(0));
+        assertNotSame(original.mutableTransformSizeCdf(0, 0), copy.mutableTransformSizeCdf(0, 0));
         assertNotSame(original.mutableMotionVectorJointCdf(), copy.mutableMotionVectorJointCdf());
         assertNotSame(original.mutableMotionVectorClassCdf(0), copy.mutableMotionVectorClassCdf(0));
         assertNotSame(original.mutableMotionVectorSignCdf(0), copy.mutableMotionVectorSignCdf(0));
@@ -142,6 +145,7 @@ final class CdfContextTest {
         copy.mutableSingleInterReferenceMvCdf(0)[0] = 97;
         copy.mutableDrlCdf(0)[0] = 98;
         copy.mutableCompoundInterModeCdf(0)[0] = 99;
+        copy.mutableTransformSizeCdf(0, 0)[0] = 111;
         copy.mutableMotionVectorJointCdf()[0] = 101;
         copy.mutableMotionVectorClassCdf(0)[0] = 102;
         copy.mutableMotionVectorSignCdf(0)[0] = 103;
@@ -176,6 +180,7 @@ final class CdfContextTest {
         assertEquals(8794, original.mutableSingleInterReferenceMvCdf(0)[0]);
         assertEquals(19664, original.mutableDrlCdf(0)[0]);
         assertEquals(25008, original.mutableCompoundInterModeCdf(0)[0]);
+        assertEquals(12800, original.mutableTransformSizeCdf(0, 0)[0]);
         assertEquals(28672, original.mutableMotionVectorJointCdf()[0]);
         assertEquals(4096, original.mutableMotionVectorClassCdf(0)[0]);
         assertEquals(16384, original.mutableMotionVectorSignCdf(0)[0]);

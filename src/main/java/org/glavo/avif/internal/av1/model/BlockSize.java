@@ -15,7 +15,9 @@
  */
 package org.glavo.avif.internal.av1.model;
 
+import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /// The AV1 block sizes currently needed by the early partition tree reader.
 @NotNullByDefault
@@ -64,6 +66,110 @@ public enum BlockSize {
     SIZE_4X8(1, 2, 0, 1),
     /// A 4x4 block.
     SIZE_4X4(1, 1, 0, 0);
+
+    /// The maximum luma transform sizes in block-size enum order.
+    private static final TransformSize[] MAX_LUMA_TRANSFORM_SIZES = {
+            TransformSize.TX_64X64,
+            TransformSize.TX_64X64,
+            TransformSize.TX_64X64,
+            TransformSize.TX_64X64,
+            TransformSize.RTX_64X32,
+            TransformSize.RTX_64X16,
+            TransformSize.RTX_32X64,
+            TransformSize.TX_32X32,
+            TransformSize.RTX_32X16,
+            TransformSize.RTX_32X8,
+            TransformSize.RTX_16X64,
+            TransformSize.RTX_16X32,
+            TransformSize.TX_16X16,
+            TransformSize.RTX_16X8,
+            TransformSize.RTX_16X4,
+            TransformSize.RTX_8X32,
+            TransformSize.RTX_8X16,
+            TransformSize.TX_8X8,
+            TransformSize.RTX_8X4,
+            TransformSize.RTX_4X16,
+            TransformSize.RTX_4X8,
+            TransformSize.TX_4X4
+    };
+
+    /// The maximum 4:2:0 chroma transform sizes in block-size enum order.
+    private static final TransformSize[] MAX_CHROMA_420_TRANSFORM_SIZES = {
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.RTX_32X16,
+            TransformSize.RTX_32X8,
+            TransformSize.RTX_16X32,
+            TransformSize.TX_16X16,
+            TransformSize.RTX_16X8,
+            TransformSize.RTX_16X4,
+            TransformSize.RTX_8X32,
+            TransformSize.RTX_8X16,
+            TransformSize.TX_8X8,
+            TransformSize.RTX_8X4,
+            TransformSize.RTX_8X4,
+            TransformSize.RTX_4X16,
+            TransformSize.RTX_4X8,
+            TransformSize.TX_4X4,
+            TransformSize.TX_4X4,
+            TransformSize.RTX_4X8,
+            TransformSize.TX_4X4,
+            TransformSize.TX_4X4
+    };
+
+    /// The maximum 4:2:2 chroma transform sizes in block-size enum order when `dav1d` exposes one directly.
+    private static final @Nullable TransformSize[] MAX_CHROMA_422_TRANSFORM_SIZES = {
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            null,
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.RTX_32X16,
+            null,
+            TransformSize.RTX_16X32,
+            TransformSize.TX_16X16,
+            TransformSize.RTX_16X8,
+            null,
+            null,
+            TransformSize.RTX_8X16,
+            TransformSize.TX_8X8,
+            TransformSize.RTX_8X4,
+            null,
+            null,
+            TransformSize.RTX_4X8,
+            TransformSize.TX_4X4,
+            null,
+            null,
+            TransformSize.TX_4X4
+    };
+
+    /// The maximum 4:4:4 chroma transform sizes in block-size enum order.
+    private static final TransformSize[] MAX_CHROMA_444_TRANSFORM_SIZES = {
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.RTX_32X16,
+            TransformSize.TX_32X32,
+            TransformSize.TX_32X32,
+            TransformSize.RTX_32X16,
+            TransformSize.RTX_32X8,
+            TransformSize.RTX_16X32,
+            TransformSize.RTX_16X32,
+            TransformSize.TX_16X16,
+            TransformSize.RTX_16X8,
+            TransformSize.RTX_16X4,
+            TransformSize.RTX_8X32,
+            TransformSize.RTX_8X16,
+            TransformSize.TX_8X8,
+            TransformSize.RTX_8X4,
+            TransformSize.RTX_4X16,
+            TransformSize.RTX_4X8,
+            TransformSize.TX_4X4
+    };
 
     /// The block width in 4x4 units.
     private final int width4;
@@ -118,6 +224,20 @@ public enum BlockSize {
         return height4 << 2;
     }
 
+    /// Returns the base-2 logarithm of the block width in 4x4 units.
+    ///
+    /// @return the base-2 logarithm of the block width in 4x4 units
+    public int log2Width4() {
+        return Integer.numberOfTrailingZeros(width4);
+    }
+
+    /// Returns the base-2 logarithm of the block height in 4x4 units.
+    ///
+    /// @return the base-2 logarithm of the block height in 4x4 units
+    public int log2Height4() {
+        return Integer.numberOfTrailingZeros(height4);
+    }
+
     /// Returns the Y-mode size context used by `TileSyntaxReader`.
     ///
     /// @return the Y-mode size context used by `TileSyntaxReader`
@@ -147,5 +267,36 @@ public enum BlockSize {
     /// @return whether the block is square
     public boolean isSquare() {
         return width4 == height4;
+    }
+
+    /// Returns the largest luma transform size allowed for this block size.
+    ///
+    /// @return the largest luma transform size allowed for this block size
+    public TransformSize maxLumaTransformSize() {
+        return MAX_LUMA_TRANSFORM_SIZES[ordinal()];
+    }
+
+    /// Returns the largest chroma transform size allowed for this block size and pixel format.
+    ///
+    /// The current implementation uses the `dav1d` lookup tables when available. For a subset of
+    /// 4:2:2 cases where `dav1d` leaves the direct table entry empty, the method falls back to the
+    /// exact transform size that matches the subsampled chroma block dimensions.
+    ///
+    /// @param pixelFormat the active sequence pixel format
+    /// @return the largest chroma transform size allowed for this block size and pixel format, or `null`
+    public @Nullable TransformSize maxChromaTransformSize(PixelFormat pixelFormat) {
+        PixelFormat nonNullPixelFormat = java.util.Objects.requireNonNull(pixelFormat, "pixelFormat");
+        return switch (nonNullPixelFormat) {
+            case I400 -> null;
+            case I420 -> MAX_CHROMA_420_TRANSFORM_SIZES[ordinal()];
+            case I422 -> {
+                @Nullable TransformSize mapped = MAX_CHROMA_422_TRANSFORM_SIZES[ordinal()];
+                if (mapped != null) {
+                    yield mapped;
+                }
+                yield TransformSize.forDimensions(Math.max(1, width4 >> 1), height4);
+            }
+            case I444 -> MAX_CHROMA_444_TRANSFORM_SIZES[ordinal()];
+        };
     }
 }

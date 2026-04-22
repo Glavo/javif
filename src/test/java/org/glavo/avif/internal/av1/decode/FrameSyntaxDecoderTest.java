@@ -49,6 +49,7 @@ final class FrameSyntaxDecoderTest {
 
         assertEquals(1, result.tileCount());
         assertTrue(result.tileRoots(0).length > 0);
+        assertTrue(firstLeaf(result.tileRoots(0)).transformLayout().lumaUnits().length > 0);
         TileDecodeContext.TemporalMotionBlock temporalBlock = result.decodedTemporalMotionField(0).block(0, 0);
         assertNotNull(temporalBlock);
         assertEquals(0, temporalBlock.referenceFrame0());

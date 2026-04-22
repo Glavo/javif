@@ -1,0 +1,158 @@
+/*
+ * Copyright 2026 Glavo
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.glavo.avif.internal.av1.model;
+
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.Arrays;
+import java.util.Objects;
+
+/// One decoded block-level transform layout produced before coefficient syntax is read.
+@NotNullByDefault
+public final class TransformLayout {
+    /// The local tile-relative luma-grid origin of the owning block.
+    private final BlockPosition position;
+
+    /// The coded block size that owns this transform layout.
+    private final BlockSize blockSize;
+
+    /// The visible block width in 4x4 units after clipping against tile bounds.
+    private final int visibleWidth4;
+
+    /// The visible block height in 4x4 units after clipping against tile bounds.
+    private final int visibleHeight4;
+
+    /// The largest luma transform size allowed by the current block and frame layout.
+    private final TransformSize maxLumaTransformSize;
+
+    /// The largest chroma transform size allowed by the current block and frame layout, or `null`.
+    private final @Nullable TransformSize chromaTransformSize;
+
+    /// Whether this layout came from a variable luma transform tree.
+    private final boolean variableLumaTransformTree;
+
+    /// The luma transform units in bitstream order.
+    private final TransformUnit[] lumaUnits;
+
+    /// Creates one decoded block-level transform layout.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param blockSize the coded block size that owns this transform layout
+    /// @param visibleWidth4 the visible block width in 4x4 units after clipping against tile bounds
+    /// @param visibleHeight4 the visible block height in 4x4 units after clipping against tile bounds
+    /// @param maxLumaTransformSize the largest luma transform size allowed by the current block and frame layout
+    /// @param chromaTransformSize the largest chroma transform size allowed by the current block and frame layout, or `null`
+    /// @param variableLumaTransformTree whether this layout came from a variable luma transform tree
+    /// @param lumaUnits the luma transform units in bitstream order
+    public TransformLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            int visibleWidth4,
+            int visibleHeight4,
+            TransformSize maxLumaTransformSize,
+            @Nullable TransformSize chromaTransformSize,
+            boolean variableLumaTransformTree,
+            TransformUnit[] lumaUnits
+    ) {
+        this.position = Objects.requireNonNull(position, "position");
+        this.blockSize = Objects.requireNonNull(blockSize, "blockSize");
+        if (visibleWidth4 <= 0 || visibleWidth4 > blockSize.width4()) {
+            throw new IllegalArgumentException("visibleWidth4 out of range: " + visibleWidth4);
+        }
+        if (visibleHeight4 <= 0 || visibleHeight4 > blockSize.height4()) {
+            throw new IllegalArgumentException("visibleHeight4 out of range: " + visibleHeight4);
+        }
+        this.visibleWidth4 = visibleWidth4;
+        this.visibleHeight4 = visibleHeight4;
+        this.maxLumaTransformSize = Objects.requireNonNull(maxLumaTransformSize, "maxLumaTransformSize");
+        this.chromaTransformSize = chromaTransformSize;
+        this.variableLumaTransformTree = variableLumaTransformTree;
+        this.lumaUnits = Arrays.copyOf(Objects.requireNonNull(lumaUnits, "lumaUnits"), lumaUnits.length);
+        if (this.lumaUnits.length == 0) {
+            throw new IllegalArgumentException("lumaUnits must not be empty");
+        }
+    }
+
+    /// Returns the local tile-relative luma-grid origin of the owning block.
+    ///
+    /// @return the local tile-relative luma-grid origin of the owning block
+    public BlockPosition position() {
+        return position;
+    }
+
+    /// Returns the coded block size that owns this transform layout.
+    ///
+    /// @return the coded block size that owns this transform layout
+    public BlockSize blockSize() {
+        return blockSize;
+    }
+
+    /// Returns the visible block width in 4x4 units after clipping against tile bounds.
+    ///
+    /// @return the visible block width in 4x4 units after clipping against tile bounds
+    public int visibleWidth4() {
+        return visibleWidth4;
+    }
+
+    /// Returns the visible block height in 4x4 units after clipping against tile bounds.
+    ///
+    /// @return the visible block height in 4x4 units after clipping against tile bounds
+    public int visibleHeight4() {
+        return visibleHeight4;
+    }
+
+    /// Returns the largest luma transform size allowed by the current block and frame layout.
+    ///
+    /// @return the largest luma transform size allowed by the current block and frame layout
+    public TransformSize maxLumaTransformSize() {
+        return maxLumaTransformSize;
+    }
+
+    /// Returns the largest chroma transform size allowed by the current block and frame layout, or `null`.
+    ///
+    /// @return the largest chroma transform size allowed by the current block and frame layout, or `null`
+    public @Nullable TransformSize chromaTransformSize() {
+        return chromaTransformSize;
+    }
+
+    /// Returns whether this layout came from a variable luma transform tree.
+    ///
+    /// @return whether this layout came from a variable luma transform tree
+    public boolean variableLumaTransformTree() {
+        return variableLumaTransformTree;
+    }
+
+    /// Returns the luma transform units in bitstream order.
+    ///
+    /// @return the luma transform units in bitstream order
+    public TransformUnit[] lumaUnits() {
+        return Arrays.copyOf(lumaUnits, lumaUnits.length);
+    }
+
+    /// Returns the uniform luma transform size, or `null` when the layout mixes sizes.
+    ///
+    /// @return the uniform luma transform size, or `null` when the layout mixes sizes
+    public @Nullable TransformSize uniformLumaTransformSize() {
+        TransformSize uniformSize = lumaUnits[0].size();
+        for (int i = 1; i < lumaUnits.length; i++) {
+            if (lumaUnits[i].size() != uniformSize) {
+                return null;
+            }
+        }
+        return uniformSize;
+    }
+}

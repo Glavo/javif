@@ -59,6 +59,9 @@ public final class TilePartitionTreeReader {
     /// The leaf block header reader used for terminal blocks.
     private final TileBlockHeaderReader blockHeaderReader;
 
+    /// The transform-layout reader used after terminal block headers are decoded.
+    private final TileTransformLayoutReader transformLayoutReader;
+
     /// The tile width rounded up to 4x4 units.
     private final int tileWidth4;
 
@@ -74,6 +77,7 @@ public final class TilePartitionTreeReader {
         this.neighborContext = BlockNeighborContext.create(nonNullTileContext);
         this.syntaxReader = new TileSyntaxReader(nonNullTileContext);
         this.blockHeaderReader = new TileBlockHeaderReader(nonNullTileContext);
+        this.transformLayoutReader = new TileTransformLayoutReader(nonNullTileContext);
         this.tileWidth4 = (nonNullTileContext.width() + 3) >> 2;
         this.tileHeight4 = (nonNullTileContext.height() + 3) >> 2;
     }
@@ -232,7 +236,18 @@ public final class TilePartitionTreeReader {
         if (position.x4() >= tileWidth4 || position.y4() >= tileHeight4) {
             return null;
         }
-        return new LeafNode(blockHeaderReader.read(position, size, neighborContext));
+        TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, size, neighborContext, false);
+        org.glavo.avif.internal.av1.model.TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        neighborContext.updateFromBlockHeader(header);
+        neighborContext.updateDefaultTransformContext(position, size);
+        if (header.intra() || header.useIntrabc()) {
+            @org.jetbrains.annotations.Nullable org.glavo.avif.internal.av1.model.TransformSize uniformLumaTransformSize =
+                    transformLayout.uniformLumaTransformSize();
+            if (uniformLumaTransformSize != null) {
+                neighborContext.updateIntraTransformContext(position, size, uniformLumaTransformSize);
+            }
+        }
+        return new LeafNode(header, transformLayout);
     }
 
     /// Creates a partition node and drops children that fell fully outside the tile.
@@ -509,11 +524,19 @@ public final class TilePartitionTreeReader {
         /// The decoded leaf block header.
         private final TileBlockHeaderReader.BlockHeader header;
 
+        /// The decoded block-level transform layout.
+        private final org.glavo.avif.internal.av1.model.TransformLayout transformLayout;
+
         /// Creates one partition tree leaf.
         ///
         /// @param header the decoded leaf block header
-        public LeafNode(TileBlockHeaderReader.BlockHeader header) {
+        /// @param transformLayout the decoded block-level transform layout
+        public LeafNode(
+                TileBlockHeaderReader.BlockHeader header,
+                org.glavo.avif.internal.av1.model.TransformLayout transformLayout
+        ) {
             this.header = Objects.requireNonNull(header, "header");
+            this.transformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
         }
 
         /// Returns the decoded leaf block header.
@@ -521,6 +544,13 @@ public final class TilePartitionTreeReader {
         /// @return the decoded leaf block header
         public TileBlockHeaderReader.BlockHeader header() {
             return header;
+        }
+
+        /// Returns the decoded block-level transform layout.
+        ///
+        /// @return the decoded block-level transform layout
+        public org.glavo.avif.internal.av1.model.TransformLayout transformLayout() {
+            return transformLayout;
         }
 
         /// Returns the local tile-relative origin of this node.
