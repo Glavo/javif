@@ -407,6 +407,9 @@ public final class CdfContext {
     });
 
     /// The transformed default coefficient base-token CDFs for base-token context `0`.
+    ///
+    /// This compact fallback remains used for non-`TX_4X4` residual paths that still only decode
+    /// the first non-zero AC coefficient.
     private static final int[][][] DEFAULT_BASE_TOKEN_CONTEXT0_CDFS = inverse3d(new int[][][]{
             {
                     {4034, 8930, 12727},
@@ -427,6 +430,69 @@ public final class CdfContext {
             {
                     {601, 983, 1311},
                     {8192, 16384, 24576}
+            }
+    });
+
+    /// The transformed default coefficient base-token CDFs for all `TX_4X4` contexts.
+    ///
+    /// These tables are copied from the first `dav1d` transform-context group and cover the
+    /// two-dimensional 4x4 residual path implemented by `TileResidualSyntaxReader`.
+    private static final int[][][] DEFAULT_BASE_TOKEN_GROUP0_CDFS = inverse3d(new int[][][]{
+            {
+                    {4034, 8930, 12727},
+                    {18082, 29741, 31877},
+                    {12596, 26124, 30493},
+                    {9446, 21118, 27005},
+                    {6308, 15141, 21279},
+                    {2463, 6357, 9783},
+                    {20667, 30546, 31929},
+                    {13043, 26123, 30134},
+                    {8151, 18757, 24778},
+                    {5255, 12839, 18632},
+                    {2820, 7206, 11161},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {15736, 27553, 30604},
+                    {11210, 23794, 28787},
+                    {5947, 13874, 19701},
+                    {4215, 9323, 13891},
+                    {2833, 6462, 10059}
+            },
+            {
+                    {6302, 16444, 21761},
+                    {23040, 31538, 32475},
+                    {15196, 28452, 31496},
+                    {10020, 22946, 28514},
+                    {6533, 16862, 23501},
+                    {3538, 9816, 15076},
+                    {24444, 31875, 32525},
+                    {15881, 28924, 31635},
+                    {9922, 22873, 28466},
+                    {6527, 16966, 23691},
+                    {4114, 11303, 17220},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {8192, 16384, 24576},
+                    {20201, 30770, 32209},
+                    {14754, 28071, 31258},
+                    {8378, 20186, 26517},
+                    {5916, 15299, 21978},
+                    {4268, 11583, 17901}
             }
     });
 
@@ -465,6 +531,9 @@ public final class CdfContext {
     });
 
     /// The transformed default high-token CDFs for the last scanned coefficient at `br_tok` context `7`.
+    ///
+    /// This compact fallback remains used for non-`TX_4X4` residual paths that still only decode
+    /// the first non-zero AC coefficient.
     private static final int[][][] DEFAULT_END_OF_BLOCK_HIGH_TOKEN_CONTEXT7_CDFS = inverse3d(new int[][][]{
             {
                     {14392, 19951, 22756},
@@ -481,6 +550,59 @@ public final class CdfContext {
             {
                     {7672, 13286, 17469},
                     {9714, 17254, 20444}
+            }
+    });
+
+    /// The transformed default coefficient high-token CDFs for all `TX_4X4` contexts.
+    ///
+    /// These tables are copied from the first `dav1d` transform-context group and cover the
+    /// two-dimensional 4x4 residual path implemented by `TileResidualSyntaxReader`.
+    private static final int[][][] DEFAULT_HIGH_TOKEN_GROUP0_CDFS = inverse3d(new int[][][]{
+            {
+                    {14298, 20718, 24174},
+                    {12536, 19601, 23789},
+                    {8712, 15051, 19503},
+                    {6170, 11327, 15434},
+                    {4742, 8926, 12538},
+                    {3803, 7317, 10546},
+                    {1696, 3317, 4871},
+                    {14392, 19951, 22756},
+                    {15978, 23218, 26818},
+                    {12187, 19474, 23889},
+                    {9176, 15640, 20259},
+                    {7068, 12655, 17028},
+                    {5656, 10442, 14472},
+                    {2580, 4992, 7244},
+                    {12136, 18049, 21426},
+                    {13784, 20721, 24481},
+                    {10836, 17621, 21900},
+                    {8372, 14444, 18847},
+                    {6523, 11779, 16000},
+                    {5337, 9898, 13760},
+                    {3034, 5860, 8462}
+            },
+            {
+                    {15967, 22905, 26286},
+                    {13534, 20654, 24579},
+                    {9504, 16092, 20535},
+                    {6975, 12568, 16903},
+                    {5364, 10091, 14020},
+                    {4357, 8370, 11857},
+                    {2506, 4934, 7218},
+                    {23032, 28815, 30936},
+                    {19540, 26704, 29719},
+                    {15158, 22969, 27097},
+                    {11408, 18865, 23650},
+                    {8885, 15448, 20250},
+                    {7108, 12853, 17416},
+                    {4231, 8041, 11480},
+                    {19823, 26490, 29156},
+                    {18890, 25929, 28932},
+                    {15660, 23491, 27433},
+                    {12147, 19776, 24488},
+                    {9728, 16774, 21649},
+                    {7919, 14277, 19066},
+                    {5440, 10170, 14185}
             }
     });
 
@@ -925,6 +1047,9 @@ public final class CdfContext {
     /// The mutable coefficient base-token CDFs for base-token context `0`.
     private final int[][][] baseTokenContext0Cdfs;
 
+    /// The mutable coefficient base-token CDFs for the supported `TX_4X4` context range.
+    private final int[][][] baseTokenGroup0Cdfs;
+
     /// The mutable DC-sign CDFs for luma and chroma planes.
     private final int[][][] dcSignCdfs;
 
@@ -933,6 +1058,9 @@ public final class CdfContext {
 
     /// The mutable high-token CDFs for the last scanned coefficient at `br_tok` context `7`.
     private final int[][][] endOfBlockHighTokenContext7Cdfs;
+
+    /// The mutable coefficient high-token CDFs for the supported `TX_4X4` context range.
+    private final int[][][] highTokenGroup0Cdfs;
 
     /// The mutable delta-q CDF.
     private final int[] deltaQCdf;
@@ -1038,9 +1166,11 @@ public final class CdfContext {
     /// @param endOfBlockBaseTokenCdfs the mutable end-of-block base-token CDFs
     /// @param endOfBlockHighBitCdfs the mutable end-of-block high-bit CDFs
     /// @param baseTokenContext0Cdfs the mutable coefficient base-token CDFs for base-token context `0`
+    /// @param baseTokenGroup0Cdfs the mutable coefficient base-token CDFs for the supported `TX_4X4` context range
     /// @param dcSignCdfs the mutable DC-sign CDFs
     /// @param dcHighTokenCdfs the mutable DC high-token CDFs
     /// @param endOfBlockHighTokenContext7Cdfs the mutable high-token CDFs for `br_tok` context `7`
+    /// @param highTokenGroup0Cdfs the mutable coefficient high-token CDFs for the supported `TX_4X4` context range
     /// @param deltaQCdf the mutable delta-q CDF
     /// @param deltaLfCdfs the mutable delta-lf CDFs
     /// @param motionVectorJointCdf the mutable motion-vector joint CDF
@@ -1090,9 +1220,11 @@ public final class CdfContext {
             int[][][][] endOfBlockBaseTokenCdfs,
             int[][][][] endOfBlockHighBitCdfs,
             int[][][] baseTokenContext0Cdfs,
+            int[][][] baseTokenGroup0Cdfs,
             int[][][] dcSignCdfs,
             int[][][] dcHighTokenCdfs,
             int[][][] endOfBlockHighTokenContext7Cdfs,
+            int[][][] highTokenGroup0Cdfs,
             int[] deltaQCdf,
             int[][] deltaLfCdfs,
             int[] motionVectorJointCdf,
@@ -1142,12 +1274,14 @@ public final class CdfContext {
         this.endOfBlockBaseTokenCdfs = Objects.requireNonNull(endOfBlockBaseTokenCdfs, "endOfBlockBaseTokenCdfs");
         this.endOfBlockHighBitCdfs = Objects.requireNonNull(endOfBlockHighBitCdfs, "endOfBlockHighBitCdfs");
         this.baseTokenContext0Cdfs = Objects.requireNonNull(baseTokenContext0Cdfs, "baseTokenContext0Cdfs");
+        this.baseTokenGroup0Cdfs = Objects.requireNonNull(baseTokenGroup0Cdfs, "baseTokenGroup0Cdfs");
         this.dcSignCdfs = Objects.requireNonNull(dcSignCdfs, "dcSignCdfs");
         this.dcHighTokenCdfs = Objects.requireNonNull(dcHighTokenCdfs, "dcHighTokenCdfs");
         this.endOfBlockHighTokenContext7Cdfs = Objects.requireNonNull(
                 endOfBlockHighTokenContext7Cdfs,
                 "endOfBlockHighTokenContext7Cdfs"
         );
+        this.highTokenGroup0Cdfs = Objects.requireNonNull(highTokenGroup0Cdfs, "highTokenGroup0Cdfs");
         this.deltaQCdf = Objects.requireNonNull(deltaQCdf, "deltaQCdf");
         this.deltaLfCdfs = Objects.requireNonNull(deltaLfCdfs, "deltaLfCdfs");
         this.motionVectorJointCdf = Objects.requireNonNull(motionVectorJointCdf, "motionVectorJointCdf");
@@ -1203,9 +1337,11 @@ public final class CdfContext {
                 deepCopy(DEFAULT_END_OF_BLOCK_BASE_TOKEN_CDFS),
                 deepCopy(DEFAULT_END_OF_BLOCK_HIGH_BIT_CDFS),
                 deepCopy(DEFAULT_BASE_TOKEN_CONTEXT0_CDFS),
+                deepCopy(DEFAULT_BASE_TOKEN_GROUP0_CDFS),
                 deepCopy(DEFAULT_DC_SIGN_CDFS),
                 deepCopy(DEFAULT_DC_HIGH_TOKEN_CDFS),
                 deepCopy(DEFAULT_END_OF_BLOCK_HIGH_TOKEN_CONTEXT7_CDFS),
+                deepCopy(DEFAULT_HIGH_TOKEN_GROUP0_CDFS),
                 Arrays.copyOf(DEFAULT_DELTA_Q_CDF, DEFAULT_DELTA_Q_CDF.length),
                 deepCopy(DEFAULT_DELTA_LF_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
@@ -1262,9 +1398,11 @@ public final class CdfContext {
                 deepCopy(endOfBlockBaseTokenCdfs),
                 deepCopy(endOfBlockHighBitCdfs),
                 deepCopy(baseTokenContext0Cdfs),
+                deepCopy(baseTokenGroup0Cdfs),
                 deepCopy(dcSignCdfs),
                 deepCopy(dcHighTokenCdfs),
                 deepCopy(endOfBlockHighTokenContext7Cdfs),
+                deepCopy(highTokenGroup0Cdfs),
                 Arrays.copyOf(deltaQCdf, deltaQCdf.length),
                 deepCopy(deltaLfCdfs),
                 Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
@@ -1485,14 +1623,21 @@ public final class CdfContext {
 
     /// Returns the live mutable coefficient base-token CDF for the supplied transform context and base-token context.
     ///
-    /// The current implementation exposes only base-token context `0`, which is enough for the
-    /// first non-zero AC path currently decoded by `TileResidualSyntaxReader`.
+    /// The current implementation exposes the full supported `TX_4X4` context range for transform
+    /// context group `0`, and falls back to base-token context `0` for the larger-transform paths
+    /// that still decode only the first non-zero AC coefficient.
     ///
     /// @param transformContextIndex the AV1 transform-context group index in `[0, 5)`
     /// @param chroma whether the syntax belongs to a chroma plane
     /// @param context the zero-based base-token context index
     /// @return the live mutable coefficient base-token CDF for the supplied inputs
     public int[] mutableBaseTokenCdf(int transformContextIndex, boolean chroma, int context) {
+        if (transformContextIndex == 0) {
+            int[][] planeTable = baseTokenGroup0Cdfs[chroma ? 1 : 0];
+            if (context >= 0 && context < planeTable.length) {
+                return planeTable[context];
+            }
+        }
         if (context != 0) {
             throw new IllegalArgumentException("Unsupported base-token context: " + context);
         }
@@ -1522,14 +1667,21 @@ public final class CdfContext {
 
     /// Returns the live mutable coefficient high-token CDF for the supplied transform context and `br_tok` context.
     ///
-    /// The current implementation exposes `br_tok` contexts `0` and `7`, which cover DC-only
-    /// residuals and the first scanned AC coefficient.
+    /// The current implementation exposes the full supported `TX_4X4` context range for transform
+    /// context group `0`, and falls back to `br_tok` contexts `0` and `7` for the larger-transform
+    /// paths that still decode only the first non-zero AC coefficient.
     ///
     /// @param transformContextIndex the AV1 transform-context group index in `[0, 5)`
     /// @param chroma whether the syntax belongs to a chroma plane
     /// @param context the zero-based `br_tok` context index
     /// @return the live mutable coefficient high-token CDF for the supplied inputs
     public int[] mutableHighTokenCdf(int transformContextIndex, boolean chroma, int context) {
+        if (transformContextIndex == 0) {
+            int[][] planeTable = highTokenGroup0Cdfs[chroma ? 1 : 0];
+            if (context >= 0 && context < planeTable.length) {
+                return planeTable[context];
+            }
+        }
         if (context == 0) {
             return mutableDcHighTokenCdf(transformContextIndex, chroma);
         }

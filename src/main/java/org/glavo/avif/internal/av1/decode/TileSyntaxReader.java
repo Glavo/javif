@@ -286,7 +286,9 @@ public final class TileSyntaxReader {
     /// Decodes one coefficient base token for the supplied transform context and table context.
     ///
     /// The returned token is in `[0, 3]`, where zero means the coefficient level is zero and three
-    /// enters the high-token extension path.
+    /// enters the high-token extension path. The currently supported `TX_4X4` residual path may
+    /// request more than context `0`, while the larger-transform fallback path still uses only
+    /// context `0`.
     ///
     /// @param transformSize the active transform size
     /// @param chroma whether the syntax belongs to a chroma plane
@@ -313,6 +315,9 @@ public final class TileSyntaxReader {
     }
 
     /// Decodes one coefficient high token from the supplied `br_tok` context.
+    ///
+    /// The currently supported `TX_4X4` residual path may request any context in `[0, 21)`, while
+    /// the larger-transform fallback path still uses only contexts `0` and `7`.
     ///
     /// @param transformSize the active transform size
     /// @param chroma whether the syntax belongs to a chroma plane

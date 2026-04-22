@@ -116,6 +116,29 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(expectedCoefficientContextByte(coefficients), residualUnit.coefficientContextByte());
     }
 
+    /// Verifies that the `TX_4X4` residual reader now supports multiple scanned coefficients.
+    @Test
+    void readsMultiCoefficientResidualForSingleTransformBlock() {
+        byte[] payload = findPayloadForMultiCoefficientResidual(BlockSize.SIZE_4X4);
+        TileDecodeContext tileContext = createTileContext(payload);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_4X4, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+        int[] coefficients = residualUnit.coefficients();
+
+        assertFalse(residualUnit.allZero());
+        assertTrue(residualUnit.endOfBlockIndex() > 1);
+        assertTrue(coefficients[expectedFourByFourOutputIndex(residualUnit.endOfBlockIndex())] != 0);
+        assertTrue(countNonZeroCoefficients(coefficients) >= 2);
+        assertEquals(expectedCoefficientContextByte(coefficients), residualUnit.coefficientContextByte());
+    }
+
     /// Verifies that non-zero coefficient state from one 4x4 unit affects the next unit's skip context.
     @Test
     void propagatesCoefficientSkipContextAcrossFourByFourUnits() {
@@ -242,6 +265,42 @@ final class TileResidualSyntaxReaderTest {
         throw new IllegalStateException("No deterministic payload produced a supported first-AC residual");
     }
 
+    /// Finds a small payload whose first residual unit exposes a supported multi-coefficient `TX_4X4` residual.
+    ///
+    /// @param blockSize the block size whose residual syntax should be decoded
+    /// @return a small payload whose first residual unit exposes a supported multi-coefficient residual
+    private static byte[] findPayloadForMultiCoefficientResidual(BlockSize blockSize) {
+        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
+            int limit = 1 << (searchBytes << 3);
+            for (int value = 0; value < limit; value++) {
+                byte[] payload = new byte[8];
+                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
+                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
+                }
+                try {
+                    TileDecodeContext tileContext = createTileContext(payload);
+                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+                    TileBlockHeaderReader.BlockHeader header =
+                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
+                    if (header.skip()) {
+                        continue;
+                    }
+                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+                    TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+                    if (residualUnit.endOfBlockIndex() > 1 && countNonZeroCoefficients(residualUnit.coefficients()) >= 2) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported residual trees are skipped while brute-forcing a supported multi-coefficient unit.
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a supported multi-coefficient residual");
+    }
+
     /// Finds a payload whose first residual flags match the requested sequence, or `null`.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
@@ -324,6 +383,29 @@ final class TileResidualSyntaxReaderTest {
     /// @return the expected natural-raster index of the first scanned AC coefficient
     private static int expectedFirstAcCoefficientIndex(TransformSize transformSize) {
         return transformSize.widthPixels() > transformSize.heightPixels() ? 1 : transformSize.widthPixels();
+    }
+
+    /// Returns the natural-raster output index for one `TX_4X4` scan position.
+    ///
+    /// @param scanIndex the zero-based `TX_4X4` scan index
+    /// @return the natural-raster output index for the supplied `TX_4X4` scan position
+    private static int expectedFourByFourOutputIndex(int scanIndex) {
+        int[] scan = {0, 4, 1, 2, 5, 8, 12, 9, 6, 3, 7, 10, 13, 14, 11, 15};
+        return scan[scanIndex];
+    }
+
+    /// Counts the number of non-zero coefficients in one dense transform-domain coefficient array.
+    ///
+    /// @param coefficients the dense transform-domain coefficient array in natural raster order
+    /// @return the number of non-zero coefficients in the supplied array
+    private static int countNonZeroCoefficients(int[] coefficients) {
+        int count = 0;
+        for (int coefficient : coefficients) {
+            if (coefficient != 0) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /// Returns the expected skip context for the second 4x4 unit in a `FOUR_BY_FOUR_ONLY` 8x8 block.

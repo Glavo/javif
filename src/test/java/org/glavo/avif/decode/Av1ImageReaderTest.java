@@ -152,10 +152,10 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
     }
 
-    /// Verifies that the public reader reports `NOT_IMPLEMENTED` before any structural reference
-    /// state is stored when frame syntax hits a deeper unsupported residual path.
+    /// Verifies that the public reader stores structural reference state before reporting the
+    /// current pixel-decode boundary once frame syntax completed successfully.
     @Test
-    void readFrameStopsBeforeStoringReferenceStateWhenStructuralDecodeIsIncomplete() throws IOException {
+    void readFrameStoresReferenceStateBeforeReportingCurrentDecodeBoundary() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -167,16 +167,15 @@ final class Av1ImageReaderTest {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
             for (int i = 0; i < 8; i++) {
-                assertNull(reader.referenceFrameSyntaxResult(i));
+                assertEquals(reader.lastFrameSyntaxDecodeResult(), reader.referenceFrameSyntaxResult(i));
             }
-            assertNull(reader.lastFrameSyntaxDecodeResult());
         }
     }
 
-    /// Verifies that a new sequence header still leaves structural reference-frame state cleared
-    /// when the previous frame stopped at the current decode boundary.
+    /// Verifies that a new sequence header clears previously stored structural reference-frame
+    /// state even when the earlier frame already reached the current decode boundary.
     @Test
-    void readFrameKeepsReferenceStateClearedOnSequenceResetAfterEarlyDecodeBoundary() throws IOException {
+    void readFrameClearsReferenceStateOnSequenceResetAfterCurrentDecodeBoundary() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload()),
@@ -187,7 +186,7 @@ final class Av1ImageReaderTest {
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertThrows(DecodeException.class, reader::readFrame);
-            assertNull(reader.referenceFrameSyntaxResult(0));
+            assertEquals(reader.lastFrameSyntaxDecodeResult(), reader.referenceFrameSyntaxResult(0));
 
             assertNull(reader.readFrame());
             assertNull(reader.lastFrameSyntaxDecodeResult());

@@ -26,13 +26,34 @@ import java.util.Objects;
 
 /// Reader for the first coefficient-side syntax elements inside one tile bitstream.
 ///
-/// The current implementation covers luma `txb_skip`, end-of-block prefix decoding, DC-only
-/// coefficient decoding, and the first scanned AC coefficient. Higher-order AC token trees are
-/// still added incrementally on top of this foundation.
+/// The current implementation fully decodes the two-dimensional luma `TX_4X4` residual syntax and
+/// retains the earlier DC-only / first-AC support for larger transform sizes. Higher-order AC
+/// token trees for non-`TX_4X4` transforms are still introduced incrementally on top of this
+/// foundation.
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
+
+    /// The `dav1d` natural-order scan for two-dimensional `TX_4X4` transforms.
+    private static final int[] FOUR_BY_FOUR_SCAN = {
+            0, 4, 1, 2,
+            5, 8, 12, 9,
+            6, 3, 7, 10,
+            13, 14, 11, 15
+    };
+
+    /// The `dav1d` low-token context offsets for square transforms.
+    private static final int[][] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
+            {0, 1, 6, 6, 21},
+            {1, 6, 6, 21, 21},
+            {6, 6, 21, 21, 21},
+            {6, 21, 21, 21, 21},
+            {21, 21, 21, 21, 21}
+    };
+
+    /// The padded `levels` grid size used by the `TX_4X4` token-context helpers.
+    private static final int FOUR_BY_FOUR_LEVEL_GRID_SIZE = 6;
 
     /// The typed syntax reader used to consume coefficient-side entropy symbols.
     private final TileSyntaxReader syntaxReader;
@@ -97,16 +118,21 @@ public final class TileResidualSyntaxReader {
         }
 
         int endOfBlockIndex = syntaxReader.readEndOfBlockIndex(nonNullTransformUnit.size(), false, false);
+        if (nonNullTransformUnit.size() == TransformSize.TX_4X4) {
+            return readFourByFourLumaResidualUnit(nonNullTransformUnit, endOfBlockIndex, nonNullNeighborContext);
+        }
         if (endOfBlockIndex > 1) {
             throw new IllegalStateException("AC coefficient decoding is not implemented yet");
         }
 
         int[] coefficients = new int[nonNullTransformUnit.size().widthPixels() * nonNullTransformUnit.size().heightPixels()];
         int cumulativeLevel = 0;
+        int acToken = 0;
+        int acCoefficientIndex = -1;
 
         if (endOfBlockIndex == 1) {
-            int coefficientIndex = naturalCoefficientIndex(nonNullTransformUnit.size(), endOfBlockIndex);
-            int acToken = syntaxReader.readEndOfBlockBaseToken(
+            acCoefficientIndex = naturalCoefficientIndex(nonNullTransformUnit.size(), endOfBlockIndex);
+            acToken = syntaxReader.readEndOfBlockBaseToken(
                     nonNullTransformUnit.size(),
                     false,
                     endOfBlockTokenContext(endOfBlockIndex, nonNullTransformUnit.size())
@@ -114,11 +140,6 @@ public final class TileResidualSyntaxReader {
             if (acToken == 3) {
                 acToken = syntaxReader.readHighToken(nonNullTransformUnit.size(), false, 7);
             }
-            if (acToken == 15) {
-                acToken += syntaxReader.readCoefficientGolomb();
-            }
-            coefficients[coefficientIndex] = syntaxReader.readCoefficientSignFlag() ? -acToken : acToken;
-            cumulativeLevel += acToken;
         }
 
         int dcToken = endOfBlockIndex == 0
@@ -134,9 +155,21 @@ public final class TileResidualSyntaxReader {
         int signedDcLevel = 0;
         if (dcToken != 0) {
             boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
+            if (dcToken == 15) {
+                dcToken += syntaxReader.readCoefficientGolomb();
+            }
             signedDcLevel = negative ? -dcToken : dcToken;
             coefficients[0] = signedDcLevel;
             cumulativeLevel += dcToken;
+        }
+
+        if (endOfBlockIndex == 1 && acToken != 0) {
+            boolean negative = syntaxReader.readCoefficientSignFlag();
+            if (acToken == 15) {
+                acToken += syntaxReader.readCoefficientGolomb();
+            }
+            coefficients[acCoefficientIndex] = negative ? -acToken : acToken;
+            cumulativeLevel += acToken;
         }
 
         int coefficientContextByte = createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel);
@@ -146,6 +179,104 @@ public final class TileResidualSyntaxReader {
                 endOfBlockIndex,
                 coefficients,
                 coefficientContextByte
+        );
+    }
+
+    /// Decodes the fully supported two-dimensional `TX_4X4` luma residual syntax.
+    ///
+    /// @param transformUnit the current `TX_4X4` luma transform unit
+    /// @param endOfBlockIndex the already-decoded end-of-block scan index
+    /// @param neighborContext the mutable neighbor context that supplies the DC-sign context
+    /// @return the decoded `TX_4X4` luma transform residual unit
+    private TransformResidualUnit readFourByFourLumaResidualUnit(
+            TransformUnit transformUnit,
+            int endOfBlockIndex,
+            BlockNeighborContext neighborContext
+    ) {
+        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+        BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
+        int[] coefficients = new int[16];
+        int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
+        int[][] levelBytes = new int[FOUR_BY_FOUR_LEVEL_GRID_SIZE][FOUR_BY_FOUR_LEVEL_GRID_SIZE];
+
+        if (endOfBlockIndex > 0) {
+            int lastCoefficientIndex = FOUR_BY_FOUR_SCAN[endOfBlockIndex];
+            int lastX = lastCoefficientIndex >> 2;
+            int lastY = lastCoefficientIndex & 3;
+            int lastToken = syntaxReader.readEndOfBlockBaseToken(
+                    TransformSize.TX_4X4,
+                    false,
+                    endOfBlockTokenContext(endOfBlockIndex, TransformSize.TX_4X4)
+            );
+            if (lastToken == 3) {
+                lastToken = syntaxReader.readHighToken(
+                        TransformSize.TX_4X4,
+                        false,
+                        fourByFourEndOfBlockHighTokenContext(lastX, lastY)
+                );
+            }
+            coefficientTokens[endOfBlockIndex] = lastToken;
+            levelBytes[lastX][lastY] = coefficientLevelByte(lastToken);
+
+            for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
+                int coefficientIndex = FOUR_BY_FOUR_SCAN[scanIndex];
+                int x = coefficientIndex >> 2;
+                int y = coefficientIndex & 3;
+                int token = syntaxReader.readBaseToken(
+                        TransformSize.TX_4X4,
+                        false,
+                        fourByFourBaseTokenContext(levelBytes, x, y)
+                );
+                if (token == 3) {
+                    token = syntaxReader.readHighToken(
+                            TransformSize.TX_4X4,
+                            false,
+                            fourByFourHighTokenContext(levelBytes, x, y)
+                    );
+                }
+                coefficientTokens[scanIndex] = token;
+                levelBytes[x][y] = coefficientLevelByte(token);
+            }
+        }
+
+        int dcToken = endOfBlockIndex == 0
+                ? syntaxReader.readEndOfBlockBaseToken(TransformSize.TX_4X4, false, 0)
+                : syntaxReader.readBaseToken(TransformSize.TX_4X4, false, 0);
+        if (dcToken == 3) {
+            dcToken = syntaxReader.readHighToken(TransformSize.TX_4X4, false, fourByFourDcHighTokenContext(levelBytes));
+        }
+
+        int cumulativeLevel = 0;
+        int signedDcLevel = 0;
+        if (dcToken != 0) {
+            boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
+            if (dcToken == 15) {
+                dcToken += syntaxReader.readCoefficientGolomb();
+            }
+            signedDcLevel = negative ? -dcToken : dcToken;
+            coefficients[0] = signedDcLevel;
+            cumulativeLevel += dcToken;
+        }
+
+        for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
+            int token = coefficientTokens[scanIndex];
+            if (token == 0) {
+                continue;
+            }
+            boolean negative = syntaxReader.readCoefficientSignFlag();
+            if (token == 15) {
+                token += syntaxReader.readCoefficientGolomb();
+            }
+            coefficients[FOUR_BY_FOUR_SCAN[scanIndex]] = negative ? -token : token;
+            cumulativeLevel += token;
+        }
+
+        return new TransformResidualUnit(
+                nonNullTransformUnit.position(),
+                nonNullTransformUnit.size(),
+                endOfBlockIndex,
+                coefficients,
+                createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel)
         );
     }
 
@@ -164,11 +295,12 @@ public final class TileResidualSyntaxReader {
         );
     }
 
-    /// Returns the natural-raster coefficient index for one supported scan index.
+    /// Returns the natural-raster coefficient index for one supported limited-path scan index.
     ///
-    /// The current implementation supports only scan indices `0` and `1`. For 2D transforms the
-    /// first scanned AC coefficient follows the dominant transform axis, which matches the first
-    /// `dav1d` scan entry for each supported transform size.
+    /// The current implementation supports only scan indices `0` and `1` for the non-`TX_4X4`
+    /// fallback path. For 2D transforms the first scanned AC coefficient follows the dominant
+    /// transform axis, which matches the first `dav1d` scan entry for each supported transform
+    /// size.
     ///
     /// @param transformSize the active transform size
     /// @param endOfBlockIndex the supported scan index
@@ -200,6 +332,71 @@ public final class TileResidualSyntaxReader {
                 + Math.min(nonNullTransformSize.log2Height4(), 3);
         return 1 + (endOfBlockIndex > (2 << tx2dSizeContext) ? 1 : 0)
                 + (endOfBlockIndex > (4 << tx2dSizeContext) ? 1 : 0);
+    }
+
+    /// Returns the stored level byte written into the local `levels` grid for one coefficient token.
+    ///
+    /// @param token the decoded coefficient token before the optional Golomb extension
+    /// @return the stored level byte written into the local `levels` grid
+    private static int coefficientLevelByte(int token) {
+        if (token == 0) {
+            return 0;
+        }
+        if (token < 3) {
+            return token * 0x41;
+        }
+        return token + (3 << 6);
+    }
+
+    /// Returns the `br_tok` high-token context for the last non-zero `TX_4X4` coefficient.
+    ///
+    /// @param x the zero-based coefficient column in `[0, 4)`
+    /// @param y the zero-based coefficient row in `[0, 4)`
+    /// @return the `br_tok` high-token context for the supplied coefficient
+    private static int fourByFourEndOfBlockHighTokenContext(int x, int y) {
+        return ((x | y) > 1) ? 14 : 7;
+    }
+
+    /// Returns the base-token context for one non-EOB `TX_4X4` coefficient.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the zero-based coefficient column in `[0, 4)`
+    /// @param y the zero-based coefficient row in `[0, 4)`
+    /// @return the base-token context for the supplied coefficient
+    private static int fourByFourBaseTokenContext(int[][] levelBytes, int x, int y) {
+        int magnitude = fourByFourHighMagnitude(levelBytes, x, y) + levelBytes[x][y + 2] + levelBytes[x + 2][y];
+        int offset = FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS[Math.min(y, 4)][Math.min(x, 4)];
+        return offset + (magnitude > 512 ? 4 : (magnitude + 64) >> 7);
+    }
+
+    /// Returns the high-token context for one non-EOB `TX_4X4` coefficient.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the zero-based coefficient column in `[0, 4)`
+    /// @param y the zero-based coefficient row in `[0, 4)`
+    /// @return the high-token context for the supplied coefficient
+    private static int fourByFourHighTokenContext(int[][] levelBytes, int x, int y) {
+        int magnitude = fourByFourHighMagnitude(levelBytes, x, y) & 0x3F;
+        return (((x | y) > 1) ? 14 : 7) + (magnitude > 12 ? 6 : (magnitude + 1) >> 1);
+    }
+
+    /// Returns the DC high-token context for one `TX_4X4` residual block.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @return the DC high-token context for the current residual block
+    private static int fourByFourDcHighTokenContext(int[][] levelBytes) {
+        int magnitude = fourByFourHighMagnitude(levelBytes, 0, 0) & 0x3F;
+        return magnitude > 12 ? 6 : (magnitude + 1) >> 1;
+    }
+
+    /// Returns the `dav1d` high-magnitude accumulator for one `TX_4X4` coefficient position.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the zero-based coefficient column in `[0, 4)`
+    /// @param y the zero-based coefficient row in `[0, 4)`
+    /// @return the `dav1d` high-magnitude accumulator for the supplied coefficient position
+    private static int fourByFourHighMagnitude(int[][] levelBytes, int x, int y) {
+        return levelBytes[x][y + 1] + levelBytes[x + 1][y] + levelBytes[x + 1][y + 1];
     }
 
     /// Creates the stored coefficient-context byte for one non-zero transform unit.
