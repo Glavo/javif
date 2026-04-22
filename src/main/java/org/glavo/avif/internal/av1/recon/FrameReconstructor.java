@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
+import org.glavo.avif.internal.av1.model.TransformSize;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,7 +36,7 @@ import java.util.Objects;
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
 /// with one tile, `I400` or `I420` chroma layout, non-directional intra prediction, no palette,
-/// no filter-intra, no CFL, and all-zero transform residuals.
+/// no filter-intra, no CFL, and a minimal luma residual subset.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -61,7 +62,7 @@ public final class FrameReconstructor {
         @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
 
         for (TilePartitionTreeReader.Node root : checkedSyntaxDecodeResult.tileRoots(0)) {
-            reconstructNode(root, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat);
+            reconstructNode(root, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat, frameHeader);
         }
 
         return new DecodedPlanes(
@@ -146,16 +147,17 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            PixelFormat pixelFormat
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader
     ) {
         if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
-            reconstructLeaf(leafNode, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat);
+            reconstructLeaf(leafNode, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat, frameHeader);
             return;
         }
 
         TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
         for (TilePartitionTreeReader.Node child : partitionNode.children()) {
-            reconstructNode(child, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat);
+            reconstructNode(child, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat, frameHeader);
         }
     }
 
@@ -171,7 +173,8 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            PixelFormat pixelFormat
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader
     ) {
         TileBlockHeaderReader.BlockHeader header = leafNode.header();
         TransformLayout transformLayout = leafNode.transformLayout();
@@ -217,6 +220,8 @@ public final class FrameReconstructor {
                     header.uvAngle()
             );
         }
+
+        reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader);
     }
 
     /// Validates that one partition-tree leaf lies inside the current reconstruction subset.
@@ -258,9 +263,58 @@ public final class FrameReconstructor {
             throw new IllegalStateException("Empty transform layout is not reconstructable");
         }
         for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
-            if (!residualUnit.allZero()) {
-                throw new IllegalStateException("Non-zero residual reconstruction is not implemented yet");
+            if (!residualUnit.allZero() && !isSupportedNonZeroLumaResidualSize(residualUnit.size())) {
+                throw new IllegalStateException(
+                        "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8 DCT_DCT luma units: "
+                                + residualUnit.size()
+                );
             }
+        }
+    }
+
+    /// Returns whether one luma transform size currently supports non-zero residual reconstruction.
+    ///
+    /// @param transformSize the luma transform size to inspect
+    /// @return whether one luma transform size currently supports non-zero residual reconstruction
+    private static boolean isSupportedNonZeroLumaResidualSize(TransformSize transformSize) {
+        return transformSize == TransformSize.TX_4X4 || transformSize == TransformSize.TX_8X8;
+    }
+
+    /// Reconstructs the currently supported luma residual subset into the destination plane.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param residualLayout the decoded luma residual layout
+    /// @param header the decoded block header that owns the residuals
+    /// @param frameHeader the frame header that owns the active quantization state
+    private static void reconstructLumaResiduals(
+            MutablePlaneBuffer lumaPlane,
+            ResidualLayout residualLayout,
+            TileBlockHeaderReader.BlockHeader header,
+            FrameHeader frameHeader
+    ) {
+        for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
+            if (residualUnit.allZero()) {
+                continue;
+            }
+            int[] dequantizedCoefficients = LumaDequantizer.dequantize(
+                    residualUnit,
+                    new LumaDequantizer.Context(
+                            header.qIndex(),
+                            frameHeader.quantization().yDcDelta(),
+                            lumaPlane.bitDepth()
+                    )
+            );
+            int[] residualSamples = InverseTransformer.reconstructResidualBlock(
+                    dequantizedCoefficients,
+                    residualUnit.size()
+            );
+            InverseTransformer.addResidualBlock(
+                    lumaPlane,
+                    residualUnit.position().x4() << 2,
+                    residualUnit.position().y4() << 2,
+                    residualUnit.size(),
+                    residualSamples
+            );
         }
     }
 }

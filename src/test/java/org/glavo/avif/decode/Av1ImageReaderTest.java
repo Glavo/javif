@@ -127,10 +127,10 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
     }
 
-    /// Verifies that the current reduced still-picture combined fixture still reaches the stable
-    /// unsupported residual-reconstruction boundary.
+    /// Verifies that the legacy reduced still-picture combined fixture now reaches the current
+    /// `filter_intra` reconstruction boundary.
     @Test
-    void readFrameParsesCombinedFrameObuBeforeReportingNotImplemented() {
+    void readFrameParsesCombinedFrameObuBeforeCurrentFilterIntraBoundary() {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -144,15 +144,16 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-        assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
+        assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
     }
 
-    /// Verifies that all buffered-input adapters report the same unsupported decode boundary for the
-    /// current reduced still-picture fixture and still refresh reference-frame state first.
+    /// Verifies that all buffered-input adapters report the same current `filter_intra` decode
+    /// boundary for the legacy reduced still-picture fixture and still refresh reference-frame
+    /// state first.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReportsSameDecodeBoundaryAcrossBufferedInputs() throws IOException {
+    void readFrameReportsSameCurrentBoundaryAcrossBufferedInputs() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -162,7 +163,7 @@ final class Av1ImageReaderTest {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
             assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-            assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
+            assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
             assertReferenceStateStoredForLastSyntaxResult(reader);
         });
     }
@@ -185,10 +186,10 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
     }
 
-    /// Verifies that the current reduced still-picture standalone fixture still reaches the stable
-    /// unsupported residual-reconstruction boundary.
+    /// Verifies that the legacy reduced still-picture standalone fixture now reaches the current
+    /// `filter_intra` reconstruction boundary.
     @Test
-    void readFrameParsesStandaloneTileGroupBeforeReportingNotImplemented() {
+    void readFrameParsesStandaloneTileGroupBeforeCurrentFilterIntraBoundary() {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(3, reducedStillPictureFrameHeaderPayload()),
@@ -203,13 +204,13 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-        assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
+        assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
     }
 
     /// Verifies that the public reader stores structural reference state before reporting the
-    /// current pixel-decode boundary once frame syntax completed successfully.
+    /// current `filter_intra` reconstruction boundary once frame syntax completed successfully.
     @Test
-    void readFrameStoresReferenceStateBeforeReportingCurrentDecodeBoundary() throws IOException {
+    void readFrameStoresReferenceStateBeforeCurrentFilterIntraBoundary() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -220,7 +221,7 @@ final class Av1ImageReaderTest {
         )) {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-            assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
+            assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
             assertReferenceStateStoredForLastSyntaxResult(reader);
         }
     }
@@ -429,19 +430,31 @@ final class Av1ImageReaderTest {
         assertNotNull(decodedFrame);
         assertTrue(decodedFrame instanceof ArgbIntFrame);
         ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
-        assertEquals(64, frame.width());
-        assertEquals(64, frame.height());
-        assertEquals(8, frame.bitDepth());
-        assertEquals(PixelFormat.I420, frame.pixelFormat());
-        assertEquals(FrameType.KEY, frame.frameType());
-        assertTrue(frame.visible());
-        assertEquals(expectedPresentationIndex, frame.presentationIndex());
+        assertDecodedStillPictureFrameMetadata(frame, expectedPresentationIndex);
 
         int[] pixels = frame.pixels();
         assertEquals(64 * 64, pixels.length);
         for (int pixel : pixels) {
             assertEquals(OPAQUE_MID_GRAY, pixel);
         }
+    }
+
+    /// Asserts the stable decoded-frame metadata shared by the current reduced still-picture fixtures.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertDecodedStillPictureFrameMetadata(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            long expectedPresentationIndex
+    ) {
+        assertNotNull(decodedFrame);
+        assertEquals(64, decodedFrame.width());
+        assertEquals(64, decodedFrame.height());
+        assertEquals(8, decodedFrame.bitDepth());
+        assertEquals(PixelFormat.I420, decodedFrame.pixelFormat());
+        assertEquals(FrameType.KEY, decodedFrame.frameType());
+        assertTrue(decodedFrame.visible());
+        assertEquals(expectedPresentationIndex, decodedFrame.presentationIndex());
     }
 
     /// Asserts that every refreshed reference slot stores structural state for the same decoded frame.

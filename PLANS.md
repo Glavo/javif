@@ -26,7 +26,7 @@ The repository already has:
 - `8-bit`
 - `I400` and `I420`
 - non-directional intra prediction only
-- all-zero residual only
+- minimal luma `DCT_DCT` residual support for `TX_4X4` and `TX_8X8`
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -55,18 +55,20 @@ Everything else expands from that baseline after correctness is stable.
 - `DecodedPlane`, `DecodedPlanes`, and `ReferenceSurfaceSnapshot` already exist as the reconstruction/output boundary contracts.
 - `ArgbOutput` already converts `DecodedPlanes` into `ArgbIntFrame` for `8-bit I400/I420`.
 - A minimal reconstruction path already exists through `FrameReconstructor`, `IntraPredictor`, and `MutablePlaneBuffer`.
+- `LumaDequantizer` and `InverseTransformer` already support the current minimal non-zero luma residual path.
 - `Av1ImageReader` already connects structural decode -> reconstruction -> ARGB output for the current supported subset.
 
 ### Remaining Decode Boundary
 
 - Multi-tile frames are still rejected by the reconstruction/output path.
-- Only all-zero residual blocks reconstruct today. Non-zero residual still stops at `FRAME_DECODE / NOT_IMPLEMENTED`.
+- Non-zero reconstruction currently covers only luma `DCT_DCT` `TX_4X4` and `TX_8X8` within the existing key/intra subset.
 - Only non-directional intra prediction currently reconstructs. Directional intra, filter-intra, CFL, palette, `intrabc`, inter prediction, and motion compensation are still unsupported.
 - Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
 - `show_existing_frame` still validates slot state but does not yet return a reused output frame.
 - Reference surfaces are not yet consumed by a real inter-frame pixel path.
 - Postfiltering and film grain synthesis are still not implemented.
 - `ArgbLongFrame`, `I422`, `I444`, and high bit-depth output paths are not implemented.
+- The legacy reduced still-picture fixture no longer stops at `non-zero residual`; the current public reader boundary has moved forward to `filter_intra reconstruction is not implemented yet`.
 
 ### Current Progress Snapshot
 
@@ -134,7 +136,7 @@ Exit criteria:
 
 Current gap after the first-pixel milestone:
 
-- Non-zero residual decode still does not cover the full reconstruction-ready coefficient space.
+- Non-zero residual decode and reconstruction still do not cover the full reconstruction-ready coefficient space.
 - Chroma residual syntax is still missing.
 - Several block features remain syntax-only or rejected during reconstruction: directional intra, CFL, palette, filter-intra, inter prediction.
 
@@ -173,7 +175,7 @@ Write scope:
 
 Goal: create decoded planes from block syntax and residuals.
 
-Status: in progress. First-pixel baseline reached.
+Status: in progress. First-pixel baseline and minimal non-zero luma residual support reached.
 
 Scope:
 
@@ -190,9 +192,10 @@ Execution order inside the track:
 
 1. `8-bit I400 KEY/INTRA`
 2. `8-bit I420 KEY/INTRA`
-3. non-zero residual support for the current key/intra path
-4. visible inter/reference frame support
-5. wider pixel-format and bit-depth coverage
+3. non-zero luma residual support for the current key/intra path
+4. chroma residual and richer intra feature support
+5. visible inter/reference frame support
+6. wider pixel-format and bit-depth coverage
 
 Exit criteria:
 
@@ -204,13 +207,15 @@ Completed within this track already:
 - mutable plane storage
 - minimal intra prediction
 - first public first-pixel path for single-tile `8-bit I400/I420` key/intra frames with all-zero residual
+- luma dequantization and inverse transform for `TX_4X4` / `TX_8X8` `DCT_DCT`
+- minimal non-zero luma residual reconstruction inside the current key/intra subset
 
 Immediate next steps inside this track:
 
-- dequantization and inverse transform
-- non-zero luma residual application
+- richer AC coverage and larger transform support
 - chroma residual application
 - directional intra modes
+- filter-intra, CFL, and palette pixel application
 - inter reconstruction and reference-surface consumption
 
 Write scope:
@@ -322,6 +327,7 @@ Already complete in this track:
 - `readFrame()` returns `ArgbIntFrame` for the current narrow first-pixel subset
 - frame filtering for `decodeFrameType` is applied at the current public output boundary
 - syntax reference state and reconstructed reference surfaces are stored separately
+- the current public boundary has already moved past `non-zero residual` and now fails later on unsupported reconstruction features such as `filter_intra`
 
 Still missing in this track:
 
@@ -477,8 +483,8 @@ Acceptance:
 Status:
 
 - partially achieved now
-- current first-pixel output works for single-tile, all-zero-residual, non-directional key/intra samples
-- milestone is not closed until non-zero residual and a less artificial sample set are covered
+- current first-pixel output works for single-tile, non-directional `8-bit I400/I420` key/intra samples, including the minimal non-zero luma residual subset
+- milestone is not closed until chroma residuals, richer intra features, and a less artificial sample set are covered
 
 ### M3: Reference and Inter Frames
 
@@ -586,5 +592,6 @@ Status:
 - completed tracks
 - remaining blocked dependencies
 - newly added or removed deferred items
+- the exact delta between the last documented reconstruction subset and the current one
 
 The file must continue to describe actual remaining work, not an outdated from-scratch port design.

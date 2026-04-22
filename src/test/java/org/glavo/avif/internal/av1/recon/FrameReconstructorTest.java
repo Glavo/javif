@@ -99,6 +99,64 @@ final class FrameReconstructorTest {
         assertPlaneFilled(chromaV, 2, 2, 128);
     }
 
+    /// Verifies that a positive monochrome DC residual shifts every luma sample above the zero-residual baseline.
+    @Test
+    void reconstructsSingleTileI400KeyFrameWithPositiveDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, 64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlane baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, zeroResidualLeaf)
+        ).lumaPlane();
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, positiveResidualLeaf)
+        );
+
+        assertFalse(residualPlanes.hasChroma());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
+    }
+
+    /// Verifies that a negative `I420` luma DC residual shifts only the luma plane below the zero-residual baseline.
+    @Test
+    void reconstructsSingleTileI420IntraFrameWithNegativeLumaDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode negativeResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, -64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 4, 4, negativeResidualLeaf)
+        );
+
+        assertTrue(residualPlanes.hasChroma());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline.lumaPlane(), residualPlanes.lumaPlane(), -1);
+        assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(residualPlanes.chromaUPlane()));
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
     /// Verifies that inter blocks still fail fast in the first reconstruction subset.
     @Test
     void rejectsInterBlocks() {
@@ -118,27 +176,6 @@ final class FrameReconstructorTest {
         );
 
         assertEquals("Inter block reconstruction is not implemented yet", exception.getMessage());
-    }
-
-    /// Verifies that non-zero luma residual units remain explicitly unsupported.
-    @Test
-    void rejectsNonZeroResidualUnits() {
-        BlockPosition position = new BlockPosition(0, 0);
-        BlockSize size = BlockSize.SIZE_4X4;
-        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
-                createResidualLayout(position, size, false)
-        );
-
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> new FrameReconstructor().reconstruct(
-                        createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, leaf)
-                )
-        );
-
-        assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
     }
 
     /// Verifies that CFL-coded chroma blocks remain unsupported in the first `I420` reconstruction path.
@@ -460,6 +497,31 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Creates one residual layout with one caller-supplied luma DC coefficient.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param dcCoefficient the signed luma DC coefficient to store
+    /// @return one residual layout with one caller-supplied luma DC coefficient
+    private static ResidualLayout createResidualLayout(BlockPosition position, BlockSize size, int dcCoefficient) {
+        TransformSize transformSize = size.maxLumaTransformSize();
+        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        coefficients[0] = dcCoefficient;
+        return new ResidualLayout(
+                position,
+                size,
+                new TransformResidualUnit[]{
+                        new TransformResidualUnit(
+                                position,
+                                transformSize,
+                                0,
+                                coefficients,
+                                expectedNonZeroCoefficientContextByte(dcCoefficient)
+                        )
+                }
+        );
+    }
+
     /// Asserts that one decoded plane is filled with one constant sample value.
     ///
     /// @param plane the decoded plane to inspect
@@ -474,6 +536,59 @@ final class FrameReconstructorTest {
                 assertEquals(expectedSample, plane.sample(x, y));
             }
         }
+    }
+
+    /// Asserts that every sample differs from the baseline by the same non-zero signed offset.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the non-zero residual plane
+    /// @param expectedSign the required sign of the uniform delta, either `1` or `-1`
+    private static void assertPlaneDiffersFromBaselineByUniformSignedOffset(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed,
+            int expectedSign
+    ) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+
+        int firstDelta = reconstructed.sample(0, 0) - baseline.sample(0, 0);
+        assertEquals(expectedSign, Integer.signum(firstDelta));
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
+                assertEquals(firstDelta, reconstructed.sample(x, y) - baseline.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that two decoded planes carry the same stored sample values.
+    ///
+    /// @param expected the expected decoded plane
+    /// @param actual the actual decoded plane
+    private static void assertPlanesEqual(DecodedPlane expected, DecodedPlane actual) {
+        assertEquals(expected.width(), actual.width());
+        assertEquals(expected.height(), actual.height());
+        for (int y = 0; y < expected.height(); y++) {
+            for (int x = 0; x < expected.width(); x++) {
+                assertEquals(expected.sample(x, y), actual.sample(x, y));
+            }
+        }
+    }
+
+    /// Returns one guaranteed-present decoded plane after a non-null assertion.
+    ///
+    /// @param plane the decoded plane reference, or `null`
+    /// @return the same decoded plane reference after a non-null assertion
+    private static DecodedPlane requirePlane(@Nullable DecodedPlane plane) {
+        assertNotNull(plane);
+        return plane;
+    }
+
+    /// Returns the stored coefficient-context byte for one non-zero DC coefficient.
+    ///
+    /// @param signedDcCoefficient the signed DC coefficient
+    /// @return the stored coefficient-context byte for one non-zero DC coefficient
+    private static int expectedNonZeroCoefficientContextByte(int signedDcCoefficient) {
+        return Math.min(Math.abs(signedDcCoefficient), 63) | (signedDcCoefficient > 0 ? 0x80 : 0);
     }
 
     /// Creates default per-segment data with all optional features disabled.
