@@ -484,6 +484,18 @@ public final class TileDecodeContext {
             return blocks[index(x8, y8)];
         }
 
+        /// Returns a shallow copy of this temporal motion field.
+        ///
+        /// The copied field owns a new storage array while reusing immutable temporal-motion block
+        /// entries.
+        ///
+        /// @return a shallow copy of this temporal motion field
+        public TemporalMotionField copy() {
+            TemporalMotionField copy = new TemporalMotionField(width8, height8);
+            System.arraycopy(blocks, 0, copy.blocks, 0, blocks.length);
+            return copy;
+        }
+
         /// Returns the flat array index for one tile-relative 8x8 coordinate.
         ///
         /// @param x8 the tile-relative X coordinate in 8x8 units

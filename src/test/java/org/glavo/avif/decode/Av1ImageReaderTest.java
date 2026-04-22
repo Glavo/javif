@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.decode;
 
+import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -148,6 +150,52 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+    }
+
+    /// Verifies that structural frame-decode results are stored in refreshed reference slots.
+    @Test
+    void readFrameStoresFrameSyntaxResultsInReferenceSlots() throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload())
+        );
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
+            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
+
+            FrameSyntaxDecodeResult lastResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(lastResult);
+            assertEquals(1, lastResult.tileCount());
+            for (int i = 0; i < 8; i++) {
+                assertNotNull(reader.referenceFrameSyntaxResult(i));
+            }
+        }
+    }
+
+    /// Verifies that a new sequence header clears stored structural reference-frame state.
+    @Test
+    void readFrameClearsStoredFrameSyntaxResultsOnSequenceReset() throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload()),
+                obu(1, reducedStillPicturePayload())
+        );
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertThrows(DecodeException.class, reader::readFrame);
+            assertNotNull(reader.referenceFrameSyntaxResult(0));
+
+            assertNull(reader.readFrame());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
+            for (int i = 0; i < 8; i++) {
+                assertNull(reader.referenceFrameSyntaxResult(i));
+            }
+        }
     }
 
     /// Verifies that tile-group OBUs are rejected when no standalone or combined frame header is active.
@@ -281,7 +329,7 @@ final class Av1ImageReaderTest {
     ///
     /// @return a minimal single-tile tile-group payload
     private static byte[] singleTileGroupPayload() {
-        return new byte[]{0x12, 0x34};
+        return new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
     }
 
     /// Writes the reduced still-picture key frame header syntax without standalone trailing bits.
