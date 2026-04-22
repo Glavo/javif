@@ -844,9 +844,9 @@ public final class BlockNeighborContext {
     /// Scans the tile-local temporal motion field for samples overlapping the current block footprint.
     ///
     /// This is still a reduced approximation of AV1 `refmvs`: it samples the tile-local temporal
-    /// field in 8x8 units and feeds matching candidates into the provisional motion-vector stack,
-    /// but it does not yet perform full previous-frame projection or the smaller-block fringe walk
-    /// used by `dav1d`.
+    /// field in 8x8 units, includes the small-block fringe probes around the current footprint, and
+    /// feeds matching candidates into the provisional motion-vector stack. It still does not yet
+    /// perform full previous-frame projection.
     ///
     /// @param position the current block position
     /// @param size the current block size
@@ -886,42 +886,133 @@ public final class BlockNeighborContext {
         boolean nonZeroMotionVectorCandidate = false;
         for (int y8 = startY8; y8 < endY8; y8 += stepY8) {
             for (int x8 = startX8; x8 < endX8; x8 += stepX8) {
-                @Nullable TileDecodeContext.TemporalMotionBlock temporalBlock = temporalMotionField.block(x8, y8);
-                if (temporalBlock == null
-                        || containsTemporalMotionBlock(visitedBlocks, visitedCount, temporalBlock)
-                        || !sharesAnyReference(
+                TemporalSampleResult sample = sampleTemporalMotionFieldCoordinate(
+                        x8,
+                        y8,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        visitedBlocks,
+                        visitedCount,
+                        destination,
+                        count
+                );
+                visitedCount = sample.visitedCount();
+                count = sample.candidateCount();
+                nonZeroMotionVectorCandidate |= sample.nonZeroMotionVectorCandidate();
+            }
+        }
+        if (Math.min(nonNullSize.width4(), nonNullSize.height4()) >= 2
+                && Math.max(nonNullSize.width4(), nonNullSize.height4()) < 16) {
+            boolean hasBottom = endY8 < temporalMotionField.height8();
+            if (hasBottom && startX8 > 0) {
+                TemporalSampleResult bottomLeftSample = sampleTemporalMotionFieldCoordinate(
+                        startX8 - 1,
+                        endY8,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        visitedBlocks,
+                        visitedCount,
+                        destination,
+                        count
+                );
+                visitedCount = bottomLeftSample.visitedCount();
+                count = bottomLeftSample.candidateCount();
+                nonZeroMotionVectorCandidate |= bottomLeftSample.nonZeroMotionVectorCandidate();
+            }
+            if (endX8 < temporalMotionField.width8()) {
+                if (hasBottom) {
+                    TemporalSampleResult bottomRightSample = sampleTemporalMotionFieldCoordinate(
+                            endX8,
+                            endY8,
+                            compoundReference,
+                            referenceFrame0,
+                            referenceFrame1,
+                            visitedBlocks,
+                            visitedCount,
+                            destination,
+                            count
+                    );
+                    visitedCount = bottomRightSample.visitedCount();
+                    count = bottomRightSample.candidateCount();
+                    nonZeroMotionVectorCandidate |= bottomRightSample.nonZeroMotionVectorCandidate();
+                }
+                TemporalSampleResult rightEdgeSample = sampleTemporalMotionFieldCoordinate(
+                        endX8,
+                        endY8 - 1,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        visitedBlocks,
+                        visitedCount,
+                        destination,
+                        count
+                );
+                visitedCount = rightEdgeSample.visitedCount();
+                count = rightEdgeSample.candidateCount();
+                nonZeroMotionVectorCandidate |= rightEdgeSample.nonZeroMotionVectorCandidate();
+            }
+        }
+        return new TemporalScanResult(count, nonZeroMotionVectorCandidate ? 1 : 0);
+    }
+
+    /// Samples one tile-local temporal motion-field coordinate and appends any matching candidate.
+    ///
+    /// @param x8 the tile-relative X coordinate in 8x8 units
+    /// @param y8 the tile-relative Y coordinate in 8x8 units
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param visitedBlocks the temporal blocks that were already sampled for the current block
+    /// @param visitedCount the number of active entries in `visitedBlocks`
+    /// @param destination the destination candidate array
+    /// @param count the number of valid candidates already stored in `destination`
+    /// @return the result of sampling one tile-local temporal motion-field coordinate
+    private TemporalSampleResult sampleTemporalMotionFieldCoordinate(
+            int x8,
+            int y8,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            TileDecodeContext.TemporalMotionBlock[] visitedBlocks,
+            int visitedCount,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        @Nullable TileDecodeContext.TemporalMotionBlock temporalBlock = temporalMotionField.block(x8, y8);
+        if (temporalBlock == null
+                || containsTemporalMotionBlock(visitedBlocks, visitedCount, temporalBlock)
+                || !sharesAnyReference(
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                temporalBlock.compoundReference(),
+                temporalBlock.referenceFrame0(),
+                temporalBlock.referenceFrame1()
+        )) {
+            return new TemporalSampleResult(count, visitedCount, false);
+        }
+        visitedBlocks[visitedCount++] = temporalBlock;
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                provisionalMotionVectorCandidate(
                         compoundReference,
                         referenceFrame0,
                         referenceFrame1,
                         temporalBlock.compoundReference(),
                         temporalBlock.referenceFrame0(),
-                        temporalBlock.referenceFrame1()
-                )) {
-                    continue;
-                }
-                visitedBlocks[visitedCount++] = temporalBlock;
-                ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
-                        provisionalMotionVectorCandidate(
-                                compoundReference,
-                                referenceFrame0,
-                                referenceFrame1,
-                                temporalBlock.compoundReference(),
-                                temporalBlock.referenceFrame0(),
-                                temporalBlock.referenceFrame1(),
-                                temporalBlock.motionVector0(),
-                                temporalBlock.motionVector1() != null
-                                        ? temporalBlock.motionVector1()
-                                        : InterMotionVector.predicted(MotionVector.zero()),
-                                TEMPORAL_MOTION_WEIGHT
-                        );
-                count = appendOrAccumulateTemporalCandidate(destination, count, candidate);
-                if (!candidate.motionVector0().vector().equals(MotionVector.zero())
-                        || candidate.motionVector1() != null && !candidate.motionVector1().vector().equals(MotionVector.zero())) {
-                    nonZeroMotionVectorCandidate = true;
-                }
-            }
-        }
-        return new TemporalScanResult(count, nonZeroMotionVectorCandidate ? 1 : 0);
+                        temporalBlock.referenceFrame1(),
+                        temporalBlock.motionVector0(),
+                        temporalBlock.motionVector1() != null
+                                ? temporalBlock.motionVector1()
+                                : InterMotionVector.predicted(MotionVector.zero()),
+                        TEMPORAL_MOTION_WEIGHT
+                );
+        count = appendOrAccumulateTemporalCandidate(destination, count, candidate);
+        boolean nonZeroMotionVectorCandidate =
+                !candidate.motionVector0().vector().equals(MotionVector.zero())
+                        || candidate.motionVector1() != null && !candidate.motionVector1().vector().equals(MotionVector.zero());
+        return new TemporalSampleResult(count, visitedCount, nonZeroMotionVectorCandidate);
     }
 
     /// Returns the temporal segmentation-prediction context for the supplied block position.
@@ -2242,6 +2333,51 @@ public final class BlockNeighborContext {
         /// @return the zero-based provisional `globalmv` context index in `[0, 2)`
         public int globalMotionContext() {
             return globalMotionContext;
+        }
+    }
+
+    /// The result of sampling one temporal motion-field coordinate.
+    @NotNullByDefault
+    private static final class TemporalSampleResult {
+        /// The updated number of valid weighted candidates.
+        private final int candidateCount;
+
+        /// The updated number of visited temporal motion blocks.
+        private final int visitedCount;
+
+        /// Whether the sampled temporal candidate contributes a non-zero motion vector.
+        private final boolean nonZeroMotionVectorCandidate;
+
+        /// Creates one temporal motion-field sample result.
+        ///
+        /// @param candidateCount the updated number of valid weighted candidates
+        /// @param visitedCount the updated number of visited temporal motion blocks
+        /// @param nonZeroMotionVectorCandidate whether the sampled temporal candidate contributes a non-zero motion vector
+        private TemporalSampleResult(int candidateCount, int visitedCount, boolean nonZeroMotionVectorCandidate) {
+            this.candidateCount = candidateCount;
+            this.visitedCount = visitedCount;
+            this.nonZeroMotionVectorCandidate = nonZeroMotionVectorCandidate;
+        }
+
+        /// Returns the updated number of valid weighted candidates.
+        ///
+        /// @return the updated number of valid weighted candidates
+        public int candidateCount() {
+            return candidateCount;
+        }
+
+        /// Returns the updated number of visited temporal motion blocks.
+        ///
+        /// @return the updated number of visited temporal motion blocks
+        public int visitedCount() {
+            return visitedCount;
+        }
+
+        /// Returns whether the sampled temporal candidate contributes a non-zero motion vector.
+        ///
+        /// @return whether the sampled temporal candidate contributes a non-zero motion vector
+        public boolean nonZeroMotionVectorCandidate() {
+            return nonZeroMotionVectorCandidate;
         }
     }
 

@@ -516,6 +516,38 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
     }
 
+    /// Verifies that small-block temporal fringe probes contribute candidates even when the main
+    /// temporal sampling footprint does not contain any matching sample.
+    @Test
+    void provisionalInterModeContextsIncludeTemporalFringeCandidates() {
+        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(8, 8);
+        temporalMotionField.setBlock(
+                1,
+                0,
+                TileDecodeContext.TemporalMotionBlock.singleReference(
+                        0,
+                        InterMotionVector.resolved(new MotionVector(16, 20))
+                )
+        );
+        BlockNeighborContext context = BlockNeighborContext.create(
+                testTileContext(FrameType.INTER, true, temporalMotionField)
+        );
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(new BlockPosition(0, 0), BlockSize.SIZE_8X8, false, 0, -1);
+
+        assertEquals(0, provisionalContext.singleNewMvContext());
+        assertEquals(1, provisionalContext.singleGlobalMvContext());
+        assertEquals(0, provisionalContext.singleReferenceMvContext());
+        assertEquals(0, provisionalContext.compoundInterModeContext());
+        assertEquals(2, provisionalContext.candidateCount());
+        assertEquals(640, provisionalContext.candidateWeight(0));
+        assertEquals(64, provisionalContext.candidateWeight(1));
+        assertEquals(2, provisionalContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.resolved(new MotionVector(16, 20)), provisionalContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
+    }
+
     /// Verifies inter-frame initialization starts with non-intra neighbors.
     @Test
     void initializesInterFrameNeighborState() {
