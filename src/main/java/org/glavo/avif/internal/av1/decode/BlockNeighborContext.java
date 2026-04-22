@@ -36,6 +36,9 @@ public final class BlockNeighborContext {
     /// The weight penalty applied to secondary spatial candidates relative to direct-edge candidates.
     private static final int SECONDARY_SPATIAL_WEIGHT_PENALTY = 192;
 
+    /// The weight penalty applied to top-right spatial candidates relative to direct-edge candidates.
+    private static final int TOP_RIGHT_SPATIAL_WEIGHT_PENALTY = 64;
+
     /// The tile width rounded up to 4x4 units.
     private final int tileWidth4;
 
@@ -726,7 +729,7 @@ public final class BlockNeighborContext {
 
         int secondaryY4 = y4 - nonNullSize.height4() - 1;
         if (secondaryY4 >= 0) {
-            SecondarySpatialScanResult secondaryTopScan = scanStoredBlocksAlongSpan(
+            SpatialScanResult secondaryTopScan = scanStoredBlocksAlongSpan(
                     true,
                     secondaryY4,
                     x4,
@@ -734,6 +737,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    SECONDARY_SPATIAL_WEIGHT_PENALTY,
                     candidates,
                     candidateCount
             );
@@ -743,7 +747,7 @@ public final class BlockNeighborContext {
         }
         int secondaryX4 = x4 - nonNullSize.width4() - 1;
         if (secondaryX4 >= 0) {
-            SecondarySpatialScanResult secondaryLeftScan = scanStoredBlocksAlongSpan(
+            SpatialScanResult secondaryLeftScan = scanStoredBlocksAlongSpan(
                     false,
                     secondaryX4,
                     y4,
@@ -751,12 +755,30 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    SECONDARY_SPATIAL_WEIGHT_PENALTY,
                     candidates,
                     candidateCount
             );
             candidateCount = secondaryLeftScan.candidateCount();
             columnReferenceMatch |= secondaryLeftScan.referenceMatch();
             haveNewMotionVectorMatch |= secondaryLeftScan.haveNewMotionVectorMatch();
+        }
+        if (y4 > 0 && endX4 < tileWidth4) {
+            SpatialScanResult topRightScan = scanStoredBlocksAlongSpan(
+                    true,
+                    y4 - 1,
+                    endX4,
+                    Math.min(tileWidth4, endX4 + 1),
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    TOP_RIGHT_SPATIAL_WEIGHT_PENALTY,
+                    candidates,
+                    candidateCount
+            );
+            candidateCount = topRightScan.candidateCount();
+            rowReferenceMatch |= topRightScan.referenceMatch();
+            haveNewMotionVectorMatch |= topRightScan.haveNewMotionVectorMatch();
         }
 
         sortDescending(candidates, candidateCount);
@@ -1107,7 +1129,7 @@ public final class BlockNeighborContext {
         }
     }
 
-    /// Scans one secondary spatial row or column in the stored block map.
+    /// Scans one bounded spatial row or column in the stored block map.
     ///
     /// The scan is bounded to one far row or one far column and therefore remains smaller than a
     /// full AV1 `refmvs` walk. Each unique stored block is visited at most once per scan.
@@ -1121,8 +1143,9 @@ public final class BlockNeighborContext {
     /// @param referenceFrame1 the secondary current-block reference, or `-1`
     /// @param destination the destination candidate array
     /// @param count the number of valid candidates already stored in `destination`
-    /// @return the result of scanning one bounded secondary spatial row or column
-    private SecondarySpatialScanResult scanStoredBlocksAlongSpan(
+    /// @param weightPenalty the candidate-weight penalty applied to the scanned span
+    /// @return the result of scanning one bounded spatial row or column
+    private SpatialScanResult scanStoredBlocksAlongSpan(
             boolean rowScan,
             int fixedCoordinate4,
             int spanStart4,
@@ -1130,6 +1153,7 @@ public final class BlockNeighborContext {
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
+            int weightPenalty,
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
             int count
     ) {
@@ -1161,7 +1185,7 @@ public final class BlockNeighborContext {
                     storedBlock.referenceFrame0(),
                     storedBlock.referenceFrame1()
             );
-            int weight = Math.max(128, baseWeight - SECONDARY_SPATIAL_WEIGHT_PENALTY);
+            int weight = Math.max(128, baseWeight - weightPenalty);
             count = appendProvisionalCandidateWeights(
                     destination,
                     count,
@@ -1182,7 +1206,7 @@ public final class BlockNeighborContext {
                 haveNewMotionVectorMatch |= storedBlock.usesNewMotionVector();
             }
         }
-        return new SecondarySpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch);
+        return new SpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch);
     }
 
     /// Returns whether one stored-block list prefix already contains the supplied block instance.
@@ -1892,9 +1916,9 @@ public final class BlockNeighborContext {
         }
     }
 
-    /// The result of scanning one bounded secondary spatial row or column.
+    /// The result of scanning one bounded spatial row or column.
     @NotNullByDefault
-    private static final class SecondarySpatialScanResult {
+    private static final class SpatialScanResult {
         /// The updated number of valid weighted candidates.
         private final int candidateCount;
 
@@ -1904,12 +1928,12 @@ public final class BlockNeighborContext {
         /// Whether any matching scanned block used a `NEWMV`-carrying mode.
         private final boolean haveNewMotionVectorMatch;
 
-        /// Creates one bounded secondary spatial scan result.
+        /// Creates one bounded spatial scan result.
         ///
         /// @param candidateCount the updated number of valid weighted candidates
         /// @param referenceMatch whether the scanned row or column found any matching reference
         /// @param haveNewMotionVectorMatch whether any matching scanned block used a `NEWMV`-carrying mode
-        private SecondarySpatialScanResult(int candidateCount, boolean referenceMatch, boolean haveNewMotionVectorMatch) {
+        private SpatialScanResult(int candidateCount, boolean referenceMatch, boolean haveNewMotionVectorMatch) {
             this.candidateCount = candidateCount;
             this.referenceMatch = referenceMatch;
             this.haveNewMotionVectorMatch = haveNewMotionVectorMatch;
