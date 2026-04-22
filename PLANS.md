@@ -14,8 +14,21 @@ The repository already has:
 - transform layout decoding
 - partial residual syntax decoding
 - frame-level structural snapshots for CDF and temporal motion state
+- a minimal reconstruction core for a narrow first-pixel path
+- an internal ARGB output layer for `DecodedPlanes`
 
-The decoder still stops before pixel reconstruction. `Av1ImageReader.readFrame()` completes frame assembly and structural syntax decode, then fails with `FRAME_DECODE / NOT_IMPLEMENTED` instead of returning a `DecodedFrame`.
+`Av1ImageReader.readFrame()` no longer always stops before pixel reconstruction. The reader can now return a real `ArgbIntFrame` for a deliberately narrow subset:
+
+- raw AV1 OBU input only
+- serial execution only
+- single-tile frames only
+- visible `KEY` / `INTRA` frames
+- `8-bit`
+- `I400` and `I420`
+- non-directional intra prediction only
+- all-zero residual only
+
+Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
 The first end-to-end delivery target is intentionally narrow:
 
@@ -35,16 +48,35 @@ Everything else expands from that baseline after correctness is stable.
 - Input abstraction is already unified around `BufferedInput`.
 - Public API types already exist: `Av1ImageReader`, `Av1DecoderConfig`, `DecodeException`, `DecodedFrame`, `ArgbIntFrame`, and `ArgbLongFrame`.
 - `SequenceHeaderParser` and `FrameHeaderParser` already cover most frame-level syntax, including tiling, quantization, segmentation, loop filter, CDEF, restoration, skip mode, and reference-state inheritance.
+- Film grain parameters are already parsed and normalized into `FrameHeader`; synthesis is still deferred.
 - Tile parsing is already connected through `TileGroupHeaderParser`, `TileDataParser`, and `TileBitstreamParser`.
 - Structural decoding already exists through `FrameSyntaxDecoder`, `TilePartitionTreeReader`, `TileBlockHeaderReader`, `TileTransformLayoutReader`, and `TileResidualSyntaxReader`.
 - Reference slots already persist structural decode state, final tile CDF snapshots, and decoded temporal motion-field snapshots.
+- `DecodedPlane`, `DecodedPlanes`, and `ReferenceSurfaceSnapshot` already exist as the reconstruction/output boundary contracts.
+- `ArgbOutput` already converts `DecodedPlanes` into `ArgbIntFrame` for `8-bit I400/I420`.
+- A minimal reconstruction path already exists through `FrameReconstructor`, `IntraPredictor`, and `MutablePlaneBuffer`.
+- `Av1ImageReader` already connects structural decode -> reconstruction -> ARGB output for the current supported subset.
 
 ### Remaining Decode Boundary
 
-- Valid bitstreams still stop before decoded-plane construction and public frame output.
-- `show_existing_frame` only validates slot state and does not yet return a materialized output frame.
-- Film grain parameters are not fully parsed and film grain synthesis is not implemented.
-- Post-processing packages and runtime output packages do not yet exist.
+- Multi-tile frames are still rejected by the reconstruction/output path.
+- Only all-zero residual blocks reconstruct today. Non-zero residual still stops at `FRAME_DECODE / NOT_IMPLEMENTED`.
+- Only non-directional intra prediction currently reconstructs. Directional intra, filter-intra, CFL, palette, `intrabc`, inter prediction, and motion compensation are still unsupported.
+- Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
+- `show_existing_frame` still validates slot state but does not yet return a reused output frame.
+- Reference surfaces are not yet consumed by a real inter-frame pixel path.
+- Postfiltering and film grain synthesis are still not implemented.
+- `ArgbLongFrame`, `I422`, `I444`, and high bit-depth output paths are not implemented.
+
+### Current Progress Snapshot
+
+- `Track A`: in progress
+- `Track B`: parser-side work largely complete
+- `Track C`: in progress, first-pixel baseline reached
+- `Track D`: not started
+- `Track E`: partially complete for `8-bit I400/I420 -> ArgbIntFrame`
+- `Track F`: in progress, minimal public output path exists
+- `Track G`: in progress
 
 ## Frozen Interfaces and Constraints
 
@@ -71,11 +103,20 @@ The following internal contracts must be introduced or finalized early and treat
 - `FilmGrainParams`
   - Must be normalized inside `FrameHeader` and not left as partially parsed raw state.
 
+Current status:
+
+- `DecodedPlanes` exists and is already consumed by the output layer.
+- `ReferenceSurfaceSnapshot` exists and is already used as the reference-surface storage contract.
+- `FilmGrainParams` already exists in normalized form inside `FrameHeader`.
+- `ResidualLayout` and `TransformResidualUnit` still need expansion before full reconstruction, especially for chroma and richer transform/residual coverage.
+
 ## Remaining Work Tracks
 
 ### Track A: Syntax Tail
 
 Goal: finish all syntax that must exist before reconstruction can begin.
+
+Status: in progress.
 
 Scope:
 
@@ -91,6 +132,12 @@ Exit criteria:
 - Every decoded leaf block has a complete `BlockHeader`, `TransformLayout`, and `ResidualLayout`.
 - No supported valid path depends on fallback exceptions or unsupported-path shortcuts inside the syntax layer.
 
+Current gap after the first-pixel milestone:
+
+- Non-zero residual decode still does not cover the full reconstruction-ready coefficient space.
+- Chroma residual syntax is still missing.
+- Several block features remain syntax-only or rejected during reconstruction: directional intra, CFL, palette, filter-intra, inter prediction.
+
 Write scope:
 
 - Existing `src/main/java/org/glavo/avif/internal/av1/decode/**`
@@ -100,6 +147,8 @@ Write scope:
 ### Track B: Frame Header and Film Grain Parameters
 
 Goal: finish frame-level parsing so later runtime and postfilter stages do not need parser changes.
+
+Status: mostly complete on the parser/model side.
 
 Scope:
 
@@ -112,6 +161,8 @@ Exit criteria:
 - `FrameHeader` fully represents grain-related and postfilter-related frame state.
 - No valid grain-bearing frame fails in the parser with `NOT_IMPLEMENTED`.
 
+Remaining work inside this track is now mostly validation and downstream consumption, not core parser bring-up.
+
 Write scope:
 
 - `src/main/java/org/glavo/avif/internal/av1/parse/FrameHeaderParser.java`
@@ -121,6 +172,8 @@ Write scope:
 ### Track C: Reconstruction Core
 
 Goal: create decoded planes from block syntax and residuals.
+
+Status: in progress. First-pixel baseline reached.
 
 Scope:
 
@@ -137,13 +190,28 @@ Execution order inside the track:
 
 1. `8-bit I400 KEY/INTRA`
 2. `8-bit I420 KEY/INTRA`
-3. visible inter/reference frame support
-4. wider pixel-format and bit-depth coverage
+3. non-zero residual support for the current key/intra path
+4. visible inter/reference frame support
+5. wider pixel-format and bit-depth coverage
 
 Exit criteria:
 
 - A decoded frame produces stable `DecodedPlanes`.
 - Reference surfaces can be refreshed and reused for later frames.
+
+Completed within this track already:
+
+- mutable plane storage
+- minimal intra prediction
+- first public first-pixel path for single-tile `8-bit I400/I420` key/intra frames with all-zero residual
+
+Immediate next steps inside this track:
+
+- dequantization and inverse transform
+- non-zero luma residual application
+- chroma residual application
+- directional intra modes
+- inter reconstruction and reference-surface consumption
 
 Write scope:
 
@@ -157,6 +225,8 @@ Dependency:
 ### Track D: Postfilter and Film Grain Application
 
 Goal: implement the full decoder output pipeline after reconstruction.
+
+Status: not started.
 
 Scope:
 
@@ -189,6 +259,8 @@ Dependencies:
 
 Goal: convert decoded planes into public frame payloads.
 
+Status: partially complete.
+
 Scope:
 
 - Add a new `org.glavo.avif.internal.av1.output` package.
@@ -207,6 +279,13 @@ Exit criteria:
 
 - Output conversion no longer depends on decoder-internal storage details beyond `DecodedPlanes`.
 
+Already complete in this track:
+
+- `ArgbOutput`
+- `YuvToRgbTransform`
+- `OutputFrameMetadata`
+- `8-bit I400/I420 -> ArgbIntFrame`
+
 Write scope:
 
 - New `src/main/java/org/glavo/avif/internal/av1/output/**`
@@ -219,6 +298,8 @@ Dependency:
 ### Track F: Public Runtime Integration
 
 Goal: connect the internal decode pipeline to public frame delivery.
+
+Status: in progress.
 
 Scope:
 
@@ -236,6 +317,19 @@ Exit criteria:
 - `readAllFrames()` matches incremental reading.
 - Valid supported streams no longer fail with the current placeholder `NOT_IMPLEMENTED` boundary.
 
+Already complete in this track:
+
+- `readFrame()` returns `ArgbIntFrame` for the current narrow first-pixel subset
+- frame filtering for `decodeFrameType` is applied at the current public output boundary
+- syntax reference state and reconstructed reference surfaces are stored separately
+
+Still missing in this track:
+
+- `show_existing_frame` output reuse
+- invisible-frame output policy beyond the current narrow path
+- inter/reference-frame output lifecycle
+- film-grain-aware final output
+
 Write scope:
 
 - Existing `src/main/java/org/glavo/avif/decode/**`
@@ -249,6 +343,8 @@ Dependencies:
 ### Track G: Oracle and Regression Harness
 
 Goal: replace existence-only tests with fixed oracle coverage and end-to-end validation.
+
+Status: in progress.
 
 Scope:
 
@@ -270,6 +366,13 @@ Exit criteria:
 
 - Newly fixed bugs always add a stable sample-backed regression test.
 - The suite no longer depends primarily on brute-force payload search to prove a path is reachable.
+
+Already complete in this track:
+
+- fixed structural fixtures and exact-oracle syntax tests
+- reader contract tests for malformed streams and stable error codes
+- first-pixel reader success tests
+- output-layer and reconstruction-layer unit tests
 
 Write scope:
 
@@ -354,6 +457,10 @@ Acceptance:
 - No supported syntax path still depends on placeholder-only decode branches.
 - The reader still may stop before pixel reconstruction, but the syntax boundary is stable and explicit.
 
+Status:
+
+- partially achieved, but not yet closed
+
 ### M2: First-Pixel Output
 
 Tracks:
@@ -366,6 +473,12 @@ Acceptance:
 
 - `Av1ImageReader` can return `ArgbIntFrame` for representative `8-bit I400/I420` visible key/intra samples.
 - Pixel arrays, metadata, and source-equivalence checks are stable across all `BufferedInput` adapters.
+
+Status:
+
+- partially achieved now
+- current first-pixel output works for single-tile, all-zero-residual, non-directional key/intra samples
+- milestone is not closed until non-zero residual and a less artificial sample set are covered
 
 ### M3: Reference and Inter Frames
 
@@ -381,6 +494,10 @@ Acceptance:
 - Reference-surface refresh and reuse are stable.
 - `show_existing_frame` produces output instead of failing at the old boundary.
 
+Status:
+
+- not started
+
 ### M4: Full Presentation Pipeline
 
 Tracks:
@@ -395,6 +512,10 @@ Acceptance:
 - `applyFilmGrain`, `outputInvisibleFrames`, and `decodeFrameType` have stable public behavior.
 - `readAllFrames()` and `presentationIndex` behavior are locked by tests.
 
+Status:
+
+- not started
+
 ### M5: Coverage Closure
 
 Tracks:
@@ -406,6 +527,10 @@ Tracks:
 Acceptance:
 
 - Representative coverage exists for `8/10/12-bit`, `I400/I420/I422/I444`, key/intra/inter/switch, visible/invisible frames, `show_existing_frame`, super-resolution, loop filter, CDEF, restoration, and film grain on/off.
+
+Status:
+
+- not started
 
 ## Test Strategy
 
