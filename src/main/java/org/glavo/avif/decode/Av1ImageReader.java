@@ -282,10 +282,23 @@ public final class Av1ImageReader implements AutoCloseable {
         FrameHeader frameHeader = assembly.frameHeader();
         @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
         @Nullable FrameSyntaxDecodeResult temporalReferenceResult = selectTemporalReferenceFrameSyntaxResult(frameHeader);
-        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(
-                cdfReferenceResult,
-                temporalReferenceResult
-        ).decode(assembly);
+        FrameSyntaxDecodeResult syntaxDecodeResult;
+        try {
+            syntaxDecodeResult = new FrameSyntaxDecoder(
+                    cdfReferenceResult,
+                    temporalReferenceResult
+            ).decode(assembly);
+        } catch (IllegalStateException exception) {
+            throw new DecodeException(
+                    DecodeErrorCode.NOT_IMPLEMENTED,
+                    DecodeStage.FRAME_DECODE,
+                    exception.getMessage() != null ? exception.getMessage() : "AV1 frame decoding is not implemented yet",
+                    packet.streamOffset(),
+                    packet.obuIndex(),
+                    null,
+                    exception
+            );
+        }
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
         refreshReferenceFrameState(frameHeader, storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult));
         throw notImplementedForFrame(packet);

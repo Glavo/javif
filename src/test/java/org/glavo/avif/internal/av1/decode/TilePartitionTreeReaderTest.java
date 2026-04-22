@@ -38,11 +38,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `TilePartitionTreeReader`.
 @NotNullByDefault
 final class TilePartitionTreeReaderTest {
+    /// One supported 64x64 key-frame tile payload for partition-tree tests.
+    private static final byte[] SUPPORTED_FULL_TILE_PAYLOAD = findSupportedPayload(FrameType.KEY, 64, 64);
+
+    /// One supported clipped key-frame tile payload for partition-tree tests.
+    private static final byte[] SUPPORTED_CLIPPED_TILE_PAYLOAD = findSupportedPayload(FrameType.KEY, 40, 28);
+
     /// Verifies that one 64x64 tile can be expanded into a non-empty partition tree with in-bounds leaves.
     @Test
     void readsTilePartitionTree() {
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createTileContext(FrameType.KEY, new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A, 0x00, 0x00, 0x00})
+                createTileContext(FrameType.KEY, SUPPORTED_FULL_TILE_PAYLOAD)
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
@@ -59,7 +65,7 @@ final class TilePartitionTreeReaderTest {
     @Test
     void readsClippedTilePartitionTree() {
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createClippedTileContext(new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18, 0x00, 0x00, 0x00})
+                createClippedTileContext(SUPPORTED_CLIPPED_TILE_PAYLOAD)
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
@@ -112,6 +118,31 @@ final class TilePartitionTreeReaderTest {
             }
         }
         return false;
+    }
+
+    /// Finds one payload that the current partition-tree reader can fully consume.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @return one payload that the current partition-tree reader can fully consume
+    private static byte[] findSupportedPayload(FrameType frameType, int codedWidth, int codedHeight) {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+                try {
+                    TilePartitionTreeReader reader = new TilePartitionTreeReader(
+                            createContext(frameType, codedWidth, codedHeight, payload)
+                    );
+                    if (reader.readTile().length > 0) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported AC residual payloads are skipped while searching for a supported fixture.
+                }
+            }
+        }
+        throw new IllegalStateException("No supported partition-tree payload was found");
     }
 
     /// Creates a simple 64x64 tile context used by partition-tree tests.

@@ -152,9 +152,10 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
     }
 
-    /// Verifies that structural frame-decode results are stored in refreshed reference slots.
+    /// Verifies that the public reader reports `NOT_IMPLEMENTED` before any structural reference
+    /// state is stored when frame syntax hits a deeper unsupported residual path.
     @Test
-    void readFrameStoresFrameSyntaxResultsInReferenceSlots() throws IOException {
+    void readFrameStopsBeforeStoringReferenceStateWhenStructuralDecodeIsIncomplete() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -165,19 +166,17 @@ final class Av1ImageReaderTest {
         )) {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-
-            FrameSyntaxDecodeResult lastResult = reader.lastFrameSyntaxDecodeResult();
-            assertNotNull(lastResult);
-            assertEquals(1, lastResult.tileCount());
             for (int i = 0; i < 8; i++) {
-                assertNotNull(reader.referenceFrameSyntaxResult(i));
+                assertNull(reader.referenceFrameSyntaxResult(i));
             }
+            assertNull(reader.lastFrameSyntaxDecodeResult());
         }
     }
 
-    /// Verifies that a new sequence header clears stored structural reference-frame state.
+    /// Verifies that a new sequence header still leaves structural reference-frame state cleared
+    /// when the previous frame stopped at the current decode boundary.
     @Test
-    void readFrameClearsStoredFrameSyntaxResultsOnSequenceReset() throws IOException {
+    void readFrameKeepsReferenceStateClearedOnSequenceResetAfterEarlyDecodeBoundary() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload()),
@@ -188,7 +187,7 @@ final class Av1ImageReaderTest {
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertThrows(DecodeException.class, reader::readFrame);
-            assertNotNull(reader.referenceFrameSyntaxResult(0));
+            assertNull(reader.referenceFrameSyntaxResult(0));
 
             assertNull(reader.readFrame());
             assertNull(reader.lastFrameSyntaxDecodeResult());
@@ -285,8 +284,8 @@ final class Av1ImageReaderTest {
         writer.writeBits(1, 2);
         writer.writeBits(9, 4);
         writer.writeBits(8, 4);
-        writer.writeBits(639, 10);
-        writer.writeBits(359, 9);
+        writer.writeBits(63, 10);
+        writer.writeBits(63, 9);
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);
@@ -318,10 +317,18 @@ final class Av1ImageReaderTest {
     ///
     /// @return the reduced still-picture combined frame payload
     private static byte[] reducedStillPictureCombinedFramePayload() {
+        return reducedStillPictureCombinedFramePayload(singleTileGroupPayload());
+    }
+
+    /// Creates a reduced still-picture combined frame payload with a caller-supplied tile group.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the frame header
+    /// @return the reduced still-picture combined frame payload
+    private static byte[] reducedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
         BitWriter writer = new BitWriter();
         writeReducedStillPictureFrameHeaderBits(writer);
         writer.padToByteBoundary();
-        writer.writeBytes(singleTileGroupPayload());
+        writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
     }
 

@@ -238,6 +238,86 @@ public final class TileSyntaxReader {
         );
     }
 
+    /// Decodes the end-of-block prefix for one transform block.
+    ///
+    /// The returned value follows the AV1 `eob` scan-index convention where `0` means a DC-only
+    /// block, positive values indicate that at least one AC coefficient is present, and `-1` is
+    /// never returned.
+    ///
+    /// @param transformSize the active transform size
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param oneDimensional whether the active transform type belongs to a 1D transform class
+    /// @return the decoded end-of-block scan index
+    public int readEndOfBlockIndex(TransformSize transformSize, boolean chroma, boolean oneDimensional) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int tx2dSizeContext = Math.min(nonNullTransformSize.log2Width4(), 3)
+                + Math.min(nonNullTransformSize.log2Height4(), 3);
+        int eob = msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableEndOfBlockPrefixCdf(tx2dSizeContext, chroma, oneDimensional),
+                4 + tx2dSizeContext
+        );
+        if (eob <= 1) {
+            return eob;
+        }
+
+        throw new IllegalStateException("AC end-of-block syntax is not implemented yet");
+    }
+
+    /// Decodes one end-of-block/DC base token for the supplied transform context and table context.
+    ///
+    /// AV1 stores this symbol as `token_minus_1`, so the returned token is in `[1, 3]`.
+    ///
+    /// @param transformSize the active transform size
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param context the zero-based end-of-block base-token context in `[0, 4)`
+    /// @return the decoded end-of-block/DC base token in `[1, 3]`
+    public int readEndOfBlockBaseToken(TransformSize transformSize, boolean chroma, int context) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        return 1 + msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableEndOfBlockBaseTokenCdf(nonNullTransformSize.coefficientContextIndex(), chroma, context),
+                2
+        );
+    }
+
+    /// Decodes one DC high token from the `br_tok` context `0`.
+    ///
+    /// This path currently covers the DC-only residual syntax where higher AC contexts are not yet
+    /// required.
+    ///
+    /// @param transformSize the active transform size
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @return the decoded high token in `[3, 15]`
+    public int readDcHighToken(TransformSize transformSize, boolean chroma) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        return msacDecoder.decodeHighToken(
+                cdfContext.mutableDcHighTokenCdf(Math.min(nonNullTransformSize.coefficientContextIndex(), 3), chroma)
+        );
+    }
+
+    /// Decodes one DC-sign flag for the supplied plane and context.
+    ///
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param context the zero-based DC-sign context in `[0, 3)`
+    /// @return whether the decoded DC coefficient is negative
+    public boolean readDcSignFlag(boolean chroma, int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableDcSignCdf(chroma, context));
+    }
+
+    /// Decodes one AV1 coefficient Golomb extension value.
+    ///
+    /// @return the decoded coefficient Golomb extension value
+    public int readCoefficientGolomb() {
+        int length = 0;
+        int value = 1;
+        while (!msacDecoder.decodeBooleanEqui() && length < 32) {
+            length++;
+        }
+        while (length-- > 0) {
+            value = (value << 1) | (msacDecoder.decodeBooleanEqui() ? 1 : 0);
+        }
+        return value - 1;
+    }
+
     /// Decodes an unsigned literal made of equiprobable binary values.
     ///
     /// @param bitCount the number of equiprobable bits to decode

@@ -214,6 +214,188 @@ public final class CdfContext {
             }
     });
 
+    /// The transformed default end-of-block prefix CDFs grouped by clamped transform area.
+    private static final int[][][][] DEFAULT_END_OF_BLOCK_PREFIX_CDFS = inverse4d(new int[][][][]{
+            {
+                    {
+                            {840, 1039, 1980, 4895},
+                            {370, 671, 1883, 4471}
+                    },
+                    {
+                            {3247, 4950, 9688, 14563},
+                            {1904, 3354, 7763, 14647}
+                    }
+            },
+            {
+                    {
+                            {400, 520, 977, 2102, 6542},
+                            {210, 405, 1315, 3326, 7537}
+                    },
+                    {
+                            {2636, 4273, 7588, 11794, 20401},
+                            {1786, 3179, 6902, 11357, 19054}
+                    }
+            },
+            {
+                    {
+                            {329, 498, 1101, 1784, 3265, 7758},
+                            {335, 730, 1459, 5494, 8755, 12997}
+                    },
+                    {
+                            {3505, 5304, 10086, 13814, 17684, 23370},
+                            {1563, 2700, 4876, 10911, 14706, 22480}
+                    }
+            },
+            {
+                    {
+                            {219, 482, 1140, 2091, 3680, 6028, 12586},
+                            {371, 699, 1254, 4830, 9479, 12562, 17497}
+                    },
+                    {
+                            {5245, 7456, 12880, 15852, 20033, 23932, 27608},
+                            {2054, 3472, 5869, 14232, 18242, 20590, 26752}
+                    }
+            },
+            {
+                    {
+                            {310, 584, 1887, 3589, 6168, 8611, 11352, 15652},
+                            {998, 1850, 2998, 5604, 17341, 19888, 22899, 25583}
+                    },
+                    {
+                            {2520, 3240, 5952, 8870, 12577, 17558, 19954, 24168},
+                            {2203, 4130, 7435, 10739, 20652, 23681, 25609, 27261}
+                    }
+            },
+            {
+                    {
+                            {641, 983, 3707, 5430, 10234, 14958, 18788, 23412, 26061},
+                            {641, 983, 3707, 5430, 10234, 14958, 18788, 23412, 26061}
+                    },
+                    {
+                            {5095, 6446, 9996, 13354, 16017, 17986, 20919, 26129, 29140},
+                            {5095, 6446, 9996, 13354, 16017, 17986, 20919, 26129, 29140}
+                    }
+            },
+            {
+                    {
+                            {393, 421, 751, 1623, 3160, 6352, 13345, 18047, 22571, 25830},
+                            {393, 421, 751, 1623, 3160, 6352, 13345, 18047, 22571, 25830}
+                    },
+                    {
+                            {1865, 1988, 2930, 4242, 10533, 16538, 21354, 27255, 28546, 31784},
+                            {1865, 1988, 2930, 4242, 10533, 16538, 21354, 27255, 28546, 31784}
+                    }
+            }
+    });
+
+    /// The transformed default end-of-block base-token CDFs grouped by AV1 transform-context class.
+    private static final int[][][][] DEFAULT_END_OF_BLOCK_BASE_TOKEN_CDFS = inverse4d(new int[][][][]{
+            {
+                    {
+                            {17837, 29055},
+                            {29600, 31446},
+                            {30844, 31878},
+                            {24926, 28948}
+                    },
+                    {
+                            {21365, 30026},
+                            {30512, 32423},
+                            {31658, 32621},
+                            {29630, 31881}
+                    }
+            },
+            {
+                    {
+                            {5717, 26477},
+                            {30491, 31703},
+                            {31550, 32158},
+                            {29648, 31491}
+                    },
+                    {
+                            {12608, 27820},
+                            {30680, 32225},
+                            {30809, 32335},
+                            {31299, 32423}
+                    }
+            },
+            {
+                    {
+                            {1786, 12612},
+                            {30663, 31625},
+                            {32339, 32468},
+                            {31148, 31833}
+                    },
+                    {
+                            {18857, 23865},
+                            {31428, 32428},
+                            {31744, 32373},
+                            {31775, 32526}
+                    }
+            },
+            {
+                    {
+                            {1787, 2532},
+                            {30832, 31662},
+                            {31824, 32682},
+                            {32133, 32569}
+                    },
+                    {
+                            {13751, 22235},
+                            {32089, 32409},
+                            {27084, 27920},
+                            {29291, 32594}
+                    }
+            },
+            {
+                    {
+                            {1725, 3449},
+                            {31102, 31935},
+                            {32457, 32613},
+                            {32412, 32649}
+                    },
+                    {
+                            {10923, 21845},
+                            {10923, 21845},
+                            {10923, 21845},
+                            {10923, 21845}
+                    }
+            }
+    });
+
+    /// The transformed default DC-sign CDFs for luma and chroma planes.
+    private static final int[][][] DEFAULT_DC_SIGN_CDFS = inverse3d(new int[][][]{
+            {
+                    {16000},
+                    {13056},
+                    {18816}
+            },
+            {
+                    {15232},
+                    {12928},
+                    {17280}
+            }
+    });
+
+    /// The transformed default DC high-token CDFs for the `br_tok` context `0`.
+    private static final int[][][] DEFAULT_DC_HIGH_TOKEN_CDFS = inverse3d(new int[][][]{
+            {
+                    {14298, 20718, 24174},
+                    {15967, 22905, 26286}
+            },
+            {
+                    {14406, 20862, 24414},
+                    {15460, 21696, 25469}
+            },
+            {
+                    {10563, 16233, 19763},
+                    {10870, 16684, 20949}
+            },
+            {
+                    {2331, 3662, 5244},
+                    {5842, 9229, 10838}
+            }
+    });
+
     /// The transformed default delta-q CDF.
     private static final int[] DEFAULT_DELTA_Q_CDF = inverse(608, 648, 91);
 
@@ -643,6 +825,18 @@ public final class CdfContext {
     /// The mutable coefficient-skip CDFs grouped by AV1 transform-context class.
     private final int[][][] coefficientSkipCdfs;
 
+    /// The mutable end-of-block prefix CDFs grouped by clamped transform area.
+    private final int[][][][] endOfBlockPrefixCdfs;
+
+    /// The mutable end-of-block base-token CDFs grouped by AV1 transform-context class.
+    private final int[][][][] endOfBlockBaseTokenCdfs;
+
+    /// The mutable DC-sign CDFs for luma and chroma planes.
+    private final int[][][] dcSignCdfs;
+
+    /// The mutable DC high-token CDFs for the `br_tok` context `0`.
+    private final int[][][] dcHighTokenCdfs;
+
     /// The mutable delta-q CDF.
     private final int[] deltaQCdf;
 
@@ -743,6 +937,10 @@ public final class CdfContext {
     /// @param transformSizeCdfs the mutable transform-size CDFs
     /// @param transformPartitionCdfs the mutable inter transform-partition CDFs
     /// @param coefficientSkipCdfs the mutable coefficient-skip CDFs grouped by AV1 transform-context class
+    /// @param endOfBlockPrefixCdfs the mutable end-of-block prefix CDFs
+    /// @param endOfBlockBaseTokenCdfs the mutable end-of-block base-token CDFs
+    /// @param dcSignCdfs the mutable DC-sign CDFs
+    /// @param dcHighTokenCdfs the mutable DC high-token CDFs
     /// @param deltaQCdf the mutable delta-q CDF
     /// @param deltaLfCdfs the mutable delta-lf CDFs
     /// @param motionVectorJointCdf the mutable motion-vector joint CDF
@@ -788,6 +986,10 @@ public final class CdfContext {
             int[][][] transformSizeCdfs,
             int[][] transformPartitionCdfs,
             int[][][] coefficientSkipCdfs,
+            int[][][][] endOfBlockPrefixCdfs,
+            int[][][][] endOfBlockBaseTokenCdfs,
+            int[][][] dcSignCdfs,
+            int[][][] dcHighTokenCdfs,
             int[] deltaQCdf,
             int[][] deltaLfCdfs,
             int[] motionVectorJointCdf,
@@ -833,6 +1035,10 @@ public final class CdfContext {
         this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
         this.transformPartitionCdfs = Objects.requireNonNull(transformPartitionCdfs, "transformPartitionCdfs");
         this.coefficientSkipCdfs = Objects.requireNonNull(coefficientSkipCdfs, "coefficientSkipCdfs");
+        this.endOfBlockPrefixCdfs = Objects.requireNonNull(endOfBlockPrefixCdfs, "endOfBlockPrefixCdfs");
+        this.endOfBlockBaseTokenCdfs = Objects.requireNonNull(endOfBlockBaseTokenCdfs, "endOfBlockBaseTokenCdfs");
+        this.dcSignCdfs = Objects.requireNonNull(dcSignCdfs, "dcSignCdfs");
+        this.dcHighTokenCdfs = Objects.requireNonNull(dcHighTokenCdfs, "dcHighTokenCdfs");
         this.deltaQCdf = Objects.requireNonNull(deltaQCdf, "deltaQCdf");
         this.deltaLfCdfs = Objects.requireNonNull(deltaLfCdfs, "deltaLfCdfs");
         this.motionVectorJointCdf = Objects.requireNonNull(motionVectorJointCdf, "motionVectorJointCdf");
@@ -884,6 +1090,10 @@ public final class CdfContext {
                 deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_PARTITION_CDFS),
                 deepCopy(DEFAULT_COEFFICIENT_SKIP_CDFS),
+                deepCopy(DEFAULT_END_OF_BLOCK_PREFIX_CDFS),
+                deepCopy(DEFAULT_END_OF_BLOCK_BASE_TOKEN_CDFS),
+                deepCopy(DEFAULT_DC_SIGN_CDFS),
+                deepCopy(DEFAULT_DC_HIGH_TOKEN_CDFS),
                 Arrays.copyOf(DEFAULT_DELTA_Q_CDF, DEFAULT_DELTA_Q_CDF.length),
                 deepCopy(DEFAULT_DELTA_LF_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
@@ -936,6 +1146,10 @@ public final class CdfContext {
                 deepCopy(transformSizeCdfs),
                 deepCopy(transformPartitionCdfs),
                 deepCopy(coefficientSkipCdfs),
+                deepCopy(endOfBlockPrefixCdfs),
+                deepCopy(endOfBlockBaseTokenCdfs),
+                deepCopy(dcSignCdfs),
+                deepCopy(dcHighTokenCdfs),
                 Arrays.copyOf(deltaQCdf, deltaQCdf.length),
                 deepCopy(deltaLfCdfs),
                 Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
@@ -1116,6 +1330,50 @@ public final class CdfContext {
     public int[] mutableCoefficientSkipCdf(int transformContextIndex, int context) {
         int[][] table = coefficientSkipCdfs[Objects.checkIndex(transformContextIndex, coefficientSkipCdfs.length)];
         return table[Objects.checkIndex(context, table.length)];
+    }
+
+    /// Returns the live mutable end-of-block prefix CDF for the supplied transform-area context.
+    ///
+    /// @param tx2dSizeContext the clamped transform-area context in `[0, 7)`
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param oneDimensional whether the active transform type belongs to a 1D transform class
+    /// @return the live mutable end-of-block prefix CDF for the supplied inputs
+    public int[] mutableEndOfBlockPrefixCdf(int tx2dSizeContext, boolean chroma, boolean oneDimensional) {
+        int[][][] areaTable = endOfBlockPrefixCdfs[Objects.checkIndex(tx2dSizeContext, endOfBlockPrefixCdfs.length)];
+        int[][] chromaTable = areaTable[chroma ? 1 : 0];
+        return chromaTable[oneDimensional ? 1 : 0];
+    }
+
+    /// Returns the live mutable end-of-block base-token CDF for the supplied transform context.
+    ///
+    /// @param transformContextIndex the AV1 transform-context group index in `[0, 5)`
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param context the zero-based end-of-block base-token context in `[0, 4)`
+    /// @return the live mutable end-of-block base-token CDF for the supplied inputs
+    public int[] mutableEndOfBlockBaseTokenCdf(int transformContextIndex, boolean chroma, int context) {
+        int[][][] transformTable = endOfBlockBaseTokenCdfs[Objects.checkIndex(transformContextIndex, endOfBlockBaseTokenCdfs.length)];
+        int[][] chromaTable = transformTable[chroma ? 1 : 0];
+        return chromaTable[Objects.checkIndex(context, chromaTable.length)];
+    }
+
+    /// Returns the live mutable DC-sign CDF for the supplied plane and context.
+    ///
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param context the zero-based DC-sign context in `[0, 3)`
+    /// @return the live mutable DC-sign CDF for the supplied plane and context
+    public int[] mutableDcSignCdf(boolean chroma, int context) {
+        int[][] planeTable = dcSignCdfs[chroma ? 1 : 0];
+        return planeTable[Objects.checkIndex(context, planeTable.length)];
+    }
+
+    /// Returns the live mutable DC high-token CDF for the supplied transform context and plane.
+    ///
+    /// @param transformContextIndex the AV1 transform-context group index in `[0, 4)`
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @return the live mutable DC high-token CDF for the supplied inputs
+    public int[] mutableDcHighTokenCdf(int transformContextIndex, boolean chroma) {
+        int[][] transformTable = dcHighTokenCdfs[Objects.checkIndex(transformContextIndex, dcHighTokenCdfs.length)];
+        return transformTable[chroma ? 1 : 0];
     }
 
     /// Returns the live mutable delta-q CDF.

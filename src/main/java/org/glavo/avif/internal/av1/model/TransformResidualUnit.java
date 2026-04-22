@@ -17,13 +17,14 @@ package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
+import java.util.Arrays;
 import java.util.Objects;
 
-/// One transform residual unit after the first coefficient-side syntax pass.
+/// One transform residual unit after the current coefficient-side syntax pass.
 ///
-/// The current implementation stops after `txb_skip` / all-zero signaling, so the stored
-/// coefficient-context byte is still provisional for non-zero blocks and does not yet carry full
-/// token statistics.
+/// Coefficients are stored as signed transform-domain levels in natural raster order. The current
+/// implementation supports all-zero units and DC-only units, while higher-order AC token decoding
+/// is still introduced incrementally.
 @NotNullByDefault
 public final class TransformResidualUnit {
     /// The tile-relative luma-grid origin of this transform residual unit.
@@ -32,30 +33,49 @@ public final class TransformResidualUnit {
     /// The transform size used by this residual unit.
     private final TransformSize size;
 
-    /// Whether the transform block is signaled as all-zero through `txb_skip`.
-    private final boolean allZero;
+    /// The scan index of the last non-zero coefficient, or `-1` for all-zero units.
+    private final int endOfBlockIndex;
 
-    /// The provisional coefficient-context byte written back to neighbor state.
+    /// The signed transform-domain coefficients in natural raster order.
+    private final int[] coefficients;
+
+    /// The coefficient-context byte written back to neighbor state.
     private final int coefficientContextByte;
 
     /// Creates one transform residual unit.
     ///
     /// @param position the tile-relative luma-grid origin of this transform residual unit
     /// @param size the transform size used by this residual unit
-    /// @param allZero whether the transform block is signaled as all-zero through `txb_skip`
-    /// @param coefficientContextByte the provisional coefficient-context byte written back to neighbor state
+    /// @param endOfBlockIndex the scan index of the last non-zero coefficient, or `-1` for all-zero units
+    /// @param coefficients the signed transform-domain coefficients in natural raster order
+    /// @param coefficientContextByte the coefficient-context byte written back to neighbor state
     public TransformResidualUnit(
             BlockPosition position,
             TransformSize size,
-            boolean allZero,
+            int endOfBlockIndex,
+            int[] coefficients,
             int coefficientContextByte
     ) {
         this.position = Objects.requireNonNull(position, "position");
         this.size = Objects.requireNonNull(size, "size");
+        if (endOfBlockIndex < -1 || endOfBlockIndex >= size.widthPixels() * size.heightPixels()) {
+            throw new IllegalArgumentException("endOfBlockIndex out of range: " + endOfBlockIndex);
+        }
+        this.endOfBlockIndex = endOfBlockIndex;
+        this.coefficients = Arrays.copyOf(Objects.requireNonNull(coefficients, "coefficients"), coefficients.length);
+        if (this.coefficients.length != size.widthPixels() * size.heightPixels()) {
+            throw new IllegalArgumentException("coefficients length does not match transform area");
+        }
+        if (endOfBlockIndex < 0) {
+            for (int coefficient : this.coefficients) {
+                if (coefficient != 0) {
+                    throw new IllegalArgumentException("all-zero residual units must not carry coefficients");
+                }
+            }
+        }
         if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
             throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
         }
-        this.allZero = allZero;
         this.coefficientContextByte = coefficientContextByte;
     }
 
@@ -77,12 +97,33 @@ public final class TransformResidualUnit {
     ///
     /// @return whether the transform block is signaled as all-zero through `txb_skip`
     public boolean allZero() {
-        return allZero;
+        return endOfBlockIndex < 0;
     }
 
-    /// Returns the provisional coefficient-context byte written back to neighbor state.
+    /// Returns the scan index of the last non-zero coefficient, or `-1` for all-zero units.
     ///
-    /// @return the provisional coefficient-context byte written back to neighbor state
+    /// @return the scan index of the last non-zero coefficient, or `-1` for all-zero units
+    public int endOfBlockIndex() {
+        return endOfBlockIndex;
+    }
+
+    /// Returns the signed transform-domain coefficients in natural raster order.
+    ///
+    /// @return the signed transform-domain coefficients in natural raster order
+    public int[] coefficients() {
+        return Arrays.copyOf(coefficients, coefficients.length);
+    }
+
+    /// Returns the decoded DC coefficient in natural raster order.
+    ///
+    /// @return the decoded DC coefficient in natural raster order
+    public int dcCoefficient() {
+        return coefficients[0];
+    }
+
+    /// Returns the coefficient-context byte written back to neighbor state.
+    ///
+    /// @return the coefficient-context byte written back to neighbor state
     public int coefficientContextByte() {
         return coefficientContextByte;
     }

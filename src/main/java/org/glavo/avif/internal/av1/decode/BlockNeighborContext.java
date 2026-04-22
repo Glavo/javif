@@ -1295,6 +1295,28 @@ public final class BlockNeighborContext {
         return LUMA_COEFFICIENT_SKIP_CONTEXTS[Math.min(aboveContext & 0x3F, 4)][Math.min(leftContext & 0x3F, 4)];
     }
 
+    /// Returns the luma DC-sign context for one transform unit.
+    ///
+    /// This follows `dav1d`'s `get_dc_sign_ctx()` rule by merging the sign classes stored in the
+    /// current top and left coefficient-context bytes across the visible transform span.
+    ///
+    /// @param transformUnit the current luma transform unit
+    /// @return the luma DC-sign context in `[0, 3)`
+    public int lumaDcSignContext(TransformUnit transformUnit) {
+        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+        TransformSize transformSize = nonNullTransformUnit.size();
+        int signBalance = sumDcSignClasses(
+                aboveLumaCoefficientContext,
+                nonNullTransformUnit.position().x4(),
+                transformSize.width4()
+        ) + sumDcSignClasses(
+                leftLumaCoefficientContext,
+                nonNullTransformUnit.position().y4(),
+                transformSize.height4()
+        );
+        return (signBalance != 0 ? 1 : 0) + (signBalance > 0 ? 1 : 0);
+    }
+
     /// Updates the default transform-context dimensions after one block header is decoded.
     ///
     /// Inter blocks use their coded block dimensions for subsequent transform-size contexts, which
@@ -1431,6 +1453,25 @@ public final class BlockNeighborContext {
             merged |= contexts[index] & 0xFF;
         }
         return merged;
+    }
+
+    /// Sums the stored DC-sign classes across one visible coefficient-context edge span.
+    ///
+    /// Stored coefficient-context bytes encode negative values as class `0`, all-zero as class `1`,
+    /// and positive values as class `2`. This helper converts the stored bytes back into the
+    /// signed balance used by `dav1d`'s `get_dc_sign_ctx()`.
+    ///
+    /// @param contexts the stored coefficient-context edge bytes
+    /// @param start the inclusive start coordinate in 4x4 units
+    /// @param span the requested span length in 4x4 units
+    /// @return the signed DC-sign balance across the requested visible edge range
+    private static int sumDcSignClasses(byte[] contexts, int start, int span) {
+        int end = Math.min(contexts.length, start + span);
+        int sum = 0;
+        for (int index = start; index < end; index++) {
+            sum += ((contexts[index] & 0xFF) >>> 6) - 1;
+        }
+        return sum;
     }
 
     /// Updates the neighbor state after decoding one block header.

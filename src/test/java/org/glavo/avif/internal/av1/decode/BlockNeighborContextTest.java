@@ -31,6 +31,8 @@ import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -101,6 +103,35 @@ final class BlockNeighborContextTest {
 
         context.updatePartition(position, 8, 0x10, 0x18);
         assertEquals(2, context.partitionContext(3, new BlockPosition(0, 8)));
+    }
+
+    /// Verifies that stored coefficient-context bytes derive the same three-way DC-sign context
+    /// classes used by AV1 coefficient coding.
+    @Test
+    void derivesDcSignContextsFromStoredCoefficientState() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        context.updateLumaCoefficientContext(
+                new TransformUnit(new BlockPosition(1, 0), TransformSize.TX_4X4),
+                0x83
+        );
+        context.updateLumaCoefficientContext(
+                new TransformUnit(new BlockPosition(0, 1), TransformSize.TX_4X4),
+                0x03
+        );
+
+        assertEquals(
+                0,
+                context.lumaDcSignContext(new TransformUnit(new BlockPosition(1, 1), TransformSize.TX_4X4))
+        );
+
+        context.updateLumaCoefficientContext(
+                new TransformUnit(new BlockPosition(0, 1), TransformSize.TX_4X4),
+                0x82
+        );
+        assertEquals(
+                2,
+                context.lumaDcSignContext(new TransformUnit(new BlockPosition(1, 1), TransformSize.TX_4X4))
+        );
     }
 
     /// Verifies that inter-reference contexts track compound and single-reference neighbors.

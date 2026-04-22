@@ -35,6 +35,7 @@ import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -65,7 +66,31 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(0, coefficientSkipContext);
         assertEquals(TransformSize.TX_4X4, transformUnit.size());
         assertTrue(residualUnit.allZero());
+        assertEquals(-1, residualUnit.endOfBlockIndex());
+        assertArrayEquals(new int[16], residualUnit.coefficients());
         assertEquals(0x40, residualUnit.coefficientContextByte());
+    }
+
+    /// Verifies that a supported non-zero transform block decodes a real DC coefficient.
+    @Test
+    void readsDcOnlyResidualCoefficientForSingleTransformBlock() {
+        byte[] payload = findPayloadForDcOnlyResidual(BlockSize.SIZE_4X4);
+        TileDecodeContext tileContext = createTileContext(payload);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_4X4, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+
+        assertFalse(residualUnit.allZero());
+        assertEquals(0, residualUnit.endOfBlockIndex());
+        assertTrue(Math.abs(residualUnit.dcCoefficient()) >= 1);
+        assertEquals(expectedNonZeroCoefficientContextByte(residualUnit.dcCoefficient()), residualUnit.coefficientContextByte());
+        assertEquals(residualUnit.dcCoefficient(), residualUnit.coefficients()[0]);
     }
 
     /// Verifies that non-zero coefficient state from one 4x4 unit affects the next unit's skip context.
@@ -88,7 +113,8 @@ final class TileResidualSyntaxReaderTest {
         assertFalse(decodeHeader.skip());
         assertEquals(4, residualUnits.length);
         assertFalse(residualUnits[0].allZero());
-        assertEquals(0x01, residualUnits[0].coefficientContextByte());
+        assertEquals(0, residualUnits[0].endOfBlockIndex());
+        assertEquals(expectedNonZeroCoefficientContextByte(residualUnits[0].dcCoefficient()), residualUnits[0].coefficientContextByte());
         assertTrue(residualUnits[1].allZero());
         assertEquals(0x40, residualUnits[1].coefficientContextByte());
 
@@ -99,8 +125,9 @@ final class TileResidualSyntaxReaderTest {
         TransformUnit[] transformUnits = oracleTransformLayout.lumaUnits();
 
         assertEquals(1, oracleNeighborContext.lumaCoefficientSkipContext(BlockSize.SIZE_8X8, transformUnits[0]));
-        oracleNeighborContext.updateLumaCoefficientContext(transformUnits[0], 0x01);
-        assertEquals(2, oracleNeighborContext.lumaCoefficientSkipContext(BlockSize.SIZE_8X8, transformUnits[1]));
+        oracleNeighborContext.updateLumaCoefficientContext(transformUnits[0], residualUnits[0].coefficientContextByte());
+        assertEquals(expectedSecondUnitSkipContext(residualUnits[0].coefficientContextByte()),
+                oracleNeighborContext.lumaCoefficientSkipContext(BlockSize.SIZE_8X8, transformUnits[1]));
     }
 
     /// Finds a small payload whose first residual flags match the requested sequence.
@@ -118,6 +145,42 @@ final class TileResidualSyntaxReaderTest {
             return threeBytePayload;
         }
         throw new IllegalStateException("No deterministic payload produced the requested residual flags");
+    }
+
+    /// Finds a small payload whose first residual unit is supported and DC-only.
+    ///
+    /// @param blockSize the block size whose residual syntax should be decoded
+    /// @return a small payload whose first residual unit is supported and DC-only
+    private static byte[] findPayloadForDcOnlyResidual(BlockSize blockSize) {
+        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
+            int limit = 1 << (searchBytes << 3);
+            for (int value = 0; value < limit; value++) {
+                byte[] payload = new byte[8];
+                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
+                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
+                }
+                try {
+                    TileDecodeContext tileContext = createTileContext(payload);
+                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+                    TileBlockHeaderReader.BlockHeader header =
+                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
+                    if (header.skip()) {
+                        continue;
+                    }
+                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+                    TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
+                    if (!residualUnit.allZero() && residualUnit.endOfBlockIndex() == 0) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported AC paths are skipped while brute-forcing a supported DC-only unit.
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a supported DC-only residual");
     }
 
     /// Finds a payload whose first residual flags match the requested sequence, or `null`.
@@ -146,7 +209,12 @@ final class TileResidualSyntaxReaderTest {
             }
 
             TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-            ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+            ResidualLayout residualLayout;
+            try {
+                residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+            } catch (IllegalStateException ignored) {
+                continue;
+            }
             TransformResidualUnit[] residualUnits = residualLayout.lumaUnits();
             if (residualUnits.length < expectedFlags.length) {
                 continue;
@@ -164,6 +232,22 @@ final class TileResidualSyntaxReaderTest {
             }
         }
         return null;
+    }
+
+    /// Returns the stored coefficient-context byte expected for one non-zero DC coefficient.
+    ///
+    /// @param signedDcCoefficient the decoded signed DC coefficient
+    /// @return the stored coefficient-context byte expected for one non-zero DC coefficient
+    private static int expectedNonZeroCoefficientContextByte(int signedDcCoefficient) {
+        return Math.min(Math.abs(signedDcCoefficient), 63) | (signedDcCoefficient > 0 ? 0x80 : 0);
+    }
+
+    /// Returns the expected skip context for the second 4x4 unit in a `FOUR_BY_FOUR_ONLY` 8x8 block.
+    ///
+    /// @param firstCoefficientContextByte the stored coefficient-context byte of the first 4x4 unit
+    /// @return the expected skip context for the second 4x4 unit
+    private static int expectedSecondUnitSkipContext(int firstCoefficientContextByte) {
+        return new int[]{1, 2, 2, 2, 3}[Math.min(firstCoefficientContextByte & 0x3F, 4)];
     }
 
     /// Creates one synthetic tile-local decode context used by residual-syntax tests.

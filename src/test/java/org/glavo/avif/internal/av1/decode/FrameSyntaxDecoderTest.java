@@ -135,13 +135,16 @@ final class FrameSyntaxDecoderTest {
         for (int first = 0; first < 256; first++) {
             for (int second = 0; second < 256; second++) {
                 byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                    return payload;
+                try {
+                    FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(
+                            createAssembly(FrameType.INTER, payload, false)
+                    );
+                    TilePartitionTreeReader.LeafNode leafNode = firstLeaf(result.tileRoots(0));
+                    if (!leafNode.header().skip() && !leafNode.header().intra()) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported AC residual payloads are skipped while searching for a supported fixture.
                 }
             }
         }
@@ -163,8 +166,26 @@ final class FrameSyntaxDecoderTest {
                 CdfContext inherited = overriddenCdf.copy();
                 MsacDecoder inheritedDecoder = new MsacDecoder(payload, 0, payload.length, false);
                 boolean inheritedSkip = inheritedDecoder.decodeBooleanAdapt(inherited.mutableSkipCdf(0));
-                if (defaultSkip != inheritedSkip) {
-                    return payload;
+                if (defaultSkip == inheritedSkip) {
+                    continue;
+                }
+
+                FrameAssembly assembly = createAssembly(FrameType.INTER, payload, false, 8, 8);
+                FrameSyntaxDecodeResult cdfReferenceResult = new FrameSyntaxDecodeResult(
+                        assembly,
+                        new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
+                        new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)},
+                        new CdfContext[]{overriddenCdf.copy()}
+                );
+                try {
+                    FrameSyntaxDecodeResult defaultResult = new FrameSyntaxDecoder(null).decode(assembly);
+                    FrameSyntaxDecodeResult seededResult = new FrameSyntaxDecoder(cdfReferenceResult).decode(assembly);
+                    if (firstLeaf(defaultResult.tileRoots(0)).header().skip()
+                            != firstLeaf(seededResult.tileRoots(0)).header().skip()) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported AC residual payloads are skipped while searching for a supported fixture.
                 }
             }
         }
