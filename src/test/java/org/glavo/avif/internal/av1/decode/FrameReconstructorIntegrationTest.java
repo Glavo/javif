@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -38,6 +39,7 @@ import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -81,6 +83,25 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(128, decodedPlanes.chromaVPlane().sample(3, 3));
     }
 
+    /// Verifies that one monochrome all-zero `filter_intra` leaf reconstructs through the minimal luma path.
+    @Test
+    void reconstructsMonochromeFilterIntraDcLeaf() {
+        TilePartitionTreeReader.LeafNode leaf = createLeaf(true, false, FilterIntraMode.DC);
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(PixelFormat.I400, leaf, true);
+        assertEquals(FilterIntraMode.DC, leaf.header().filterIntraMode());
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+
+        assertEquals(8, decodedPlanes.bitDepth());
+        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertEquals(8, decodedPlanes.codedWidth());
+        assertEquals(8, decodedPlanes.codedHeight());
+        assertEquals(128, decodedPlanes.lumaPlane().sample(0, 0));
+        assertEquals(198, decodedPlanes.lumaPlane().sample(7, 7));
+        assertNull(decodedPlanes.chromaUPlane());
+        assertNull(decodedPlanes.chromaVPlane());
+    }
+
     /// Verifies that one decoded 4x4 monochrome DC residual survives the frame-syntax path and shifts luma uniformly.
     @Test
     void reconstructsMonochromeDcResidualDecodedFromFrameSyntax() {
@@ -115,7 +136,21 @@ final class FrameReconstructorIntegrationTest {
             PixelFormat pixelFormat,
             TilePartitionTreeReader.LeafNode leafNode
     ) {
-        FrameAssembly assembly = createAssembly(pixelFormat);
+        return createSyntheticResult(pixelFormat, leafNode, false);
+    }
+
+    /// Creates one synthetic frame result that carries a single tile leaf.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param leafNode the synthetic partition-tree leaf
+    /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
+    /// @return one synthetic frame result that carries a single tile leaf
+    private static FrameSyntaxDecodeResult createSyntheticResult(
+            PixelFormat pixelFormat,
+            TilePartitionTreeReader.LeafNode leafNode,
+            boolean filterIntraEnabled
+    ) {
+        FrameAssembly assembly = createAssembly(pixelFormat, filterIntraEnabled);
         return new FrameSyntaxDecodeResult(
                 assembly,
                 new TilePartitionTreeReader.Node[][]{{leafNode}},
@@ -129,6 +164,20 @@ final class FrameReconstructorIntegrationTest {
     /// @param hasChroma whether the synthetic leaf should carry chroma
     /// @return one synthetic partition-tree leaf
     private static TilePartitionTreeReader.LeafNode createLeaf(boolean allZeroResidual, boolean hasChroma) {
+        return createLeaf(allZeroResidual, hasChroma, null);
+    }
+
+    /// Creates one synthetic partition-tree leaf.
+    ///
+    /// @param allZeroResidual whether the synthetic residual unit should be all-zero
+    /// @param hasChroma whether the synthetic leaf should carry chroma
+    /// @param filterIntraMode the synthetic filter-intra mode, or `null` when filter intra is disabled
+    /// @return one synthetic partition-tree leaf
+    private static TilePartitionTreeReader.LeafNode createLeaf(
+            boolean allZeroResidual,
+            boolean hasChroma,
+            @Nullable FilterIntraMode filterIntraMode
+    ) {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_8X8;
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
@@ -153,7 +202,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[0],
                 new byte[0],
                 new byte[0],
-                null,
+                filterIntraMode,
                 0,
                 0,
                 0,
@@ -200,7 +249,16 @@ final class FrameReconstructorIntegrationTest {
     /// @param pixelFormat the synthetic decoded chroma layout
     /// @return one synthetic single-tile frame assembly
     private static FrameAssembly createAssembly(PixelFormat pixelFormat) {
-        return createAssembly(pixelFormat, new byte[0], 8, 8, FrameHeader.TransformMode.LARGEST);
+        return createAssembly(pixelFormat, false);
+    }
+
+    /// Creates one synthetic single-tile frame assembly.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
+    /// @return one synthetic single-tile frame assembly
+    private static FrameAssembly createAssembly(PixelFormat pixelFormat, boolean filterIntraEnabled) {
+        return createAssembly(pixelFormat, new byte[0], 8, 8, FrameHeader.TransformMode.LARGEST, filterIntraEnabled);
     }
 
     /// Creates one synthetic single-tile frame assembly.
@@ -217,6 +275,26 @@ final class FrameReconstructorIntegrationTest {
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
+    ) {
+        return createAssembly(pixelFormat, payload, codedWidth, codedHeight, transformMode, false);
+    }
+
+    /// Creates one synthetic single-tile frame assembly.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
+    /// @return one synthetic single-tile frame assembly
+    private static FrameAssembly createAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode,
+            boolean filterIntraEnabled
     ) {
         boolean monochrome = pixelFormat == PixelFormat.I400;
         SequenceHeader sequenceHeader = new SequenceHeader(
@@ -236,7 +314,7 @@ final class FrameReconstructorIntegrationTest {
                 0,
                 new SequenceHeader.FeatureConfig(
                         false,
-                        false,
+                        filterIntraEnabled,
                         false,
                         false,
                         false,

@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -57,7 +58,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, PixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
@@ -78,7 +79,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, 0, 0, 0, 0),
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, PixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
@@ -105,12 +106,12 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, PixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, PixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
@@ -133,12 +134,12 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, 0, 0, 0, 0),
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, PixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode negativeResidualLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, 0, 0, 0, 0),
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, PixelFormat.I420),
                 createResidualLayout(position, size, -64)
         );
@@ -155,6 +156,58 @@ final class FrameReconstructorTest {
         assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline.lumaPlane(), residualPlanes.lumaPlane(), -1);
         assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(residualPlanes.chromaUPlane()));
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
+    /// Verifies that the first reconstruction path now supports filter-intra luma and `I420` CFL chroma.
+    @Test
+    void reconstructsI420BlockWithFilterIntraAndCflPrediction() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.CFL,
+                        FilterIntraMode.DC,
+                        0,
+                        0,
+                        4,
+                        -4
+                ),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.KEY, 4, 4, leaf)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                new int[][]{
+                        {128, 136, 144, 152},
+                        {64, 96, 120, 144},
+                        {132, 147, 164, 164},
+                        {68, 101, 133, 155}
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaUPlane()),
+                new int[][]{
+                        {117, 134},
+                        {120, 141}
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaVPlane()),
+                new int[][]{
+                        {139, 122},
+                        {136, 115}
+                }
+        );
     }
 
     /// Verifies that inter blocks still fail fast in the first reconstruction subset.
@@ -176,27 +229,6 @@ final class FrameReconstructorTest {
         );
 
         assertEquals("Inter block reconstruction is not implemented yet", exception.getMessage());
-    }
-
-    /// Verifies that CFL-coded chroma blocks remain unsupported in the first `I420` reconstruction path.
-    @Test
-    void rejectsCflChromaBlocks() {
-        BlockPosition position = new BlockPosition(0, 0);
-        BlockSize size = BlockSize.SIZE_4X4;
-        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.CFL, 0, 0, 1, -1),
-                createTransformLayout(position, size, PixelFormat.I420),
-                createResidualLayout(position, size, true)
-        );
-
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> new FrameReconstructor().reconstruct(
-                        createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.KEY, 4, 4, leaf)
-                )
-        );
-
-        assertEquals("CFL reconstruction is not implemented yet", exception.getMessage());
     }
 
     /// Creates one synthetic structural frame-decode result for reconstruction tests.
@@ -370,6 +402,7 @@ final class FrameReconstructorTest {
     /// @param hasChroma whether the block carries chroma samples
     /// @param yMode the luma intra mode
     /// @param uvMode the chroma intra mode, or `null`
+    /// @param filterIntraMode the filter-intra mode, or `null`
     /// @param yPaletteSize the luma palette size
     /// @param uvPaletteSize the chroma palette size
     /// @param cflAlphaU the signed CFL alpha for chroma U
@@ -381,6 +414,7 @@ final class FrameReconstructorTest {
             boolean hasChroma,
             LumaIntraPredictionMode yMode,
             @Nullable UvIntraPredictionMode uvMode,
+            @Nullable FilterIntraMode filterIntraMode,
             int yPaletteSize,
             int uvPaletteSize,
             int cflAlphaU,
@@ -408,7 +442,7 @@ final class FrameReconstructorTest {
                 new int[uvPaletteSize],
                 new byte[0],
                 new byte[0],
-                null,
+                filterIntraMode,
                 0,
                 0,
                 cflAlphaU,
@@ -534,6 +568,20 @@ final class FrameReconstructorTest {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 assertEquals(expectedSample, plane.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane matches the supplied expected raster.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param expected the expected sample raster
+    private static void assertPlaneEquals(DecodedPlane plane, int[][] expected) {
+        assertEquals(expected[0].length, plane.width());
+        assertEquals(expected.length, plane.height());
+        for (int y = 0; y < expected.length; y++) {
+            for (int x = 0; x < expected[y].length; x++) {
+                assertEquals(expected[y][x], plane.sample(x, y));
             }
         }
     }

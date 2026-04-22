@@ -128,9 +128,9 @@ final class Av1ImageReaderTest {
     }
 
     /// Verifies that the legacy reduced still-picture combined fixture now reaches the current
-    /// `filter_intra` reconstruction boundary.
+    /// directional-intra reconstruction boundary.
     @Test
-    void readFrameParsesCombinedFrameObuBeforeCurrentFilterIntraBoundary() {
+    void readFrameParsesCombinedFrameObuBeforeCurrentDirectionalIntraBoundary() {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -144,16 +144,16 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-        assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
+        assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
     }
 
-    /// Verifies that all buffered-input adapters report the same current `filter_intra` decode
+    /// Verifies that all buffered-input adapters report the same current directional-intra decode
     /// boundary for the legacy reduced still-picture fixture and still refresh reference-frame
     /// state first.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReportsSameCurrentBoundaryAcrossBufferedInputs() throws IOException {
+    void readFrameReportsSameCurrentDirectionalIntraBoundaryAcrossBufferedInputs() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -163,7 +163,7 @@ final class Av1ImageReaderTest {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
             assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-            assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
+            assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
             assertReferenceStateStoredForLastSyntaxResult(reader);
         });
     }
@@ -187,9 +187,9 @@ final class Av1ImageReaderTest {
     }
 
     /// Verifies that the legacy reduced still-picture standalone fixture now reaches the current
-    /// `filter_intra` reconstruction boundary.
+    /// directional-intra reconstruction boundary.
     @Test
-    void readFrameParsesStandaloneTileGroupBeforeCurrentFilterIntraBoundary() {
+    void readFrameParsesStandaloneTileGroupBeforeCurrentDirectionalIntraBoundary() {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(3, reducedStillPictureFrameHeaderPayload()),
@@ -204,13 +204,13 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-        assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
+        assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
     }
 
     /// Verifies that the public reader stores structural reference state before reporting the
-    /// current `filter_intra` reconstruction boundary once frame syntax completed successfully.
+    /// current directional-intra reconstruction boundary once frame syntax completed successfully.
     @Test
-    void readFrameStoresReferenceStateBeforeCurrentFilterIntraBoundary() throws IOException {
+    void readFrameStoresReferenceStateBeforeCurrentDirectionalIntraBoundary() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
@@ -221,7 +221,7 @@ final class Av1ImageReaderTest {
         )) {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-            assertEquals("filter_intra reconstruction is not implemented yet", exception.getMessage());
+            assertEquals("Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0", exception.getMessage());
             assertReferenceStateStoredForLastSyntaxResult(reader);
         }
     }

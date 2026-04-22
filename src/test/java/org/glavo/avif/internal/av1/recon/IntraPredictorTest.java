@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -137,17 +138,76 @@ final class IntraPredictorTest {
         );
     }
 
-    /// Verifies that chroma CFL prediction stays explicitly unsupported for the first reconstruction pass.
+    /// Verifies that filter-intra prediction applies the recursive 4x2 tap tables in raster order.
     @Test
-    void chromaPredictionRejectsCflMode() {
+    void filterIntraPredictionUsesRecursiveTapTables() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(5, 5, 8);
+        plane.setSample(0, 0, 50);
+        plane.setSample(1, 0, 10);
+        plane.setSample(2, 0, 20);
+        plane.setSample(3, 0, 30);
+        plane.setSample(4, 0, 40);
+        plane.setSample(0, 1, 60);
+        plane.setSample(0, 2, 70);
+        plane.setSample(0, 3, 80);
+        plane.setSample(0, 4, 90);
+
+        IntraPredictor.predictFilterIntraLuma(plane, 1, 1, 4, 4, FilterIntraMode.DC);
+
+        assertBlockEquals(
+                plane,
+                1,
+                1,
+                new int[][]{
+                        {61, 61, 63, 75},
+                        {26, 36, 47, 66},
+                        {80, 81, 90, 100},
+                        {36, 50, 68, 89}
+                }
+        );
+    }
+
+    /// Verifies that `I420` CFL prediction derives signed AC from reconstructed luma and applies alpha.
+    @Test
+    void chromaCflPredictionUsesDownsampledLumaAc() {
+        MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(4, 4, 8);
+        int[][] lumaSamples = {
+                {10, 20, 30, 40},
+                {50, 60, 70, 80},
+                {90, 100, 110, 120},
+                {130, 140, 150, 160}
+        };
+        for (int row = 0; row < lumaSamples.length; row++) {
+            for (int column = 0; column < lumaSamples[row].length; column++) {
+                lumaPlane.setSample(column, row, lumaSamples[row][column]);
+            }
+        }
+
+        MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(2, 2, 8);
+        IntraPredictor.predictChromaCflI420(chromaPlane, lumaPlane, 0, 0, 0, 0, 2, 2, 4);
+
+        assertBlockEquals(
+                chromaPlane,
+                0,
+                0,
+                new int[][]{
+                        {103, 113},
+                        {143, 153}
+                }
+        );
+    }
+
+    /// Verifies that directional chroma modes remain unsupported outside the newly added CFL path.
+    @Test
+    void chromaPredictionStillRejectsDirectionalModes() {
         MutablePlaneBuffer plane = new MutablePlaneBuffer(2, 2, 8);
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> IntraPredictor.predictChroma(plane, 0, 0, 2, 2, UvIntraPredictionMode.CFL, 0)
+                () -> IntraPredictor.predictChroma(plane, 0, 0, 2, 2, UvIntraPredictionMode.VERTICAL_LEFT, 0)
         );
 
-        assertEquals("CFL chroma prediction is not implemented yet", exception.getMessage());
+        assertEquals("Directional intra prediction is not implemented yet: VERTICAL_LEFT angle_delta=0", exception.getMessage());
     }
 
     /// Asserts one rectangular block against expected sample values.

@@ -15,16 +15,78 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 
 /// Minimal intra predictor used by the first reconstruction-capable decode path.
 ///
-/// The current implementation supports only non-directional AV1 intra modes and uses frame-edge
-/// midpoint samples when top or left neighbors are unavailable.
+/// The current implementation supports the non-directional AV1 intra modes, luma filter-intra,
+/// and `I420` CFL chroma prediction. It uses frame-edge midpoint samples when top or left
+/// neighbors are unavailable.
 @NotNullByDefault
 final class IntraPredictor {
+    /// The AV1 filter-intra tap sets in `FilterIntraMode` order.
+    ///
+    /// Each mode stores eight per-pixel tap vectors for the 4x2 recursive prediction unit in
+    /// raster order. Every tap vector multiplies:
+    /// 1. the current unit top-left reference
+    /// 2. the four top reference samples
+    /// 3. the two left reference samples
+    private static final int[][][] FILTER_INTRA_TAPS = {
+            {
+                    {0, -6, 10, 0, 0, 0, 12},
+                    {1, -5, 2, 10, 0, 0, 9},
+                    {2, -3, 1, 1, 10, 0, 7},
+                    {3, -3, 1, 1, 2, 10, 5},
+                    {4, -4, 6, 0, 0, 0, 2},
+                    {5, -3, 2, 6, 0, 0, 2},
+                    {6, -3, 2, 2, 6, 0, 2},
+                    {7, -3, 1, 2, 2, 6, 3}
+            },
+            {
+                    {-10, 16, 0, 0, 0, 10, 0},
+                    {-6, 0, 16, 0, 0, 6, 0},
+                    {-4, 0, 0, 16, 0, 4, 0},
+                    {-2, 0, 0, 0, 16, 2, 0},
+                    {-10, 16, 0, 0, 0, 0, 10},
+                    {-6, 0, 16, 0, 0, 0, 6},
+                    {-4, 0, 0, 16, 0, 0, 4},
+                    {-2, 0, 0, 0, 16, 0, 2}
+            },
+            {
+                    {-8, 8, 0, 0, 0, 16, 0},
+                    {-8, 0, 8, 0, 0, 16, 0},
+                    {-8, 0, 0, 8, 0, 16, 0},
+                    {-8, 0, 0, 0, 8, 16, 0},
+                    {-4, 4, 0, 0, 0, 0, 16},
+                    {-4, 0, 4, 0, 0, 0, 16},
+                    {-4, 0, 0, 4, 0, 0, 16},
+                    {-4, 0, 0, 0, 4, 0, 16}
+            },
+            {
+                    {-2, 8, 0, 0, 0, 10, 0},
+                    {-1, 3, 8, 0, 0, 6, 0},
+                    {-1, 2, 3, 8, 0, 4, 0},
+                    {0, 1, 2, 3, 8, 2, 0},
+                    {-1, 4, 0, 0, 0, 3, 10},
+                    {-1, 3, 4, 0, 0, 4, 6},
+                    {-1, 2, 3, 4, 0, 4, 4},
+                    {-1, 2, 2, 3, 4, 3, 3}
+            },
+            {
+                    {-12, 14, 0, 0, 0, 14, 0},
+                    {-10, 0, 14, 0, 0, 12, 0},
+                    {-9, 0, 0, 14, 0, 11, 0},
+                    {-8, 0, 0, 0, 14, 10, 0},
+                    {-10, 12, 0, 0, 0, 0, 14},
+                    {-9, 1, 12, 0, 0, 0, 12},
+                    {-8, 0, 0, 12, 0, 1, 11},
+                    {-7, 0, 0, 1, 12, 1, 9}
+            }
+    };
+
     /// The smooth predictor weights for a width or height of one sample.
     private static final int[] SMOOTH_WEIGHTS_1 = {255};
 
@@ -96,6 +158,74 @@ final class IntraPredictor {
         );
     }
 
+    /// Reconstructs one luma filter-intra block directly into the destination plane.
+    ///
+    /// The current implementation supports the AV1 recursive 4x2 filter-intra algorithm for the
+    /// full syntax-legal size range up to `32x32`.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param mode the filter-intra mode
+    static void predictFilterIntraLuma(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            FilterIntraMode mode
+    ) {
+        if (width <= 0) {
+            throw new IllegalArgumentException("width <= 0: " + width);
+        }
+        if (height <= 0) {
+            throw new IllegalArgumentException("height <= 0: " + height);
+        }
+        if ((width & 3) != 0) {
+            throw new IllegalStateException("filter_intra requires width aligned to 4 samples: " + width);
+        }
+        if ((height & 1) != 0) {
+            throw new IllegalStateException("filter_intra requires height aligned to 2 samples: " + height);
+        }
+        if (width > 32 || height > 32) {
+            throw new IllegalStateException("filter_intra currently supports sizes up to 32x32: " + width + "x" + height);
+        }
+
+        int defaultSample = 1 << (plane.bitDepth() - 1);
+        int[][] taps = FILTER_INTRA_TAPS[mode.symbolIndex()];
+        for (int stripeY = 0; stripeY < height; stripeY += 2) {
+            int topReferenceY = y + stripeY - 1;
+            int currentY = y + stripeY;
+            for (int blockX = 0; blockX < width; blockX += 4) {
+                int currentX = x + blockX;
+                int leftReferenceX = currentX - 1;
+                int p0 = plane.sampleOrFallback(leftReferenceX, topReferenceY, defaultSample);
+                int p1 = plane.sampleOrFallback(currentX, topReferenceY, defaultSample);
+                int p2 = plane.sampleOrFallback(currentX + 1, topReferenceY, defaultSample);
+                int p3 = plane.sampleOrFallback(currentX + 2, topReferenceY, defaultSample);
+                int p4 = plane.sampleOrFallback(currentX + 3, topReferenceY, defaultSample);
+                int p5 = plane.sampleOrFallback(leftReferenceX, currentY, defaultSample);
+                int p6 = plane.sampleOrFallback(leftReferenceX, currentY + 1, defaultSample);
+                for (int yy = 0; yy < 2; yy++) {
+                    for (int xx = 0; xx < 4; xx++) {
+                        int[] tap = taps[(yy << 2) + xx];
+                        int predicted = (tap[0] * p0
+                                + tap[1] * p1
+                                + tap[2] * p2
+                                + tap[3] * p3
+                                + tap[4] * p4
+                                + tap[5] * p5
+                                + tap[6] * p6
+                                + 8) >> 4;
+                        plane.setSample(currentX + xx, currentY + yy, predicted);
+                    }
+                }
+            }
+        }
+    }
+
     /// Reconstructs one chroma intra-predicted block directly into the destination plane.
     ///
     /// @param plane the mutable destination plane
@@ -123,6 +253,48 @@ final class IntraPredictor {
                 checkedPredictionMode(mode, angleDelta),
                 angleDelta
         );
+    }
+
+    /// Reconstructs one `I420` CFL chroma block directly into the destination plane.
+    ///
+    /// The current implementation consumes already reconstructed luma samples, including any luma
+    /// residuals that were applied before chroma prediction begins.
+    ///
+    /// @param chromaPlane the mutable chroma destination plane
+    /// @param lumaPlane the already reconstructed luma plane
+    /// @param chromaX the zero-based horizontal chroma sample coordinate
+    /// @param chromaY the zero-based vertical chroma sample coordinate
+    /// @param lumaX the zero-based horizontal luma sample coordinate
+    /// @param lumaY the zero-based vertical luma sample coordinate
+    /// @param width the chroma block width in samples
+    /// @param height the chroma block height in samples
+    /// @param alpha the signed CFL alpha
+    static void predictChromaCflI420(
+            MutablePlaneBuffer chromaPlane,
+            MutablePlaneBuffer lumaPlane,
+            int chromaX,
+            int chromaY,
+            int lumaX,
+            int lumaY,
+            int width,
+            int height,
+            int alpha
+    ) {
+        if (width <= 0) {
+            throw new IllegalArgumentException("width <= 0: " + width);
+        }
+        if (height <= 0) {
+            throw new IllegalArgumentException("height <= 0: " + height);
+        }
+        int dc = dcPredictionValue(chromaPlane, chromaX, chromaY, width, height);
+        int[] ac = cflAcI420(lumaPlane, lumaX, lumaY, width, height);
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                int diff = alpha * ac[row * width + column];
+                int predicted = dc + applySign((Math.abs(diff) + 32) >> 6, diff);
+                chromaPlane.setSample(chromaX + column, chromaY + row, predicted);
+            }
+        }
     }
 
     /// Validates one luma prediction mode and maps it into the internal supported subset.
@@ -273,9 +445,45 @@ final class IntraPredictor {
             int[] left,
             int defaultSample
     ) {
+        int value = dcPredictionValue(x, y, width, height, top, left, defaultSample);
+        fillBlock(plane, x, y, width, height, value);
+    }
+
+    /// Returns the stable DC predictor value for one block.
+    ///
+    /// @param plane the destination plane that supplies already reconstructed neighbors
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @return the stable DC predictor value for one block
+    private static int dcPredictionValue(MutablePlaneBuffer plane, int x, int y, int width, int height) {
+        int defaultSample = 1 << (plane.bitDepth() - 1);
+        int[] top = new int[width];
+        int[] left = new int[height];
+        for (int i = 0; i < width; i++) {
+            top[i] = plane.sampleOrFallback(x + i, y - 1, defaultSample);
+        }
+        for (int i = 0; i < height; i++) {
+            left[i] = plane.sampleOrFallback(x - 1, y + i, defaultSample);
+        }
+        return dcPredictionValue(x, y, width, height, top, left, defaultSample);
+    }
+
+    /// Returns the stable DC predictor value for one block using caller-supplied edge samples.
+    ///
+    /// @param plane the destination plane that supplies already reconstructed neighbors
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param top the top reference samples
+    /// @param left the left reference samples
+    /// @param defaultSample the frame-edge default sample
+    /// @return the stable DC predictor value for one block using caller-supplied edge samples
+    private static int dcPredictionValue(int x, int y, int width, int height, int[] top, int[] left, int defaultSample) {
         boolean haveTop = y > 0;
         boolean haveLeft = x > 0;
-        int value;
         if (haveTop && haveLeft) {
             int sum = 0;
             for (int sample : top) {
@@ -284,23 +492,73 @@ final class IntraPredictor {
             for (int sample : left) {
                 sum += sample;
             }
-            value = (sum + ((width + height) >> 1)) / (width + height);
-        } else if (haveTop) {
+            return (sum + ((width + height) >> 1)) / (width + height);
+        }
+        if (haveTop) {
             int sum = 0;
             for (int sample : top) {
                 sum += sample;
             }
-            value = (sum + (width >> 1)) / width;
-        } else if (haveLeft) {
+            return (sum + (width >> 1)) / width;
+        }
+        if (haveLeft) {
             int sum = 0;
             for (int sample : left) {
                 sum += sample;
             }
-            value = (sum + (height >> 1)) / height;
-        } else {
-            value = defaultSample;
+            return (sum + (height >> 1)) / height;
         }
-        fillBlock(plane, x, y, width, height, value);
+        return defaultSample;
+    }
+
+    /// Returns the signed CFL AC buffer for one `I420` chroma block.
+    ///
+    /// The returned buffer has one entry per chroma sample in raster order.
+    ///
+    /// @param lumaPlane the already reconstructed luma plane
+    /// @param lumaX the zero-based horizontal luma sample coordinate
+    /// @param lumaY the zero-based vertical luma sample coordinate
+    /// @param chromaWidth the chroma block width in samples
+    /// @param chromaHeight the chroma block height in samples
+    /// @return the signed CFL AC buffer for one `I420` chroma block
+    private static int[] cflAcI420(
+            MutablePlaneBuffer lumaPlane,
+            int lumaX,
+            int lumaY,
+            int chromaWidth,
+            int chromaHeight
+    ) {
+        int[] ac = new int[chromaWidth * chromaHeight];
+        int sum = 1 << (Integer.numberOfTrailingZeros(chromaWidth) + Integer.numberOfTrailingZeros(chromaHeight) - 1);
+        for (int row = 0; row < chromaHeight; row++) {
+            int rowOffset = row * chromaWidth;
+            int sourceY = lumaY + (row << 1);
+            for (int column = 0; column < chromaWidth; column++) {
+                int sourceX = lumaX + (column << 1);
+                int acSum = lumaPlane.sample(sourceX, sourceY)
+                        + lumaPlane.sample(sourceX + 1, sourceY)
+                        + lumaPlane.sample(sourceX, sourceY + 1)
+                        + lumaPlane.sample(sourceX + 1, sourceY + 1);
+                int value = acSum << 1;
+                ac[rowOffset + column] = value;
+                sum += value;
+            }
+        }
+        int shift = Integer.numberOfTrailingZeros(chromaWidth) + Integer.numberOfTrailingZeros(chromaHeight);
+        int average = sum >> shift;
+        for (int i = 0; i < ac.length; i++) {
+            ac[i] -= average;
+        }
+        return ac;
+    }
+
+    /// Applies the sign of one source value to one magnitude.
+    ///
+    /// @param magnitude the unsigned magnitude
+    /// @param signedSource the value whose sign should be copied
+    /// @return the signed magnitude
+    private static int applySign(int magnitude, int signedSource) {
+        return signedSource < 0 ? -magnitude : magnitude;
     }
 
     /// Reconstructs one vertical-predicted block.

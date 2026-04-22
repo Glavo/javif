@@ -27,6 +27,7 @@ import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,8 +36,8 @@ import java.util.Objects;
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
-/// with one tile, `I400` or `I420` chroma layout, non-directional intra prediction, no palette,
-/// no filter-intra, no CFL, and a minimal luma residual subset.
+/// with one tile, `I400` or `I420` chroma layout, non-directional intra prediction, filter-intra
+/// luma prediction, CFL chroma prediction for `I420`, no palette, and a minimal luma residual subset.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -186,42 +187,78 @@ public final class FrameReconstructor {
         int visibleLumaWidth = transformLayout.visibleWidth4() << 2;
         int visibleLumaHeight = transformLayout.visibleHeight4() << 2;
 
-        IntraPredictor.predictLuma(
-                lumaPlane,
-                lumaX,
-                lumaY,
-                visibleLumaWidth,
-                visibleLumaHeight,
-                Objects.requireNonNull(header.yMode(), "header.yMode()"),
-                header.yAngle()
-        );
+        if (header.filterIntraMode() != null) {
+            IntraPredictor.predictFilterIntraLuma(
+                    lumaPlane,
+                    lumaX,
+                    lumaY,
+                    visibleLumaWidth,
+                    visibleLumaHeight,
+                    header.filterIntraMode()
+            );
+        } else {
+            IntraPredictor.predictLuma(
+                    lumaPlane,
+                    lumaX,
+                    lumaY,
+                    visibleLumaWidth,
+                    visibleLumaHeight,
+                    Objects.requireNonNull(header.yMode(), "header.yMode()"),
+                    header.yAngle()
+            );
+        }
+
+        reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader);
 
         if (header.hasChroma() && chromaUPlane != null && chromaVPlane != null) {
             int chromaX = lumaX >> 1;
             int chromaY = lumaY >> 1;
             int visibleChromaWidth = (visibleLumaWidth + 1) >> 1;
             int visibleChromaHeight = (visibleLumaHeight + 1) >> 1;
-            IntraPredictor.predictChroma(
-                    chromaUPlane,
-                    chromaX,
-                    chromaY,
-                    visibleChromaWidth,
-                    visibleChromaHeight,
-                    Objects.requireNonNull(header.uvMode(), "header.uvMode()"),
-                    header.uvAngle()
-            );
-            IntraPredictor.predictChroma(
-                    chromaVPlane,
-                    chromaX,
-                    chromaY,
-                    visibleChromaWidth,
-                    visibleChromaHeight,
-                    Objects.requireNonNull(header.uvMode(), "header.uvMode()"),
-                    header.uvAngle()
-            );
+            if (header.uvMode() == UvIntraPredictionMode.CFL) {
+                IntraPredictor.predictChromaCflI420(
+                        chromaUPlane,
+                        lumaPlane,
+                        chromaX,
+                        chromaY,
+                        lumaX,
+                        lumaY,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        header.cflAlphaU()
+                );
+                IntraPredictor.predictChromaCflI420(
+                        chromaVPlane,
+                        lumaPlane,
+                        chromaX,
+                        chromaY,
+                        lumaX,
+                        lumaY,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        header.cflAlphaV()
+                );
+            } else {
+                IntraPredictor.predictChroma(
+                        chromaUPlane,
+                        chromaX,
+                        chromaY,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        Objects.requireNonNull(header.uvMode(), "header.uvMode()"),
+                        header.uvAngle()
+                );
+                IntraPredictor.predictChroma(
+                        chromaVPlane,
+                        chromaX,
+                        chromaY,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        Objects.requireNonNull(header.uvMode(), "header.uvMode()"),
+                        header.uvAngle()
+                );
+            }
         }
-
-        reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader);
     }
 
     /// Validates that one partition-tree leaf lies inside the current reconstruction subset.
@@ -242,9 +279,6 @@ public final class FrameReconstructor {
         if (header.useIntrabc()) {
             throw new IllegalStateException("intrabc reconstruction is not implemented yet");
         }
-        if (header.filterIntraMode() != null) {
-            throw new IllegalStateException("filter_intra reconstruction is not implemented yet");
-        }
         if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
             throw new IllegalStateException("Palette reconstruction is not implemented yet");
         }
@@ -255,8 +289,8 @@ public final class FrameReconstructor {
             if (header.uvMode() == null) {
                 throw new IllegalStateException("Chroma reconstruction requires uvMode");
             }
-            if (header.cflAlphaU() != 0 || header.cflAlphaV() != 0) {
-                throw new IllegalStateException("CFL reconstruction is not implemented yet");
+            if (header.uvMode() == UvIntraPredictionMode.CFL && pixelFormat != PixelFormat.I420) {
+                throw new IllegalStateException("CFL reconstruction currently supports only I420");
             }
         }
         if (transformLayout.visibleWidth4() <= 0 || transformLayout.visibleHeight4() <= 0) {

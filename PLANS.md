@@ -25,7 +25,7 @@ The repository already has:
 - visible `KEY` / `INTRA` frames
 - `8-bit`
 - `I400` and `I420`
-- non-directional intra prediction only
+- non-directional intra prediction, filter-intra luma prediction, and `I420` CFL chroma prediction
 - minimal luma `DCT_DCT` residual support for `TX_4X4` and `TX_8X8`
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
@@ -62,13 +62,13 @@ Everything else expands from that baseline after correctness is stable.
 
 - Multi-tile frames are still rejected by the reconstruction/output path.
 - Non-zero reconstruction currently covers only luma `DCT_DCT` `TX_4X4` and `TX_8X8` within the existing key/intra subset.
-- Only non-directional intra prediction currently reconstructs. Directional intra, filter-intra, CFL, palette, `intrabc`, inter prediction, and motion compensation are still unsupported.
+- Directional intra prediction is still unsupported. Palette, `intrabc`, inter prediction, and motion compensation also remain unsupported.
 - Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
 - `show_existing_frame` still validates slot state but does not yet return a reused output frame.
 - Reference surfaces are not yet consumed by a real inter-frame pixel path.
 - Postfiltering and film grain synthesis are still not implemented.
 - `ArgbLongFrame`, `I422`, `I444`, and high bit-depth output paths are not implemented.
-- The legacy reduced still-picture fixture no longer stops at `non-zero residual`; the current public reader boundary has moved forward to `filter_intra reconstruction is not implemented yet`.
+- The legacy reduced still-picture fixture no longer stops at `non-zero residual`, `filter_intra`, or `CFL`; the current public reader boundary has moved forward to `Directional intra prediction is not implemented yet: HORIZONTAL_DOWN angle_delta=0`.
 
 ### Current Progress Snapshot
 
@@ -138,7 +138,7 @@ Current gap after the first-pixel milestone:
 
 - Non-zero residual decode and reconstruction still do not cover the full reconstruction-ready coefficient space.
 - Chroma residual syntax is still missing.
-- Several block features remain syntax-only or rejected during reconstruction: directional intra, CFL, palette, filter-intra, inter prediction.
+- Several block features remain syntax-only or rejected during reconstruction: directional intra, palette, inter prediction, and motion compensation-related paths.
 
 Write scope:
 
@@ -184,7 +184,7 @@ Scope:
 - Implement dequantization and inverse transforms.
 - Implement intra prediction.
 - Implement inter prediction and motion compensation.
-- Implement `intrabc`, palette, CFL, and filter-intra pixel application.
+- Implement `intrabc`, palette, richer intra prediction, and inter pixel application.
 - Implement super-resolution upscaling.
 - Implement reference-surface refresh and reuse.
 
@@ -209,13 +209,15 @@ Completed within this track already:
 - first public first-pixel path for single-tile `8-bit I400/I420` key/intra frames with all-zero residual
 - luma dequantization and inverse transform for `TX_4X4` / `TX_8X8` `DCT_DCT`
 - minimal non-zero luma residual reconstruction inside the current key/intra subset
+- luma filter-intra reconstruction
+- `I420` CFL chroma reconstruction
 
 Immediate next steps inside this track:
 
 - richer AC coverage and larger transform support
 - chroma residual application
 - directional intra modes
-- filter-intra, CFL, and palette pixel application
+- palette pixel application
 - inter reconstruction and reference-surface consumption
 
 Write scope:
@@ -327,7 +329,7 @@ Already complete in this track:
 - `readFrame()` returns `ArgbIntFrame` for the current narrow first-pixel subset
 - frame filtering for `decodeFrameType` is applied at the current public output boundary
 - syntax reference state and reconstructed reference surfaces are stored separately
-- the current public boundary has already moved past `non-zero residual` and now fails later on unsupported reconstruction features such as `filter_intra`
+- the current public boundary has already moved past `non-zero residual`, `filter_intra`, and `CFL`, and now fails later on unsupported directional intra prediction
 
 Still missing in this track:
 
@@ -483,7 +485,7 @@ Acceptance:
 Status:
 
 - partially achieved now
-- current first-pixel output works for single-tile, non-directional `8-bit I400/I420` key/intra samples, including the minimal non-zero luma residual subset
+- current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-filter-intra/CFL subset, including the minimal non-zero luma residual subset
 - milestone is not closed until chroma residuals, richer intra features, and a less artificial sample set are covered
 
 ### M3: Reference and Inter Frames
