@@ -165,6 +165,31 @@ public final class CdfContext {
             }
     });
 
+    /// The transformed default inter transform-partition CDFs.
+    private static final int[][] DEFAULT_TRANSFORM_PARTITION_CDFS = inverse2d(new int[][]{
+            {28581},
+            {23846},
+            {20847},
+            {24315},
+            {18196},
+            {12133},
+            {18791},
+            {10887},
+            {11005},
+            {27179},
+            {20004},
+            {11281},
+            {26549},
+            {19308},
+            {14224},
+            {28015},
+            {21546},
+            {14400},
+            {28165},
+            {22401},
+            {16088}
+    });
+
     /// The transformed default motion-vector joint CDF.
     private static final int[] DEFAULT_MOTION_VECTOR_JOINT_CDF = inverse(4096, 11264, 19328);
 
@@ -576,6 +601,9 @@ public final class CdfContext {
     /// The mutable transform-size CDFs.
     private final int[][][] transformSizeCdfs;
 
+    /// The mutable inter transform-partition CDFs.
+    private final int[][] transformPartitionCdfs;
+
     /// The mutable motion-vector joint CDF.
     private final int[] motionVectorJointCdf;
 
@@ -668,6 +696,7 @@ public final class CdfContext {
     /// @param drlCdfs the mutable dynamic-reference-list selection CDFs
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
     /// @param transformSizeCdfs the mutable transform-size CDFs
+    /// @param transformPartitionCdfs the mutable inter transform-partition CDFs
     /// @param motionVectorJointCdf the mutable motion-vector joint CDF
     /// @param motionVectorClassCdfs the mutable motion-vector class CDFs
     /// @param motionVectorSignCdfs the mutable motion-vector sign CDFs
@@ -709,6 +738,7 @@ public final class CdfContext {
             int[][] drlCdfs,
             int[][] compoundInterModeCdfs,
             int[][][] transformSizeCdfs,
+            int[][] transformPartitionCdfs,
             int[] motionVectorJointCdf,
             int[][] motionVectorClassCdfs,
             int[][] motionVectorSignCdfs,
@@ -750,6 +780,7 @@ public final class CdfContext {
         this.drlCdfs = Objects.requireNonNull(drlCdfs, "drlCdfs");
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
         this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
+        this.transformPartitionCdfs = Objects.requireNonNull(transformPartitionCdfs, "transformPartitionCdfs");
         this.motionVectorJointCdf = Objects.requireNonNull(motionVectorJointCdf, "motionVectorJointCdf");
         this.motionVectorClassCdfs = Objects.requireNonNull(motionVectorClassCdfs, "motionVectorClassCdfs");
         this.motionVectorSignCdfs = Objects.requireNonNull(motionVectorSignCdfs, "motionVectorSignCdfs");
@@ -797,6 +828,7 @@ public final class CdfContext {
                 deepCopy(DEFAULT_DRL_CDFS),
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
+                deepCopy(DEFAULT_TRANSFORM_PARTITION_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
                 deepCopy(DEFAULT_MOTION_VECTOR_CLASS_CDFS),
                 deepCopy(DEFAULT_MOTION_VECTOR_SIGN_CDFS),
@@ -845,6 +877,7 @@ public final class CdfContext {
                 deepCopy(drlCdfs),
                 deepCopy(compoundInterModeCdfs),
                 deepCopy(transformSizeCdfs),
+                deepCopy(transformPartitionCdfs),
                 Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
                 deepCopy(motionVectorClassCdfs),
                 deepCopy(motionVectorSignCdfs),
@@ -1001,6 +1034,18 @@ public final class CdfContext {
     public int[] mutableTransformSizeCdf(int tableIndex, int context) {
         int[][] table = transformSizeCdfs[Objects.checkIndex(tableIndex, transformSizeCdfs.length)];
         return table[Objects.checkIndex(context, table.length)];
+    }
+
+    /// Returns the live mutable inter transform-partition CDF for the supplied table and context.
+    ///
+    /// The table index follows `dav1d`'s `cat` formula from `read_tx_tree()`.
+    ///
+    /// @param tableIndex the zero-based inter transform-partition table index in `[0, 7)`
+    /// @param context the zero-based context index in `[0, 3)`
+    /// @return the live mutable inter transform-partition CDF for the supplied inputs
+    public int[] mutableTransformPartitionCdf(int tableIndex, int context) {
+        int baseIndex = Objects.checkIndex(tableIndex, 7) * 3;
+        return transformPartitionCdfs[baseIndex + Objects.checkIndex(context, 3)];
     }
 
     /// Returns the live mutable motion-vector joint CDF.

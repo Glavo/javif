@@ -41,6 +41,7 @@ import java.util.Objects;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `TileTransformLayoutReader`.
 @NotNullByDefault
@@ -99,6 +100,58 @@ final class TileTransformLayoutReaderTest {
         assertEquals(TransformSize.TX_4X4, layout.uniformLumaTransformSize());
         assertEquals(TransformSize.TX_4X4, layout.chromaTransformSize());
         assertEquals(16, layout.lumaUnits().length);
+    }
+
+    /// Verifies that switchable inter var-tx can split an 8x8 block into repeated 4x4 luma units.
+    @Test
+    void readsSwitchableInterEightByEightTransformTree() {
+        byte[] payload = findPayloadForInterTransformLayout(BlockSize.SIZE_8X8, 4, TransformSize.TX_4X4);
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                PixelFormat.I400,
+                FrameHeader.TransformMode.SWITCHABLE,
+                false,
+                payload,
+                64,
+                64
+        );
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout layout = transformLayoutReader.read(header, neighborContext);
+
+        assertTrue(layout.variableLumaTransformTree());
+        assertEquals(4, layout.lumaUnits().length);
+        assertEquals(TransformSize.TX_4X4, layout.lumaUnits()[0].size());
+    }
+
+    /// Verifies that switchable inter var-tx can split a 16x16 block to four 8x8 luma units.
+    @Test
+    void readsSwitchableInterSixteenBySixteenTransformTree() {
+        byte[] payload = findPayloadForInterTransformLayout(BlockSize.SIZE_16X16, 4, TransformSize.TX_8X8);
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                PixelFormat.I400,
+                FrameHeader.TransformMode.SWITCHABLE,
+                false,
+                payload,
+                64,
+                64
+        );
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext, false);
+        TransformLayout layout = transformLayoutReader.read(header, neighborContext);
+
+        assertTrue(layout.variableLumaTransformTree());
+        assertEquals(4, layout.lumaUnits().length);
+        assertEquals(TransformSize.TX_8X8, layout.lumaUnits()[0].size());
     }
 
     /// Verifies that partition-tree leaves carry the decoded transform layout.
@@ -162,6 +215,50 @@ final class TileTransformLayoutReaderTest {
             }
         }
         throw new IllegalStateException("No deterministic payload produced the requested key-frame transform depth");
+    }
+
+    /// Finds a small payload whose first inter block decodes a switchable transform layout that matches expectations.
+    ///
+    /// @param blockSize the coded block size whose transform layout should be decoded
+    /// @param expectedUnitCount the expected number of luma transform units
+    /// @param expectedFirstUnitSize the expected size of the first luma transform unit
+    /// @return a small payload whose first inter block decodes a matching switchable transform layout
+    private static byte[] findPayloadForInterTransformLayout(
+            BlockSize blockSize,
+            int expectedUnitCount,
+            TransformSize expectedFirstUnitSize
+    ) {
+        for (int first = 0; first < 256; first++) {
+            for (int second = 0; second < 256; second++) {
+                for (int third = 0; third < 256; third++) {
+                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
+                    TileDecodeContext tileContext = createTileContext(
+                            FrameType.INTER,
+                            PixelFormat.I400,
+                            FrameHeader.TransformMode.SWITCHABLE,
+                            false,
+                            payload,
+                            64,
+                            64
+                    );
+                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+                    TileBlockHeaderReader.BlockHeader header =
+                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
+                    if (header.skip() || header.intra()) {
+                        continue;
+                    }
+                    TransformLayout layout = transformLayoutReader.read(header, neighborContext);
+                    if (layout.variableLumaTransformTree()
+                            && layout.lumaUnits().length == expectedUnitCount
+                            && layout.lumaUnits()[0].size() == expectedFirstUnitSize) {
+                        return payload;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced the requested inter transform layout");
     }
 
     /// Creates one synthetic tile-local decode context used by transform-layout tests.

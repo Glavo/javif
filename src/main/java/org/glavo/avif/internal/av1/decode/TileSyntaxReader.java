@@ -216,6 +216,15 @@ public final class TileSyntaxReader {
         );
     }
 
+    /// Decodes one inter var-tx split flag from the supplied `dav1d` table and context.
+    ///
+    /// @param tableIndex the zero-based `dav1d` transform-partition table index in `[0, 7)`
+    /// @param context the zero-based transform-partition context index in `[0, 3)`
+    /// @return whether the current transform region splits to smaller transforms
+    public boolean readTransformSplitFlag(int tableIndex, int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableTransformPartitionCdf(tableIndex, context));
+    }
+
     /// Decodes one `NEWMV` residual around the supplied predictor.
     ///
     /// The active frame header supplies the motion-vector precision mode. The returned vector is

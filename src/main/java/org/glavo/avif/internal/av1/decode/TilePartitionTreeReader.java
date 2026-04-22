@@ -244,7 +244,10 @@ public final class TilePartitionTreeReader {
             @org.jetbrains.annotations.Nullable org.glavo.avif.internal.av1.model.TransformSize uniformLumaTransformSize =
                     transformLayout.uniformLumaTransformSize();
             if (uniformLumaTransformSize != null) {
-                neighborContext.updateIntraTransformContext(position, size, uniformLumaTransformSize);
+                if (header.intra()) {
+                    neighborContext.updateIntraTransformContext(position, size, uniformLumaTransformSize);
+                    neighborContext.updateInterTransformContext(position, size.width4(), size.height4(), uniformLumaTransformSize);
+                }
             }
         }
         return new LeafNode(header, transformLayout);

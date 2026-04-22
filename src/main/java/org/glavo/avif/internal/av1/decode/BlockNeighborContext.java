@@ -169,6 +169,12 @@ public final class BlockNeighborContext {
     /// The left-edge transform-context heights indexed in 4x4 units.
     private final byte[] leftTransformHeightLog2;
 
+    /// The above-edge inter var-tx widths indexed in 4x4 units.
+    private final byte[] aboveInterTransformWidthLog2;
+
+    /// The left-edge inter var-tx heights indexed in 4x4 units.
+    private final byte[] leftInterTransformHeightLog2;
+
     /// Creates tile-local neighbor context state.
     ///
     /// @param tileWidth4 the tile width rounded up to 4x4 units
@@ -211,6 +217,8 @@ public final class BlockNeighborContext {
     /// @param leftPartition the left-edge partition context state indexed in 8x8 units
     /// @param aboveTransformWidthLog2 the above-edge transform-context widths indexed in 4x4 units
     /// @param leftTransformHeightLog2 the left-edge transform-context heights indexed in 4x4 units
+    /// @param aboveInterTransformWidthLog2 the above-edge inter var-tx widths indexed in 4x4 units
+    /// @param leftInterTransformHeightLog2 the left-edge inter var-tx heights indexed in 4x4 units
     private BlockNeighborContext(
             int tileWidth4,
             int tileHeight4,
@@ -251,7 +259,9 @@ public final class BlockNeighborContext {
             byte[] abovePartition,
             byte[] leftPartition,
             byte[] aboveTransformWidthLog2,
-            byte[] leftTransformHeightLog2
+            byte[] leftTransformHeightLog2,
+            byte[] aboveInterTransformWidthLog2,
+            byte[] leftInterTransformHeightLog2
     ) {
         this.tileWidth4 = tileWidth4;
         this.tileHeight4 = tileHeight4;
@@ -293,6 +303,14 @@ public final class BlockNeighborContext {
         this.leftPartition = Objects.requireNonNull(leftPartition, "leftPartition");
         this.aboveTransformWidthLog2 = Objects.requireNonNull(aboveTransformWidthLog2, "aboveTransformWidthLog2");
         this.leftTransformHeightLog2 = Objects.requireNonNull(leftTransformHeightLog2, "leftTransformHeightLog2");
+        this.aboveInterTransformWidthLog2 = Objects.requireNonNull(
+                aboveInterTransformWidthLog2,
+                "aboveInterTransformWidthLog2"
+        );
+        this.leftInterTransformHeightLog2 = Objects.requireNonNull(
+                leftInterTransformHeightLog2,
+                "leftInterTransformHeightLog2"
+        );
     }
 
     /// Creates initialized neighbor context state for one tile.
@@ -315,6 +333,8 @@ public final class BlockNeighborContext {
         byte[] leftReferenceFrame1 = new byte[tileHeight4];
         byte[] aboveTransformWidthLog2 = new byte[tileWidth4];
         byte[] leftTransformHeightLog2 = new byte[tileHeight4];
+        byte[] aboveInterTransformWidthLog2 = new byte[tileWidth4];
+        byte[] leftInterTransformHeightLog2 = new byte[tileHeight4];
         InterMotionVector[] aboveMotionVector0 = new InterMotionVector[tileWidth4];
         InterMotionVector[] leftMotionVector0 = new InterMotionVector[tileHeight4];
         InterMotionVector[] aboveMotionVector1 = new InterMotionVector[tileWidth4];
@@ -324,6 +344,8 @@ public final class BlockNeighborContext {
         InterMotionVector defaultMotionVector = InterMotionVector.predicted(MotionVector.zero());
         Arrays.fill(aboveTransformWidthLog2, (byte) -1);
         Arrays.fill(leftTransformHeightLog2, (byte) -1);
+        Arrays.fill(aboveInterTransformWidthLog2, (byte) -1);
+        Arrays.fill(leftInterTransformHeightLog2, (byte) -1);
         Arrays.fill(aboveReferenceFrame0, (byte) -1);
         Arrays.fill(leftReferenceFrame0, (byte) -1);
         Arrays.fill(aboveReferenceFrame1, (byte) -1);
@@ -379,7 +401,9 @@ public final class BlockNeighborContext {
                 new byte[tileWidth8],
                 new byte[tileHeight8],
                 aboveTransformWidthLog2,
-                leftTransformHeightLog2
+                leftTransformHeightLog2,
+                aboveInterTransformWidthLog2,
+                leftInterTransformHeightLog2
         );
     }
 
@@ -1187,6 +1211,23 @@ public final class BlockNeighborContext {
                 + (aboveTransformWidthLog2[x4] >= nonNullMaxTransformSize.log2Width4() ? 1 : 0);
     }
 
+    /// Returns the inter var-tx split context for one transform region and maximum transform size.
+    ///
+    /// This matches `dav1d`'s `read_tx_tree()` rule that compares the current top and left inter
+    /// transform-context dimensions against the transform width and height being split.
+    ///
+    /// @param position the local tile-relative origin of the current transform region
+    /// @param transformSize the transform size currently being considered for splitting
+    /// @return the inter var-tx split context in `[0, 3)`
+    public int interTransformSplitContext(BlockPosition position, TransformSize transformSize) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        return (aboveInterTransformWidthLog2[x4] < nonNullTransformSize.log2Width4() ? 1 : 0)
+                + (leftInterTransformHeightLog2[y4] < nonNullTransformSize.log2Height4() ? 1 : 0);
+    }
+
     /// Updates the default transform-context dimensions after one block header is decoded.
     ///
     /// Inter blocks use their coded block dimensions for subsequent transform-size contexts, which
@@ -1217,6 +1258,56 @@ public final class BlockNeighborContext {
                 nonNullTransformSize.log2Width4(),
                 nonNullTransformSize.log2Height4()
         );
+    }
+
+    /// Updates the inter var-tx context for one transform region.
+    ///
+    /// @param position the local tile-relative origin of the current transform region
+    /// @param width4 the transform-region width in 4x4 units
+    /// @param height4 the transform-region height in 4x4 units
+    /// @param transformSize the chosen transform size for the current region
+    public void updateInterTransformContext(
+            BlockPosition position,
+            int width4,
+            int height4,
+            TransformSize transformSize
+    ) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        updateInterTransformContext(
+                Objects.requireNonNull(position, "position"),
+                width4,
+                height4,
+                nonNullTransformSize.log2Width4(),
+                nonNullTransformSize.log2Height4()
+        );
+    }
+
+    /// Updates the inter var-tx context for one region using raw width/height log2 values.
+    ///
+    /// This variant is used when switchable inter transform mode stores the coded block dimensions
+    /// rather than a legal transform enum, such as 128x128 superblocks.
+    ///
+    /// @param position the local tile-relative origin of the current region
+    /// @param width4 the region width in 4x4 units
+    /// @param height4 the region height in 4x4 units
+    /// @param widthLog2 the stored width in `log2(4x4 units)`
+    /// @param heightLog2 the stored height in `log2(4x4 units)`
+    public void updateInterTransformContext(
+            BlockPosition position,
+            int width4,
+            int height4,
+            int widthLog2,
+            int heightLog2
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int endX4 = Math.min(tileWidth4, nonNullPosition.x4() + width4);
+        int endY4 = Math.min(tileHeight4, nonNullPosition.y4() + height4);
+        for (int x4 = nonNullPosition.x4(); x4 < endX4; x4++) {
+            aboveInterTransformWidthLog2[x4] = (byte) widthLog2;
+        }
+        for (int y4 = nonNullPosition.y4(); y4 < endY4; y4++) {
+            leftInterTransformHeightLog2[y4] = (byte) heightLog2;
+        }
     }
 
     /// Writes one transform-context width/height pair across the visible edges of one block span.
