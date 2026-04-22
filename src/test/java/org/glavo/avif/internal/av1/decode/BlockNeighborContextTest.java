@@ -433,6 +433,89 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(2).motionVector0());
     }
 
+    /// Verifies that farther odd-aligned secondary row/column offsets contribute when large blocks
+    /// have no direct matching neighbors.
+    @Test
+    void provisionalInterModeContextsIncludeFarSecondaryOffsetMatches() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                4,
+                null,
+                InterMotionVector.resolved(new MotionVector(-12, -4))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
+                4,
+                null,
+                InterMotionVector.resolved(new MotionVector(-8, 16))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 0),
+                BlockSize.SIZE_8X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(20, -8))
+        ));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(0, 4),
+                BlockSize.SIZE_8X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(24, 12))
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
+
+        assertEquals(1, provisionalContext.singleNewMvContext());
+        assertEquals(2, provisionalContext.singleReferenceMvContext());
+        assertEquals(2, provisionalContext.compoundInterModeContext());
+        assertEquals(5, provisionalContext.candidateCount());
+        assertEquals(640, provisionalContext.candidateWeight(0));
+        assertEquals(448, provisionalContext.candidateWeight(1));
+        assertEquals(448, provisionalContext.candidateWeight(2));
+        assertEquals(256, provisionalContext.candidateWeight(3));
+        assertEquals(256, provisionalContext.candidateWeight(4));
+        assertEquals(4, provisionalContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.resolved(new MotionVector(20, -8)), provisionalContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(InterMotionVector.resolved(new MotionVector(24, 12)), provisionalContext.motionVectorCandidate(1).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(2).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(3).motionVector0());
+    }
+
+    /// Verifies that temporal motion-field samples feed the provisional motion-vector stack and
+    /// global-motion context when reference-frame motion vectors are enabled.
+    @Test
+    void provisionalInterModeContextsIncludeTemporalMotionFieldCandidates() {
+        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(8, 8);
+        TileDecodeContext.TemporalMotionBlock temporalBlock = TileDecodeContext.TemporalMotionBlock.singleReference(
+                0,
+                InterMotionVector.resolved(new MotionVector(28, -12))
+        );
+        temporalMotionField.setBlock(2, 2, temporalBlock);
+        temporalMotionField.setBlock(3, 2, temporalBlock);
+        BlockNeighborContext context = BlockNeighborContext.create(
+                testTileContext(FrameType.INTER, true, temporalMotionField)
+        );
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
+
+        assertEquals(0, provisionalContext.singleNewMvContext());
+        assertEquals(1, provisionalContext.singleGlobalMvContext());
+        assertEquals(0, provisionalContext.singleReferenceMvContext());
+        assertEquals(0, provisionalContext.compoundInterModeContext());
+        assertEquals(2, provisionalContext.candidateCount());
+        assertEquals(640, provisionalContext.candidateWeight(0));
+        assertEquals(64, provisionalContext.candidateWeight(1));
+        assertEquals(2, provisionalContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.resolved(new MotionVector(28, -12)), provisionalContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
+    }
+
     /// Verifies inter-frame initialization starts with non-intra neighbors.
     @Test
     void initializesInterFrameNeighborState() {
@@ -449,6 +532,20 @@ final class BlockNeighborContextTest {
     /// @param frameType the synthetic frame type
     /// @return a simple tile context used by neighbor-context tests
     private static TileDecodeContext testTileContext(FrameType frameType) {
+        return testTileContext(frameType, false, null);
+    }
+
+    /// Creates a simple tile context used by neighbor-context tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
+    /// @param temporalMotionField the synthetic tile-local temporal motion field, or `null`
+    /// @return a simple tile context used by neighbor-context tests
+    private static TileDecodeContext testTileContext(
+            FrameType frameType,
+            boolean useReferenceFrameMotionVectors,
+            @org.jetbrains.annotations.Nullable TileDecodeContext.TemporalMotionField temporalMotionField
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -516,9 +613,15 @@ final class BlockNeighborContextTest {
                 7,
                 0,
                 0xFF,
+                false,
+                new int[]{-1, -1, -1, -1, -1, -1, -1},
                 new FrameHeader.FrameSize(64, 64, 64, 64, 64),
                 new FrameHeader.SuperResolutionInfo(false, 8),
                 false,
+                false,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                false,
+                useReferenceFrameMotionVectors,
                 true,
                 new FrameHeader.TilingInfo(
                         true,
@@ -561,6 +664,11 @@ final class BlockNeighborContextTest {
                 ),
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                false,
                 false
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
@@ -571,7 +679,9 @@ final class BlockNeighborContextTest {
                 0,
                 new TileBitstream[]{new TileBitstream(0, new byte[]{0x00}, 0, 1)}
         );
-        return TileDecodeContext.create(assembly, 0);
+        return temporalMotionField == null
+                ? TileDecodeContext.create(assembly, 0)
+                : TileDecodeContext.create(assembly, 0, temporalMotionField);
     }
 
     /// Creates default per-segment data with all features disabled.

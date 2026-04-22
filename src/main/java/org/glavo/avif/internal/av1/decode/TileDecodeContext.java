@@ -19,6 +19,7 @@ import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -47,6 +48,9 @@ public final class TileDecodeContext {
 
     /// The tile-local mutable CDF context.
     private final CdfContext cdfContext;
+
+    /// The tile-local temporal motion field sampled from refreshed reference frames.
+    private final TemporalMotionField temporalMotionField;
 
     /// The zero-based tile index within the frame.
     private final int tileIndex;
@@ -92,6 +96,7 @@ public final class TileDecodeContext {
     /// @param tileBitstream the selected tile bitstream
     /// @param msacDecoder the tile-local arithmetic decoder
     /// @param cdfContext the tile-local mutable CDF context
+    /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
     /// @param tileIndex the zero-based tile index within the frame
     /// @param tileRow the zero-based tile row within the frame
     /// @param tileColumn the zero-based tile column within the frame
@@ -111,6 +116,7 @@ public final class TileDecodeContext {
             TileBitstream tileBitstream,
             MsacDecoder msacDecoder,
             CdfContext cdfContext,
+            TemporalMotionField temporalMotionField,
             int tileIndex,
             int tileRow,
             int tileColumn,
@@ -130,6 +136,7 @@ public final class TileDecodeContext {
         this.tileBitstream = Objects.requireNonNull(tileBitstream, "tileBitstream");
         this.msacDecoder = Objects.requireNonNull(msacDecoder, "msacDecoder");
         this.cdfContext = Objects.requireNonNull(cdfContext, "cdfContext");
+        this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
         this.tileIndex = tileIndex;
         this.tileRow = tileRow;
         this.tileColumn = tileColumn;
@@ -160,6 +167,36 @@ public final class TileDecodeContext {
     /// @param baseCdfContext the base CDF context template to copy for this tile
     /// @return tile-local decode state for the selected tile
     public static TileDecodeContext create(FrameAssembly assembly, int tileIndex, CdfContext baseCdfContext) {
+        return create(assembly, tileIndex, baseCdfContext, null);
+    }
+
+    /// Creates tile-local decode state with a fresh default CDF context and a supplied temporal motion field.
+    ///
+    /// @param assembly the frame assembly that owns the tile
+    /// @param tileIndex the zero-based tile index within the frame
+    /// @param temporalMotionField the tile-local temporal motion field to attach
+    /// @return tile-local decode state for the selected tile
+    public static TileDecodeContext create(
+            FrameAssembly assembly,
+            int tileIndex,
+            TemporalMotionField temporalMotionField
+    ) {
+        return create(assembly, tileIndex, CdfContext.createDefault(), temporalMotionField);
+    }
+
+    /// Creates tile-local decode state with a copy of the supplied base CDF context and a supplied temporal motion field.
+    ///
+    /// @param assembly the frame assembly that owns the tile
+    /// @param tileIndex the zero-based tile index within the frame
+    /// @param baseCdfContext the base CDF context template to copy for this tile
+    /// @param temporalMotionField the tile-local temporal motion field to attach, or `null` for an empty field
+    /// @return tile-local decode state for the selected tile
+    public static TileDecodeContext create(
+            FrameAssembly assembly,
+            int tileIndex,
+            CdfContext baseCdfContext,
+            @org.jetbrains.annotations.Nullable TemporalMotionField temporalMotionField
+    ) {
         FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
         CdfContext copiedCdfContext = Objects.requireNonNull(baseCdfContext, "baseCdfContext").copy();
         TileBitstream tileBitstream = nonNullAssembly.tileBitstream(tileIndex);
@@ -181,6 +218,19 @@ public final class TileDecodeContext {
         int endX = Math.min(frameHeader.frameSize().codedWidth(), columnEndSuperblock * superblockSize);
         int startY = rowStartSuperblock * superblockSize;
         int endY = Math.min(frameHeader.frameSize().height(), rowEndSuperblock * superblockSize);
+        int width8 = (endX - startX + 7) >> 3;
+        int height8 = (endY - startY + 7) >> 3;
+        TemporalMotionField effectiveTemporalMotionField = temporalMotionField == null
+                ? new TemporalMotionField(width8, height8)
+                : temporalMotionField;
+        if (effectiveTemporalMotionField.width8() != width8 || effectiveTemporalMotionField.height8() != height8) {
+            throw new IllegalArgumentException(
+                    "Temporal motion field dimensions do not match tile geometry: expected "
+                            + width8 + "x" + height8
+                            + " but got "
+                            + effectiveTemporalMotionField.width8() + "x" + effectiveTemporalMotionField.height8()
+            );
+        }
 
         return new TileDecodeContext(
                 nonNullAssembly,
@@ -189,6 +239,7 @@ public final class TileDecodeContext {
                 tileBitstream,
                 tileBitstream.openMsacDecoder(frameHeader.disableCdfUpdate()),
                 copiedCdfContext,
+                effectiveTemporalMotionField,
                 tileIndex,
                 tileRow,
                 tileColumn,
@@ -244,6 +295,13 @@ public final class TileDecodeContext {
     /// @return the tile-local mutable CDF context
     public CdfContext cdfContext() {
         return cdfContext;
+    }
+
+    /// Returns the tile-local temporal motion field sampled from refreshed reference frames.
+    ///
+    /// @return the tile-local temporal motion field sampled from refreshed reference frames
+    public TemporalMotionField temporalMotionField() {
+        return temporalMotionField;
     }
 
     /// Returns the zero-based tile index within the frame.
@@ -342,5 +400,199 @@ public final class TileDecodeContext {
     /// @return the tile height in pixels
     public int height() {
         return endY - startY;
+    }
+
+    /// A tile-local temporal motion field sampled in 8x8 units.
+    @NotNullByDefault
+    public static final class TemporalMotionField {
+        /// The tile width rounded up to 8x8 units.
+        private final int width8;
+
+        /// The tile height rounded up to 8x8 units.
+        private final int height8;
+
+        /// The temporal motion blocks indexed in tile-relative 8x8 units.
+        private final @org.jetbrains.annotations.Nullable TemporalMotionBlock[] blocks;
+
+        /// Creates an empty tile-local temporal motion field.
+        ///
+        /// @param width8 the tile width rounded up to 8x8 units
+        /// @param height8 the tile height rounded up to 8x8 units
+        public TemporalMotionField(int width8, int height8) {
+            if (width8 < 0) {
+                throw new IllegalArgumentException("width8 < 0: " + width8);
+            }
+            if (height8 < 0) {
+                throw new IllegalArgumentException("height8 < 0: " + height8);
+            }
+            this.width8 = width8;
+            this.height8 = height8;
+            this.blocks = new TemporalMotionBlock[width8 * height8];
+        }
+
+        /// Returns the tile width rounded up to 8x8 units.
+        ///
+        /// @return the tile width rounded up to 8x8 units
+        public int width8() {
+            return width8;
+        }
+
+        /// Returns the tile height rounded up to 8x8 units.
+        ///
+        /// @return the tile height rounded up to 8x8 units
+        public int height8() {
+            return height8;
+        }
+
+        /// Stores one temporal motion block at the supplied tile-relative 8x8 coordinate.
+        ///
+        /// @param x8 the tile-relative X coordinate in 8x8 units
+        /// @param y8 the tile-relative Y coordinate in 8x8 units
+        /// @param block the temporal motion block to store
+        public void setBlock(int x8, int y8, TemporalMotionBlock block) {
+            blocks[index(x8, y8)] = Objects.requireNonNull(block, "block");
+        }
+
+        /// Returns the temporal motion block stored at the supplied tile-relative 8x8 coordinate, or `null`.
+        ///
+        /// @param x8 the tile-relative X coordinate in 8x8 units
+        /// @param y8 the tile-relative Y coordinate in 8x8 units
+        /// @return the temporal motion block stored at the supplied tile-relative 8x8 coordinate, or `null`
+        public @org.jetbrains.annotations.Nullable TemporalMotionBlock block(int x8, int y8) {
+            return blocks[index(x8, y8)];
+        }
+
+        /// Returns the flat array index for one tile-relative 8x8 coordinate.
+        ///
+        /// @param x8 the tile-relative X coordinate in 8x8 units
+        /// @param y8 the tile-relative Y coordinate in 8x8 units
+        /// @return the flat array index for one tile-relative 8x8 coordinate
+        private int index(int x8, int y8) {
+            if (x8 < 0 || x8 >= width8) {
+                throw new IndexOutOfBoundsException("x8 out of range: " + x8);
+            }
+            if (y8 < 0 || y8 >= height8) {
+                throw new IndexOutOfBoundsException("y8 out of range: " + y8);
+            }
+            return y8 * width8 + x8;
+        }
+    }
+
+    /// One temporal motion-field sample projected into the current tile.
+    @NotNullByDefault
+    public static final class TemporalMotionBlock {
+        /// Whether the temporal sample carries compound references.
+        private final boolean compoundReference;
+
+        /// The primary reference frame in internal LAST..ALTREF order.
+        private final int referenceFrame0;
+
+        /// The secondary reference frame in internal LAST..ALTREF order, or `-1`.
+        private final int referenceFrame1;
+
+        /// The primary temporal motion-vector state.
+        private final InterMotionVector motionVector0;
+
+        /// The secondary temporal motion-vector state, or `null`.
+        private final @org.jetbrains.annotations.Nullable InterMotionVector motionVector1;
+
+        /// Creates one single-reference temporal motion-field sample.
+        ///
+        /// @param referenceFrame0 the primary reference frame in internal LAST..ALTREF order
+        /// @param motionVector0 the primary temporal motion-vector state
+        /// @return one single-reference temporal motion-field sample
+        public static TemporalMotionBlock singleReference(int referenceFrame0, InterMotionVector motionVector0) {
+            return new TemporalMotionBlock(false, referenceFrame0, -1, motionVector0, null);
+        }
+
+        /// Creates one compound-reference temporal motion-field sample.
+        ///
+        /// @param referenceFrame0 the primary reference frame in internal LAST..ALTREF order
+        /// @param referenceFrame1 the secondary reference frame in internal LAST..ALTREF order
+        /// @param motionVector0 the primary temporal motion-vector state
+        /// @param motionVector1 the secondary temporal motion-vector state
+        /// @return one compound-reference temporal motion-field sample
+        public static TemporalMotionBlock compoundReference(
+                int referenceFrame0,
+                int referenceFrame1,
+                InterMotionVector motionVector0,
+                InterMotionVector motionVector1
+        ) {
+            return new TemporalMotionBlock(true, referenceFrame0, referenceFrame1, motionVector0, motionVector1);
+        }
+
+        /// Creates one temporal motion-field sample.
+        ///
+        /// @param compoundReference whether the temporal sample carries compound references
+        /// @param referenceFrame0 the primary reference frame in internal LAST..ALTREF order
+        /// @param referenceFrame1 the secondary reference frame in internal LAST..ALTREF order, or `-1`
+        /// @param motionVector0 the primary temporal motion-vector state
+        /// @param motionVector1 the secondary temporal motion-vector state, or `null`
+        public TemporalMotionBlock(
+                boolean compoundReference,
+                int referenceFrame0,
+                int referenceFrame1,
+                InterMotionVector motionVector0,
+                @org.jetbrains.annotations.Nullable InterMotionVector motionVector1
+        ) {
+            if (referenceFrame0 < 0) {
+                throw new IllegalArgumentException("referenceFrame0 < 0: " + referenceFrame0);
+            }
+            if (compoundReference) {
+                if (referenceFrame1 < 0) {
+                    throw new IllegalArgumentException("Compound temporal motion blocks must carry referenceFrame1");
+                }
+                if (motionVector1 == null) {
+                    throw new IllegalArgumentException("Compound temporal motion blocks must carry motionVector1");
+                }
+            } else {
+                if (referenceFrame1 >= 0) {
+                    throw new IllegalArgumentException("Single-reference temporal motion blocks must not carry referenceFrame1");
+                }
+                if (motionVector1 != null) {
+                    throw new IllegalArgumentException("Single-reference temporal motion blocks must not carry motionVector1");
+                }
+            }
+            this.compoundReference = compoundReference;
+            this.referenceFrame0 = referenceFrame0;
+            this.referenceFrame1 = referenceFrame1;
+            this.motionVector0 = Objects.requireNonNull(motionVector0, "motionVector0");
+            this.motionVector1 = motionVector1;
+        }
+
+        /// Returns whether the temporal sample carries compound references.
+        ///
+        /// @return whether the temporal sample carries compound references
+        public boolean compoundReference() {
+            return compoundReference;
+        }
+
+        /// Returns the primary reference frame in internal LAST..ALTREF order.
+        ///
+        /// @return the primary reference frame in internal LAST..ALTREF order
+        public int referenceFrame0() {
+            return referenceFrame0;
+        }
+
+        /// Returns the secondary reference frame in internal LAST..ALTREF order, or `-1`.
+        ///
+        /// @return the secondary reference frame in internal LAST..ALTREF order, or `-1`
+        public int referenceFrame1() {
+            return referenceFrame1;
+        }
+
+        /// Returns the primary temporal motion-vector state.
+        ///
+        /// @return the primary temporal motion-vector state
+        public InterMotionVector motionVector0() {
+            return motionVector0;
+        }
+
+        /// Returns the secondary temporal motion-vector state, or `null`.
+        ///
+        /// @return the secondary temporal motion-vector state, or `null`
+        public @org.jetbrains.annotations.Nullable InterMotionVector motionVector1() {
+            return motionVector1;
+        }
     }
 }

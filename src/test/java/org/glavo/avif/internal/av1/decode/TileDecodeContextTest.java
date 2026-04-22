@@ -23,6 +23,8 @@ import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
@@ -33,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /// Tests for `TileDecodeContext`.
 @NotNullByDefault
@@ -111,6 +114,33 @@ final class TileDecodeContextTest {
         assertEquals(190, context.endY());
         assertFalse(context.msacDecoder().allowCdfUpdate());
         assertTrue(context.msacDecoder().decodeBooleanEqui());
+    }
+
+    /// Verifies that custom temporal motion fields are preserved and validated against tile geometry.
+    @Test
+    void createsContextWithCustomTemporalMotionField() {
+        FrameAssembly assembly = testAssembly(
+                false,
+                false,
+                128,
+                128,
+                new int[]{0, 2},
+                new int[]{0, 2},
+                new byte[][]{
+                        {0x00}
+                }
+        );
+        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(16, 16);
+        TileDecodeContext.TemporalMotionBlock temporalBlock = TileDecodeContext.TemporalMotionBlock.singleReference(
+                0,
+                InterMotionVector.resolved(new MotionVector(12, -4))
+        );
+        temporalMotionField.setBlock(3, 4, temporalBlock);
+
+        TileDecodeContext context = TileDecodeContext.create(assembly, 0, temporalMotionField);
+
+        assertSame(temporalMotionField, context.temporalMotionField());
+        assertSame(temporalBlock, context.temporalMotionField().block(3, 4));
     }
 
     /// Creates a synthetic assembled frame with one tile group that already covers all tiles.

@@ -36,6 +36,12 @@ public final class BlockNeighborContext {
     /// The weight penalty applied to secondary spatial candidates relative to direct-edge candidates.
     private static final int SECONDARY_SPATIAL_WEIGHT_PENALTY = 192;
 
+    /// The extra penalty applied for each farther odd-aligned secondary spatial offset layer.
+    private static final int SECONDARY_SPATIAL_WEIGHT_PENALTY_STEP = 64;
+
+    /// The weight contributed by one temporal motion-field sample.
+    private static final int TEMPORAL_MOTION_WEIGHT = 64;
+
     /// The weight penalty applied to top-right spatial candidates relative to direct-edge candidates.
     private static final int TOP_RIGHT_SPATIAL_WEIGHT_PENALTY = 64;
 
@@ -47,6 +53,12 @@ public final class BlockNeighborContext {
 
     /// The tile height rounded up to 4x4 units.
     private final int tileHeight4;
+
+    /// Whether reference-frame motion vectors are enabled for the active frame.
+    private final boolean useReferenceFrameMotionVectors;
+
+    /// The tile-local temporal motion field sampled from refreshed reference frames.
+    private final TileDecodeContext.TemporalMotionField temporalMotionField;
 
     /// The stored decoded block map indexed in tile-relative 4x4 units.
     private final StoredBlock[] storedBlocks;
@@ -151,6 +163,8 @@ public final class BlockNeighborContext {
     ///
     /// @param tileWidth4 the tile width rounded up to 4x4 units
     /// @param tileHeight4 the tile height rounded up to 4x4 units
+    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
+    /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
     /// @param storedBlocks the stored decoded block map indexed in tile-relative 4x4 units
     /// @param aboveIntra the above-edge intra flags indexed in 4x4 units
     /// @param leftIntra the left-edge intra flags indexed in 4x4 units
@@ -187,6 +201,8 @@ public final class BlockNeighborContext {
     private BlockNeighborContext(
             int tileWidth4,
             int tileHeight4,
+            boolean useReferenceFrameMotionVectors,
+            TileDecodeContext.TemporalMotionField temporalMotionField,
             StoredBlock[] storedBlocks,
             byte[] aboveIntra,
             byte[] leftIntra,
@@ -223,6 +239,8 @@ public final class BlockNeighborContext {
     ) {
         this.tileWidth4 = tileWidth4;
         this.tileHeight4 = tileHeight4;
+        this.useReferenceFrameMotionVectors = useReferenceFrameMotionVectors;
+        this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
         this.storedBlocks = Objects.requireNonNull(storedBlocks, "storedBlocks");
         this.aboveIntra = Objects.requireNonNull(aboveIntra, "aboveIntra");
         this.leftIntra = Objects.requireNonNull(leftIntra, "leftIntra");
@@ -301,6 +319,8 @@ public final class BlockNeighborContext {
         return new BlockNeighborContext(
                 tileWidth4,
                 tileHeight4,
+                nonNullTileContext.frameHeader().useReferenceFrameMotionVectors(),
+                nonNullTileContext.temporalMotionField(),
                 new StoredBlock[tileWidth4 * tileHeight4],
                 aboveIntra,
                 leftIntra,
@@ -599,9 +619,9 @@ public final class BlockNeighborContext {
     /// Builds a provisional inter-mode syntax context from already-decoded spatial neighbors.
     ///
     /// This helper scans the direct top row and left column across the full current-block span,
-    /// then augments that with a bounded secondary spatial scan plus dedicated top-right and
-    /// top-left spatial candidates. It still omits temporal neighbors and therefore remains an
-    /// incomplete `refmvs` implementation.
+    /// then augments that with temporal motion-field samples, odd-aligned secondary
+    /// 8x8-resolution row/column offsets, and dedicated top-right and top-left spatial
+    /// candidates. It still remains an incomplete `refmvs` implementation.
     ///
     /// @param position the current block position
     /// @param size the current block size
@@ -684,18 +704,34 @@ public final class BlockNeighborContext {
             columnReferenceMatch = directLeftScan.referenceMatch();
             haveNewMotionVectorMatch |= directLeftScan.haveNewMotionVectorMatch();
         }
+        TemporalScanResult temporalScan = scanTemporalMotionField(
+                nonNullPosition,
+                nonNullSize,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                candidates,
+                candidateCount
+        );
+        candidateCount = temporalScan.candidateCount();
 
-        int secondaryY4 = y4 - nonNullSize.height4() - 1;
-        if (secondaryY4 >= 0) {
+        int secondaryTopSpanStart4 = secondaryScanSpanStart(x4, endX4);
+        int secondaryLeftSpanStart4 = secondaryScanSpanStart(y4, endY4);
+        int maxSecondaryTopOffsets = Math.min((y4 + 1) >> 1, 2 + (nonNullSize.height4() > 1 ? 1 : 0));
+        for (int secondaryOffset = 2; secondaryOffset <= maxSecondaryTopOffsets; secondaryOffset++) {
+            int secondaryRowY4 = secondarySpatialOffsetCoordinate(y4, secondaryOffset);
+            if (secondaryRowY4 < 0) {
+                break;
+            }
             SpatialScanResult secondaryTopScan = scanStoredBlocksAlongSpan(
                     true,
-                    secondaryY4,
-                    x4,
+                    secondaryRowY4,
+                    secondaryTopSpanStart4,
                     endX4,
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
-                    SECONDARY_SPATIAL_WEIGHT_PENALTY,
+                    secondarySpatialWeightPenalty(secondaryOffset),
                     candidates,
                     candidateCount
             );
@@ -703,17 +739,21 @@ public final class BlockNeighborContext {
             rowReferenceMatch |= secondaryTopScan.referenceMatch();
             haveNewMotionVectorMatch |= secondaryTopScan.haveNewMotionVectorMatch();
         }
-        int secondaryX4 = x4 - nonNullSize.width4() - 1;
-        if (secondaryX4 >= 0) {
+        int maxSecondaryLeftOffsets = Math.min((x4 + 1) >> 1, 2 + (nonNullSize.width4() > 1 ? 1 : 0));
+        for (int secondaryOffset = 2; secondaryOffset <= maxSecondaryLeftOffsets; secondaryOffset++) {
+            int secondaryColumnX4 = secondarySpatialOffsetCoordinate(x4, secondaryOffset);
+            if (secondaryColumnX4 < 0) {
+                break;
+            }
             SpatialScanResult secondaryLeftScan = scanStoredBlocksAlongSpan(
                     false,
-                    secondaryX4,
-                    y4,
+                    secondaryColumnX4,
+                    secondaryLeftSpanStart4,
                     endY4,
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
-                    SECONDARY_SPATIAL_WEIGHT_PENALTY,
+                    secondarySpatialWeightPenalty(secondaryOffset),
                     candidates,
                     candidateCount
             );
@@ -763,11 +803,125 @@ public final class BlockNeighborContext {
 
         return new ProvisionalInterModeContext(
                 refMvsContextSummary.singleNewMvContext(),
-                refMvsContextSummary.singleGlobalMvContext(),
+                temporalScan.globalMotionContext(),
                 refMvsContextSummary.singleReferenceMvContext(),
                 refMvsContextSummary.compoundInterModeContext(),
                 Arrays.copyOf(candidates, candidateCount)
         );
+    }
+
+    /// Returns the odd-aligned coordinate used for one secondary spatial offset layer.
+    ///
+    /// @param coordinate4 the current block start coordinate in 4x4 units
+    /// @param secondaryOffset the one-based secondary offset layer index starting at `2`
+    /// @return the odd-aligned secondary scan coordinate in 4x4 units
+    private static int secondarySpatialOffsetCoordinate(int coordinate4, int secondaryOffset) {
+        return (coordinate4 - (secondaryOffset << 1) + 1) | 1;
+    }
+
+    /// Returns the start coordinate used when scanning secondary 8x8-resolution spans.
+    ///
+    /// The secondary spatial scan in `dav1d` samples odd-aligned coordinates inside the current
+    /// block footprint. This helper keeps that odd alignment while still guaranteeing that narrow
+    /// blocks contribute at least one sampled coordinate.
+    ///
+    /// @param spanStart4 the inclusive start of the current block span in 4x4 units
+    /// @param spanEnd4 the exclusive end of the current block span in 4x4 units
+    /// @return the odd-aligned start coordinate used by secondary spatial scans
+    private static int secondaryScanSpanStart(int spanStart4, int spanEnd4) {
+        return Math.min(spanEnd4 - 1, spanStart4 | 1);
+    }
+
+    /// Returns the weight penalty applied to one secondary spatial offset layer.
+    ///
+    /// @param secondaryOffset the one-based secondary offset layer index starting at `2`
+    /// @return the weight penalty applied to the requested secondary spatial offset layer
+    private static int secondarySpatialWeightPenalty(int secondaryOffset) {
+        return SECONDARY_SPATIAL_WEIGHT_PENALTY
+                + (secondaryOffset - 2) * SECONDARY_SPATIAL_WEIGHT_PENALTY_STEP;
+    }
+
+    /// Scans the tile-local temporal motion field for samples overlapping the current block footprint.
+    ///
+    /// This is still a reduced approximation of AV1 `refmvs`: it samples the tile-local temporal
+    /// field in 8x8 units and feeds matching candidates into the provisional motion-vector stack,
+    /// but it does not yet perform full previous-frame projection or the smaller-block fringe walk
+    /// used by `dav1d`.
+    ///
+    /// @param position the current block position
+    /// @param size the current block size
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param destination the destination candidate array
+    /// @param count the number of valid candidates already stored in `destination`
+    /// @return the result of scanning the tile-local temporal motion field
+    private TemporalScanResult scanTemporalMotionField(
+            BlockPosition position,
+            BlockSize size,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        if (!useReferenceFrameMotionVectors) {
+            return new TemporalScanResult(count, 0);
+        }
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        int startX8 = nonNullPosition.x8();
+        int startY8 = nonNullPosition.y8();
+        int endX8 = Math.min(temporalMotionField.width8(), (Math.min(tileWidth4, nonNullPosition.x4() + nonNullSize.width4()) + 1) >> 1);
+        int endY8 = Math.min(temporalMotionField.height8(), (Math.min(tileHeight4, nonNullPosition.y4() + nonNullSize.height4()) + 1) >> 1);
+        if (startX8 >= endX8 || startY8 >= endY8) {
+            return new TemporalScanResult(count, 0);
+        }
+
+        int stepX8 = nonNullSize.width4() >= 16 ? 2 : 1;
+        int stepY8 = nonNullSize.height4() >= 16 ? 2 : 1;
+        TileDecodeContext.TemporalMotionBlock[] visitedBlocks =
+                new TileDecodeContext.TemporalMotionBlock[Math.max(1, (endX8 - startX8) * (endY8 - startY8))];
+        int visitedCount = 0;
+        boolean nonZeroMotionVectorCandidate = false;
+        for (int y8 = startY8; y8 < endY8; y8 += stepY8) {
+            for (int x8 = startX8; x8 < endX8; x8 += stepX8) {
+                @Nullable TileDecodeContext.TemporalMotionBlock temporalBlock = temporalMotionField.block(x8, y8);
+                if (temporalBlock == null
+                        || containsTemporalMotionBlock(visitedBlocks, visitedCount, temporalBlock)
+                        || !sharesAnyReference(
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        temporalBlock.compoundReference(),
+                        temporalBlock.referenceFrame0(),
+                        temporalBlock.referenceFrame1()
+                )) {
+                    continue;
+                }
+                visitedBlocks[visitedCount++] = temporalBlock;
+                ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                        provisionalMotionVectorCandidate(
+                                compoundReference,
+                                referenceFrame0,
+                                referenceFrame1,
+                                temporalBlock.compoundReference(),
+                                temporalBlock.referenceFrame0(),
+                                temporalBlock.referenceFrame1(),
+                                temporalBlock.motionVector0(),
+                                temporalBlock.motionVector1() != null
+                                        ? temporalBlock.motionVector1()
+                                        : InterMotionVector.predicted(MotionVector.zero()),
+                                TEMPORAL_MOTION_WEIGHT
+                        );
+                count = appendOrAccumulateTemporalCandidate(destination, count, candidate);
+                if (!candidate.motionVector0().vector().equals(MotionVector.zero())
+                        || candidate.motionVector1() != null && !candidate.motionVector1().vector().equals(MotionVector.zero())) {
+                    nonZeroMotionVectorCandidate = true;
+                }
+            }
+        }
+        return new TemporalScanResult(count, nonZeroMotionVectorCandidate ? 1 : 0);
     }
 
     /// Returns the temporal segmentation-prediction context for the supplied block position.
@@ -1258,6 +1412,26 @@ public final class BlockNeighborContext {
         return false;
     }
 
+    /// Returns whether one temporal-motion-block list prefix already contains the supplied block instance.
+    ///
+    /// @param values the scanned temporal-motion-block list prefix
+    /// @param count the number of active temporal motion blocks at the front of `values`
+    /// @param expected the temporal motion block to search for
+    /// @return whether one temporal-motion-block list prefix already contains the supplied block instance
+    private static boolean containsTemporalMotionBlock(
+            TileDecodeContext.TemporalMotionBlock[] values,
+            int count,
+            TileDecodeContext.TemporalMotionBlock expected
+    ) {
+        TileDecodeContext.TemporalMotionBlock nonNullExpected = Objects.requireNonNull(expected, "expected");
+        for (int i = 0; i < count; i++) {
+            if (values[i] == nonNullExpected) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Computes one provisional neighbor weight for inter-mode context derivation.
     ///
     /// Exact reference matches receive the highest weight, partial reference overlap receives a
@@ -1396,6 +1570,35 @@ public final class BlockNeighborContext {
         return count;
     }
 
+    /// Appends one temporal provisional candidate or accumulates its weight into an equivalent real candidate.
+    ///
+    /// Temporal motion-field samples should not duplicate the synthetic zero baseline. When a real
+    /// candidate with the same motion-vector payload is already present, this helper increases its
+    /// weight instead of appending another entry.
+    ///
+    /// @param destination the destination candidate array
+    /// @param count the number of valid candidates currently stored in `destination`
+    /// @param candidate the temporal provisional candidate to append or accumulate
+    /// @return the updated candidate count after processing the temporal candidate
+    private static int appendOrAccumulateTemporalCandidate(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+    ) {
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate = Objects.requireNonNull(candidate, "candidate");
+        for (int i = 0; i < count; i++) {
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate existingCandidate = destination[i];
+            if (!existingCandidate.synthetic() && equivalentMotionVectorCandidate(existingCandidate, nonNullCandidate)) {
+                destination[i] = existingCandidate.withWeight(existingCandidate.weight() + nonNullCandidate.weight());
+                return count;
+            }
+        }
+        if (count < destination.length) {
+            destination[count++] = nonNullCandidate;
+        }
+        return count;
+    }
+
     /// Sorts a prefix of the supplied provisional candidate array in descending weight order.
     ///
     /// Real neighbor-derived candidates win ties over the synthetic zero baseline.
@@ -1433,6 +1636,21 @@ public final class BlockNeighborContext {
             return nonNullLeft.synthetic() ? 1 : -1;
         }
         return 0;
+    }
+
+    /// Returns whether two provisional motion-vector candidates carry the same motion-vector payload.
+    ///
+    /// @param left the first provisional motion-vector candidate
+    /// @param right the second provisional motion-vector candidate
+    /// @return whether the two provisional motion-vector candidates carry the same motion-vector payload
+    private static boolean equivalentMotionVectorCandidate(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate left,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate right
+    ) {
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullLeft = Objects.requireNonNull(left, "left");
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullRight = Objects.requireNonNull(right, "right");
+        return nonNullLeft.motionVector0().equals(nonNullRight.motionVector0())
+                && Objects.equals(nonNullLeft.motionVector1(), nonNullRight.motionVector1());
     }
 
     /// Returns whether two reference selections share at least one reference-frame index.
@@ -1991,6 +2209,39 @@ public final class BlockNeighborContext {
         /// @return whether any matching scanned block used a `NEWMV`-carrying mode
         public boolean haveNewMotionVectorMatch() {
             return haveNewMotionVectorMatch;
+        }
+    }
+
+    /// The result of sampling the tile-local temporal motion field.
+    @NotNullByDefault
+    private static final class TemporalScanResult {
+        /// The updated number of valid weighted candidates.
+        private final int candidateCount;
+
+        /// The zero-based provisional `globalmv` context index in `[0, 2)`.
+        private final int globalMotionContext;
+
+        /// Creates one temporal motion-field scan result.
+        ///
+        /// @param candidateCount the updated number of valid weighted candidates
+        /// @param globalMotionContext the zero-based provisional `globalmv` context index in `[0, 2)`
+        private TemporalScanResult(int candidateCount, int globalMotionContext) {
+            this.candidateCount = candidateCount;
+            this.globalMotionContext = globalMotionContext;
+        }
+
+        /// Returns the updated number of valid weighted candidates.
+        ///
+        /// @return the updated number of valid weighted candidates
+        public int candidateCount() {
+            return candidateCount;
+        }
+
+        /// Returns the zero-based provisional `globalmv` context index in `[0, 2)`.
+        ///
+        /// @return the zero-based provisional `globalmv` context index in `[0, 2)`
+        public int globalMotionContext() {
+            return globalMotionContext;
         }
     }
 
