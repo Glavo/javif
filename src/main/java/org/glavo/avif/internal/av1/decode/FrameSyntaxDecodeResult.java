@@ -174,6 +174,17 @@ public final class FrameSyntaxDecodeResult {
         return finalTileCdfContexts[checkedTileIndex(tileIndex)].copy();
     }
 
+    /// Returns a copy of this structural frame-decode result with replaced final tile-local CDF contexts.
+    ///
+    /// Partition trees and decoded temporal motion fields are preserved while the supplied tile-local
+    /// CDF snapshot becomes the new stored entropy state.
+    ///
+    /// @param replacementTileCdfContexts the replacement final tile-local CDF contexts
+    /// @return a copy of this structural frame-decode result with replaced final tile-local CDF contexts
+    public FrameSyntaxDecodeResult withFinalTileCdfContexts(CdfContext[] replacementTileCdfContexts) {
+        return new FrameSyntaxDecodeResult(assembly, tileRoots(), decodedTemporalMotionFields(), replacementTileCdfContexts);
+    }
+
     /// Validates and returns one tile index.
     ///
     /// @param tileIndex the zero-based tile index in frame order

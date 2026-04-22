@@ -21,6 +21,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecoder;
+import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
@@ -278,11 +279,15 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param packet the OBU that completed the frame assembly
     /// @throws DecodeException always, to report that pixel decoding is not implemented yet
     private void completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
+        FrameHeader frameHeader = assembly.frameHeader();
+        @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
+        @Nullable FrameSyntaxDecodeResult temporalReferenceResult = selectTemporalReferenceFrameSyntaxResult(frameHeader);
         FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(
-                selectTemporalReferenceFrameSyntaxResult(assembly.frameHeader())
+                cdfReferenceResult,
+                temporalReferenceResult
         ).decode(assembly);
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
-        refreshReferenceFrameState(assembly.frameHeader(), syntaxDecodeResult);
+        refreshReferenceFrameState(frameHeader, storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult));
         throw notImplementedForFrame(packet);
     }
 
@@ -501,10 +506,30 @@ public final class Av1ImageReader implements AutoCloseable {
         }
     }
 
+    /// Returns the structural decode result whose final tile-local CDF contexts should seed the next frame.
+    ///
+    /// AV1 inherits entropy state from `primary_ref_frame` when it is present. When
+    /// `primary_ref_frame == PRIMARY_REF_NONE`, no reference CDF state is inherited.
+    ///
+    /// @param frameHeader the parsed frame header for the next frame
+    /// @return the structural decode result whose final tile-local CDF contexts should seed the next frame, or `null`
+    private @Nullable FrameSyntaxDecodeResult selectCdfReferenceFrameSyntaxResult(FrameHeader frameHeader) {
+        int primaryRefFrame = frameHeader.primaryRefFrame();
+        if (primaryRefFrame < 0 || primaryRefFrame >= 7) {
+            return null;
+        }
+
+        int primarySlot = frameHeader.referenceFrameIndex(primaryRefFrame);
+        if (primarySlot < 0 || primarySlot >= referenceFrameSyntaxResults.length) {
+            return null;
+        }
+        return referenceFrameSyntaxResults[primarySlot];
+    }
+
     /// Returns the structural decode result whose temporal motion field should seed the next frame.
     ///
-    /// The current implementation uses the primary reference frame when available, otherwise it
-    /// falls back to the first populated reference in LAST..ALTREF order.
+    /// The current implementation prefers `primary_ref_frame` when available, then falls back to
+    /// the first populated reference in LAST..ALTREF order.
     ///
     /// @param frameHeader the parsed frame header for the next frame
     /// @return the structural decode result whose temporal motion field should seed the next frame, or `null`
@@ -513,15 +538,9 @@ public final class Av1ImageReader implements AutoCloseable {
             return null;
         }
 
-        int primaryRefFrame = frameHeader.primaryRefFrame();
-        if (primaryRefFrame >= 0 && primaryRefFrame < 7) {
-            int primarySlot = frameHeader.referenceFrameIndex(primaryRefFrame);
-            if (primarySlot >= 0 && primarySlot < referenceFrameSyntaxResults.length) {
-                @Nullable FrameSyntaxDecodeResult primaryResult = referenceFrameSyntaxResults[primarySlot];
-                if (primaryResult != null) {
-                    return primaryResult;
-                }
-            }
+        @Nullable FrameSyntaxDecodeResult primaryResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
+        if (primaryResult != null) {
+            return primaryResult;
         }
 
         int[] referenceFrameIndices = frameHeader.referenceFrameIndices();
@@ -536,6 +555,30 @@ public final class Av1ImageReader implements AutoCloseable {
         return null;
     }
 
+    /// Returns the structural decode result that should be stored in refreshed reference slots.
+    ///
+    /// When `refresh_context` is disabled the refreshed slots keep their inherited entropy state,
+    /// while still receiving the current frame's partition trees and temporal motion fields.
+    ///
+    /// @param frameHeader the parsed frame header whose refresh flags will be applied
+    /// @param syntaxDecodeResult the structural frame-decode result produced for the current frame
+    /// @param cdfReferenceResult the inherited CDF reference snapshot, or `null`
+    /// @return the structural decode result that should be stored in refreshed reference slots
+    private FrameSyntaxDecodeResult storedReferenceFrameSyntaxResult(
+            FrameHeader frameHeader,
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            @Nullable FrameSyntaxDecodeResult cdfReferenceResult
+    ) {
+        if (frameHeader.refreshContext()) {
+            return syntaxDecodeResult;
+        }
+
+        CdfContext[] storedTileCdfContexts = cdfReferenceResult != null
+                ? cdfReferenceResult.finalTileCdfContexts()
+                : defaultTileCdfContexts(syntaxDecodeResult.tileCount());
+        return syntaxDecodeResult.withFinalTileCdfContexts(storedTileCdfContexts);
+    }
+
     /// Refreshes any reference-frame slots targeted by the parsed frame header.
     ///
     /// @param frameHeader the parsed frame header whose refresh flags should be applied
@@ -548,5 +591,17 @@ public final class Av1ImageReader implements AutoCloseable {
                 referenceFrameSyntaxResults[i] = syntaxDecodeResult;
             }
         }
+    }
+
+    /// Creates default tile-local CDF contexts for the supplied tile count.
+    ///
+    /// @param tileCount the number of tiles in the frame
+    /// @return default tile-local CDF contexts for the supplied tile count
+    private static CdfContext[] defaultTileCdfContexts(int tileCount) {
+        CdfContext[] contexts = new CdfContext[tileCount];
+        for (int i = 0; i < tileCount; i++) {
+            contexts[i] = CdfContext.createDefault();
+        }
+        return contexts;
     }
 }

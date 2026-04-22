@@ -25,14 +25,31 @@ import java.util.Objects;
 /// Structural frame decoder that expands every tile into partition trees and temporal motion fields.
 @NotNullByDefault
 public final class FrameSyntaxDecoder {
+    /// The optional reference-frame syntax result that provides tile-local base CDF contexts.
+    private final @Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult;
+
     /// The optional reference-frame syntax result that provides tile-local temporal motion fields.
-    private final @Nullable FrameSyntaxDecodeResult referenceFrameSyntaxResult;
+    private final @Nullable FrameSyntaxDecodeResult referenceTemporalFrameSyntaxResult;
 
     /// Creates one structural frame decoder.
     ///
-    /// @param referenceFrameSyntaxResult the optional reference-frame syntax result that provides temporal motion fields
+    /// The supplied snapshot is used for both CDF inheritance and temporal motion-field sampling.
+    ///
+    /// @param referenceFrameSyntaxResult the optional reference-frame syntax result used for both inheritance paths
     public FrameSyntaxDecoder(@Nullable FrameSyntaxDecodeResult referenceFrameSyntaxResult) {
-        this.referenceFrameSyntaxResult = referenceFrameSyntaxResult;
+        this(referenceFrameSyntaxResult, referenceFrameSyntaxResult);
+    }
+
+    /// Creates one structural frame decoder with separate reference snapshots for entropy and motion state.
+    ///
+    /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides tile-local base CDF contexts
+    /// @param referenceTemporalFrameSyntaxResult the optional reference-frame syntax result that provides tile-local temporal motion fields
+    public FrameSyntaxDecoder(
+            @Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult,
+            @Nullable FrameSyntaxDecodeResult referenceTemporalFrameSyntaxResult
+    ) {
+        this.referenceCdfFrameSyntaxResult = referenceCdfFrameSyntaxResult;
+        this.referenceTemporalFrameSyntaxResult = referenceTemporalFrameSyntaxResult;
     }
 
     /// Structurally decodes every collected tile in one completed frame assembly.
@@ -89,10 +106,10 @@ public final class FrameSyntaxDecoder {
     /// @param tileIndex the zero-based tile index in frame order
     /// @return the reference tile-local CDF context for one tile, or `null`
     private @Nullable CdfContext referenceCdfContext(int tileIndex) {
-        if (referenceFrameSyntaxResult == null || tileIndex >= referenceFrameSyntaxResult.tileCount()) {
+        if (referenceCdfFrameSyntaxResult == null || tileIndex >= referenceCdfFrameSyntaxResult.tileCount()) {
             return null;
         }
-        return referenceFrameSyntaxResult.finalTileCdfContext(tileIndex);
+        return referenceCdfFrameSyntaxResult.finalTileCdfContext(tileIndex);
     }
 
     /// Returns the reference temporal motion field for one tile, or `null` when no compatible field exists.
@@ -100,9 +117,9 @@ public final class FrameSyntaxDecoder {
     /// @param tileIndex the zero-based tile index in frame order
     /// @return the reference temporal motion field for one tile, or `null`
     private @Nullable TileDecodeContext.TemporalMotionField referenceTemporalMotionField(int tileIndex) {
-        if (referenceFrameSyntaxResult == null || tileIndex >= referenceFrameSyntaxResult.tileCount()) {
+        if (referenceTemporalFrameSyntaxResult == null || tileIndex >= referenceTemporalFrameSyntaxResult.tileCount()) {
             return null;
         }
-        return referenceFrameSyntaxResult.decodedTemporalMotionField(tileIndex);
+        return referenceTemporalFrameSyntaxResult.decodedTemporalMotionField(tileIndex);
     }
 }

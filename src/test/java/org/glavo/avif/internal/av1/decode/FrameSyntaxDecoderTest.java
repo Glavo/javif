@@ -90,6 +90,42 @@ final class FrameSyntaxDecoderTest {
         assertNotEquals(defaultSkip, seededSkip);
     }
 
+    /// Verifies that CDF inheritance can be enabled without also inheriting temporal motion fields.
+    @Test
+    void decodeFrameCanUseSeparateCdfAndTemporalReferenceSnapshots() {
+        CdfContext inheritedCdf = CdfContext.createDefault();
+        inheritedCdf.mutableSkipCdf(0)[0] = 32000;
+        byte[] payload = findPayloadWithDifferentSkipDecision(inheritedCdf);
+        FrameAssembly assembly = createAssembly(FrameType.INTER, payload, false, 8, 8);
+        FrameSyntaxDecodeResult cdfReferenceResult = new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)},
+                new CdfContext[]{inheritedCdf}
+        );
+
+        FrameSyntaxDecodeResult defaultResult = new FrameSyntaxDecoder(null).decode(assembly);
+        FrameSyntaxDecodeResult cdfOnlyResult = new FrameSyntaxDecoder(cdfReferenceResult, null).decode(assembly);
+
+        boolean defaultSkip = firstLeaf(defaultResult.tileRoots(0)).header().skip();
+        boolean cdfOnlySkip = firstLeaf(cdfOnlyResult.tileRoots(0)).header().skip();
+        assertNotEquals(defaultSkip, cdfOnlySkip);
+    }
+
+    /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.
+    @Test
+    void frameSyntaxDecodeResultCanReplaceStoredTileCdfContexts() {
+        FrameAssembly assembly = createAssembly(FrameType.INTER, findPayloadForInterBlockWithoutSkipOrIntra(), false);
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
+        CdfContext replacementCdf = CdfContext.createDefault();
+        replacementCdf.mutableSkipCdf(0)[0] = 32000;
+
+        FrameSyntaxDecodeResult replaced = result.withFinalTileCdfContexts(new CdfContext[]{replacementCdf});
+
+        assertEquals(32000, replaced.finalTileCdfContext(0).mutableSkipCdf(0)[0]);
+        assertEquals(result.decodedTemporalMotionField(0).block(0, 0), replaced.decodedTemporalMotionField(0).block(0, 0));
+    }
+
     /// Finds a small payload whose first inter block decodes `skip = false` and `intra = false`.
     ///
     /// @return a small payload whose first inter block decodes `skip = false` and `intra = false`
