@@ -29,6 +29,7 @@ import java.nio.channels.Channels;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +38,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `Av1ImageReader`.
 @NotNullByDefault
 final class Av1ImageReaderTest {
+    /// One fixed single-tile payload that stays inside the current first-pixel reconstruction subset.
+    ///
+    /// This payload decodes as one reduced still-picture key frame whose luma and chroma blocks are
+    /// fully intra-predicted with zero residuals, so the current reader can return a stable opaque
+    /// gray `ArgbIntFrame` without relying on runtime brute-force search.
+    private static final byte[] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
+            (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    };
+
+    /// The expected packed opaque gray pixel produced by the supported still-picture payload.
+    private static final int OPAQUE_MID_GRAY = 0xFF808080;
+
     /// Verifies that an empty stream returns end-of-stream instead of failing.
     ///
     /// @throws IOException if the reader cannot be closed
@@ -114,7 +127,8 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
     }
 
-    /// Verifies that a combined frame OBU is assembled before reporting `NOT_IMPLEMENTED`.
+    /// Verifies that the current reduced still-picture combined fixture still reaches the stable
+    /// unsupported residual-reconstruction boundary.
     @Test
     void readFrameParsesCombinedFrameObuBeforeReportingNotImplemented() {
         byte[] stream = concat(
@@ -130,9 +144,11 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+        assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
     }
 
-    /// Verifies that all buffered-input adapters report the same current decode boundary and refresh the same reference state.
+    /// Verifies that all buffered-input adapters report the same unsupported decode boundary for the
+    /// current reduced still-picture fixture and still refresh reference-frame state first.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
@@ -146,11 +162,8 @@ final class Av1ImageReaderTest {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
             assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-            FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
-            assertTrue(syntaxResult != null);
-            for (int i = 0; i < 8; i++) {
-                assertSame(syntaxResult, reader.referenceFrameSyntaxResult(i));
-            }
+            assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
         });
     }
 
@@ -172,7 +185,8 @@ final class Av1ImageReaderTest {
         assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
     }
 
-    /// Verifies that a standalone frame header followed by a tile group reaches the decode-not-implemented boundary.
+    /// Verifies that the current reduced still-picture standalone fixture still reaches the stable
+    /// unsupported residual-reconstruction boundary.
     @Test
     void readFrameParsesStandaloneTileGroupBeforeReportingNotImplemented() {
         byte[] stream = concat(
@@ -189,6 +203,7 @@ final class Av1ImageReaderTest {
         });
         assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
         assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+        assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
     }
 
     /// Verifies that the public reader stores structural reference state before reporting the
@@ -205,9 +220,8 @@ final class Av1ImageReaderTest {
         )) {
             DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
             assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-            for (int i = 0; i < 8; i++) {
-                assertEquals(reader.lastFrameSyntaxDecodeResult(), reader.referenceFrameSyntaxResult(i));
-            }
+            assertEquals("Non-zero residual reconstruction is not implemented yet", exception.getMessage());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
         }
     }
 
@@ -225,13 +239,51 @@ final class Av1ImageReaderTest {
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(reader.lastFrameSyntaxDecodeResult(), reader.referenceFrameSyntaxResult(0));
+            assertReferenceStateStoredForLastSyntaxResult(reader);
 
             assertNull(reader.readFrame());
             assertNull(reader.lastFrameSyntaxDecodeResult());
             for (int i = 0; i < 8; i++) {
                 assertNull(reader.referenceFrameSyntaxResult(i));
             }
+        }
+    }
+
+    /// Verifies that a supported reduced still-picture combined stream returns one opaque `ArgbIntFrame`.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForSupportedCombinedStillPictureStream() throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that the same supported tile payload also succeeds through the standalone
+    /// frame-header plus tile-group assembly path.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForSupportedStandaloneStillPictureStream() throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(3, reducedStillPictureFrameHeaderPayload()),
+                obu(4, SUPPORTED_SINGLE_TILE_PAYLOAD)
+        );
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
         }
     }
 
@@ -366,6 +418,46 @@ final class Av1ImageReaderTest {
                 new BufferedInput.OfByteChannel(Channels.newChannel(new ByteArrayInputStream(stream)))
         )) {
             assertion.accept(reader);
+        }
+    }
+
+    /// Asserts that the reader returned one supported opaque gray still-picture frame.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertOpaqueGrayStillPictureFrame(@org.jetbrains.annotations.Nullable DecodedFrame decodedFrame, long expectedPresentationIndex) {
+        assertNotNull(decodedFrame);
+        assertTrue(decodedFrame instanceof ArgbIntFrame);
+        ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
+        assertEquals(64, frame.width());
+        assertEquals(64, frame.height());
+        assertEquals(8, frame.bitDepth());
+        assertEquals(PixelFormat.I420, frame.pixelFormat());
+        assertEquals(FrameType.KEY, frame.frameType());
+        assertTrue(frame.visible());
+        assertEquals(expectedPresentationIndex, frame.presentationIndex());
+
+        int[] pixels = frame.pixels();
+        assertEquals(64 * 64, pixels.length);
+        for (int pixel : pixels) {
+            assertEquals(OPAQUE_MID_GRAY, pixel);
+        }
+    }
+
+    /// Asserts that every refreshed reference slot stores structural state for the same decoded frame.
+    ///
+    /// Reference snapshots are allowed to differ in stored CDF state from `lastFrameSyntaxDecodeResult()`,
+    /// so this helper checks the shared frame assembly and tile count instead of object identity.
+    ///
+    /// @param reader the reader whose stored structural reference state should be validated
+    private static void assertReferenceStateStoredForLastSyntaxResult(Av1ImageReader reader) {
+        FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
+        assertNotNull(syntaxResult);
+        for (int i = 0; i < 8; i++) {
+            FrameSyntaxDecodeResult storedResult = reader.referenceFrameSyntaxResult(i);
+            assertNotNull(storedResult);
+            assertSame(syntaxResult.assembly(), storedResult.assembly());
+            assertEquals(syntaxResult.tileCount(), storedResult.tileCount());
         }
     }
 

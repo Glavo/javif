@@ -27,10 +27,14 @@ import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
 import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
+import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.internal.av1.recon.FrameReconstructor;
+import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -64,10 +68,16 @@ public final class Av1ImageReader implements AutoCloseable {
     private final FrameHeader[] referenceFrameHeaders;
     /// The structural decode results stored by refreshed reference-frame slot.
     private final @Nullable FrameSyntaxDecodeResult[] referenceFrameSyntaxResults;
+    /// The reconstructed reference surfaces stored by refreshed reference-frame slot.
+    private final @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots;
     /// The currently assembled frame when tile groups span multiple OBUs.
     private @Nullable FrameAssembly pendingFrameAssembly;
     /// The most recently completed structural frame-decode result.
     private @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult;
+    /// The minimal pixel reconstructor used by the first output-producing path.
+    private final FrameReconstructor frameReconstructor;
+    /// The zero-based presentation index assigned to the next returned frame.
+    private long nextPresentationIndex;
     /// Whether this reader has already been closed.
     private boolean closed;
 
@@ -85,6 +95,8 @@ public final class Av1ImageReader implements AutoCloseable {
         this.tileBitstreamParser = new TileBitstreamParser();
         this.referenceFrameHeaders = new FrameHeader[8];
         this.referenceFrameSyntaxResults = new FrameSyntaxDecodeResult[8];
+        this.referenceSurfaceSnapshots = new ReferenceSurfaceSnapshot[8];
+        this.frameReconstructor = new FrameReconstructor();
     }
 
     /// Opens an AV1 image reader using the default decoder configuration.
@@ -126,6 +138,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 sequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
                 Arrays.fill(referenceFrameHeaders, null);
                 Arrays.fill(referenceFrameSyntaxResults, null);
+                Arrays.fill(referenceSurfaceSnapshots, null);
                 lastFrameSyntaxDecodeResult = null;
                 continue;
             }
@@ -136,16 +149,24 @@ public final class Av1ImageReader implements AutoCloseable {
             if (type == ObuType.FRAME) {
                 FrameAssembly assembly = startCombinedFrameAssembly(packet);
                 if (assembly.isComplete()) {
-                    completeFrameAssembly(assembly, packet);
+                    pendingFrameAssembly = null;
+                    DecodedFrame frame = completeFrameAssembly(assembly, packet);
+                    if (frame != null) {
+                        return frame;
+                    }
+                } else {
+                    pendingFrameAssembly = assembly;
                 }
-                pendingFrameAssembly = assembly;
                 continue;
             }
             if (type == ObuType.TILE_GROUP) {
                 FrameAssembly assembly = appendStandaloneTileGroup(packet);
                 if (assembly.isComplete()) {
                     pendingFrameAssembly = null;
-                    completeFrameAssembly(assembly, packet);
+                    DecodedFrame frame = completeFrameAssembly(assembly, packet);
+                    if (frame != null) {
+                        return frame;
+                    }
                 }
                 continue;
             }
@@ -278,7 +299,7 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param assembly the completed frame assembly
     /// @param packet the OBU that completed the frame assembly
     /// @throws DecodeException always, to report that pixel decoding is not implemented yet
-    private void completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
+    private @Nullable DecodedFrame completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
         @Nullable FrameSyntaxDecodeResult temporalReferenceResult = selectTemporalReferenceFrameSyntaxResult(frameHeader);
@@ -300,8 +321,57 @@ public final class Av1ImageReader implements AutoCloseable {
             );
         }
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
-        refreshReferenceFrameState(frameHeader, storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult));
-        throw notImplementedForFrame(packet);
+        FrameSyntaxDecodeResult storedSyntaxDecodeResult =
+                storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult);
+        refreshReferenceFrameSyntaxState(frameHeader, storedSyntaxDecodeResult);
+        boolean shouldOutput = shouldOutputFrame(frameHeader);
+        boolean needsSurfaceSnapshot = frameHeader.refreshFrameFlags() != 0;
+
+        @Nullable DecodedPlanes decodedPlanes = null;
+        if (shouldOutput || needsSurfaceSnapshot) {
+            try {
+                decodedPlanes = frameReconstructor.reconstruct(syntaxDecodeResult);
+            } catch (IllegalStateException exception) {
+                throw new DecodeException(
+                        DecodeErrorCode.NOT_IMPLEMENTED,
+                        DecodeStage.FRAME_DECODE,
+                        exception.getMessage() != null ? exception.getMessage() : "AV1 frame decoding is not implemented yet",
+                        packet.streamOffset(),
+                        packet.obuIndex(),
+                        null,
+                        exception
+                );
+            }
+        }
+
+        if (decodedPlanes != null) {
+            refreshReferenceSurfaceState(
+                    frameHeader,
+                    new ReferenceSurfaceSnapshot(frameHeader, storedSyntaxDecodeResult, decodedPlanes)
+            );
+        }
+        if (!shouldOutput) {
+            return null;
+        }
+        if (decodedPlanes == null) {
+            throw notImplementedForFrame(packet);
+        }
+        if (config.applyFilmGrain() && frameHeader.filmGrain().applyGrain()) {
+            throw new DecodeException(
+                    DecodeErrorCode.NOT_IMPLEMENTED,
+                    DecodeStage.OUTPUT_CONVERSION,
+                    "Film grain synthesis is not implemented yet",
+                    packet.streamOffset(),
+                    packet.obuIndex(),
+                    null
+            );
+        }
+        return ArgbOutput.toOpaqueArgbIntFrame(
+                decodedPlanes,
+                frameHeader.frameType(),
+                frameHeader.showFrame(),
+                nextPresentationIndex++
+        );
     }
 
     /// Parses and appends a standalone tile-group OBU to the current frame assembly.
@@ -596,7 +666,7 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param frameHeader the parsed frame header whose refresh flags should be applied
     /// @param syntaxDecodeResult the structural frame-decode result to store in refreshed slots
-    private void refreshReferenceFrameState(FrameHeader frameHeader, FrameSyntaxDecodeResult syntaxDecodeResult) {
+    private void refreshReferenceFrameSyntaxState(FrameHeader frameHeader, FrameSyntaxDecodeResult syntaxDecodeResult) {
         int refreshFrameFlags = frameHeader.refreshFrameFlags();
         for (int i = 0; i < referenceFrameHeaders.length; i++) {
             if ((refreshFrameFlags & (1 << i)) != 0) {
@@ -604,6 +674,43 @@ public final class Av1ImageReader implements AutoCloseable {
                 referenceFrameSyntaxResults[i] = syntaxDecodeResult;
             }
         }
+    }
+
+    /// Refreshes any reference-surface slots targeted by the parsed frame header.
+    ///
+    /// Only successfully reconstructed frames populate these slots. Structural syntax refresh is
+    /// handled separately so unsupported pixel paths still preserve reference syntax state.
+    ///
+    /// @param frameHeader the parsed frame header whose refresh flags should be applied
+    /// @param referenceSurfaceSnapshot the reconstructed reference surface to store
+    private void refreshReferenceSurfaceState(
+            FrameHeader frameHeader,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot
+    ) {
+        int refreshFrameFlags = frameHeader.refreshFrameFlags();
+        for (int i = 0; i < referenceFrameHeaders.length; i++) {
+            if ((refreshFrameFlags & (1 << i)) != 0) {
+                referenceSurfaceSnapshots[i] = referenceSurfaceSnapshot;
+            }
+        }
+    }
+
+    /// Returns whether the parsed frame should be exposed through the public API.
+    ///
+    /// This first output-producing path applies frame filtering only at the public output boundary.
+    ///
+    /// @param frameHeader the parsed frame header for the current frame
+    /// @return whether the parsed frame should be exposed through the public API
+    private boolean shouldOutputFrame(FrameHeader frameHeader) {
+        if (!frameHeader.showFrame() && !config.outputInvisibleFrames()) {
+            return false;
+        }
+        return switch (config.decodeFrameType()) {
+            case ALL -> true;
+            case REFERENCE -> frameHeader.refreshFrameFlags() != 0;
+            case INTRA -> frameHeader.frameType() == FrameType.KEY || frameHeader.frameType() == FrameType.INTRA;
+            case KEY -> frameHeader.frameType() == FrameType.KEY;
+        };
     }
 
     /// Creates default tile-local CDF contexts for the supplied tile count.
