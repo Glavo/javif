@@ -546,14 +546,16 @@ public final class FrameReconstructor {
                     header.motionVector0().vector(),
                     pixelFormat,
                     header.hasChroma(),
-                    frameHeader.subpelFilterMode()
+                    resolveHorizontalInterpolationFilter(header, frameHeader),
+                    resolveVerticalInterpolationFilter(header, frameHeader)
             );
             if (header.compoundReference()) {
                 requireSupportedInterMotionVector(
                         Objects.requireNonNull(header.motionVector1(), "header.motionVector1()").vector(),
                         pixelFormat,
                         header.hasChroma(),
-                        frameHeader.subpelFilterMode()
+                        resolveHorizontalInterpolationFilter(header, frameHeader),
+                        resolveVerticalInterpolationFilter(header, frameHeader)
                 );
             }
         }
@@ -652,6 +654,8 @@ public final class FrameReconstructor {
                 requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame0());
         DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
+        FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
+        FrameHeader.InterpolationFilter verticalInterpolationFilter = resolveVerticalInterpolationFilter(header, frameHeader);
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
@@ -669,7 +673,8 @@ public final class FrameReconstructor {
                 4,
                 visibleLumaWidth,
                 visibleLumaHeight,
-                frameHeader.subpelFilterMode()
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -698,7 +703,8 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                frameHeader.subpelFilterMode()
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter
         );
         reconstructInterPlanePrediction(
                 chromaVPlane,
@@ -713,7 +719,8 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                frameHeader.subpelFilterMode()
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter
         );
     }
 
@@ -747,6 +754,8 @@ public final class FrameReconstructor {
         DecodedPlanes referencePlanes1 = referenceSurfaceSnapshot1.decodedPlanes();
         MotionVector motionVector0 = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         MotionVector motionVector1 = Objects.requireNonNull(header.motionVector1(), "header.motionVector1()").vector();
+        FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
+        FrameHeader.InterpolationFilter verticalInterpolationFilter = resolveVerticalInterpolationFilter(header, frameHeader);
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
@@ -768,7 +777,8 @@ public final class FrameReconstructor {
                 4,
                 visibleLumaWidth,
                 visibleLumaHeight,
-                frameHeader.subpelFilterMode()
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -800,7 +810,8 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                frameHeader.subpelFilterMode()
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter
         );
         reconstructCompoundInterPlanePrediction(
                 chromaVPlane,
@@ -818,7 +829,8 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                frameHeader.subpelFilterMode()
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter
         );
     }
 
@@ -837,7 +849,8 @@ public final class FrameReconstructor {
     /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
     /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
-    /// @param filterMode the frame-level interpolation filter mode
+    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
+    /// @param verticalFilterMode the effective vertical interpolation filter mode
     private static void reconstructInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
@@ -851,7 +864,8 @@ public final class FrameReconstructor {
             int denominatorY,
             int widthForFilterSelection,
             int heightForFilterSelection,
-            FrameHeader.InterpolationFilter filterMode
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
     ) {
         if (Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
                 && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
@@ -881,7 +895,8 @@ public final class FrameReconstructor {
                 denominatorY,
                 widthForFilterSelection,
                 heightForFilterSelection,
-                filterMode
+                horizontalFilterMode,
+                verticalFilterMode
         );
     }
 
@@ -901,6 +916,10 @@ public final class FrameReconstructor {
     /// @param sourceOffsetQuarterPelY1 the secondary signed vertical motion-vector component in luma quarter-pel units
     /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
     /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
+    /// @param verticalFilterMode the effective vertical interpolation filter mode
     private static void reconstructCompoundInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane0,
@@ -917,7 +936,8 @@ public final class FrameReconstructor {
             int denominatorY,
             int widthForFilterSelection,
             int heightForFilterSelection,
-            FrameHeader.InterpolationFilter filterMode
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
     ) {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -931,7 +951,8 @@ public final class FrameReconstructor {
                         denominatorY,
                         widthForFilterSelection,
                         heightForFilterSelection,
-                        filterMode
+                        horizontalFilterMode,
+                        verticalFilterMode
                 );
                 int sample1 = sampleInterPlaneValue(
                         referencePlane1,
@@ -943,7 +964,8 @@ public final class FrameReconstructor {
                         denominatorY,
                         widthForFilterSelection,
                         heightForFilterSelection,
-                        filterMode
+                        horizontalFilterMode,
+                        verticalFilterMode
                 );
                 destinationPlane.setSample(destinationX + x, destinationY + y, averageCompoundSamples(sample0, sample1));
             }
@@ -960,6 +982,10 @@ public final class FrameReconstructor {
     /// @param sourceOffsetQuarterPelY the signed vertical motion-vector component in luma quarter-pel units
     /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
     /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
+    /// @param verticalFilterMode the effective vertical interpolation filter mode
     /// @return one predicted plane sample
     private static int sampleInterPlaneValue(
             DecodedPlane referencePlane,
@@ -971,7 +997,8 @@ public final class FrameReconstructor {
             int denominatorY,
             int widthForFilterSelection,
             int heightForFilterSelection,
-            FrameHeader.InterpolationFilter filterMode
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
     ) {
         if (Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
                 && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
@@ -988,7 +1015,8 @@ public final class FrameReconstructor {
                 denominatorY,
                 widthForFilterSelection,
                 heightForFilterSelection,
-                filterMode
+                horizontalFilterMode,
+                verticalFilterMode
         );
     }
 
@@ -1039,6 +1067,10 @@ public final class FrameReconstructor {
     /// @param sourceNumeratorY the source origin numerator in plane-local sample units
     /// @param denominatorX the horizontal plane-local denominator
     /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
+    /// @param verticalFilterMode the effective vertical interpolation filter mode
     private static void filteredReferencePlaneBlock(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
@@ -1052,7 +1084,8 @@ public final class FrameReconstructor {
             int denominatorY,
             int widthForFilterSelection,
             int heightForFilterSelection,
-            FrameHeader.InterpolationFilter filterMode
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
     ) {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -1067,7 +1100,8 @@ public final class FrameReconstructor {
                                 denominatorY,
                                 widthForFilterSelection,
                                 heightForFilterSelection,
-                                filterMode
+                                horizontalFilterMode,
+                                verticalFilterMode
                         )
                 );
             }
@@ -1084,7 +1118,8 @@ public final class FrameReconstructor {
     /// @param denominatorY the vertical interpolation denominator
     /// @param widthForFilterSelection the sampled block width in pixels
     /// @param heightForFilterSelection the sampled block height in pixels
-    /// @param filterMode the frame-level interpolation filter
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
     /// @return one fixed-filter interpolated unsigned sample
     private static int filteredInterpolateAt(
             DecodedPlane referencePlane,
@@ -1094,12 +1129,17 @@ public final class FrameReconstructor {
             int denominatorY,
             int widthForFilterSelection,
             int heightForFilterSelection,
-            FrameHeader.InterpolationFilter filterMode
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
     ) {
-        if (filterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+        if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
             return bilinearInterpolateAt(referencePlane, sourceNumeratorX, sourceNumeratorY, denominatorX, denominatorY);
         }
-        if (!supportsFixedFractionalInterFilter(filterMode)) {
+        if (!supportsFixedFractionalInterFilter(horizontalFilterMode)
+                || !supportsFixedFractionalInterFilter(verticalFilterMode)
+                || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
             throw new IllegalStateException(
                     "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
             );
@@ -1117,9 +1157,9 @@ public final class FrameReconstructor {
         }
 
         @Nullable int[] horizontalFilter =
-                phaseX == 0 ? null : selectSubpelFilter(filterMode, phaseX, widthForFilterSelection);
+                phaseX == 0 ? null : selectSubpelFilter(horizontalFilterMode, phaseX, widthForFilterSelection);
         @Nullable int[] verticalFilter =
-                phaseY == 0 ? null : selectSubpelFilter(filterMode, phaseY, heightForFilterSelection);
+                phaseY == 0 ? null : selectSubpelFilter(verticalFilterMode, phaseY, heightForFilterSelection);
         if (verticalFilter == null) {
             long filtered = horizontalInterpolate(
                     referencePlane,
@@ -1331,6 +1371,44 @@ public final class FrameReconstructor {
         return (primarySample + secondarySample + 1) >> 1;
     }
 
+    /// Resolves the effective horizontal interpolation filter for one inter block.
+    ///
+    /// @param header the decoded block header that owns the inter state
+    /// @param frameHeader the frame header that owns the block
+    /// @return the effective horizontal interpolation filter
+    private static FrameHeader.InterpolationFilter resolveHorizontalInterpolationFilter(
+            TileBlockHeaderReader.BlockHeader header,
+            FrameHeader frameHeader
+    ) {
+        if (frameHeader.subpelFilterMode() != FrameHeader.InterpolationFilter.SWITCHABLE) {
+            return frameHeader.subpelFilterMode();
+        }
+        @Nullable FrameHeader.InterpolationFilter interpolationFilter = header.horizontalInterpolationFilter();
+        if (interpolationFilter == null) {
+            throw new IllegalStateException("Inter reconstruction requires decoded switchable interpolation filters");
+        }
+        return interpolationFilter;
+    }
+
+    /// Resolves the effective vertical interpolation filter for one inter block.
+    ///
+    /// @param header the decoded block header that owns the inter state
+    /// @param frameHeader the frame header that owns the block
+    /// @return the effective vertical interpolation filter
+    private static FrameHeader.InterpolationFilter resolveVerticalInterpolationFilter(
+            TileBlockHeaderReader.BlockHeader header,
+            FrameHeader frameHeader
+    ) {
+        if (frameHeader.subpelFilterMode() != FrameHeader.InterpolationFilter.SWITCHABLE) {
+            return frameHeader.subpelFilterMode();
+        }
+        @Nullable FrameHeader.InterpolationFilter interpolationFilter = header.verticalInterpolationFilter();
+        if (interpolationFilter == null) {
+            throw new IllegalStateException("Inter reconstruction requires decoded switchable interpolation filters");
+        }
+        return interpolationFilter;
+    }
+
     /// Returns one compatible stored reference surface for the supplied internal LAST..ALTREF
     /// reference position.
     ///
@@ -1380,18 +1458,22 @@ public final class FrameReconstructor {
     /// @param motionVector the inter motion vector chosen for the block
     /// @param pixelFormat the active decoded chroma layout
     /// @param hasChroma whether the block carries chroma samples
-    /// @param subpelFilterMode the frame-level interpolation filter mode
+    /// @param horizontalInterpolationFilter the effective horizontal interpolation filter mode
+    /// @param verticalInterpolationFilter the effective vertical interpolation filter mode
     private static void requireSupportedInterMotionVector(
             MotionVector motionVector,
             PixelFormat pixelFormat,
             boolean hasChroma,
-            FrameHeader.InterpolationFilter subpelFilterMode
+            FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+            FrameHeader.InterpolationFilter verticalInterpolationFilter
     ) {
         MotionVector checkedMotionVector = Objects.requireNonNull(motionVector, "motionVector");
         boolean lumaFractional = (checkedMotionVector.rowQuarterPel() & 0x03) != 0
                 || (checkedMotionVector.columnQuarterPel() & 0x03) != 0;
         if (!hasChroma || pixelFormat == PixelFormat.I400) {
-            if (lumaFractional && !supportsFixedFractionalInterFilter(subpelFilterMode)) {
+            if (lumaFractional
+                    && (!supportsFixedFractionalInterFilter(horizontalInterpolationFilter)
+                    || !supportsFixedFractionalInterFilter(verticalInterpolationFilter))) {
                 throw new IllegalStateException(
                         "Inter reconstruction currently supports fractional luma motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
                 );
@@ -1403,7 +1485,9 @@ public final class FrameReconstructor {
         int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
         boolean chromaFractional = Math.floorMod(checkedMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
                 || Math.floorMod(checkedMotionVector.rowQuarterPel(), chromaVerticalAlignment) != 0;
-        if ((lumaFractional || chromaFractional) && !supportsFixedFractionalInterFilter(subpelFilterMode)) {
+        if ((lumaFractional || chromaFractional)
+                && (!supportsFixedFractionalInterFilter(horizontalInterpolationFilter)
+                || !supportsFixedFractionalInterFilter(verticalInterpolationFilter))) {
             throw new IllegalStateException(
                     "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters for "
                             + pixelFormat

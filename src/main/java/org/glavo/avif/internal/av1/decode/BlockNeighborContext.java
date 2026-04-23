@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
@@ -37,6 +38,18 @@ public final class BlockNeighborContext {
 
     /// The AV1 coefficient-context byte that marks one transform block as all-zero.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
+
+    /// The switchable interpolation-filter symbol used for regular 8-tap filtering.
+    private static final byte INTERPOLATION_FILTER_REGULAR = 0;
+
+    /// The switchable interpolation-filter symbol used for smooth 8-tap filtering.
+    private static final byte INTERPOLATION_FILTER_SMOOTH = 1;
+
+    /// The switchable interpolation-filter symbol used for sharp 8-tap filtering.
+    private static final byte INTERPOLATION_FILTER_SHARP = 2;
+
+    /// The switchable interpolation-filter sentinel used when no usable neighbor filter is available.
+    private static final byte INTERPOLATION_FILTER_UNSET = 3;
 
     /// The `dav1d` luma coefficient skip-context lookup table indexed by merged top and left counts.
     private static final int[][] LUMA_COEFFICIENT_SKIP_CONTEXTS = {
@@ -140,6 +153,18 @@ public final class BlockNeighborContext {
     /// The left-edge `NEWMV` usage flags indexed in 4x4 units.
     private final byte[] leftUsesNewMotionVector;
 
+    /// The above-edge horizontal switchable interpolation-filter symbols indexed in 4x4 units.
+    private final byte[] aboveInterpolationFilterHorizontal;
+
+    /// The left-edge horizontal switchable interpolation-filter symbols indexed in 4x4 units.
+    private final byte[] leftInterpolationFilterHorizontal;
+
+    /// The above-edge vertical switchable interpolation-filter symbols indexed in 4x4 units.
+    private final byte[] aboveInterpolationFilterVertical;
+
+    /// The left-edge vertical switchable interpolation-filter symbols indexed in 4x4 units.
+    private final byte[] leftInterpolationFilterVertical;
+
     /// The above-edge segmentation-prediction flags indexed in 4x4 units.
     private final byte[] aboveSegmentPredicted;
 
@@ -234,6 +259,10 @@ public final class BlockNeighborContext {
     /// @param leftMotionVector1 the left-edge secondary motion vectors indexed in 4x4 units
     /// @param aboveUsesNewMotionVector the above-edge `NEWMV` usage flags indexed in 4x4 units
     /// @param leftUsesNewMotionVector the left-edge `NEWMV` usage flags indexed in 4x4 units
+    /// @param aboveInterpolationFilterHorizontal the above-edge horizontal switchable interpolation-filter symbols indexed in 4x4 units
+    /// @param leftInterpolationFilterHorizontal the left-edge horizontal switchable interpolation-filter symbols indexed in 4x4 units
+    /// @param aboveInterpolationFilterVertical the above-edge vertical switchable interpolation-filter symbols indexed in 4x4 units
+    /// @param leftInterpolationFilterVertical the left-edge vertical switchable interpolation-filter symbols indexed in 4x4 units
     /// @param aboveSegmentPredicted the above-edge segmentation-prediction flags indexed in 4x4 units
     /// @param leftSegmentPredicted the left-edge segmentation-prediction flags indexed in 4x4 units
     /// @param aboveSegmentId the above-edge segment identifiers indexed in 4x4 units
@@ -283,6 +312,10 @@ public final class BlockNeighborContext {
             InterMotionVector[] leftMotionVector1,
             byte[] aboveUsesNewMotionVector,
             byte[] leftUsesNewMotionVector,
+            byte[] aboveInterpolationFilterHorizontal,
+            byte[] leftInterpolationFilterHorizontal,
+            byte[] aboveInterpolationFilterVertical,
+            byte[] leftInterpolationFilterVertical,
             byte[] aboveSegmentPredicted,
             byte[] leftSegmentPredicted,
             byte[] aboveSegmentId,
@@ -332,6 +365,22 @@ public final class BlockNeighborContext {
         this.leftMotionVector1 = Objects.requireNonNull(leftMotionVector1, "leftMotionVector1");
         this.aboveUsesNewMotionVector = Objects.requireNonNull(aboveUsesNewMotionVector, "aboveUsesNewMotionVector");
         this.leftUsesNewMotionVector = Objects.requireNonNull(leftUsesNewMotionVector, "leftUsesNewMotionVector");
+        this.aboveInterpolationFilterHorizontal = Objects.requireNonNull(
+                aboveInterpolationFilterHorizontal,
+                "aboveInterpolationFilterHorizontal"
+        );
+        this.leftInterpolationFilterHorizontal = Objects.requireNonNull(
+                leftInterpolationFilterHorizontal,
+                "leftInterpolationFilterHorizontal"
+        );
+        this.aboveInterpolationFilterVertical = Objects.requireNonNull(
+                aboveInterpolationFilterVertical,
+                "aboveInterpolationFilterVertical"
+        );
+        this.leftInterpolationFilterVertical = Objects.requireNonNull(
+                leftInterpolationFilterVertical,
+                "leftInterpolationFilterVertical"
+        );
         this.aboveSegmentPredicted = Objects.requireNonNull(aboveSegmentPredicted, "aboveSegmentPredicted");
         this.leftSegmentPredicted = Objects.requireNonNull(leftSegmentPredicted, "leftSegmentPredicted");
         this.aboveSegmentId = Objects.requireNonNull(aboveSegmentId, "aboveSegmentId");
@@ -408,6 +457,10 @@ public final class BlockNeighborContext {
         InterMotionVector[] leftMotionVector0 = new InterMotionVector[tileHeight4];
         InterMotionVector[] aboveMotionVector1 = new InterMotionVector[tileWidth4];
         InterMotionVector[] leftMotionVector1 = new InterMotionVector[tileHeight4];
+        byte[] aboveInterpolationFilterHorizontal = new byte[tileWidth4];
+        byte[] leftInterpolationFilterHorizontal = new byte[tileHeight4];
+        byte[] aboveInterpolationFilterVertical = new byte[tileWidth4];
+        byte[] leftInterpolationFilterVertical = new byte[tileHeight4];
         LumaIntraPredictionMode[] aboveMode = new LumaIntraPredictionMode[tileWidth4];
         LumaIntraPredictionMode[] leftMode = new LumaIntraPredictionMode[tileHeight4];
         InterMotionVector defaultMotionVector = InterMotionVector.predicted(MotionVector.zero());
@@ -429,6 +482,10 @@ public final class BlockNeighborContext {
         Arrays.fill(leftMotionVector0, defaultMotionVector);
         Arrays.fill(aboveMotionVector1, defaultMotionVector);
         Arrays.fill(leftMotionVector1, defaultMotionVector);
+        Arrays.fill(aboveInterpolationFilterHorizontal, INTERPOLATION_FILTER_UNSET);
+        Arrays.fill(leftInterpolationFilterHorizontal, INTERPOLATION_FILTER_UNSET);
+        Arrays.fill(aboveInterpolationFilterVertical, INTERPOLATION_FILTER_UNSET);
+        Arrays.fill(leftInterpolationFilterVertical, INTERPOLATION_FILTER_UNSET);
         Arrays.fill(aboveMode, LumaIntraPredictionMode.DC);
         Arrays.fill(leftMode, LumaIntraPredictionMode.DC);
         if (keyFrame) {
@@ -463,6 +520,10 @@ public final class BlockNeighborContext {
                 leftMotionVector1,
                 new byte[tileWidth4],
                 new byte[tileHeight4],
+                aboveInterpolationFilterHorizontal,
+                leftInterpolationFilterHorizontal,
+                aboveInterpolationFilterVertical,
+                leftInterpolationFilterVertical,
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 new byte[tileWidth4],
@@ -700,6 +761,60 @@ public final class BlockNeighborContext {
             return hasUnidirectionalCompoundReference(useLeft, off) ? 4 : 0;
         }
         return 2;
+    }
+
+    /// Returns the switchable interpolation-filter context for the supplied block position and direction.
+    ///
+    /// The current implementation matches only the primary current-block reference against the
+    /// neighboring edge state and uses the AV1 switchable-filter sentinel when no usable neighbor
+    /// filter is available.
+    ///
+    /// @param position the current block position
+    /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
+    /// @param direction the zero-based interpolation-filter direction index in `[0, 2)`
+    /// @return the switchable interpolation-filter context for the supplied block position and direction
+    public int interpolationFilterContext(
+            BlockPosition position,
+            int referenceFrame0,
+            int referenceFrame1,
+            int direction
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int checkedDirection = requireInterpolationFilterDirection(direction);
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        byte aboveFilter = hasTopNeighbor(nonNullPosition)
+                ? matchingInterpolationFilterSymbol(
+                referenceFrame0,
+                aboveIntra[x4] != 0,
+                aboveCompoundReference[x4] != 0,
+                aboveReferenceFrame0[x4],
+                aboveReferenceFrame1[x4],
+                checkedDirection == 0 ? aboveInterpolationFilterHorizontal[x4] : aboveInterpolationFilterVertical[x4]
+        )
+                : INTERPOLATION_FILTER_UNSET;
+        byte leftFilter = hasLeftNeighbor(nonNullPosition)
+                ? matchingInterpolationFilterSymbol(
+                referenceFrame0,
+                leftIntra[y4] != 0,
+                leftCompoundReference[y4] != 0,
+                leftReferenceFrame0[y4],
+                leftReferenceFrame1[y4],
+                checkedDirection == 0 ? leftInterpolationFilterHorizontal[y4] : leftInterpolationFilterVertical[y4]
+        )
+                : INTERPOLATION_FILTER_UNSET;
+        int contextBase = ((checkedDirection << 1) + (referenceFrame1 >= 0 ? 1 : 0)) << 2;
+        if (aboveFilter == leftFilter) {
+            return contextBase + (aboveFilter & 0xFF);
+        }
+        if (aboveFilter == INTERPOLATION_FILTER_UNSET) {
+            return contextBase + (leftFilter & 0xFF);
+        }
+        if (leftFilter == INTERPOLATION_FILTER_UNSET) {
+            return contextBase + (aboveFilter & 0xFF);
+        }
+        return contextBase + INTERPOLATION_FILTER_UNSET;
     }
 
     /// Returns the single-reference primary context for the supplied block position.
@@ -1710,6 +1825,65 @@ public final class BlockNeighborContext {
         return plane;
     }
 
+    /// Validates and returns one switchable interpolation-filter direction index.
+    ///
+    /// Direction `0` selects the horizontal filter symbol and direction `1` selects the vertical
+    /// filter symbol.
+    ///
+    /// @param direction the requested switchable interpolation-filter direction index
+    /// @return the same direction index after validation
+    private static int requireInterpolationFilterDirection(int direction) {
+        if (direction != 0 && direction != 1) {
+            throw new IllegalArgumentException("direction must be 0 (horizontal) or 1 (vertical): " + direction);
+        }
+        return direction;
+    }
+
+    /// Returns the edge filter symbol that matches the current primary reference, or the unset sentinel.
+    ///
+    /// @param referenceFrame0 the current primary inter reference in internal LAST..ALTREF order
+    /// @param neighborIntra whether the stored neighbor is intra-coded
+    /// @param neighborCompound whether the stored neighbor uses compound references
+    /// @param neighborReferenceFrame0 the stored neighbor primary inter reference in internal LAST..ALTREF order
+    /// @param neighborReferenceFrame1 the stored neighbor secondary inter reference in internal LAST..ALTREF order, or `-1`
+    /// @param storedFilterSymbol the stored edge filter symbol
+    /// @return the edge filter symbol that matches the current primary reference, or the unset sentinel
+    private static byte matchingInterpolationFilterSymbol(
+            int referenceFrame0,
+            boolean neighborIntra,
+            boolean neighborCompound,
+            byte neighborReferenceFrame0,
+            byte neighborReferenceFrame1,
+            byte storedFilterSymbol
+    ) {
+        if (neighborIntra || storedFilterSymbol == INTERPOLATION_FILTER_UNSET) {
+            return INTERPOLATION_FILTER_UNSET;
+        }
+        if ((neighborReferenceFrame0 & 0xFF) == referenceFrame0) {
+            return storedFilterSymbol;
+        }
+        if (neighborCompound && (neighborReferenceFrame1 & 0xFF) == referenceFrame0) {
+            return storedFilterSymbol;
+        }
+        return INTERPOLATION_FILTER_UNSET;
+    }
+
+    /// Returns the switchable interpolation-filter symbol stored for one decoded filter, or the unset sentinel.
+    ///
+    /// @param interpolationFilter the decoded interpolation filter, or `null`
+    /// @return the switchable interpolation-filter symbol stored for one decoded filter, or the unset sentinel
+    private static byte interpolationFilterSymbol(@Nullable FrameHeader.InterpolationFilter interpolationFilter) {
+        if (interpolationFilter == null) {
+            return INTERPOLATION_FILTER_UNSET;
+        }
+        return switch (interpolationFilter) {
+            case EIGHT_TAP_REGULAR -> INTERPOLATION_FILTER_REGULAR;
+            case EIGHT_TAP_SMOOTH -> INTERPOLATION_FILTER_SMOOTH;
+            case EIGHT_TAP_SHARP -> INTERPOLATION_FILTER_SHARP;
+            case BILINEAR, SWITCHABLE -> INTERPOLATION_FILTER_UNSET;
+        };
+    }
+
     /// Updates the neighbor state after decoding one block header.
     ///
     /// @param header the decoded block header that should become the new above/left edge state
@@ -1733,6 +1907,8 @@ public final class BlockNeighborContext {
         InterMotionVector motionVector0 = fallbackMotionVector(nonNullHeader.motionVector0());
         InterMotionVector motionVector1 = fallbackMotionVector(nonNullHeader.motionVector1());
         byte usesNewMotionVector = (byte) (usesNewMotionVector(nonNullHeader) ? 1 : 0);
+        byte horizontalInterpolationFilter = interpolationFilterSymbol(nonNullHeader.horizontalInterpolationFilter());
+        byte verticalInterpolationFilter = interpolationFilterSymbol(nonNullHeader.verticalInterpolationFilter());
         LumaIntraPredictionMode mode = nonNullHeader.intra() ? nonNullHeader.yMode() : LumaIntraPredictionMode.DC;
         int endX4 = Math.min(tileWidth4, position.x4() + size.width4());
         int endY4 = Math.min(tileHeight4, position.y4() + size.height4());
@@ -1759,6 +1935,8 @@ public final class BlockNeighborContext {
             aboveMotionVector0[x4] = motionVector0;
             aboveMotionVector1[x4] = motionVector1;
             aboveUsesNewMotionVector[x4] = usesNewMotionVector;
+            aboveInterpolationFilterHorizontal[x4] = horizontalInterpolationFilter;
+            aboveInterpolationFilterVertical[x4] = verticalInterpolationFilter;
             aboveSegmentPredicted[x4] = segmentPredicted;
             aboveSegmentId[x4] = segmentId;
             abovePaletteSize[x4] = paletteSize;
@@ -1781,6 +1959,8 @@ public final class BlockNeighborContext {
             leftMotionVector0[y4] = motionVector0;
             leftMotionVector1[y4] = motionVector1;
             leftUsesNewMotionVector[y4] = usesNewMotionVector;
+            leftInterpolationFilterHorizontal[y4] = horizontalInterpolationFilter;
+            leftInterpolationFilterVertical[y4] = verticalInterpolationFilter;
             leftSegmentPredicted[y4] = segmentPredicted;
             leftSegmentId[y4] = segmentId;
             leftPaletteSize[y4] = paletteSize;

@@ -21,6 +21,7 @@ import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
+import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.PartitionType;
@@ -196,6 +197,24 @@ public final class TileSyntaxReader {
     public CompoundInterPredictionMode readCompoundInterMode(int context) {
         int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCompoundInterModeCdf(context), 7);
         return CompoundInterPredictionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one switchable interpolation-filter symbol for the supplied direction and context.
+    ///
+    /// Direction `0` decodes the horizontal filter symbol and direction `1` decodes the vertical
+    /// filter symbol. The current switchable subset covers only the three fixed 8-tap filters.
+    ///
+    /// @param direction the zero-based interpolation-filter direction index in `[0, 2)`
+    /// @param context the zero-based switchable interpolation-filter context index in `[0, 8)`
+    /// @return the decoded switchable interpolation filter
+    public FrameHeader.InterpolationFilter readInterpolationFilter(int direction, int context) {
+        int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableInterpolationFilterCdf(direction, context), 2);
+        return switch (symbol) {
+            case 0 -> FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
+            case 1 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH;
+            case 2 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
+            default -> throw new IllegalStateException("Unsupported switchable interpolation-filter symbol: " + symbol);
+        };
     }
 
     /// Decodes one luma transform-depth symbol for the supplied maximum transform size.

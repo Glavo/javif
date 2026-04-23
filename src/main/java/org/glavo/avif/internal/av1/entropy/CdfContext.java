@@ -141,6 +141,30 @@ public final class CdfContext {
             {13046, 23214, 24505, 25942, 27435, 28442, 29330}
     });
 
+    /// The transformed default switchable interpolation-filter CDFs.
+    private static final int[][][] DEFAULT_INTERPOLATION_FILTER_CDFS = inverse3d(new int[][][]{
+            {
+                    {31935, 32720},
+                    {5568, 32719},
+                    {422, 2938},
+                    {28244, 32608},
+                    {31206, 31953},
+                    {4862, 32121},
+                    {770, 1152},
+                    {20889, 25637}
+            },
+            {
+                    {31910, 32724},
+                    {4120, 32712},
+                    {305, 2247},
+                    {27403, 32636},
+                    {31022, 32009},
+                    {2963, 32093},
+                    {601, 943},
+                    {14969, 21398}
+            }
+    });
+
     /// The transformed default transform-size CDFs.
     private static final int[][][] DEFAULT_TRANSFORM_SIZE_CDFS = inverse3d(new int[][][]{
             {
@@ -1026,6 +1050,9 @@ public final class CdfContext {
     /// The mutable compound inter-mode CDFs.
     private final int[][] compoundInterModeCdfs;
 
+    /// The mutable switchable interpolation-filter CDFs.
+    private final int[][][] interpolationFilterCdfs;
+
     /// The mutable transform-size CDFs.
     private final int[][][] transformSizeCdfs;
 
@@ -1159,6 +1186,7 @@ public final class CdfContext {
     /// @param singleInterReferenceMvCdfs the mutable single-reference reference-motion-vector CDFs
     /// @param drlCdfs the mutable dynamic-reference-list selection CDFs
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
+    /// @param interpolationFilterCdfs the mutable switchable interpolation-filter CDFs
     /// @param transformSizeCdfs the mutable transform-size CDFs
     /// @param transformPartitionCdfs the mutable inter transform-partition CDFs
     /// @param coefficientSkipCdfs the mutable coefficient-skip CDFs grouped by AV1 transform-context class
@@ -1213,6 +1241,7 @@ public final class CdfContext {
             int[][] singleInterReferenceMvCdfs,
             int[][] drlCdfs,
             int[][] compoundInterModeCdfs,
+            int[][][] interpolationFilterCdfs,
             int[][][] transformSizeCdfs,
             int[][] transformPartitionCdfs,
             int[][][] coefficientSkipCdfs,
@@ -1267,6 +1296,7 @@ public final class CdfContext {
         this.singleInterReferenceMvCdfs = Objects.requireNonNull(singleInterReferenceMvCdfs, "singleInterReferenceMvCdfs");
         this.drlCdfs = Objects.requireNonNull(drlCdfs, "drlCdfs");
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
+        this.interpolationFilterCdfs = Objects.requireNonNull(interpolationFilterCdfs, "interpolationFilterCdfs");
         this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
         this.transformPartitionCdfs = Objects.requireNonNull(transformPartitionCdfs, "transformPartitionCdfs");
         this.coefficientSkipCdfs = Objects.requireNonNull(coefficientSkipCdfs, "coefficientSkipCdfs");
@@ -1330,6 +1360,7 @@ public final class CdfContext {
                 deepCopy(DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS),
                 deepCopy(DEFAULT_DRL_CDFS),
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
+                deepCopy(DEFAULT_INTERPOLATION_FILTER_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_PARTITION_CDFS),
                 deepCopy(DEFAULT_COEFFICIENT_SKIP_CDFS),
@@ -1391,6 +1422,7 @@ public final class CdfContext {
                 deepCopy(singleInterReferenceMvCdfs),
                 deepCopy(drlCdfs),
                 deepCopy(compoundInterModeCdfs),
+                deepCopy(interpolationFilterCdfs),
                 deepCopy(transformSizeCdfs),
                 deepCopy(transformPartitionCdfs),
                 deepCopy(coefficientSkipCdfs),
@@ -1551,6 +1583,19 @@ public final class CdfContext {
     /// @return the live mutable compound inter-mode CDF for the supplied context index
     public int[] mutableCompoundInterModeCdf(int context) {
         return compoundInterModeCdfs[Objects.checkIndex(context, compoundInterModeCdfs.length)];
+    }
+
+    /// Returns the live mutable switchable interpolation-filter CDF for the supplied direction and context.
+    ///
+    /// Direction `0` selects the horizontal filter symbol and direction `1` selects the vertical
+    /// filter symbol.
+    ///
+    /// @param direction the zero-based interpolation-filter direction index in `[0, 2)`
+    /// @param context the zero-based switchable interpolation-filter context index in `[0, 8)`
+    /// @return the live mutable switchable interpolation-filter CDF for the supplied direction and context
+    public int[] mutableInterpolationFilterCdf(int direction, int context) {
+        int[][] directionCdfs = interpolationFilterCdfs[Objects.checkIndex(direction, interpolationFilterCdfs.length)];
+        return directionCdfs[Objects.checkIndex(context, directionCdfs.length)];
     }
 
     /// Returns the live mutable transform-size CDF for the supplied max-size table and context.

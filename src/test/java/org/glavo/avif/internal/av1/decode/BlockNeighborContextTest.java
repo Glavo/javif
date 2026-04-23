@@ -168,6 +168,62 @@ final class BlockNeighborContextTest {
         assertEquals(1, context.unidirectionalReference1Context(position));
     }
 
+    /// Verifies that switchable interpolation-filter contexts merge matching neighbor filters and sentinels.
+    @Test
+    void derivesInterpolationFilterContextsFromUpdatedNeighbors() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockPosition position = new BlockPosition(4, 4);
+
+        assertEquals(3, context.interpolationFilterContext(position, 0, -1, 0));
+        assertEquals(11, context.interpolationFilterContext(position, 0, -1, 1));
+        assertEquals(7, context.interpolationFilterContext(position, 0, 4, 0));
+        assertEquals(15, context.interpolationFilterContext(position, 0, 4, 1));
+
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(8, -4)),
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
+        ));
+        assertEquals(0, context.interpolationFilterContext(position, 0, -1, 0));
+        assertEquals(9, context.interpolationFilterContext(position, 0, -1, 1));
+        assertEquals(4, context.interpolationFilterContext(position, 0, 4, 0));
+        assertEquals(13, context.interpolationFilterContext(position, 0, 4, 1));
+
+        context.updateFromBlockHeader(compoundInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
+                4,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(12, 4)),
+                InterMotionVector.predicted(new MotionVector(-8, 16)),
+                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        ));
+        assertEquals(3, context.interpolationFilterContext(position, 0, -1, 0));
+        assertEquals(11, context.interpolationFilterContext(position, 0, -1, 1));
+        assertEquals(7, context.interpolationFilterContext(position, 0, 4, 0));
+        assertEquals(15, context.interpolationFilterContext(position, 0, 4, 1));
+
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(8, -4)),
+                FrameHeader.InterpolationFilter.BILINEAR,
+                FrameHeader.InterpolationFilter.SWITCHABLE
+        ));
+        assertEquals(2, context.interpolationFilterContext(position, 4, -1, 0));
+        assertEquals(8, context.interpolationFilterContext(position, 4, -1, 1));
+        assertEquals(6, context.interpolationFilterContext(position, 4, 0, 0));
+        assertEquals(12, context.interpolationFilterContext(position, 4, 0, 1));
+    }
+
     /// Verifies provisional inter-mode contexts derive stable mode and DRL contexts from neighbors.
     @Test
     void derivesProvisionalInterModeContextsFromUpdatedNeighbors() {
@@ -804,6 +860,28 @@ final class BlockNeighborContextTest {
             @org.jetbrains.annotations.Nullable SingleInterPredictionMode singleInterMode,
             InterMotionVector motionVector0
     ) {
+        return singleReferenceInterBlock(position, size, referenceFrame0, singleInterMode, motionVector0, null, null);
+    }
+
+    /// Creates one compact single-reference inter block header used by neighbor-context tests with explicit interpolation filters.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param singleInterMode the decoded single-reference inter mode, or `null`
+    /// @param motionVector0 the primary motion-vector state chosen for the block
+    /// @param horizontalInterpolationFilter the decoded horizontal interpolation filter, or `null`
+    /// @param verticalInterpolationFilter the decoded vertical interpolation filter, or `null`
+    /// @return one compact single-reference inter block header used by neighbor-context tests with explicit interpolation filters
+    private static TileBlockHeaderReader.BlockHeader singleReferenceInterBlock(
+            BlockPosition position,
+            BlockSize size,
+            int referenceFrame0,
+            @org.jetbrains.annotations.Nullable SingleInterPredictionMode singleInterMode,
+            InterMotionVector motionVector0,
+            @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+            @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 size,
@@ -820,8 +898,13 @@ final class BlockNeighborContextTest {
                 -1,
                 motionVector0,
                 null,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
                 false,
                 0,
+                -1,
+                0,
+                new int[4],
                 null,
                 null,
                 0,
@@ -858,6 +941,42 @@ final class BlockNeighborContextTest {
             InterMotionVector motionVector0,
             InterMotionVector motionVector1
     ) {
+        return compoundInterBlock(
+                position,
+                size,
+                referenceFrame0,
+                referenceFrame1,
+                compoundInterMode,
+                motionVector0,
+                motionVector1,
+                null,
+                null
+        );
+    }
+
+    /// Creates one compact compound-reference inter block header used by neighbor-context tests with explicit interpolation filters.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order
+    /// @param compoundInterMode the decoded compound inter mode, or `null`
+    /// @param motionVector0 the primary motion-vector state chosen for the block
+    /// @param motionVector1 the secondary motion-vector state chosen for the block
+    /// @param horizontalInterpolationFilter the decoded horizontal interpolation filter, or `null`
+    /// @param verticalInterpolationFilter the decoded vertical interpolation filter, or `null`
+    /// @return one compact compound-reference inter block header used by neighbor-context tests with explicit interpolation filters
+    private static TileBlockHeaderReader.BlockHeader compoundInterBlock(
+            BlockPosition position,
+            BlockSize size,
+            int referenceFrame0,
+            int referenceFrame1,
+            @org.jetbrains.annotations.Nullable org.glavo.avif.internal.av1.model.CompoundInterPredictionMode compoundInterMode,
+            InterMotionVector motionVector0,
+            InterMotionVector motionVector1,
+            @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+            @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 size,
@@ -874,8 +993,13 @@ final class BlockNeighborContextTest {
                 -1,
                 motionVector0,
                 motionVector1,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
                 false,
                 0,
+                -1,
+                0,
+                new int[4],
                 null,
                 null,
                 0,

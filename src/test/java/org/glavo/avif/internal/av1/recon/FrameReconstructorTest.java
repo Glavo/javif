@@ -1964,10 +1964,10 @@ final class FrameReconstructorTest {
         assertEquals("Inter reconstruction requires one populated stored reference surface", exception.getMessage());
     }
 
-    /// Verifies that one chroma-bearing inter block still rejects fractional motion vectors when
-    /// the frame-level interpolation filter is not one fixed supported mode.
+    /// Verifies that one chroma-bearing switchable inter block now rejects missing decoded
+    /// block-level interpolation filters before evaluating fractional-motion-vector support.
     @Test
-    void rejectsI420InterBlocksWithFractionalMotionVectorsWithSwitchableFilter() {
+    void rejectsI420InterBlocksWithSwitchableFrameFilterWithoutDecodedBlockFilters() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
@@ -2016,10 +2016,7 @@ final class FrameReconstructorTest {
                 )
         );
 
-        assertEquals(
-                "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters for I420",
-                exception.getMessage()
-        );
+        assertEquals("Inter reconstruction requires decoded switchable interpolation filters", exception.getMessage());
     }
 
     /// Creates one synthetic structural frame-decode result for reconstruction tests.

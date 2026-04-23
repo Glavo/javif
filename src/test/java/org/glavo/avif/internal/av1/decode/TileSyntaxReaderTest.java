@@ -183,6 +183,38 @@ final class TileSyntaxReaderTest {
         assertEquals(expectedSingleInterMode, singleModeReader.readSingleInterMode(4, 1, 3, false, false));
     }
 
+    /// Verifies that switchable interpolation-filter syntax uses the expected tile-local CDF tables.
+    @Test
+    void readsInterpolationFilterSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        FrameHeader.InterpolationFilter expectedHorizontal = switch (
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableInterpolationFilterCdf(0, 3), 2)
+        ) {
+            case 0 -> FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
+            case 1 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH;
+            case 2 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
+            default -> throw new IllegalStateException("Unexpected interpolation-filter symbol");
+        };
+        FrameHeader.InterpolationFilter expectedVertical = switch (
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableInterpolationFilterCdf(1, 6), 2)
+        ) {
+            case 0 -> FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
+            case 1 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH;
+            case 2 -> FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
+            default -> throw new IllegalStateException("Unexpected interpolation-filter symbol");
+        };
+
+        assertEquals(expectedHorizontal, reader.readInterpolationFilter(0, 3));
+        assertArrayEquals(oracleCdf.mutableInterpolationFilterCdf(0, 3), tileContext.cdfContext().mutableInterpolationFilterCdf(0, 3));
+        assertEquals(expectedVertical, reader.readInterpolationFilter(1, 6));
+        assertArrayEquals(oracleCdf.mutableInterpolationFilterCdf(1, 6), tileContext.cdfContext().mutableInterpolationFilterCdf(1, 6));
+    }
+
     /// Verifies that motion-vector residual syntax uses the expected tile-local CDF tables.
     @Test
     void readsMotionVectorResidualSyntax() {

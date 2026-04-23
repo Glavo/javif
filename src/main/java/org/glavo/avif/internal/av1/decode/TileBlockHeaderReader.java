@@ -188,6 +188,8 @@ public final class TileBlockHeaderReader {
         int drlIndex = -1;
         @Nullable InterMotionVector motionVector0 = null;
         @Nullable InterMotionVector motionVector1 = null;
+        @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter = null;
+        @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter = null;
         if (!intra && !useIntrabc) {
             InterReferenceSelection selection = readInterReferenceSelection(
                     nonNullPosition,
@@ -230,6 +232,18 @@ public final class TileBlockHeaderReader {
                 motionVector0 = interModeSelection.motionVector0();
                 motionVector1 = interModeSelection.motionVector1();
             }
+            InterpolationFilterSelection interpolationFilterSelection = readInterpolationFilterSelection(
+                    nonNullPosition,
+                    nonNullNeighborContext,
+                    hasChroma,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    motionVector0,
+                    motionVector1
+            );
+            horizontalInterpolationFilter = interpolationFilterSelection.horizontalInterpolationFilter();
+            verticalInterpolationFilter = interpolationFilterSelection.verticalInterpolationFilter();
         }
 
         @Nullable LumaIntraPredictionMode yMode = null;
@@ -319,6 +333,8 @@ public final class TileBlockHeaderReader {
                 drlIndex,
                 motionVector0,
                 motionVector1,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
                 segmentPredicted,
                 segmentId,
                 cdefIndex,
@@ -673,6 +689,122 @@ public final class TileBlockHeaderReader {
             motionVector0 = decodeNewMotionVectorResidual(motionVector0);
         }
         return new InterModeSelection(singleInterMode, null, drlIndex, motionVector0, null);
+    }
+
+    /// Decodes one switchable interpolation-filter selection for the current inter block.
+    ///
+    /// Non-switchable frame-level filter modes leave the block-level filter state unavailable. For
+    /// switchable frames, blocks that do not require subpel filtering default both directions to
+    /// regular 8-tap filtering so later neighbor contexts see the same state that AV1 would store
+    /// on the edges.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param neighborContext the mutable neighbor context that supplies interpolation-filter contexts
+    /// @param hasChroma whether the current block has chroma samples in the active frame layout
+    /// @param compoundReference whether the current block uses compound inter references
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+    /// @param motionVector0 the resolved primary motion-vector state chosen for the block
+    /// @param motionVector1 the resolved secondary motion-vector state chosen for the block, or `null`
+    /// @return the decoded switchable interpolation-filter selection for the current inter block
+    private InterpolationFilterSelection readInterpolationFilterSelection(
+            BlockPosition position,
+            BlockNeighborContext neighborContext,
+            boolean hasChroma,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            @Nullable InterMotionVector motionVector0,
+            @Nullable InterMotionVector motionVector1
+    ) {
+        FrameHeader.InterpolationFilter subpelFilterMode = tileContext.frameHeader().subpelFilterMode();
+        if (subpelFilterMode != FrameHeader.InterpolationFilter.SWITCHABLE) {
+            return new InterpolationFilterSelection(null, null);
+        }
+        if (!requiresSwitchableInterpolationFilterSignaling(
+                hasChroma,
+                Objects.requireNonNull(motionVector0, "motionVector0"),
+                compoundReference ? Objects.requireNonNull(motionVector1, "motionVector1") : null
+        )) {
+            return new InterpolationFilterSelection(
+                    FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                    FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+            );
+        }
+
+        int horizontalContext = neighborContext.interpolationFilterContext(position, referenceFrame0, referenceFrame1, 0);
+        FrameHeader.InterpolationFilter horizontalInterpolationFilter =
+                syntaxReader.readInterpolationFilter(0, horizontalContext);
+        FrameHeader.InterpolationFilter verticalInterpolationFilter;
+        if (tileContext.sequenceHeader().features().dualFilter()) {
+            int verticalContext = neighborContext.interpolationFilterContext(position, referenceFrame0, referenceFrame1, 1);
+            verticalInterpolationFilter = syntaxReader.readInterpolationFilter(1, verticalContext);
+        } else {
+            verticalInterpolationFilter = horizontalInterpolationFilter;
+        }
+        return new InterpolationFilterSelection(horizontalInterpolationFilter, verticalInterpolationFilter);
+    }
+
+    /// Returns whether the current switchable inter block must decode explicit interpolation-filter symbols.
+    ///
+    /// The current implementation treats any active-plane fractional motion vector as requiring
+    /// switchable filter signaling.
+    ///
+    /// @param hasChroma whether the current block has chroma samples in the active frame layout
+    /// @param motionVector0 the resolved primary motion-vector state chosen for the block
+    /// @param motionVector1 the resolved secondary motion-vector state chosen for the block, or `null`
+    /// @return whether the current switchable inter block must decode explicit interpolation-filter symbols
+    private boolean requiresSwitchableInterpolationFilterSignaling(
+            boolean hasChroma,
+            InterMotionVector motionVector0,
+            @Nullable InterMotionVector motionVector1
+    ) {
+        return requiresSubpelFiltering(Objects.requireNonNull(motionVector0, "motionVector0").vector(), hasChroma)
+                || (motionVector1 != null && requiresSubpelFiltering(motionVector1.vector(), hasChroma));
+    }
+
+    /// Returns whether one motion vector requires subpel filtering for the current pixel format.
+    ///
+    /// @param motionVector the resolved motion vector to inspect
+    /// @param hasChroma whether the current block has chroma samples in the active frame layout
+    /// @return whether the supplied motion vector requires subpel filtering for the current pixel format
+    private boolean requiresSubpelFiltering(MotionVector motionVector, boolean hasChroma) {
+        MotionVector nonNullMotionVector = Objects.requireNonNull(motionVector, "motionVector");
+        if ((nonNullMotionVector.rowQuarterPel() & 0x03) != 0 || (nonNullMotionVector.columnQuarterPel() & 0x03) != 0) {
+            return true;
+        }
+        if (!hasChroma) {
+            return false;
+        }
+        PixelFormat pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
+        int chromaHorizontalAlignment = 4 << chromaSubsamplingX(pixelFormat);
+        int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
+        return Math.floorMod(nonNullMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
+                || Math.floorMod(nonNullMotionVector.rowQuarterPel(), chromaVerticalAlignment) != 0;
+    }
+
+    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the decoded pixel format to inspect
+    /// @return the horizontal chroma subsampling shift for the supplied pixel format
+    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+        PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        return switch (nonNullPixelFormat) {
+            case I400, I444 -> 0;
+            case I420, I422 -> 1;
+        };
+    }
+
+    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the decoded pixel format to inspect
+    /// @return the vertical chroma subsampling shift for the supplied pixel format
+    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+        PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        return switch (nonNullPixelFormat) {
+            case I400, I422, I444 -> 0;
+            case I420 -> 1;
+        };
     }
 
     /// Returns the provisional motion-vector candidate index used by one single-reference mode.
@@ -1467,6 +1599,12 @@ public final class TileBlockHeaderReader {
         /// The secondary motion vector chosen for the block, or `null` when not available.
         private final @Nullable InterMotionVector motionVector1;
 
+        /// The decoded horizontal switchable interpolation filter, or `null` when not available.
+        private final @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter;
+
+        /// The decoded vertical switchable interpolation filter, or `null` when not available.
+        private final @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter;
+
         /// Whether the block used temporal segmentation prediction.
         private final boolean segmentPredicted;
 
@@ -1541,6 +1679,192 @@ public final class TileBlockHeaderReader {
         /// @param drlIndex the decoded dynamic-reference-list index, or `-1`
         /// @param motionVector0 the primary motion vector chosen for the block, or `null`
         /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
+        /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
+        /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
+        /// @param segmentPredicted whether the block used temporal segmentation prediction
+        /// @param segmentId the decoded segment identifier for the block
+        /// @param cdefIndex the decoded CDEF index for the current superblock quadrant, or `-1`
+        /// @param qIndex the current luma AC quantizer index after any superblock-level delta-q update
+        /// @param deltaLfValues the current delta-lf runtime slots after any superblock-level updates
+        /// @param yMode the decoded luma intra prediction mode, or `null`
+        /// @param uvMode the decoded chroma intra prediction mode, or `null`
+        /// @param yPaletteSize the decoded luma palette size in `[0, 8]`, or `0`
+        /// @param uvPaletteSize the decoded chroma palette size in `[0, 8]`, or `0`
+        /// @param yPaletteColors the decoded luma palette entries, or an empty array
+        /// @param uPaletteColors the decoded U chroma palette entries, or an empty array
+        /// @param vPaletteColors the decoded V chroma palette entries, or an empty array
+        /// @param yPaletteIndices the packed luma palette indices, or an empty array
+        /// @param uvPaletteIndices the packed chroma palette indices, or an empty array
+        /// @param filterIntraMode the decoded filter-intra mode, or `null`
+        /// @param yAngle the decoded signed luma angle delta in `[-3, 3]`
+        /// @param uvAngle the decoded signed chroma angle delta in `[-3, 3]`
+        /// @param cflAlphaU the decoded signed CFL alpha for chroma U
+        /// @param cflAlphaV the decoded signed CFL alpha for chroma V
+        public BlockHeader(
+                BlockPosition position,
+                BlockSize size,
+                boolean hasChroma,
+                boolean skip,
+                boolean skipMode,
+                boolean intra,
+                boolean useIntrabc,
+                boolean compoundReference,
+                int referenceFrame0,
+                int referenceFrame1,
+                @Nullable SingleInterPredictionMode singleInterMode,
+                @Nullable CompoundInterPredictionMode compoundInterMode,
+                int drlIndex,
+                @Nullable InterMotionVector motionVector0,
+                @Nullable InterMotionVector motionVector1,
+                @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+                @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter,
+                boolean segmentPredicted,
+                int segmentId,
+                int cdefIndex,
+                int qIndex,
+                int[] deltaLfValues,
+                @Nullable LumaIntraPredictionMode yMode,
+                @Nullable UvIntraPredictionMode uvMode,
+                int yPaletteSize,
+                int uvPaletteSize,
+                int[] yPaletteColors,
+                int[] uPaletteColors,
+                int[] vPaletteColors,
+                byte[] yPaletteIndices,
+                byte[] uvPaletteIndices,
+                @Nullable FilterIntraMode filterIntraMode,
+                int yAngle,
+                int uvAngle,
+                int cflAlphaU,
+                int cflAlphaV
+        ) {
+            this.position = Objects.requireNonNull(position, "position");
+            this.size = Objects.requireNonNull(size, "size");
+            this.hasChroma = hasChroma;
+            this.skip = skip;
+            this.skipMode = skipMode;
+            this.intra = intra;
+            this.useIntrabc = useIntrabc;
+            this.compoundReference = compoundReference;
+            this.referenceFrame0 = referenceFrame0;
+            this.referenceFrame1 = referenceFrame1;
+            this.singleInterMode = singleInterMode;
+            this.compoundInterMode = compoundInterMode;
+            this.drlIndex = drlIndex;
+            this.motionVector0 = motionVector0;
+            this.motionVector1 = motionVector1;
+            this.horizontalInterpolationFilter = horizontalInterpolationFilter;
+            this.verticalInterpolationFilter = verticalInterpolationFilter;
+            this.segmentPredicted = segmentPredicted;
+            this.segmentId = segmentId;
+            this.cdefIndex = cdefIndex;
+            this.qIndex = qIndex;
+            this.deltaLfValues = Arrays.copyOf(Objects.requireNonNull(deltaLfValues, "deltaLfValues"), deltaLfValues.length);
+            this.yMode = yMode;
+            this.uvMode = uvMode;
+            this.yPaletteSize = yPaletteSize;
+            this.uvPaletteSize = uvPaletteSize;
+            this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
+            this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
+            this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
+            this.yPaletteIndices = Arrays.copyOf(Objects.requireNonNull(yPaletteIndices, "yPaletteIndices"), yPaletteIndices.length);
+            this.uvPaletteIndices = Arrays.copyOf(Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices"), uvPaletteIndices.length);
+            this.filterIntraMode = filterIntraMode;
+            this.yAngle = yAngle;
+            this.uvAngle = uvAngle;
+            this.cflAlphaU = cflAlphaU;
+            this.cflAlphaV = cflAlphaV;
+            if (this.yPaletteColors.length != yPaletteSize) {
+                throw new IllegalArgumentException("yPaletteColors length does not match yPaletteSize");
+            }
+            if (this.uPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("uPaletteColors length does not match uvPaletteSize");
+            }
+            if (this.vPaletteColors.length != uvPaletteSize) {
+                throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
+            }
+            if (yPaletteSize == 0 && this.yPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("yPaletteIndices must be empty when yPaletteSize == 0");
+            }
+            if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
+                throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
+            }
+            if (cdefIndex < -1) {
+                throw new IllegalArgumentException("cdefIndex < -1: " + cdefIndex);
+            }
+            if (qIndex < 0 || qIndex > 255) {
+                throw new IllegalArgumentException("qIndex out of range: " + qIndex);
+            }
+            if (this.deltaLfValues.length != 4) {
+                throw new IllegalArgumentException("deltaLfValues length must be 4");
+            }
+            if (drlIndex < -1 || drlIndex > 3) {
+                throw new IllegalArgumentException("drlIndex out of range: " + drlIndex);
+            }
+            if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
+            }
+            if ((intra || useIntrabc)
+                    && (singleInterMode != null || compoundInterMode != null || drlIndex != -1
+                    || motionVector0 != null || motionVector1 != null)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode or motion-vector state");
+            }
+            if ((intra || useIntrabc)
+                    && (horizontalInterpolationFilter != null || verticalInterpolationFilter != null)) {
+                throw new IllegalArgumentException("Intra and intrabc blocks must not carry switchable interpolation filters");
+            }
+            if ((horizontalInterpolationFilter == null) != (verticalInterpolationFilter == null)) {
+                throw new IllegalArgumentException("Switchable interpolation filters must be both present or both absent");
+            }
+            if (!intra && !useIntrabc) {
+                if (referenceFrame0 == NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Inter blocks must carry a primary reference");
+                }
+                if (compoundReference) {
+                    if (referenceFrame1 == NO_REFERENCE_FRAME) {
+                        throw new IllegalArgumentException("Compound-reference blocks must carry a secondary reference");
+                    }
+                    if (singleInterMode != null) {
+                        throw new IllegalArgumentException("Compound-reference blocks must not carry a single inter mode");
+                    }
+                } else if (referenceFrame1 != NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary reference");
+                }
+                if (!compoundReference && compoundInterMode != null) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a compound inter mode");
+                }
+                if (!compoundReference && motionVector1 != null) {
+                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary motion vector");
+                }
+                if (compoundReference && compoundInterMode == null && drlIndex != -1) {
+                    throw new IllegalArgumentException("Compound-reference blocks with DRL state must carry a compound inter mode");
+                }
+                if (!compoundReference && singleInterMode == null && drlIndex != -1) {
+                    throw new IllegalArgumentException("Single-reference blocks with DRL state must carry a single inter mode");
+                }
+                if (motionVector1 != null && referenceFrame1 == NO_REFERENCE_FRAME) {
+                    throw new IllegalArgumentException("Blocks without a secondary reference must not carry a secondary motion vector");
+                }
+            }
+        }
+
+        /// Creates one decoded leaf block header with switchable interpolation-filter state defaulted to unavailable.
+        ///
+        /// @param position the local tile-relative block origin
+        /// @param size the decoded block size
+        /// @param hasChroma whether the block has chroma samples in the active frame layout
+        /// @param skip the decoded skip flag
+        /// @param skipMode the decoded skip-mode flag
+        /// @param intra whether the block is intra-coded
+        /// @param useIntrabc whether the block uses `intrabc`
+        /// @param compoundReference whether the block uses compound inter references
+        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param singleInterMode the decoded single-reference inter mode, or `null`
+        /// @param compoundInterMode the decoded compound inter mode, or `null`
+        /// @param drlIndex the decoded dynamic-reference-list index, or `-1`
+        /// @param motionVector0 the primary motion vector chosen for the block, or `null`
+        /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
         /// @param segmentPredicted whether the block used temporal segmentation prediction
         /// @param segmentId the decoded segment identifier for the block
         /// @param cdefIndex the decoded CDEF index for the current superblock quadrant, or `-1`
@@ -1596,105 +1920,44 @@ public final class TileBlockHeaderReader {
                 int cflAlphaU,
                 int cflAlphaV
         ) {
-            this.position = Objects.requireNonNull(position, "position");
-            this.size = Objects.requireNonNull(size, "size");
-            this.hasChroma = hasChroma;
-            this.skip = skip;
-            this.skipMode = skipMode;
-            this.intra = intra;
-            this.useIntrabc = useIntrabc;
-            this.compoundReference = compoundReference;
-            this.referenceFrame0 = referenceFrame0;
-            this.referenceFrame1 = referenceFrame1;
-            this.singleInterMode = singleInterMode;
-            this.compoundInterMode = compoundInterMode;
-            this.drlIndex = drlIndex;
-            this.motionVector0 = motionVector0;
-            this.motionVector1 = motionVector1;
-            this.segmentPredicted = segmentPredicted;
-            this.segmentId = segmentId;
-            this.cdefIndex = cdefIndex;
-            this.qIndex = qIndex;
-            this.deltaLfValues = Arrays.copyOf(Objects.requireNonNull(deltaLfValues, "deltaLfValues"), deltaLfValues.length);
-            this.yMode = yMode;
-            this.uvMode = uvMode;
-            this.yPaletteSize = yPaletteSize;
-            this.uvPaletteSize = uvPaletteSize;
-            this.yPaletteColors = Arrays.copyOf(Objects.requireNonNull(yPaletteColors, "yPaletteColors"), yPaletteColors.length);
-            this.uPaletteColors = Arrays.copyOf(Objects.requireNonNull(uPaletteColors, "uPaletteColors"), uPaletteColors.length);
-            this.vPaletteColors = Arrays.copyOf(Objects.requireNonNull(vPaletteColors, "vPaletteColors"), vPaletteColors.length);
-            this.yPaletteIndices = Arrays.copyOf(Objects.requireNonNull(yPaletteIndices, "yPaletteIndices"), yPaletteIndices.length);
-            this.uvPaletteIndices = Arrays.copyOf(Objects.requireNonNull(uvPaletteIndices, "uvPaletteIndices"), uvPaletteIndices.length);
-            this.filterIntraMode = filterIntraMode;
-            this.yAngle = yAngle;
-            this.uvAngle = uvAngle;
-            this.cflAlphaU = cflAlphaU;
-            this.cflAlphaV = cflAlphaV;
-            if (this.yPaletteColors.length != yPaletteSize) {
-                throw new IllegalArgumentException("yPaletteColors length does not match yPaletteSize");
-            }
-            if (this.uPaletteColors.length != uvPaletteSize) {
-                throw new IllegalArgumentException("uPaletteColors length does not match uvPaletteSize");
-            }
-            if (this.vPaletteColors.length != uvPaletteSize) {
-                throw new IllegalArgumentException("vPaletteColors length does not match uvPaletteSize");
-            }
-            if (yPaletteSize == 0 && this.yPaletteIndices.length != 0) {
-                throw new IllegalArgumentException("yPaletteIndices must be empty when yPaletteSize == 0");
-            }
-            if (uvPaletteSize == 0 && this.uvPaletteIndices.length != 0) {
-                throw new IllegalArgumentException("uvPaletteIndices must be empty when uvPaletteSize == 0");
-            }
-            if (cdefIndex < -1) {
-                throw new IllegalArgumentException("cdefIndex < -1: " + cdefIndex);
-            }
-            if (qIndex < 0 || qIndex > 255) {
-                throw new IllegalArgumentException("qIndex out of range: " + qIndex);
-            }
-            if (this.deltaLfValues.length != 4) {
-                throw new IllegalArgumentException("deltaLfValues length must be 4");
-            }
-            if (drlIndex < -1 || drlIndex > 3) {
-                throw new IllegalArgumentException("drlIndex out of range: " + drlIndex);
-            }
-            if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
-                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
-            }
-            if ((intra || useIntrabc)
-                    && (singleInterMode != null || compoundInterMode != null || drlIndex != -1
-                    || motionVector0 != null || motionVector1 != null)) {
-                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode or motion-vector state");
-            }
-            if (!intra && !useIntrabc) {
-                if (referenceFrame0 == NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Inter blocks must carry a primary reference");
-                }
-                if (compoundReference) {
-                    if (referenceFrame1 == NO_REFERENCE_FRAME) {
-                        throw new IllegalArgumentException("Compound-reference blocks must carry a secondary reference");
-                    }
-                    if (singleInterMode != null) {
-                        throw new IllegalArgumentException("Compound-reference blocks must not carry a single inter mode");
-                    }
-                } else if (referenceFrame1 != NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary reference");
-                }
-                if (!compoundReference && compoundInterMode != null) {
-                    throw new IllegalArgumentException("Single-reference blocks must not carry a compound inter mode");
-                }
-                if (!compoundReference && motionVector1 != null) {
-                    throw new IllegalArgumentException("Single-reference blocks must not carry a secondary motion vector");
-                }
-                if (compoundReference && compoundInterMode == null && drlIndex != -1) {
-                    throw new IllegalArgumentException("Compound-reference blocks with DRL state must carry a compound inter mode");
-                }
-                if (!compoundReference && singleInterMode == null && drlIndex != -1) {
-                    throw new IllegalArgumentException("Single-reference blocks with DRL state must carry a single inter mode");
-                }
-                if (motionVector1 != null && referenceFrame1 == NO_REFERENCE_FRAME) {
-                    throw new IllegalArgumentException("Blocks without a secondary reference must not carry a secondary motion vector");
-                }
-            }
+            this(
+                    position,
+                    size,
+                    hasChroma,
+                    skip,
+                    skipMode,
+                    intra,
+                    useIntrabc,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    singleInterMode,
+                    compoundInterMode,
+                    drlIndex,
+                    motionVector0,
+                    motionVector1,
+                    null,
+                    null,
+                    segmentPredicted,
+                    segmentId,
+                    cdefIndex,
+                    qIndex,
+                    deltaLfValues,
+                    yMode,
+                    uvMode,
+                    yPaletteSize,
+                    uvPaletteSize,
+                    yPaletteColors,
+                    uPaletteColors,
+                    vPaletteColors,
+                    yPaletteIndices,
+                    uvPaletteIndices,
+                    filterIntraMode,
+                    yAngle,
+                    uvAngle,
+                    cflAlphaU,
+                    cflAlphaV
+            );
         }
 
         /// Creates one decoded leaf block header with runtime delta state defaulted to unavailable.
@@ -2000,6 +2263,20 @@ public final class TileBlockHeaderReader {
             return motionVector1;
         }
 
+        /// Returns the decoded horizontal switchable interpolation filter, or `null` when not available.
+        ///
+        /// @return the decoded horizontal switchable interpolation filter, or `null` when not available
+        public @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter() {
+            return horizontalInterpolationFilter;
+        }
+
+        /// Returns the decoded vertical switchable interpolation filter, or `null` when not available.
+        ///
+        /// @return the decoded vertical switchable interpolation filter, or `null` when not available
+        public @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter() {
+            return verticalInterpolationFilter;
+        }
+
         /// Returns whether the block used temporal segmentation prediction.
         ///
         /// @return whether the block used temporal segmentation prediction
@@ -2170,6 +2447,42 @@ public final class TileBlockHeaderReader {
         /// @return the decoded segment identifier
         public int segmentId() {
             return segmentId;
+        }
+    }
+
+    /// The decoded switchable interpolation-filter selection for one inter block.
+    @NotNullByDefault
+    private static final class InterpolationFilterSelection {
+        /// The decoded horizontal switchable interpolation filter, or `null` when not available.
+        private final @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter;
+
+        /// The decoded vertical switchable interpolation filter, or `null` when not available.
+        private final @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter;
+
+        /// Creates one decoded switchable interpolation-filter selection.
+        ///
+        /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
+        /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
+        private InterpolationFilterSelection(
+                @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+                @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter
+        ) {
+            this.horizontalInterpolationFilter = horizontalInterpolationFilter;
+            this.verticalInterpolationFilter = verticalInterpolationFilter;
+        }
+
+        /// Returns the decoded horizontal switchable interpolation filter, or `null` when not available.
+        ///
+        /// @return the decoded horizontal switchable interpolation filter, or `null` when not available
+        public @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter() {
+            return horizontalInterpolationFilter;
+        }
+
+        /// Returns the decoded vertical switchable interpolation filter, or `null` when not available.
+        ///
+        /// @return the decoded vertical switchable interpolation filter, or `null` when not available
+        public @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter() {
+            return verticalInterpolationFilter;
         }
     }
 

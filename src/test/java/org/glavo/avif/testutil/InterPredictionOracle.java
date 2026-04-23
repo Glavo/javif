@@ -135,7 +135,7 @@ public final class InterPredictionOracle {
     /// @param denominatorY the vertical plane-local denominator
     /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
     /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
-    /// @param filterMode the frame-level interpolation filter
+    /// @param filterMode the interpolation filter used for both directions
     /// @return one sampled reference-plane block in row-major order
     public static int[][] sampleReferencePlaneBlock(
             DecodedPlane referencePlane,
@@ -149,6 +149,49 @@ public final class InterPredictionOracle {
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter filterMode
     ) {
+        return sampleReferencePlaneBlock(
+                referencePlane,
+                width,
+                height,
+                sourceNumeratorX,
+                sourceNumeratorY,
+                denominatorX,
+                denominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                filterMode,
+                filterMode
+        );
+    }
+
+    /// Samples one rectangular reference-plane footprint using the supplied directional inter
+    /// filters.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param width the sampled block width in samples
+    /// @param height the sampled block height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @return one sampled reference-plane block in row-major order
+    public static int[][] sampleReferencePlaneBlock(
+            DecodedPlane referencePlane,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
+    ) {
         int[][] samples = new int[height][width];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -160,7 +203,8 @@ public final class InterPredictionOracle {
                         denominatorY,
                         widthForFilterSelection,
                         heightForFilterSelection,
-                        filterMode
+                        horizontalFilterMode,
+                        verticalFilterMode
                 );
             }
         }
@@ -193,7 +237,8 @@ public final class InterPredictionOracle {
     /// @param denominatorY the vertical plane-local denominator
     /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
     /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
-    /// @param filterMode the frame-level interpolation filter
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
     /// @return one sampled inter value
     private static int sampleInterPlaneValue(
             DecodedPlane referencePlane,
@@ -203,7 +248,8 @@ public final class InterPredictionOracle {
             int denominatorY,
             int widthForFilterSelection,
             int heightForFilterSelection,
-            FrameHeader.InterpolationFilter filterMode
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
     ) {
         if (Math.floorMod(sourceNumeratorX, denominatorX) == 0 && Math.floorMod(sourceNumeratorY, denominatorY) == 0) {
             return referencePlane.sample(
@@ -211,7 +257,8 @@ public final class InterPredictionOracle {
                     clamp(Math.floorDiv(sourceNumeratorY, denominatorY), 0, referencePlane.height() - 1)
             );
         }
-        if (filterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+        if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
             return bilinearInterpolateAt(referencePlane, sourceNumeratorX, sourceNumeratorY, denominatorX, denominatorY);
         }
         int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
@@ -224,13 +271,21 @@ public final class InterPredictionOracle {
                     clamp(sourceY0, 0, referencePlane.height() - 1)
             );
         }
+        if (!supportsFixedFractionalInterFilter(horizontalFilterMode)
+                || !supportsFixedFractionalInterFilter(verticalFilterMode)
+                || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            throw new IllegalArgumentException(
+                    "InterPredictionOracle supports only shared BILINEAR or fixed EIGHT_TAP_* filters per direction"
+            );
+        }
 
         int @org.jetbrains.annotations.Nullable [] horizontalFilter = phaseX == 0
                 ? null
-                : selectSubpelFilter(filterMode, phaseX, widthForFilterSelection);
+                : selectSubpelFilter(horizontalFilterMode, phaseX, widthForFilterSelection);
         int @org.jetbrains.annotations.Nullable [] verticalFilter = phaseY == 0
                 ? null
-                : selectSubpelFilter(filterMode, phaseY, heightForFilterSelection);
+                : selectSubpelFilter(verticalFilterMode, phaseY, heightForFilterSelection);
 
         if (verticalFilter == null) {
             long filtered = horizontalInterpolate(referencePlane, sourceX0, sourceY0, horizontalFilter);
@@ -317,6 +372,18 @@ public final class InterPredictionOracle {
                     "InterPredictionOracle supports only BILINEAR and fixed EIGHT_TAP_* filters"
             );
         };
+    }
+
+    /// Returns whether one interpolation filter is currently supported for fixed fractional
+    /// prediction.
+    ///
+    /// @param filterMode the interpolation filter to inspect
+    /// @return whether the supplied interpolation filter is currently supported for fixed fractional prediction
+    private static boolean supportsFixedFractionalInterFilter(FrameHeader.InterpolationFilter filterMode) {
+        return filterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
+                || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
     }
 
     /// Converts one plane-local fractional numerator into one AV1 fixed-filter phase.

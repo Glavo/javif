@@ -32,6 +32,7 @@ import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
@@ -416,6 +417,156 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Verifies that one synthetic `I420` single-reference inter leaf reconstructs through one
+    /// switchable frame header by using the caller-supplied horizontal and vertical fixed filters.
+    @Test
+    void reconstructsSyntheticI420SingleReferenceInterLeafWithSwitchableDirectionalSubpelFilters() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(3, 1);
+        FrameHeader.InterpolationFilter horizontalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
+        FrameHeader.InterpolationFilter verticalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
+        TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                SingleInterPredictionMode.NEARESTMV,
+                null,
+                0,
+                InterMotionVector.resolved(motionVector),
+                null,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
+                false,
+                0,
+                0,
+                0,
+                new int[4],
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                header,
+                new TransformLayout(
+                        position,
+                        blockSize,
+                        blockSize.width4(),
+                        blockSize.height4(),
+                        lumaTransformSize,
+                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        false,
+                        new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+                ),
+                createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
+        );
+        FrameAssembly assembly = createInterAssembly(
+                PixelFormat.I420,
+                new byte[0],
+                8,
+                8,
+                0,
+                FrameHeader.InterpolationFilter.SWITCHABLE
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
+
+        DecodedPlane referenceLumaPlane = createGradientPlane(8, 8, 17, 5, 9);
+        DecodedPlane referenceChromaUPlane = createGradientPlane(4, 4, 41, 7, 11);
+        DecodedPlane referenceChromaVPlane = createGradientPlane(4, 4, 83, 13, 3);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                8,
+                8,
+                referenceLumaPlane,
+                referenceChromaUPlane,
+                referenceChromaVPlane
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertEquals(FrameHeader.InterpolationFilter.SWITCHABLE, assembly.frameHeader().subpelFilterMode());
+        assertEquals(horizontalInterpolationFilter, header.horizontalInterpolationFilter());
+        assertEquals(verticalInterpolationFilter, header.verticalInterpolationFilter());
+        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertTrue(decodedPlanes.hasChroma());
+        assertPlaneBlockEquals(
+                decodedPlanes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        referenceLumaPlane,
+                        4,
+                        4,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        4,
+                        4,
+                        4,
+                        4,
+                        horizontalInterpolationFilter,
+                        verticalInterpolationFilter
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        referenceChromaUPlane,
+                        2,
+                        2,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        8,
+                        8,
+                        2,
+                        2,
+                        horizontalInterpolationFilter,
+                        verticalInterpolationFilter
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        referenceChromaVPlane,
+                        2,
+                        2,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        8,
+                        8,
+                        2,
+                        2,
+                        horizontalInterpolationFilter,
+                        verticalInterpolationFilter
+                )
+        );
+    }
+
     /// Verifies that the same deterministic real inter tile payload now keeps its decoded residuals
     /// through reconstruction instead of requiring zero-residual normalization.
     @Test
@@ -557,6 +708,214 @@ final class FrameReconstructorIntegrationTest {
                 {90, 100, 110, 120},
                 {110, 120, 130, 140}
         });
+    }
+
+    /// Verifies that one synthetic `I420` compound-reference inter leaf reconstructs through one
+    /// switchable frame header by averaging two dual-filter subpel predictions.
+    @Test
+    void reconstructsSyntheticI420CompoundInterLeafWithSwitchableDirectionalSubpelFilters() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        MotionVector motionVector0 = new MotionVector(3, 1);
+        MotionVector motionVector1 = new MotionVector(1, 3);
+        FrameHeader.InterpolationFilter horizontalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH;
+        FrameHeader.InterpolationFilter verticalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
+        TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                1,
+                null,
+                CompoundInterPredictionMode.NEARESTMV_NEARESTMV,
+                0,
+                InterMotionVector.resolved(motionVector0),
+                InterMotionVector.resolved(motionVector1),
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
+                false,
+                0,
+                0,
+                0,
+                new int[4],
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                header,
+                new TransformLayout(
+                        position,
+                        blockSize,
+                        blockSize.width4(),
+                        blockSize.height4(),
+                        lumaTransformSize,
+                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        false,
+                        new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+                ),
+                createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
+        );
+        FrameAssembly assembly = createInterAssembly(
+                PixelFormat.I420,
+                new byte[0],
+                8,
+                8,
+                0,
+                1,
+                FrameHeader.InterpolationFilter.SWITCHABLE
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
+
+        DecodedPlane referenceLumaPlane0 = createGradientPlane(8, 8, 12, 6, 9);
+        DecodedPlane referenceChromaUPlane0 = createGradientPlane(4, 4, 31, 8, 5);
+        DecodedPlane referenceChromaVPlane0 = createGradientPlane(4, 4, 77, 4, 12);
+        DecodedPlane referenceLumaPlane1 = createGradientPlane(8, 8, 196, -7, -9);
+        DecodedPlane referenceChromaUPlane1 = createGradientPlane(4, 4, 184, -11, -5);
+        DecodedPlane referenceChromaVPlane1 = createGradientPlane(4, 4, 221, -9, -7);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                8,
+                8,
+                referenceLumaPlane0,
+                referenceChromaUPlane0,
+                referenceChromaVPlane0
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                8,
+                8,
+                referenceLumaPlane1,
+                referenceChromaUPlane1,
+                referenceChromaVPlane1
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertEquals(FrameHeader.InterpolationFilter.SWITCHABLE, assembly.frameHeader().subpelFilterMode());
+        assertEquals(horizontalInterpolationFilter, header.horizontalInterpolationFilter());
+        assertEquals(verticalInterpolationFilter, header.verticalInterpolationFilter());
+        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertTrue(decodedPlanes.hasChroma());
+        assertPlaneBlockEquals(
+                decodedPlanes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceLumaPlane0,
+                                4,
+                                4,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                4,
+                                4,
+                                4,
+                                4,
+                                horizontalInterpolationFilter,
+                                verticalInterpolationFilter
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceLumaPlane1,
+                                4,
+                                4,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                4,
+                                4,
+                                4,
+                                4,
+                                horizontalInterpolationFilter,
+                                verticalInterpolationFilter
+                        )
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceChromaUPlane0,
+                                2,
+                                2,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                horizontalInterpolationFilter,
+                                verticalInterpolationFilter
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceChromaUPlane1,
+                                2,
+                                2,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                horizontalInterpolationFilter,
+                                verticalInterpolationFilter
+                        )
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceChromaVPlane0,
+                                2,
+                                2,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                horizontalInterpolationFilter,
+                                verticalInterpolationFilter
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceChromaVPlane1,
+                                2,
+                                2,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                horizontalInterpolationFilter,
+                                verticalInterpolationFilter
+                        )
+                )
+        );
     }
 
     /// Verifies that one synthetic `I420` leaf with only a chroma-U DC residual changes only the U plane.
@@ -4037,6 +4396,8 @@ final class FrameReconstructorIntegrationTest {
                 header.drlIndex(),
                 InterMotionVector.resolved(motionVector),
                 header.motionVector1(),
+                header.horizontalInterpolationFilter(),
+                header.verticalInterpolationFilter(),
                 header.segmentPredicted(),
                 header.segmentId(),
                 header.cdefIndex(),

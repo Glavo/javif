@@ -46,6 +46,8 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{8794, 0}, context.mutableSingleInterReferenceMvCdf(0));
         assertArrayEquals(new int[]{19664, 0}, context.mutableDrlCdf(0));
         assertArrayEquals(new int[]{25008, 18945, 16960, 15127, 13612, 12102, 5877, 0}, context.mutableCompoundInterModeCdf(0));
+        assertArrayEquals(new int[]{833, 48, 0}, context.mutableInterpolationFilterCdf(0, 0));
+        assertArrayEquals(new int[]{17799, 11370, 0}, context.mutableInterpolationFilterCdf(1, 7));
         assertArrayEquals(new int[]{12800, 0}, context.mutableTransformSizeCdf(0, 0));
         assertArrayEquals(new int[]{14091, 1920, 0}, context.mutableTransformSizeCdf(1, 2));
         assertArrayEquals(new int[]{4187, 0}, context.mutableTransformPartitionCdf(0, 0));
@@ -125,6 +127,8 @@ final class CdfContextTest {
         assertNotSame(original.mutableSingleInterReferenceMvCdf(0), copy.mutableSingleInterReferenceMvCdf(0));
         assertNotSame(original.mutableDrlCdf(0), copy.mutableDrlCdf(0));
         assertNotSame(original.mutableCompoundInterModeCdf(0), copy.mutableCompoundInterModeCdf(0));
+        assertNotSame(original.mutableInterpolationFilterCdf(0, 0), copy.mutableInterpolationFilterCdf(0, 0));
+        assertNotSame(original.mutableInterpolationFilterCdf(1, 7), copy.mutableInterpolationFilterCdf(1, 7));
         assertNotSame(original.mutableTransformSizeCdf(0, 0), copy.mutableTransformSizeCdf(0, 0));
         assertNotSame(original.mutableTransformPartitionCdf(0, 0), copy.mutableTransformPartitionCdf(0, 0));
         assertNotSame(original.mutableCoefficientSkipCdf(0, 0), copy.mutableCoefficientSkipCdf(0, 0));
@@ -173,6 +177,8 @@ final class CdfContextTest {
         copy.mutableSingleInterReferenceMvCdf(0)[0] = 97;
         copy.mutableDrlCdf(0)[0] = 98;
         copy.mutableCompoundInterModeCdf(0)[0] = 99;
+        copy.mutableInterpolationFilterCdf(0, 0)[0] = 110;
+        copy.mutableInterpolationFilterCdf(1, 7)[0] = 120;
         copy.mutableTransformSizeCdf(0, 0)[0] = 111;
         copy.mutableTransformPartitionCdf(0, 0)[0] = 112;
         copy.mutableCoefficientSkipCdf(0, 0)[0] = 113;
@@ -221,6 +227,8 @@ final class CdfContextTest {
         assertEquals(8794, original.mutableSingleInterReferenceMvCdf(0)[0]);
         assertEquals(19664, original.mutableDrlCdf(0)[0]);
         assertEquals(25008, original.mutableCompoundInterModeCdf(0)[0]);
+        assertEquals(833, original.mutableInterpolationFilterCdf(0, 0)[0]);
+        assertEquals(17799, original.mutableInterpolationFilterCdf(1, 7)[0]);
         assertEquals(12800, original.mutableTransformSizeCdf(0, 0)[0]);
         assertEquals(4187, original.mutableTransformPartitionCdf(0, 0)[0]);
         assertEquals(919, original.mutableCoefficientSkipCdf(0, 0)[0]);
