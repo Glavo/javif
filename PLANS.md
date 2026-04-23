@@ -27,6 +27,7 @@ The repository already has:
 - `I400` and `I420`
 - non-directional and directional intra prediction, filter-intra luma prediction, and `I420` CFL chroma prediction
 - minimal luma `DCT_DCT` residual support for `TX_4X4` and `TX_8X8`
+- minimal reconstruction-side `I420` chroma `DCT_DCT` residual support for synthetic `TX_4X4` / `TX_8X8` U/V units
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -62,6 +63,7 @@ Everything else expands from that baseline after correctness is stable.
 
 - Multi-tile frames are still rejected by the reconstruction/output path.
 - Non-zero reconstruction currently covers only luma `DCT_DCT` `TX_4X4` and `TX_8X8` within the existing key/intra subset.
+- The public reader still does not consume real bitstream-derived chroma residual syntax, even though the reconstruction core now supports a minimal synthetic `I420` U/V residual path.
 - Palette, `intrabc`, inter prediction, and motion compensation remain unsupported.
 - Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
 - `show_existing_frame` still validates slot state but does not yet return a reused output frame.
@@ -111,7 +113,8 @@ Current status:
 - `DecodedPlanes` exists and is already consumed by the output layer.
 - `ReferenceSurfaceSnapshot` exists and is already used as the reference-surface storage contract.
 - `FilmGrainParams` already exists in normalized form inside `FrameHeader`.
-- `ResidualLayout` and `TransformResidualUnit` still need expansion before full reconstruction, especially for chroma and richer transform/residual coverage.
+- `ResidualLayout` now carries split U/V residual-unit arrays, but bitstream-side chroma residual population is still pending.
+- `TransformResidualUnit` still needs expansion before full reconstruction, especially for richer transform and coefficient coverage.
 
 ## Remaining Work Tracks
 
@@ -138,7 +141,7 @@ Exit criteria:
 Current gap after the first-pixel milestone:
 
 - Non-zero residual decode and reconstruction still do not cover the full reconstruction-ready coefficient space.
-- Chroma residual syntax is still missing.
+- Chroma residual syntax is still missing even though reconstruction-side U/V residual application now exists.
 - Several block features remain syntax-only or rejected during reconstruction: palette, inter prediction, and motion compensation-related paths.
 
 Write scope:
@@ -213,11 +216,12 @@ Completed within this track already:
 - luma filter-intra reconstruction
 - directional intra reconstruction
 - `I420` CFL chroma reconstruction
+- minimal reconstruction-side `I420` chroma residual application for split U/V residual units
 
 Immediate next steps inside this track:
 
 - richer AC coverage and larger transform support
-- chroma residual application
+- bitstream-side chroma residual syntax
 - palette pixel application
 - inter reconstruction and reference-surface consumption
 
@@ -487,6 +491,7 @@ Status:
 
 - partially achieved now
 - current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-directional-plus-filter-intra/CFL subset, including the minimal non-zero luma residual subset
+- reconstruction-side synthetic coverage now also includes minimal `I420` chroma residual application, but public end-to-end output is still blocked on real chroma residual syntax
 - milestone is not closed until chroma residuals, palette/inter paths, and a less artificial sample set are covered
 
 ### M3: Reference and Inter Frames

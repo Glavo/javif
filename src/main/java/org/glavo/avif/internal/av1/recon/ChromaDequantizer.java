@@ -20,30 +20,31 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Minimal luma dequantizer for the first residual-producing reconstruction path.
+/// Minimal chroma dequantizer for the first residual-producing reconstruction path.
 ///
-/// The current implementation matches the AV1 8-bit QTX lookup tables for luma coefficients and
-/// exposes only the data the current rollout already has available at reconstruction time:
-/// block-local `qindex`, frame-level luma DC delta, and bit depth.
+/// The current implementation matches the AV1 8-bit QTX lookup tables shared by luma and chroma
+/// coefficients. Plane-specific behavior is expressed only through the caller-supplied DC/AC delta
+/// quantizers.
 @NotNullByDefault
-final class LumaDequantizer {
+final class ChromaDequantizer {
     /// Prevents instantiation of this utility class.
-    private LumaDequantizer() {
+    private ChromaDequantizer() {
     }
 
-    /// Dequantizes one luma transform residual unit into transform-domain coefficients.
+    /// Dequantizes one chroma transform residual unit into transform-domain coefficients.
     ///
-    /// DC uses the frame-level luma DC delta while AC uses the block-local `qindex` unchanged.
-    /// All-zero units return a fresh all-zero array of the matching transform area.
+    /// DC and AC both apply the caller-provided plane-specific delta quantizers on top of the
+    /// block-local `qindex`. All-zero units return a fresh all-zero array of the matching
+    /// transform area.
     ///
-    /// @param residualUnit the luma residual unit to dequantize
+    /// @param residualUnit the chroma residual unit to dequantize
     /// @param context the block-local dequantization context
     /// @return one dequantized transform-domain coefficient block in natural raster order
     static int[] dequantize(TransformResidualUnit residualUnit, Context context) {
         TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         Context nonNullContext = Objects.requireNonNull(context, "context");
         if (nonNullContext.bitDepth() != 8) {
-            throw new IllegalStateException("Unsupported luma dequantization bit depth: " + nonNullContext.bitDepth());
+            throw new IllegalStateException("Unsupported chroma dequantization bit depth: " + nonNullContext.bitDepth());
         }
 
         int coefficientCount = nonNullResidualUnit.size().widthPixels() * nonNullResidualUnit.size().heightPixels();
@@ -53,29 +54,13 @@ final class LumaDequantizer {
 
         int[] quantizedCoefficients = nonNullResidualUnit.coefficients();
         int[] dequantizedCoefficients = new int[quantizedCoefficients.length];
-        int dcQuantizer = lumaDcQuantizer(nonNullContext);
-        int acQuantizer = lumaAcQuantizer(nonNullContext);
+        int dcQuantizer = QuantizerTables.dcQuantizer8(nonNullContext.qIndex() + nonNullContext.dcDelta());
+        int acQuantizer = QuantizerTables.acQuantizer8(nonNullContext.qIndex() + nonNullContext.acDelta());
         dequantizedCoefficients[0] = scaledCoefficient(quantizedCoefficients[0], dcQuantizer);
         for (int coefficientIndex = 1; coefficientIndex < quantizedCoefficients.length; coefficientIndex++) {
             dequantizedCoefficients[coefficientIndex] = scaledCoefficient(quantizedCoefficients[coefficientIndex], acQuantizer);
         }
         return dequantizedCoefficients;
-    }
-
-    /// Returns the active 8-bit luma DC quantizer after clamping the derived qindex.
-    ///
-    /// @param context the block-local dequantization context
-    /// @return the active 8-bit luma DC quantizer
-    private static int lumaDcQuantizer(Context context) {
-        return QuantizerTables.dcQuantizer8(context.qIndex() + context.yDcDelta());
-    }
-
-    /// Returns the active 8-bit luma AC quantizer for the block-local qindex.
-    ///
-    /// @param context the block-local dequantization context
-    /// @return the active 8-bit luma AC quantizer
-    private static int lumaAcQuantizer(Context context) {
-        return QuantizerTables.acQuantizer8(context.qIndex());
     }
 
     /// Multiplies one quantized coefficient by one dequantizer with saturation to `int`.
@@ -94,29 +79,32 @@ final class LumaDequantizer {
         return (int) scaled;
     }
 
-    /// Minimal luma dequantization context used by the current reconstruction path.
+    /// Minimal chroma dequantization context used by the current reconstruction path.
     ///
-    /// The block-local `qindex` already includes any superblock-level delta-q updates. The luma DC
-    /// delta remains frame-level state. Bit depth is carried explicitly so callers can wire the same
-    /// shape through broader reconstruction code even though the current implementation only accepts
-    /// 8-bit inputs.
+    /// The block-local `qindex` already includes any superblock-level delta-q updates. Plane-local
+    /// DC and AC deltas are carried explicitly so U and V can reuse the same logic with different
+    /// quantizer adjustments.
     @NotNullByDefault
     static final class Context {
-        /// The block-local luma AC quantizer index in `[0, 255]`.
+        /// The block-local chroma AC quantizer index in `[0, 255]`.
         private final int qIndex;
 
-        /// The frame-level luma DC delta quantizer.
-        private final int yDcDelta;
+        /// The plane-local DC delta quantizer.
+        private final int dcDelta;
+
+        /// The plane-local AC delta quantizer.
+        private final int acDelta;
 
         /// The decoded sample bit depth.
         private final int bitDepth;
 
-        /// Creates one luma dequantization context.
+        /// Creates one chroma dequantization context.
         ///
-        /// @param qIndex the block-local luma AC quantizer index in `[0, 255]`
-        /// @param yDcDelta the frame-level luma DC delta quantizer
+        /// @param qIndex the block-local chroma AC quantizer index in `[0, 255]`
+        /// @param dcDelta the plane-local DC delta quantizer
+        /// @param acDelta the plane-local AC delta quantizer
         /// @param bitDepth the decoded sample bit depth
-        Context(int qIndex, int yDcDelta, int bitDepth) {
+        Context(int qIndex, int dcDelta, int acDelta, int bitDepth) {
             if (qIndex < 0 || qIndex > 255) {
                 throw new IllegalArgumentException("qIndex out of range: " + qIndex);
             }
@@ -124,22 +112,30 @@ final class LumaDequantizer {
                 throw new IllegalArgumentException("bitDepth <= 0: " + bitDepth);
             }
             this.qIndex = qIndex;
-            this.yDcDelta = yDcDelta;
+            this.dcDelta = dcDelta;
+            this.acDelta = acDelta;
             this.bitDepth = bitDepth;
         }
 
-        /// Returns the block-local luma AC quantizer index in `[0, 255]`.
+        /// Returns the block-local chroma AC quantizer index in `[0, 255]`.
         ///
-        /// @return the block-local luma AC quantizer index in `[0, 255]`
+        /// @return the block-local chroma AC quantizer index in `[0, 255]`
         int qIndex() {
             return qIndex;
         }
 
-        /// Returns the frame-level luma DC delta quantizer.
+        /// Returns the plane-local DC delta quantizer.
         ///
-        /// @return the frame-level luma DC delta quantizer
-        int yDcDelta() {
-            return yDcDelta;
+        /// @return the plane-local DC delta quantizer
+        int dcDelta() {
+            return dcDelta;
+        }
+
+        /// Returns the plane-local AC delta quantizer.
+        ///
+        /// @return the plane-local AC delta quantizer
+        int acDelta() {
+            return acDelta;
         }
 
         /// Returns the decoded sample bit depth.

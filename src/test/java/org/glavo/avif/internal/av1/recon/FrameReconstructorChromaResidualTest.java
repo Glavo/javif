@@ -1,0 +1,615 @@
+/*
+ * Copyright 2026 Glavo
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.glavo.avif.internal.av1.recon;
+
+import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.internal.av1.bitstream.ObuHeader;
+import org.glavo.avif.internal.av1.bitstream.ObuPacket;
+import org.glavo.avif.internal.av1.bitstream.ObuType;
+import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
+import org.glavo.avif.internal.av1.decode.TileDecodeContext;
+import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
+import org.glavo.avif.internal.av1.model.BlockPosition;
+import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FrameAssembly;
+import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.ResidualLayout;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.TileBitstream;
+import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.internal.av1.model.TransformLayout;
+import org.glavo.avif.internal.av1.model.TransformResidualUnit;
+import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformUnit;
+import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+/// Synthetic `FrameReconstructor` tests for the minimal `I420` chroma residual rollout.
+///
+/// These tests construct tiny structural frames directly and pin the intended U/V residual
+/// behavior without relying on the integration reader path.
+@NotNullByDefault
+final class FrameReconstructorChromaResidualTest {
+    /// Verifies that a positive chroma-U DC residual shifts only the U plane above the
+    /// zero-residual `I420` baseline.
+    @Test
+    void reconstructsSingleTileI420IntraFrameWithPositiveChromaUDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = createI420Leaf(position, size, null, null, null);
+        TilePartitionTreeReader.LeafNode positiveChromaULeaf = createI420Leaf(
+                position,
+                size,
+                null,
+                dcOnlyCoefficients(requireI420ChromaTransformSize(size), 32),
+                null
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, positiveChromaULeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByUniformOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                4
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
+    /// Verifies that a negative chroma-V DC residual shifts only the V plane below the
+    /// zero-residual `I420` baseline.
+    @Test
+    void reconstructsSingleTileI420IntraFrameWithNegativeChromaVDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = createI420Leaf(position, size, null, null, null);
+        TilePartitionTreeReader.LeafNode negativeChromaVLeaf = createI420Leaf(
+                position,
+                size,
+                null,
+                null,
+                dcOnlyCoefficients(requireI420ChromaTransformSize(size), -32)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, negativeChromaVLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(residualPlanes.chromaUPlane()));
+        assertPlaneDiffersFromBaselineByUniformOffset(
+                requirePlane(baseline.chromaVPlane()),
+                requirePlane(residualPlanes.chromaVPlane()),
+                -4
+        );
+    }
+
+    /// Verifies that one synthetic `I420` block can carry non-zero luma and chroma residuals at
+    /// the same time without any cross-plane writes.
+    @Test
+    void reconstructsSingleTileI420IntraFrameWithIndependentLumaAndChromaResiduals() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        TilePartitionTreeReader.LeafNode residualLeaf = createI420Leaf(
+                position,
+                size,
+                twoDimensionalTx8x8Coefficients(),
+                dcOnlyCoefficients(requireI420ChromaTransformSize(size), 32),
+                dcOnlyCoefficients(requireI420ChromaTransformSize(size), -32)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
+        );
+
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                new int[][]{
+                        {136, 135, 132, 130, 126, 124, 121, 120},
+                        {135, 134, 132, 129, 127, 124, 122, 121},
+                        {132, 132, 131, 129, 127, 125, 124, 124},
+                        {130, 129, 129, 128, 128, 127, 127, 126},
+                        {126, 127, 127, 128, 128, 129, 129, 130},
+                        {124, 124, 125, 127, 129, 131, 132, 132},
+                        {121, 122, 124, 127, 129, 132, 134, 135},
+                        {120, 121, 124, 126, 130, 132, 135, 136}
+                }
+        );
+        assertPlaneFilled(requirePlane(planes.chromaUPlane()), 4, 4, 132);
+        assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 124);
+    }
+
+    /// Verifies that unsupported non-zero `I420` chroma transform sizes still fail fast with one
+    /// stable reconstruction-side error.
+    @Test
+    void rejectsUnsupportedNonZeroI420ChromaTransformSize() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_32X32;
+        TransformSize chromaTransformSize = requireI420ChromaTransformSize(size);
+        assertEquals(TransformSize.TX_16X16, chromaTransformSize);
+
+        TilePartitionTreeReader.LeafNode unsupportedLeaf = createI420Leaf(
+                position,
+                size,
+                null,
+                dcOnlyCoefficients(chromaTransformSize, 1),
+                null
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 32, 32, unsupportedLeaf)
+                )
+        );
+
+        assertEquals(
+                "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8 DCT_DCT chroma units: TX_16X16",
+                exception.getMessage()
+        );
+    }
+
+    /// Creates one synthetic `I420` intra leaf with optional luma/chroma residual coefficients.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param lumaCoefficients the optional luma coefficients, or `null`
+    /// @param chromaUCoefficients the optional chroma-U coefficients, or `null`
+    /// @param chromaVCoefficients the optional chroma-V coefficients, or `null`
+    /// @return one synthetic `I420` intra leaf
+    private static TilePartitionTreeReader.LeafNode createI420Leaf(
+            BlockPosition position,
+            BlockSize size,
+            @Nullable int[] lumaCoefficients,
+            @Nullable int[] chromaUCoefficients,
+            @Nullable int[] chromaVCoefficients
+    ) {
+        return new TilePartitionTreeReader.LeafNode(
+                createIntraI420BlockHeader(position, size),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, lumaCoefficients, chromaUCoefficients, chromaVCoefficients)
+        );
+    }
+
+    /// Creates one minimal structural frame result backed by one synthetic tile tree.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param frameType the frame type to expose
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param roots the synthetic single-tile partition roots
+    /// @return one structural frame result
+    private static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(
+            PixelFormat pixelFormat,
+            FrameType frameType,
+            int width,
+            int height,
+            TilePartitionTreeReader.Node... roots
+    ) {
+        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
+        FrameHeader frameHeader = createFrameHeader(frameType, width, height);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{roots},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one minimal reduced-still-picture sequence header for reconstruction tests.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param width the frame width
+    /// @param height the frame height
+    /// @return one minimal reduced-still-picture sequence header
+    private static SequenceHeader createSequenceHeader(PixelFormat pixelFormat, int width, int height) {
+        return new SequenceHeader(
+                0,
+                width,
+                height,
+                new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
+                new SequenceHeader.OperatingPoint[]{
+                        new SequenceHeader.OperatingPoint(0, 0, 0, 0, false, false, false, null)
+                },
+                true,
+                true,
+                15,
+                15,
+                false,
+                0,
+                0,
+                new SequenceHeader.FeatureConfig(
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        0,
+                        false,
+                        false,
+                        false,
+                        false
+                ),
+                new SequenceHeader.ColorConfig(
+                        8,
+                        pixelFormat == PixelFormat.I400,
+                        false,
+                        2,
+                        2,
+                        2,
+                        true,
+                        pixelFormat,
+                        0,
+                        pixelFormat != PixelFormat.I444,
+                        pixelFormat == PixelFormat.I420,
+                        false
+                )
+        );
+    }
+
+    /// Creates one minimal frame header for reconstruction tests.
+    ///
+    /// @param frameType the frame type to expose
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @return one minimal frame header
+    private static FrameHeader createFrameHeader(FrameType frameType, int width, int height) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                frameType,
+                true,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0xFF,
+                new FrameHeader.FrameSize(width, width, height, width, height),
+                new FrameHeader.SuperResolutionInfo(false, width),
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false
+        );
+    }
+
+    /// Creates one supported `I420` intra block header with zero directional and palette state.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @return one supported `I420` intra block header
+    private static TileBlockHeaderReader.BlockHeader createIntraI420BlockHeader(BlockPosition position, BlockSize size) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                true,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
+    /// Creates one transform layout that exactly covers one leaf block with one transform unit.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param pixelFormat the active decoded chroma layout
+    /// @return one transform layout that exactly covers one leaf block
+    private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, PixelFormat pixelFormat) {
+        TransformSize transformSize = size.maxLumaTransformSize();
+        return new TransformLayout(
+                position,
+                size,
+                size.width4(),
+                size.height4(),
+                transformSize,
+                size.maxChromaTransformSize(pixelFormat),
+                false,
+                new TransformUnit[]{new TransformUnit(position, transformSize)}
+        );
+    }
+
+    /// Creates one residual layout with optional luma/chroma transform units.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param lumaCoefficients the optional luma coefficients, or `null`
+    /// @param chromaUCoefficients the optional chroma-U coefficients, or `null`
+    /// @param chromaVCoefficients the optional chroma-V coefficients, or `null`
+    /// @return one residual layout with optional luma/chroma transform units
+    private static ResidualLayout createResidualLayout(
+            BlockPosition position,
+            BlockSize size,
+            @Nullable int[] lumaCoefficients,
+            @Nullable int[] chromaUCoefficients,
+            @Nullable int[] chromaVCoefficients
+    ) {
+        TransformSize lumaTransformSize = size.maxLumaTransformSize();
+        TransformSize chromaTransformSize = requireI420ChromaTransformSize(size);
+        return new ResidualLayout(
+                position,
+                size,
+                new TransformResidualUnit[]{createResidualUnit(position, lumaTransformSize, lumaCoefficients)},
+                new TransformResidualUnit[]{createResidualUnit(position, chromaTransformSize, chromaUCoefficients)},
+                new TransformResidualUnit[]{createResidualUnit(position, chromaTransformSize, chromaVCoefficients)}
+        );
+    }
+
+    /// Creates one residual unit from one optional caller-supplied coefficient array.
+    ///
+    /// @param position the block origin in luma 4x4 units
+    /// @param transformSize the transform size carried by the unit
+    /// @param coefficients the optional coefficients, or `null`
+    /// @return one residual unit from the supplied coefficients
+    private static TransformResidualUnit createResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            @Nullable int[] coefficients
+    ) {
+        int[] resolvedCoefficients = coefficients != null
+                ? coefficients
+                : new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        return new TransformResidualUnit(
+                position,
+                transformSize,
+                lastNonZeroIndex(resolvedCoefficients),
+                resolvedCoefficients,
+                hasNonZeroCoefficient(resolvedCoefficients) ? 1 : 0
+        );
+    }
+
+    /// Returns the guaranteed-present `I420` chroma transform size for one block size.
+    ///
+    /// @param size the coded block size
+    /// @return the guaranteed-present `I420` chroma transform size
+    private static TransformSize requireI420ChromaTransformSize(BlockSize size) {
+        TransformSize chromaTransformSize = size.maxChromaTransformSize(PixelFormat.I420);
+        assertNotNull(chromaTransformSize);
+        return chromaTransformSize;
+    }
+
+    /// Returns one DC-only coefficient array for the supplied transform size.
+    ///
+    /// @param transformSize the transform size the coefficients belong to
+    /// @param dcCoefficient the signed DC coefficient
+    /// @return one DC-only coefficient array
+    private static int[] dcOnlyCoefficients(TransformSize transformSize, int dcCoefficient) {
+        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        coefficients[0] = dcCoefficient;
+        return coefficients;
+    }
+
+    /// Returns one deterministic `TX_8X8` coefficient block whose luma reconstruction matches the
+    /// existing two-dimensional residual oracle.
+    ///
+    /// @return one deterministic `TX_8X8` coefficient block
+    private static int[] twoDimensionalTx8x8Coefficients() {
+        int[] coefficients = new int[TransformSize.TX_8X8.widthPixels() * TransformSize.TX_8X8.heightPixels()];
+        coefficients[9] = 64;
+        return coefficients;
+    }
+
+    /// Returns whether one coefficient array contains any non-zero coefficient.
+    ///
+    /// @param coefficients the coefficient array to inspect
+    /// @return whether one coefficient array contains any non-zero coefficient
+    private static boolean hasNonZeroCoefficient(int[] coefficients) {
+        for (int coefficient : coefficients) {
+            if (coefficient != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns the last non-zero coefficient index in one coefficient array, or `-1` when all
+    /// coefficients are zero.
+    ///
+    /// @param coefficients the coefficient array to inspect
+    /// @return the last non-zero coefficient index, or `-1`
+    private static int lastNonZeroIndex(int[] coefficients) {
+        for (int i = coefficients.length - 1; i >= 0; i--) {
+            if (coefficients[i] != 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// Asserts that one decoded plane is filled with one constant sample value.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param width the expected plane width
+    /// @param height the expected plane height
+    /// @param expectedSample the expected sample value at every coordinate
+    private static void assertPlaneFilled(DecodedPlane plane, int width, int height, int expectedSample) {
+        assertEquals(width, plane.width());
+        assertEquals(height, plane.height());
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                assertEquals(expectedSample, plane.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane matches the supplied expected raster.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param expected the expected sample raster
+    private static void assertPlaneEquals(DecodedPlane plane, int[][] expected) {
+        assertEquals(expected[0].length, plane.width());
+        assertEquals(expected.length, plane.height());
+        for (int y = 0; y < expected.length; y++) {
+            for (int x = 0; x < expected[y].length; x++) {
+                assertEquals(expected[y][x], plane.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane differs from the baseline by one exact uniform offset.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the residual-applied plane
+    /// @param expectedDelta the exact uniform delta required at every sample
+    private static void assertPlaneDiffersFromBaselineByUniformOffset(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed,
+            int expectedDelta
+    ) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
+                assertEquals(expectedDelta, reconstructed.sample(x, y) - baseline.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that two decoded planes carry the same stored sample values.
+    ///
+    /// @param expected the expected decoded plane
+    /// @param actual the actual decoded plane
+    private static void assertPlanesEqual(DecodedPlane expected, DecodedPlane actual) {
+        assertEquals(expected.width(), actual.width());
+        assertEquals(expected.height(), actual.height());
+        for (int y = 0; y < expected.height(); y++) {
+            for (int x = 0; x < expected.width(); x++) {
+                assertEquals(expected.sample(x, y), actual.sample(x, y));
+            }
+        }
+    }
+
+    /// Returns one guaranteed-present decoded plane after a non-null assertion.
+    ///
+    /// @param plane the decoded plane reference, or `null`
+    /// @return the same decoded plane reference after a non-null assertion
+    private static DecodedPlane requirePlane(@Nullable DecodedPlane plane) {
+        assertNotNull(plane);
+        return plane;
+    }
+
+    /// Creates default per-segment data with all optional features disabled.
+    ///
+    /// @return default per-segment data with all optional features disabled
+    private static FrameHeader.SegmentData[] defaultSegments() {
+        FrameHeader.SegmentData[] segments = new FrameHeader.SegmentData[8];
+        for (int i = 0; i < segments.length; i++) {
+            segments[i] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, false);
+        }
+        return segments;
+    }
+}

@@ -47,11 +47,14 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -106,6 +109,56 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(128, decodedPlanes.chromaUPlane().sample(3, 3));
         assertEquals(128, decodedPlanes.chromaVPlane().sample(0, 0));
         assertEquals(128, decodedPlanes.chromaVPlane().sample(3, 3));
+    }
+
+    /// Verifies that one synthetic `I420` leaf with only a chroma-U DC residual changes only the U plane.
+    @Test
+    void reconstructsSyntheticI420LeafWithChromaUResidualOnly() {
+        FrameSyntaxDecodeResult baselineSyntax = createSyntheticResult(
+                PixelFormat.I420,
+                createI420LeafWithChromaDcResiduals(0, 0)
+        );
+        FrameSyntaxDecodeResult residualSyntax = createSyntheticResult(
+                PixelFormat.I420,
+                createI420LeafWithChromaDcResiduals(64, 0)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
+        DecodedPlanes residual = reconstructor.reconstruct(residualSyntax);
+
+        assertPlanesEqual(baseline.lumaPlane(), residual.lumaPlane());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residual.chromaUPlane()),
+                1
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residual.chromaVPlane()));
+    }
+
+    /// Verifies that one synthetic `I420` leaf with only a chroma-V DC residual changes only the V plane.
+    @Test
+    void reconstructsSyntheticI420LeafWithChromaVResidualOnly() {
+        FrameSyntaxDecodeResult baselineSyntax = createSyntheticResult(
+                PixelFormat.I420,
+                createI420LeafWithChromaDcResiduals(0, 0)
+        );
+        FrameSyntaxDecodeResult residualSyntax = createSyntheticResult(
+                PixelFormat.I420,
+                createI420LeafWithChromaDcResiduals(0, -64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
+        DecodedPlanes residual = reconstructor.reconstruct(residualSyntax);
+
+        assertPlanesEqual(baseline.lumaPlane(), residual.lumaPlane());
+        assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(residual.chromaUPlane()));
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                requirePlane(baseline.chromaVPlane()),
+                requirePlane(residual.chromaVPlane()),
+                -1
+        );
     }
 
     /// Verifies that one monochrome all-zero `filter_intra` leaf reconstructs through the minimal luma path.
@@ -280,20 +333,252 @@ final class FrameReconstructorIntegrationTest {
                 false,
                 new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
         );
-        int[] coefficients = new int[TransformSize.TX_8X8.widthPixels() * TransformSize.TX_8X8.heightPixels()];
-        int endOfBlockIndex = -1;
-        if (!allZeroResidual) {
-            coefficients[0] = 1;
-            endOfBlockIndex = 0;
-        }
-        ResidualLayout residualLayout = new ResidualLayout(
+        TransformResidualUnit lumaResidualUnit = allZeroResidual
+                ? createAllZeroResidualUnit(position, TransformSize.TX_8X8)
+                : createDcResidualUnit(position, TransformSize.TX_8X8, 1);
+        ResidualLayout residualLayout = createResidualLayout(
                 position,
                 blockSize,
-                new TransformResidualUnit[]{
-                        new TransformResidualUnit(position, TransformSize.TX_8X8, endOfBlockIndex, coefficients, 0)
-                }
+                new TransformResidualUnit[]{lumaResidualUnit}
         );
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Creates one synthetic `I420` leaf whose luma stays at its zero-residual baseline while chroma
+    /// DC residuals may perturb the U and V planes independently.
+    ///
+    /// @param chromaUDcCoefficient the signed U-plane DC coefficient, or `0` for an all-zero U unit
+    /// @param chromaVDcCoefficient the signed V-plane DC coefficient, or `0` for an all-zero V unit
+    /// @return one synthetic `I420` leaf with caller-supplied chroma residuals
+    private static TilePartitionTreeReader.LeafNode createI420LeafWithChromaDcResiduals(
+            int chromaUDcCoefficient,
+            int chromaVDcCoefficient
+    ) {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                2,
+                2,
+                TransformSize.TX_8X8,
+                TransformSize.TX_4X4,
+                false,
+                new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
+        );
+        ResidualLayout residualLayout = createResidualLayout(
+                position,
+                blockSize,
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_8X8)},
+                new TransformResidualUnit[]{createOptionalDcResidualUnit(position, TransformSize.TX_4X4, chromaUDcCoefficient)},
+                new TransformResidualUnit[]{createOptionalDcResidualUnit(position, TransformSize.TX_4X4, chromaVDcCoefficient)}
+        );
+        return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Creates one synthetic residual layout using whichever constructor shape the current checkout exposes.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param blockSize the coded block size that owns the residual layout
+    /// @param lumaUnits the luma residual units
+    /// @return one synthetic residual layout for the supplied units
+    private static ResidualLayout createResidualLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            TransformResidualUnit[] lumaUnits
+    ) {
+        return createResidualLayout(position, blockSize, lumaUnits, new TransformResidualUnit[0], new TransformResidualUnit[0]);
+    }
+
+    /// Creates one synthetic residual layout using whichever constructor shape the current checkout exposes.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param blockSize the coded block size that owns the residual layout
+    /// @param lumaUnits the luma residual units
+    /// @param chromaUUnits the U-plane residual units
+    /// @param chromaVUnits the V-plane residual units
+    /// @return one synthetic residual layout for the supplied units
+    private static ResidualLayout createResidualLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            TransformResidualUnit[] lumaUnits,
+            TransformResidualUnit[] chromaUUnits,
+            TransformResidualUnit[] chromaVUnits
+    ) {
+        @Nullable Constructor<?> chromaConstructor = findSplitChromaResidualLayoutConstructor();
+        if (chromaConstructor != null) {
+            return instantiateResidualLayout(chromaConstructor, position, blockSize, lumaUnits, chromaUUnits, chromaVUnits);
+        }
+
+        @Nullable Constructor<?> combinedChromaConstructor = findCombinedChromaResidualLayoutConstructor();
+        if (combinedChromaConstructor != null) {
+            return instantiateResidualLayout(
+                    combinedChromaConstructor,
+                    position,
+                    blockSize,
+                    lumaUnits,
+                    (Object) new TransformResidualUnit[][]{chromaUUnits, chromaVUnits}
+            );
+        }
+
+        assumeTrue(
+                chromaUUnits.length == 0 && chromaVUnits.length == 0,
+                "Synthetic chroma residual integration coverage is waiting for ResidualLayout chroma-unit support"
+        );
+
+        @Nullable Constructor<?> legacyConstructor = findLegacyResidualLayoutConstructor();
+        if (legacyConstructor != null) {
+            return instantiateResidualLayout(legacyConstructor, position, blockSize, lumaUnits);
+        }
+        throw new AssertionError("No compatible ResidualLayout constructor was available");
+    }
+
+    /// Returns the current split-chroma `ResidualLayout` constructor, or `null`.
+    ///
+    /// @return the current split-chroma `ResidualLayout` constructor, or `null`
+    private static @Nullable Constructor<?> findSplitChromaResidualLayoutConstructor() {
+        for (Constructor<?> constructor : ResidualLayout.class.getDeclaredConstructors()) {
+            Class<?>[] parameterTypes = constructor.getParameterTypes();
+            if (parameterTypes.length == 5
+                    && parameterTypes[0] == BlockPosition.class
+                    && parameterTypes[1] == BlockSize.class
+                    && parameterTypes[2] == TransformResidualUnit[].class
+                    && parameterTypes[3] == TransformResidualUnit[].class
+                    && parameterTypes[4] == TransformResidualUnit[].class) {
+                constructor.setAccessible(true);
+                return constructor;
+            }
+        }
+        return null;
+    }
+
+    /// Returns the current combined-chroma `ResidualLayout` constructor, or `null`.
+    ///
+    /// @return the current combined-chroma `ResidualLayout` constructor, or `null`
+    private static @Nullable Constructor<?> findCombinedChromaResidualLayoutConstructor() {
+        for (Constructor<?> constructor : ResidualLayout.class.getDeclaredConstructors()) {
+            Class<?>[] parameterTypes = constructor.getParameterTypes();
+            if (parameterTypes.length == 4
+                    && parameterTypes[0] == BlockPosition.class
+                    && parameterTypes[1] == BlockSize.class
+                    && parameterTypes[2] == TransformResidualUnit[].class
+                    && parameterTypes[3] == TransformResidualUnit[][].class) {
+                constructor.setAccessible(true);
+                return constructor;
+            }
+        }
+        return null;
+    }
+
+    /// Returns the legacy luma-only `ResidualLayout` constructor, or `null`.
+    ///
+    /// @return the legacy luma-only `ResidualLayout` constructor, or `null`
+    private static @Nullable Constructor<?> findLegacyResidualLayoutConstructor() {
+        for (Constructor<?> constructor : ResidualLayout.class.getDeclaredConstructors()) {
+            Class<?>[] parameterTypes = constructor.getParameterTypes();
+            if (parameterTypes.length == 3
+                    && parameterTypes[0] == BlockPosition.class
+                    && parameterTypes[1] == BlockSize.class
+                    && parameterTypes[2] == TransformResidualUnit[].class) {
+                constructor.setAccessible(true);
+                return constructor;
+            }
+        }
+        return null;
+    }
+
+    /// Instantiates one reflected `ResidualLayout` constructor and surfaces failures as test errors.
+    ///
+    /// @param constructor the reflected constructor to invoke
+    /// @param arguments the arguments supplied to the constructor
+    /// @return one instantiated residual layout
+    private static ResidualLayout instantiateResidualLayout(Constructor<?> constructor, Object... arguments) {
+        try {
+            return (ResidualLayout) constructor.newInstance(arguments);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to instantiate synthetic ResidualLayout", e);
+        }
+    }
+
+    /// Creates one all-zero transform residual unit.
+    ///
+    /// @param position the tile-relative unit origin
+    /// @param transformSize the transform size used by the unit
+    /// @return one all-zero transform residual unit
+    private static TransformResidualUnit createAllZeroResidualUnit(BlockPosition position, TransformSize transformSize) {
+        return new TransformResidualUnit(
+                position,
+                transformSize,
+                -1,
+                new int[transformSize.widthPixels() * transformSize.heightPixels()],
+                0
+        );
+    }
+
+    /// Creates one transform residual unit whose DC coefficient may be zero or non-zero.
+    ///
+    /// @param position the tile-relative unit origin
+    /// @param transformSize the transform size used by the unit
+    /// @param dcCoefficient the signed DC coefficient, or `0` for an all-zero unit
+    /// @return one transform residual unit with the requested DC coefficient
+    private static TransformResidualUnit createOptionalDcResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int dcCoefficient
+    ) {
+        return dcCoefficient == 0
+                ? createAllZeroResidualUnit(position, transformSize)
+                : createDcResidualUnit(position, transformSize, dcCoefficient);
+    }
+
+    /// Creates one non-zero DC-only transform residual unit.
+    ///
+    /// @param position the tile-relative unit origin
+    /// @param transformSize the transform size used by the unit
+    /// @param dcCoefficient the signed non-zero DC coefficient
+    /// @return one non-zero DC-only transform residual unit
+    private static TransformResidualUnit createDcResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int dcCoefficient
+    ) {
+        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        coefficients[0] = dcCoefficient;
+        return new TransformResidualUnit(
+                position,
+                transformSize,
+                0,
+                coefficients,
+                expectedNonZeroCoefficientContextByte(dcCoefficient)
+        );
     }
 
     /// Decodes one tiny 4x4 monochrome frame from a caller-supplied tile payload.
@@ -453,6 +738,51 @@ final class FrameReconstructorIntegrationTest {
                 assertEquals(expectedSample, plane.sample(x, y));
             }
         }
+    }
+
+    /// Asserts that two decoded planes carry identical stored sample values.
+    ///
+    /// @param expected the expected decoded plane
+    /// @param actual the actual decoded plane
+    private static void assertPlanesEqual(DecodedPlane expected, DecodedPlane actual) {
+        assertEquals(expected.width(), actual.width());
+        assertEquals(expected.height(), actual.height());
+        for (int y = 0; y < expected.height(); y++) {
+            for (int x = 0; x < expected.width(); x++) {
+                assertEquals(expected.sample(x, y), actual.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that every sample differs from the baseline by the same non-zero signed offset.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the reconstructed plane after one non-zero residual
+    /// @param expectedSign the required delta sign, either `1` or `-1`
+    private static void assertPlaneDiffersFromBaselineByUniformSignedOffset(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed,
+            int expectedSign
+    ) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+
+        int firstDelta = reconstructed.sample(0, 0) - baseline.sample(0, 0);
+        assertEquals(expectedSign, Integer.signum(firstDelta));
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
+                assertEquals(firstDelta, reconstructed.sample(x, y) - baseline.sample(x, y));
+            }
+        }
+    }
+
+    /// Returns one guaranteed-present decoded plane after a non-null assertion.
+    ///
+    /// @param plane the decoded plane reference, or `null`
+    /// @return the same decoded plane reference after a non-null assertion
+    private static DecodedPlane requirePlane(@Nullable DecodedPlane plane) {
+        assertNotNull(plane);
+        return plane;
     }
 
     /// Creates one reduced still-picture combined-frame assembly with a caller-supplied tile
@@ -1006,6 +1336,14 @@ final class FrameReconstructorIntegrationTest {
             segments[i] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, false);
         }
         return segments;
+    }
+
+    /// Returns the stored coefficient-context byte for one non-zero DC coefficient.
+    ///
+    /// @param signedDcCoefficient the signed DC coefficient
+    /// @return the stored coefficient-context byte for one non-zero DC coefficient
+    private static int expectedNonZeroCoefficientContextByte(int signedDcCoefficient) {
+        return Math.min(Math.abs(signedDcCoefficient), 63) | (signedDcCoefficient > 0 ? 0x80 : 0);
     }
 
     /// Small MSB-first bit writer used to build AV1 test payloads.

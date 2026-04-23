@@ -25,10 +25,11 @@ import java.util.Objects;
 /// Coefficients are stored as signed transform-domain levels in natural raster order. The current
 /// implementation fully decodes the modeled two-dimensional luma residual path, including
 /// multi-coefficient larger-transform units that reuse the current simplified non-chroma token
-/// contexts while chroma residual syntax remains out of scope.
+/// contexts. The same contract is also used by the incremental chroma reconstruction path even
+/// before full chroma syntax decoding is wired through the bitstream reader.
 @NotNullByDefault
 public final class TransformResidualUnit {
-    /// The tile-relative luma-grid origin of this transform residual unit.
+    /// The tile-relative block origin of this transform residual unit in luma 4x4 units.
     private final BlockPosition position;
 
     /// The transform size used by this residual unit.
@@ -45,7 +46,7 @@ public final class TransformResidualUnit {
 
     /// Creates one transform residual unit.
     ///
-    /// @param position the tile-relative luma-grid origin of this transform residual unit
+    /// @param position the tile-relative block origin of this transform residual unit in luma 4x4 units
     /// @param size the transform size used by this residual unit
     /// @param endOfBlockIndex the scan index of the last non-zero coefficient, or `-1` for all-zero units
     /// @param coefficients the signed transform-domain coefficients in natural raster order
@@ -80,9 +81,9 @@ public final class TransformResidualUnit {
         this.coefficientContextByte = coefficientContextByte;
     }
 
-    /// Returns the tile-relative luma-grid origin of this transform residual unit.
+    /// Returns the tile-relative block origin of this transform residual unit in luma 4x4 units.
     ///
-    /// @return the tile-relative luma-grid origin of this transform residual unit
+    /// @return the tile-relative block origin of this transform residual unit in luma 4x4 units
     public BlockPosition position() {
         return position;
     }

@@ -37,7 +37,8 @@ import java.util.Objects;
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
 /// with one tile, `I400` or `I420` chroma layout, non-directional intra prediction, filter-intra
-/// luma prediction, CFL chroma prediction for `I420`, no palette, and a minimal luma residual subset.
+/// luma prediction, CFL chroma prediction for `I420`, no palette, and a minimal luma/chroma
+/// residual subset.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -258,6 +259,8 @@ public final class FrameReconstructor {
                         header.uvAngle()
                 );
             }
+
+            reconstructChromaResiduals(chromaUPlane, chromaVPlane, residualLayout, frameHeader, pixelFormat, header.qIndex());
         }
     }
 
@@ -285,6 +288,9 @@ public final class FrameReconstructor {
         if (header.hasChroma() && pixelFormat == PixelFormat.I400) {
             throw new IllegalStateException("Monochrome reconstruction encountered a block with chroma samples");
         }
+        if (!header.hasChroma() && residualLayout.hasChromaUnits()) {
+            throw new IllegalStateException("Chroma residuals require a block with chroma samples");
+        }
         if (header.hasChroma()) {
             if (header.uvMode() == null) {
                 throw new IllegalStateException("Chroma reconstruction requires uvMode");
@@ -292,25 +298,44 @@ public final class FrameReconstructor {
             if (header.uvMode() == UvIntraPredictionMode.CFL && pixelFormat != PixelFormat.I420) {
                 throw new IllegalStateException("CFL reconstruction currently supports only I420");
             }
+            if (residualLayout.hasChromaUnits() && transformLayout.chromaTransformSize() == null) {
+                throw new IllegalStateException("Chroma residuals require a chroma transform size");
+            }
         }
         if (transformLayout.visibleWidth4() <= 0 || transformLayout.visibleHeight4() <= 0) {
             throw new IllegalStateException("Empty transform layout is not reconstructable");
         }
         for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
-            if (!residualUnit.allZero() && !isSupportedNonZeroLumaResidualSize(residualUnit.size())) {
+            if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
                         "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8 DCT_DCT luma units: "
                                 + residualUnit.size()
                 );
             }
         }
+        for (TransformResidualUnit residualUnit : residualLayout.chromaUUnits()) {
+            if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
+                throw new IllegalStateException(
+                        "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8 DCT_DCT chroma units: "
+                                + residualUnit.size()
+                );
+            }
+        }
+        for (TransformResidualUnit residualUnit : residualLayout.chromaVUnits()) {
+            if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
+                throw new IllegalStateException(
+                        "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8 DCT_DCT chroma units: "
+                                + residualUnit.size()
+                );
+            }
+        }
     }
 
-    /// Returns whether one luma transform size currently supports non-zero residual reconstruction.
+    /// Returns whether one transform size currently supports non-zero residual reconstruction.
     ///
-    /// @param transformSize the luma transform size to inspect
-    /// @return whether one luma transform size currently supports non-zero residual reconstruction
-    private static boolean isSupportedNonZeroLumaResidualSize(TransformSize transformSize) {
+    /// @param transformSize the transform size to inspect
+    /// @return whether one transform size currently supports non-zero residual reconstruction
+    private static boolean isSupportedNonZeroResidualSize(TransformSize transformSize) {
         return transformSize == TransformSize.TX_4X4 || transformSize == TransformSize.TX_8X8;
     }
 
@@ -346,6 +371,68 @@ public final class FrameReconstructor {
                     lumaPlane,
                     residualUnit.position().x4() << 2,
                     residualUnit.position().y4() << 2,
+                    residualUnit.size(),
+                    residualSamples
+            );
+        }
+    }
+
+    /// Reconstructs the currently supported chroma residual subset into the destination planes.
+    ///
+    /// @param chromaUPlane the mutable chroma U destination plane
+    /// @param chromaVPlane the mutable chroma V destination plane
+    /// @param residualLayout the decoded residual layout
+    /// @param frameHeader the frame header that owns the active quantization state
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param qIndex the block-local quantizer index after delta-q updates
+    private static void reconstructChromaResiduals(
+            MutablePlaneBuffer chromaUPlane,
+            MutablePlaneBuffer chromaVPlane,
+            ResidualLayout residualLayout,
+            FrameHeader frameHeader,
+            PixelFormat pixelFormat,
+            int qIndex
+    ) {
+        if (pixelFormat != PixelFormat.I420) {
+            throw new IllegalStateException("Chroma residual reconstruction currently supports only I420");
+        }
+
+        FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
+        reconstructChromaPlaneResiduals(
+                chromaUPlane,
+                residualLayout.chromaUUnits(),
+                new ChromaDequantizer.Context(qIndex, quantization.uDcDelta(), quantization.uAcDelta(), chromaUPlane.bitDepth())
+        );
+        reconstructChromaPlaneResiduals(
+                chromaVPlane,
+                residualLayout.chromaVUnits(),
+                new ChromaDequantizer.Context(qIndex, quantization.vDcDelta(), quantization.vAcDelta(), chromaVPlane.bitDepth())
+        );
+    }
+
+    /// Reconstructs one chroma-plane residual array into the supplied destination plane.
+    ///
+    /// @param chromaPlane the mutable destination chroma plane
+    /// @param residualUnits the decoded transform residual units in bitstream order
+    /// @param dequantizationContext the plane-local chroma dequantization context
+    private static void reconstructChromaPlaneResiduals(
+            MutablePlaneBuffer chromaPlane,
+            TransformResidualUnit[] residualUnits,
+            ChromaDequantizer.Context dequantizationContext
+    ) {
+        for (TransformResidualUnit residualUnit : residualUnits) {
+            if (residualUnit.allZero()) {
+                continue;
+            }
+            int[] dequantizedCoefficients = ChromaDequantizer.dequantize(residualUnit, dequantizationContext);
+            int[] residualSamples = InverseTransformer.reconstructResidualBlock(
+                    dequantizedCoefficients,
+                    residualUnit.size()
+            );
+            InverseTransformer.addResidualBlock(
+                    chromaPlane,
+                    residualUnit.position().x4() << 1,
+                    residualUnit.position().y4() << 1,
                     residualUnit.size(),
                     residualSamples
             );

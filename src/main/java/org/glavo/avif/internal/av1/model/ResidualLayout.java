@@ -24,7 +24,8 @@ import java.util.Objects;
 ///
 /// The current implementation covers all-zero units plus the current two-dimensional luma
 /// coefficient syntax supported by `TileResidualSyntaxReader`. Chroma residual syntax is still
-/// introduced incrementally on top of this structure.
+/// introduced incrementally on top of this structure, but reconstruction-side callers may already
+/// populate chroma transform units through the stable block-level contract exposed here.
 @NotNullByDefault
 public final class ResidualLayout {
     /// The local tile-relative luma-grid origin of the owning block.
@@ -36,17 +37,45 @@ public final class ResidualLayout {
     /// The luma transform residual units in bitstream order.
     private final TransformResidualUnit[] lumaUnits;
 
+    /// The chroma U transform residual units in bitstream order.
+    private final TransformResidualUnit[] chromaUUnits;
+
+    /// The chroma V transform residual units in bitstream order.
+    private final TransformResidualUnit[] chromaVUnits;
+
     /// Creates one block-level residual layout.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
     /// @param blockSize the coded block size that owns this residual layout
     /// @param lumaUnits the luma transform residual units in bitstream order
     public ResidualLayout(BlockPosition position, BlockSize blockSize, TransformResidualUnit[] lumaUnits) {
+        this(position, blockSize, lumaUnits, new TransformResidualUnit[0], new TransformResidualUnit[0]);
+    }
+
+    /// Creates one block-level residual layout.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param blockSize the coded block size that owns this residual layout
+    /// @param lumaUnits the luma transform residual units in bitstream order
+    /// @param chromaUUnits the chroma U transform residual units in bitstream order
+    /// @param chromaVUnits the chroma V transform residual units in bitstream order
+    public ResidualLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            TransformResidualUnit[] lumaUnits,
+            TransformResidualUnit[] chromaUUnits,
+            TransformResidualUnit[] chromaVUnits
+    ) {
         this.position = Objects.requireNonNull(position, "position");
         this.blockSize = Objects.requireNonNull(blockSize, "blockSize");
         this.lumaUnits = Arrays.copyOf(Objects.requireNonNull(lumaUnits, "lumaUnits"), lumaUnits.length);
         if (this.lumaUnits.length == 0) {
             throw new IllegalArgumentException("lumaUnits must not be empty");
+        }
+        this.chromaUUnits = Arrays.copyOf(Objects.requireNonNull(chromaUUnits, "chromaUUnits"), chromaUUnits.length);
+        this.chromaVUnits = Arrays.copyOf(Objects.requireNonNull(chromaVUnits, "chromaVUnits"), chromaVUnits.length);
+        if (this.chromaUUnits.length != this.chromaVUnits.length) {
+            throw new IllegalArgumentException("chromaUUnits and chromaVUnits must have the same length");
         }
     }
 
@@ -69,5 +98,26 @@ public final class ResidualLayout {
     /// @return the luma transform residual units in bitstream order
     public TransformResidualUnit[] lumaUnits() {
         return Arrays.copyOf(lumaUnits, lumaUnits.length);
+    }
+
+    /// Returns the chroma U transform residual units in bitstream order.
+    ///
+    /// @return the chroma U transform residual units in bitstream order
+    public TransformResidualUnit[] chromaUUnits() {
+        return Arrays.copyOf(chromaUUnits, chromaUUnits.length);
+    }
+
+    /// Returns the chroma V transform residual units in bitstream order.
+    ///
+    /// @return the chroma V transform residual units in bitstream order
+    public TransformResidualUnit[] chromaVUnits() {
+        return Arrays.copyOf(chromaVUnits, chromaVUnits.length);
+    }
+
+    /// Returns whether this residual layout carries any modeled chroma residual units.
+    ///
+    /// @return whether this residual layout carries any modeled chroma residual units
+    public boolean hasChromaUnits() {
+        return chromaUUnits.length != 0;
     }
 }
