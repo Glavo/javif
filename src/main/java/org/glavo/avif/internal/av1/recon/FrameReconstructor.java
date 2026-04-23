@@ -38,8 +38,9 @@ import java.util.Objects;
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
 /// with the current serial tile traversal, `I400` or `I420` chroma layout, non-directional and
 /// directional intra prediction, filter-intra luma prediction, CFL chroma prediction for `I420`,
-/// no palette, and a minimal luma/chroma residual subset including clipped frame-fringe chroma
-/// footprints and the currently supported rectangular `DCT_DCT` transform sizes.
+/// the current minimal luma/chroma palette paths, and a minimal luma/chroma residual subset
+/// including clipped frame-fringe chroma footprints and the currently supported rectangular
+/// `DCT_DCT` transform sizes.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -188,7 +189,16 @@ public final class FrameReconstructor {
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
 
-        if (header.filterIntraMode() != null) {
+        if (header.yPaletteSize() != 0) {
+            reconstructLumaPalette(
+                    lumaPlane,
+                    header,
+                    lumaX,
+                    lumaY,
+                    visibleLumaWidth,
+                    visibleLumaHeight
+            );
+        } else if (header.filterIntraMode() != null) {
             IntraPredictor.predictFilterIntraLuma(
                     lumaPlane,
                     lumaX,
@@ -216,7 +226,15 @@ public final class FrameReconstructor {
             int chromaY = lumaY >> 1;
             int visibleChromaWidth = (visibleLumaWidth + 1) >> 1;
             int visibleChromaHeight = (visibleLumaHeight + 1) >> 1;
-            if (header.uvMode() == UvIntraPredictionMode.CFL) {
+            if (header.uvPaletteSize() != 0) {
+                reconstructChromaPalette(
+                        chromaUPlane,
+                        chromaVPlane,
+                        header,
+                        visibleChromaWidth,
+                        visibleChromaHeight
+                );
+            } else if (header.uvMode() == UvIntraPredictionMode.CFL) {
                 IntraPredictor.predictChromaCflI420(
                         chromaUPlane,
                         lumaPlane,
@@ -282,9 +300,6 @@ public final class FrameReconstructor {
         if (header.useIntrabc()) {
             throw new IllegalStateException("intrabc reconstruction is not implemented yet");
         }
-        if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
-            throw new IllegalStateException("Palette reconstruction is not implemented yet");
-        }
         if (header.hasChroma() && pixelFormat == PixelFormat.I400) {
             throw new IllegalStateException("Monochrome reconstruction encountered a block with chroma samples");
         }
@@ -292,14 +307,22 @@ public final class FrameReconstructor {
             throw new IllegalStateException("Chroma residuals require a block with chroma samples");
         }
         if (header.hasChroma()) {
-            if (header.uvMode() == null) {
+            if (header.uvPaletteSize() == 0 && header.uvMode() == null) {
                 throw new IllegalStateException("Chroma reconstruction requires uvMode");
             }
-            if (header.uvMode() == UvIntraPredictionMode.CFL && pixelFormat != PixelFormat.I420) {
+            if (header.uvPaletteSize() == 0
+                    && header.uvMode() == UvIntraPredictionMode.CFL
+                    && pixelFormat != PixelFormat.I420) {
                 throw new IllegalStateException("CFL reconstruction currently supports only I420");
+            }
+            if (header.uvPaletteSize() != 0 && pixelFormat != PixelFormat.I420) {
+                throw new IllegalStateException("Palette chroma reconstruction currently supports only I420");
             }
             if (residualLayout.hasChromaUnits() && transformLayout.chromaTransformSize() == null) {
                 throw new IllegalStateException("Chroma residuals require a chroma transform size");
+            }
+            if (header.uvPaletteSize() != 0 && residualLayout.hasChromaUnits()) {
+                throw new IllegalStateException("Palette chroma reconstruction currently expects no chroma residual units");
             }
         }
         if (transformLayout.visibleWidth4() <= 0 || transformLayout.visibleHeight4() <= 0) {
@@ -329,6 +352,145 @@ public final class FrameReconstructor {
                 );
             }
         }
+    }
+
+    /// Reconstructs one luma palette block directly into the destination plane.
+    ///
+    /// Palette indices are stored as two packed 4-bit entries per byte in raster order with the
+    /// invisible right and bottom edges already replicated by the syntax layer.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param header the decoded block header that owns the luma palette state
+    /// @param lumaX the zero-based horizontal luma sample coordinate
+    /// @param lumaY the zero-based vertical luma sample coordinate
+    /// @param visibleLumaWidth the exact visible luma width in pixels
+    /// @param visibleLumaHeight the exact visible luma height in pixels
+    private static void reconstructLumaPalette(
+            MutablePlaneBuffer lumaPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            int lumaX,
+            int lumaY,
+            int visibleLumaWidth,
+            int visibleLumaHeight
+    ) {
+        reconstructPalettePlane(
+                lumaPlane,
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                header.size().widthPixels(),
+                header.yPaletteColors(),
+                header.yPaletteIndices()
+        );
+    }
+
+    /// Reconstructs one `I420` chroma palette block directly into the destination planes.
+    ///
+    /// The current reconstruction subset mirrors the packed chroma palette-map geometry exposed by
+    /// `TileBlockHeaderReader`, then writes only the exact visible chroma footprint into the output
+    /// planes.
+    ///
+    /// @param chromaUPlane the mutable chroma U destination plane
+    /// @param chromaVPlane the mutable chroma V destination plane
+    /// @param header the decoded block header that owns the chroma palette state
+    /// @param visibleChromaWidth the exact visible chroma width in pixels
+    /// @param visibleChromaHeight the exact visible chroma height in pixels
+    private static void reconstructChromaPalette(
+            MutablePlaneBuffer chromaUPlane,
+            MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            int visibleChromaWidth,
+            int visibleChromaHeight
+    ) {
+        int chromaX = header.position().x4() << 1;
+        int chromaY = header.position().y4() << 1;
+        int fullChromaWidth = chromaSpan4(header.position().x4(), header.size().width4(), 1) << 2;
+        reconstructPalettePlane(
+                chromaUPlane,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                fullChromaWidth,
+                header.uPaletteColors(),
+                header.uvPaletteIndices()
+        );
+        reconstructPalettePlane(
+                chromaVPlane,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                fullChromaWidth,
+                header.vPaletteColors(),
+                header.uvPaletteIndices()
+        );
+    }
+
+    /// Reconstructs one palette-mapped sample plane directly into the destination plane.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param startX the zero-based horizontal destination coordinate
+    /// @param startY the zero-based vertical destination coordinate
+    /// @param visibleWidth the exact visible width in pixels
+    /// @param visibleHeight the exact visible height in pixels
+    /// @param packedFullWidth the coded palette-map width in pixels used to compute the packed stride
+    /// @param paletteColors the decoded palette entries for the destination plane
+    /// @param packedIndices the packed palette indices with one 4-bit entry per sample
+    private static void reconstructPalettePlane(
+            MutablePlaneBuffer plane,
+            int startX,
+            int startY,
+            int visibleWidth,
+            int visibleHeight,
+            int packedFullWidth,
+            int[] paletteColors,
+            byte[] packedIndices
+    ) {
+        int[] nonNullPaletteColors = Objects.requireNonNull(paletteColors, "paletteColors");
+        byte[] nonNullPackedIndices = Objects.requireNonNull(packedIndices, "packedIndices");
+        if (packedFullWidth <= 0 || (packedFullWidth & 1) != 0) {
+            throw new IllegalStateException("Palette map width must be a positive even value: " + packedFullWidth);
+        }
+        int packedStride = packedFullWidth >> 1;
+        if (nonNullPackedIndices.length < packedStride * visibleHeight) {
+            throw new IllegalStateException("Packed palette index map is shorter than the visible footprint");
+        }
+
+        for (int y = 0; y < visibleHeight; y++) {
+            int packedRow = y * packedStride;
+            for (int x = 0; x < visibleWidth; x++) {
+                int paletteIndex = paletteIndexAt(nonNullPackedIndices, packedRow, x);
+                if (paletteIndex < 0 || paletteIndex >= nonNullPaletteColors.length) {
+                    throw new IllegalStateException("Palette index out of range: " + paletteIndex);
+                }
+                plane.setSample(startX + x, startY + y, nonNullPaletteColors[paletteIndex]);
+            }
+        }
+    }
+
+    /// Returns one unpacked palette entry from a packed palette row.
+    ///
+    /// @param packedIndices the packed palette map
+    /// @param packedRowStart the row start offset in the packed palette map
+    /// @param x the zero-based sample coordinate inside the unpacked row
+    /// @return one unpacked palette entry from the supplied packed row
+    private static int paletteIndexAt(byte[] packedIndices, int packedRowStart, int x) {
+        int packedByte = packedIndices[packedRowStart + (x >> 1)] & 0xFF;
+        return (packedByte >> ((x & 1) << 2)) & 0x0F;
+    }
+
+    /// Returns the covered chroma span in 4x4 units for one luma-aligned block span.
+    ///
+    /// @param start4 the luma start coordinate in 4x4 units
+    /// @param span4 the luma span in 4x4 units
+    /// @param subsampling the chroma subsampling shift for the axis
+    /// @return the covered chroma span in 4x4 units
+    private static int chromaSpan4(int start4, int span4, int subsampling) {
+        int chromaStart = start4 >> subsampling;
+        int chromaEnd = (start4 + span4 + (1 << subsampling) - 1) >> subsampling;
+        return Math.max(1, chromaEnd - chromaStart);
     }
 
     /// Returns whether one transform size currently supports non-zero residual reconstruction.

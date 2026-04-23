@@ -58,6 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Integration tests for the first-pixel `FrameReconstructor` path.
@@ -111,6 +112,77 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(128, decodedPlanes.chromaUPlane().sample(3, 3));
         assertEquals(128, decodedPlanes.chromaVPlane().sample(0, 0));
         assertEquals(128, decodedPlanes.chromaVPlane().sample(3, 3));
+    }
+
+    /// Verifies that one synthetic monochrome luma-palette leaf now reconstructs through the
+    /// frame-syntax integration path instead of tripping a palette guard.
+    @Test
+    void reconstructsSyntheticMonochromeLumaPaletteLeafDuringFrameReconstruction() {
+        TilePartitionTreeReader.LeafNode leafNode = createMonochromeLeafWithLumaPalette();
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
+                createPaletteEnabledAssembly(PixelFormat.I400),
+                leafNode
+        );
+
+        assertEquals(2, leafNode.header().yPaletteSize());
+        assertEquals(0, leafNode.header().uvPaletteSize());
+        assertEquals(32, leafNode.header().yPaletteIndices().length);
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+
+        assertPlaneEquals(
+                decodedPlanes.lumaPlane(),
+                new int[][]{
+                        {32, 224, 32, 224, 32, 224, 32, 224},
+                        {224, 32, 224, 32, 224, 32, 224, 32},
+                        {32, 224, 32, 224, 32, 224, 32, 224},
+                        {224, 32, 224, 32, 224, 32, 224, 32},
+                        {32, 224, 32, 224, 32, 224, 32, 224},
+                        {224, 32, 224, 32, 224, 32, 224, 32},
+                        {32, 224, 32, 224, 32, 224, 32, 224},
+                        {224, 32, 224, 32, 224, 32, 224, 32}
+                }
+        );
+        assertNull(decodedPlanes.chromaUPlane());
+        assertNull(decodedPlanes.chromaVPlane());
+    }
+
+    /// Verifies that one synthetic `I420` chroma-palette leaf now reconstructs through the
+    /// frame-syntax integration path and populates both chroma planes.
+    @Test
+    void reconstructsSyntheticI420ChromaPaletteLeafDuringFrameReconstruction() {
+        TilePartitionTreeReader.LeafNode leafNode = createI420LeafWithChromaPalette();
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
+                createPaletteEnabledAssembly(PixelFormat.I420),
+                leafNode
+        );
+
+        assertTrue(leafNode.header().hasChroma());
+        assertEquals(0, leafNode.header().yPaletteSize());
+        assertEquals(2, leafNode.header().uvPaletteSize());
+        assertEquals(8, leafNode.header().uvPaletteIndices().length);
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+
+        assertPlaneFilled(decodedPlanes.lumaPlane(), 8, 8, 128);
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                new int[][]{
+                        {64, 192, 64, 192},
+                        {192, 64, 192, 64},
+                        {64, 192, 64, 192},
+                        {192, 64, 192, 64}
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                new int[][]{
+                        {96, 160, 96, 160},
+                        {160, 96, 160, 96},
+                        {96, 160, 96, 160},
+                        {160, 96, 160, 96}
+                }
+        );
     }
 
     /// Verifies that one synthetic `I420` leaf with only a chroma-U DC residual changes only the U plane.
@@ -523,6 +595,135 @@ final class FrameReconstructorIntegrationTest {
                 new TransformResidualUnit[]{lumaResidualUnit}
         );
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Creates one synthetic monochrome `8x8` leaf that carries one minimal two-entry luma
+    /// palette color map.
+    ///
+    /// @return one synthetic monochrome leaf that carries one luma palette
+    private static TilePartitionTreeReader.LeafNode createMonochromeLeafWithLumaPalette() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                null,
+                2,
+                0,
+                new int[]{32, 224},
+                new int[0],
+                new int[0],
+                createPackedCheckerboardPaletteIndices(8, 8),
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                2,
+                2,
+                TransformSize.TX_8X8,
+                null,
+                false,
+                new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
+        );
+        ResidualLayout residualLayout = createResidualLayout(
+                position,
+                blockSize,
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_8X8)}
+        );
+        return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Creates one synthetic `I420` `8x8` leaf that carries one minimal two-entry chroma palette
+    /// color map while leaving luma palette mode disabled.
+    ///
+    /// @return one synthetic `I420` leaf that carries one chroma palette
+    private static TilePartitionTreeReader.LeafNode createI420LeafWithChromaPalette() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                2,
+                new int[0],
+                new int[]{64, 192},
+                new int[]{96, 160},
+                new byte[0],
+                createPackedCheckerboardPaletteIndices(4, 4),
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                2,
+                2,
+                TransformSize.TX_8X8,
+                TransformSize.TX_4X4,
+                false,
+                new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
+        );
+        ResidualLayout residualLayout = createResidualLayout(
+                position,
+                blockSize,
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_8X8)}
+        );
+        return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Packs one checkerboard palette color map using the same two-4-bit-indices-per-byte layout
+    /// exposed by decoded block headers.
+    ///
+    /// @param width the palette-map width in samples
+    /// @param height the palette-map height in samples
+    /// @return one packed checkerboard palette color map
+    private static byte[] createPackedCheckerboardPaletteIndices(int width, int height) {
+        byte[] packed = new byte[(width * height + 1) >> 1];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int sampleIndex = y * width + x;
+                int paletteIndex = (x + y) & 1;
+                int byteIndex = sampleIndex >> 1;
+                if ((sampleIndex & 1) == 0) {
+                    packed[byteIndex] = (byte) paletteIndex;
+                } else {
+                    packed[byteIndex] = (byte) (packed[byteIndex] | (paletteIndex << 4));
+                }
+            }
+        }
+        return packed;
     }
 
     /// Creates one synthetic structural frame-decode result whose tiles are supplied explicitly in
@@ -1243,6 +1444,36 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
+    /// Asserts that every sample in one decoded plane equals the supplied expected value.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param width the expected width
+    /// @param height the expected height
+    /// @param value the expected constant sample value
+    private static void assertPlaneFilled(DecodedPlane plane, int width, int height, int value) {
+        assertEquals(width, plane.width());
+        assertEquals(height, plane.height());
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                assertEquals(value, plane.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane equals the supplied expected raster.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param expected the expected raster in row-major order
+    private static void assertPlaneEquals(DecodedPlane plane, int[][] expected) {
+        assertEquals(expected[0].length, plane.width());
+        assertEquals(expected.length, plane.height());
+        for (int y = 0; y < expected.length; y++) {
+            for (int x = 0; x < expected[y].length; x++) {
+                assertEquals(expected[y][x], plane.sample(x, y));
+            }
+        }
+    }
+
     /// Asserts one rectangular plane block is filled with one constant sample value.
     ///
     /// @param plane the decoded plane to inspect
@@ -1848,6 +2079,15 @@ final class FrameReconstructorIntegrationTest {
         return createAssembly(pixelFormat, new byte[0], 8, 8, FrameHeader.TransformMode.LARGEST, filterIntraEnabled);
     }
 
+    /// Creates one synthetic single-tile frame assembly whose sequence explicitly enables screen
+    /// content tools for palette-mode integration coverage.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @return one synthetic single-tile frame assembly with palette-capable sequence features
+    private static FrameAssembly createPaletteEnabledAssembly(PixelFormat pixelFormat) {
+        return createPaletteEnabledAssembly(pixelFormat, 8, 8, FrameHeader.TransformMode.LARGEST);
+    }
+
     /// Creates one synthetic single-tile frame assembly.
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
@@ -1896,6 +2136,39 @@ final class FrameReconstructorIntegrationTest {
         return assembly;
     }
 
+    /// Creates one synthetic single-tile frame assembly whose sequence explicitly enables screen
+    /// content tools for palette-mode integration coverage.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return one synthetic single-tile frame assembly with palette-capable sequence features
+    private static FrameAssembly createPaletteEnabledAssembly(
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(
+                pixelFormat,
+                codedWidth,
+                codedHeight,
+                false,
+                SequenceHeader.AdaptiveBoolean.ON
+        );
+        FrameHeader frameHeader = createSyntheticFrameHeader(FrameType.KEY, codedWidth, codedHeight, 1, transformMode);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        return assembly;
+    }
+
     /// Creates one synthetic sequence header for reconstruction integration tests.
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
@@ -1908,6 +2181,30 @@ final class FrameReconstructorIntegrationTest {
             int codedWidth,
             int codedHeight,
             boolean filterIntraEnabled
+    ) {
+        return createSyntheticSequenceHeader(
+                pixelFormat,
+                codedWidth,
+                codedHeight,
+                filterIntraEnabled,
+                SequenceHeader.AdaptiveBoolean.OFF
+        );
+    }
+
+    /// Creates one synthetic sequence header for reconstruction integration tests.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
+    /// @param screenContentTools the synthetic screen-content-tools mode
+    /// @return one synthetic sequence header for reconstruction integration tests
+    private static SequenceHeader createSyntheticSequenceHeader(
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int codedHeight,
+            boolean filterIntraEnabled,
+            SequenceHeader.AdaptiveBoolean screenContentTools
     ) {
         boolean monochrome = pixelFormat == PixelFormat.I400;
         return new SequenceHeader(
@@ -1936,7 +2233,7 @@ final class FrameReconstructorIntegrationTest {
                         false,
                         false,
                         false,
-                        SequenceHeader.AdaptiveBoolean.OFF,
+                        screenContentTools,
                         SequenceHeader.AdaptiveBoolean.OFF,
                         0,
                         false,

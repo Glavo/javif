@@ -102,6 +102,158 @@ final class FrameReconstructorTest {
         assertPlaneFilled(chromaV, 2, 2, 128);
     }
 
+    /// Verifies that one `I400` luma palette block reconstructs the stored palette raster without
+    /// requiring any chroma planes.
+    @Test
+    void reconstructsSingleTileI400KeyFrameWithLumaPalettePrediction() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] lumaPaletteColors = new int[]{32, 208};
+        int[][] lumaPaletteIndices = new int[][]{
+                {0, 1, 0, 1, 0, 1, 0, 1},
+                {1, 0, 1, 0, 1, 0, 1, 0},
+                {0, 1, 0, 1, 0, 1, 0, 1},
+                {1, 0, 1, 0, 1, 0, 1, 0},
+                {0, 1, 0, 1, 0, 1, 0, 1},
+                {1, 0, 1, 0, 1, 0, 1, 0},
+                {0, 1, 0, 1, 0, 1, 0, 1},
+                {1, 0, 1, 0, 1, 0, 1, 0}
+        };
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        false,
+                        LumaIntraPredictionMode.DC,
+                        null,
+                        null,
+                        0,
+                        0,
+                        lumaPaletteColors,
+                        new int[0],
+                        new int[0],
+                        packPaletteIndices(lumaPaletteIndices),
+                        new byte[0],
+                        0,
+                        0
+                ),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 8, leaf)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneEquals(planes.lumaPlane(), expandPaletteRaster(lumaPaletteColors, lumaPaletteIndices));
+    }
+
+    /// Verifies that one `I420` chroma palette block reconstructs the stored chroma palette rasters
+    /// while leaving the luma prediction plane untouched.
+    @Test
+    void reconstructsSingleTileI420KeyFrameWithChromaPaletteWithoutPerturbingLuma() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] chromaPaletteU = new int[]{40, 200};
+        int[] chromaPaletteV = new int[]{180, 60};
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 1, 0},
+                {1, 0, 0, 1},
+                {0, 0, 1, 1},
+                {1, 1, 0, 0}
+        };
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        chromaPaletteU,
+                        chromaPaletteV,
+                        new byte[0],
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.KEY, 8, 8, leaf)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneFilled(planes.lumaPlane(), 8, 8, 128);
+        assertPlaneEquals(requirePlane(planes.chromaUPlane()), expandPaletteRaster(chromaPaletteU, chromaPaletteIndices));
+        assertPlaneEquals(requirePlane(planes.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
+    }
+
+    /// Verifies that one non-zero luma residual is added on top of the reconstructed luma palette
+    /// prediction instead of replacing it.
+    @Test
+    void reconstructsSingleTileI400KeyFrameWithLumaPaletteAndPositiveResidualOffset() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] lumaPaletteColors = new int[]{64, 160};
+        int[][] lumaPaletteIndices = new int[][]{
+                {0, 0, 1, 1, 0, 0, 1, 1},
+                {0, 0, 1, 1, 0, 0, 1, 1},
+                {1, 1, 0, 0, 1, 1, 0, 0},
+                {1, 1, 0, 0, 1, 1, 0, 0},
+                {0, 0, 1, 1, 0, 0, 1, 1},
+                {0, 0, 1, 1, 0, 0, 1, 1},
+                {1, 1, 0, 0, 1, 1, 0, 0},
+                {1, 1, 0, 0, 1, 1, 0, 0}
+        };
+        TileBlockHeaderReader.BlockHeader header = createIntraBlockHeader(
+                position,
+                size,
+                false,
+                LumaIntraPredictionMode.DC,
+                null,
+                null,
+                0,
+                0,
+                lumaPaletteColors,
+                new int[0],
+                new int[0],
+                packPaletteIndices(lumaPaletteIndices),
+                new byte[0],
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode baselineLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, 64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 8, baselineLeaf)
+        );
+        DecodedPlanes residual = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 8, residualLeaf)
+        );
+
+        assertFalse(baseline.hasChroma());
+        assertFalse(residual.hasChroma());
+        assertPlaneEquals(baseline.lumaPlane(), expandPaletteRaster(lumaPaletteColors, lumaPaletteIndices));
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline.lumaPlane(), residual.lumaPlane(), 1);
+    }
+
     /// Verifies that a positive monochrome DC residual shifts every luma sample above the zero-residual baseline.
     @Test
     void reconstructsSingleTileI400KeyFrameWithPositiveDcResidual() {
@@ -773,6 +925,75 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Creates one supported intra block header with caller-supplied palette entries and packed
+    /// palette index maps.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param yMode the luma intra mode
+    /// @param uvMode the chroma intra mode, or `null`
+    /// @param filterIntraMode the filter-intra mode, or `null`
+    /// @param yAngle the signed luma directional angle delta
+    /// @param uvAngle the signed chroma directional angle delta
+    /// @param yPaletteColors the caller-supplied luma palette entries
+    /// @param uPaletteColors the caller-supplied chroma-U palette entries
+    /// @param vPaletteColors the caller-supplied chroma-V palette entries
+    /// @param yPaletteIndices the packed luma palette indices
+    /// @param uvPaletteIndices the packed chroma palette indices
+    /// @param cflAlphaU the signed CFL alpha for chroma U
+    /// @param cflAlphaV the signed CFL alpha for chroma V
+    /// @return one supported intra block header backed by the supplied palette data
+    private static TileBlockHeaderReader.BlockHeader createIntraBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            LumaIntraPredictionMode yMode,
+            @Nullable UvIntraPredictionMode uvMode,
+            @Nullable FilterIntraMode filterIntraMode,
+            int yAngle,
+            int uvAngle,
+            int[] yPaletteColors,
+            int[] uPaletteColors,
+            int[] vPaletteColors,
+            byte[] yPaletteIndices,
+            byte[] uvPaletteIndices,
+            int cflAlphaU,
+            int cflAlphaV
+    ) {
+        if (uPaletteColors.length != vPaletteColors.length) {
+            throw new IllegalArgumentException("uPaletteColors length must match vPaletteColors length");
+        }
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                hasChroma,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                yMode,
+                uvMode,
+                yPaletteColors.length,
+                uPaletteColors.length,
+                yPaletteColors,
+                uPaletteColors,
+                vPaletteColors,
+                yPaletteIndices,
+                uvPaletteIndices,
+                filterIntraMode,
+                yAngle,
+                uvAngle,
+                cflAlphaU,
+                cflAlphaV
+        );
+    }
+
     /// Creates one supported intra block header with zero directional angle deltas.
     ///
     /// @param position the block origin in 4x4 units
@@ -918,6 +1139,65 @@ final class FrameReconstructorTest {
                         )
                 }
         );
+    }
+
+    /// Packs one unpacked palette-index raster to the same two-4-bit-per-byte layout used by the
+    /// bitstream-side palette model.
+    ///
+    /// @param indices the unpacked palette-index raster in natural row-major order
+    /// @return the packed palette-index bytes
+    private static byte[] packPaletteIndices(int[][] indices) {
+        if (indices.length == 0) {
+            return new byte[0];
+        }
+        int width = indices[0].length;
+        if (width == 0 || (width & 1) != 0) {
+            throw new IllegalArgumentException("palette index rows must have one non-zero even width");
+        }
+        byte[] packed = new byte[(width >> 1) * indices.length];
+        int nextIndex = 0;
+        for (int y = 0; y < indices.length; y++) {
+            if (indices[y].length != width) {
+                throw new IllegalArgumentException("palette index rows must share the same width");
+            }
+            for (int x = 0; x < width; x += 2) {
+                int low = requirePaletteIndex(indices[y][x]);
+                int high = requirePaletteIndex(indices[y][x + 1]);
+                packed[nextIndex++] = (byte) (low | (high << 4));
+            }
+        }
+        return packed;
+    }
+
+    /// Expands one palette-index raster into decoded sample values by indexing the supplied palette.
+    ///
+    /// @param paletteColors the palette entries addressed by the raster
+    /// @param indices the unpacked palette-index raster in natural row-major order
+    /// @return the expanded sample raster
+    private static int[][] expandPaletteRaster(int[] paletteColors, int[][] indices) {
+        int[][] samples = new int[indices.length][];
+        for (int y = 0; y < indices.length; y++) {
+            samples[y] = new int[indices[y].length];
+            for (int x = 0; x < indices[y].length; x++) {
+                int paletteIndex = indices[y][x];
+                if (paletteIndex < 0 || paletteIndex >= paletteColors.length) {
+                    throw new IllegalArgumentException("palette index out of range: " + paletteIndex);
+                }
+                samples[y][x] = paletteColors[paletteIndex];
+            }
+        }
+        return samples;
+    }
+
+    /// Validates one packed-palette nibble value.
+    ///
+    /// @param index the unpacked palette index
+    /// @return the same unpacked palette index after validation
+    private static int requirePaletteIndex(int index) {
+        if (index < 0 || index > 0x0F) {
+            throw new IllegalArgumentException("palette index out of nibble range: " + index);
+        }
+        return index;
     }
 
     /// Reconstructs one tile-root array into one already allocated shared luma plane.

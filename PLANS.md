@@ -21,11 +21,12 @@ The repository already has:
 
 - raw AV1 OBU input only
 - serial execution only
-- single-tile frames only
+- current serial tile traversal, with real public output already exercised on the supported subset and synthetic multi-tile frame-syntax/runtime coverage in place
 - visible `KEY` / `INTRA` frames
 - `8-bit`
 - `I400` and `I420`
 - non-directional and directional intra prediction, filter-intra luma prediction, and `I420` CFL chroma prediction
+- minimal luma/chroma palette reconstruction for the current synthetic `I400` / `I420` key/intra path
 - minimal luma `DCT_DCT` residual support for the current `4/8/16` square and rectangular transform subset
 - minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for the current uniform visible-grid `4/8/16` transform subset, including clipped, fringe, multi-unit footprints, a deterministic `TX_4X4` multi-coefficient path, and the first deterministic larger-transform `TX_8X8` path
 - serial multi-tile traversal inside the current reconstruction subset, so the first-pixel path no longer hard-rejects multi-tile frame-syntax results before pixel reconstruction begins
@@ -68,14 +69,15 @@ Everything else expands from that baseline after correctness is stable.
 - The serial reconstruction/output path no longer hard-rejects multi-tile frame-syntax results, and the public reader can already present a stored synthetic multi-tile reference surface through the current `show_existing_frame` output path.
 - Stable real bitstream-driven multi-tile first-pixel fixtures are still missing, so multi-tile coverage is currently strongest at the synthetic frame-syntax/runtime level rather than the fixture corpus.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
-- Palette, `intrabc`, inter prediction, and motion compensation remain unsupported.
+- Only the current synthetic palette reconstruction paths are covered; real bitstream-driven palette fixtures and broader palette edge cases are still missing.
+- `intrabc`, inter prediction, and motion compensation remain unsupported.
 - Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
 - `show_existing_frame` now reuses one stored reconstructed reference surface for the current minimal output path when the referenced slot has a `ReferenceSurfaceSnapshot` and grain is not required.
 - Reference surfaces are not yet consumed by a real inter-frame pixel path.
 - Postfiltering and film grain synthesis are still not implemented.
 - `ArgbLongFrame`, `I422`, `I444`, and high bit-depth output paths are not implemented.
 - The legacy reduced still-picture directional fixture now decodes successfully through the public reader.
-- The next practical public decode gaps are no longer directional intra itself, but broader unreconstructed features such as richer chroma residual coverage, palette, `intrabc`, inter prediction, and postfilter stages.
+- The next practical public decode gaps are no longer directional intra itself, but broader unreconstructed features such as richer chroma residual coverage, real palette fixtures, `intrabc`, inter prediction, and postfilter stages.
 
 ### Current Progress Snapshot
 
@@ -146,7 +148,7 @@ Current gap after the first-pixel milestone:
 
 - Non-zero residual decode and reconstruction still do not cover the full reconstruction-ready coefficient space.
 - Chroma residual syntax now covers the minimal uniform visible-grid path, including clipped/fringe and multi-unit visible footprints plus the first deterministic `TX_4X4` multi-coefficient and larger-transform `TX_8X8` paths, but still does not cover the full chroma transform and coefficient space.
-- Several block features remain syntax-only or rejected during reconstruction: palette, inter prediction, and motion compensation-related paths.
+- Several block features still remain syntax-only or rejected during reconstruction, most notably inter prediction and motion-compensation-related paths; palette now has only the current minimal synthetic reconstruction coverage.
 
 Write scope:
 
@@ -192,7 +194,7 @@ Scope:
 - Implement dequantization and inverse transforms.
 - Implement intra prediction.
 - Implement inter prediction and motion compensation.
-- Implement `intrabc`, palette, richer intra prediction, and inter pixel application.
+- Implement `intrabc`, richer palette coverage and real palette fixtures, richer intra prediction, and inter pixel application.
 - Implement super-resolution upscaling.
 - Implement reference-surface refresh and reuse.
 
@@ -226,12 +228,13 @@ Completed within this track already:
 - deterministic larger-transform `TX_8X8` bitstream-derived `I420` chroma residual coverage at the syntax and integration levels
 - non-zero rectangular `DCT_DCT` reconstruction for the current `4/8/16` luma/chroma key/intra subset
 - serial multi-tile reconstruction for the current supported key/intra subset, plus synthetic frame-syntax and public-reader `show_existing_frame` multi-tile coverage
+- minimal synthetic luma/chroma palette reconstruction coverage at the reconstruction and frame-syntax integration levels
 
 Immediate next steps inside this track:
 
 - richer AC coverage beyond the current `4/8/16` square-and-rectangular `DCT_DCT` subset and broader transform-type support
 - fuller chroma transform-layout and coefficient coverage beyond the current uniform visible-grid path
-- palette pixel application
+- real bitstream-driven palette fixtures and broader palette edge-case coverage
 - inter reconstruction and reference-surface consumption
 - stable real bitstream multi-tile first-pixel fixtures, so the widened serial multi-tile path is covered by deterministic corpus samples instead of only synthetic runtime state
 
@@ -502,8 +505,8 @@ Status:
 
 - partially achieved now
 - current first-pixel output works for the current serial `8-bit I400/I420` key/intra subset, including synthetic multi-tile frame-syntax results, the minimal non-zero `DCT_DCT` luma/chroma residual subset for the current `4/8/16` square and rectangular transforms, and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints up through the first deterministic larger-transform `TX_8X8` case
-- reconstruction-side and integration coverage now both include the current minimal `I420` chroma residual path, but fuller chroma transform/token coverage, palette/inter paths, and a less artificial sample set are still missing
-- milestone is not closed until chroma residuals, palette/inter paths, and a less artificial sample set are covered
+- reconstruction-side and integration coverage now also include the current minimal synthetic luma/chroma palette path, but fuller chroma transform/token coverage, real palette fixtures, inter paths, and a less artificial sample set are still missing
+- milestone is not closed until chroma residuals, real palette fixtures, inter paths, and a less artificial sample set are covered
 
 ### M3: Reference and Inter Frames
 
