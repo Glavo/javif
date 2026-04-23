@@ -57,7 +57,7 @@ Everything else expands from that baseline after correctness is stable.
 - Structural decoding already exists through `FrameSyntaxDecoder`, `TilePartitionTreeReader`, `TileBlockHeaderReader`, `TileTransformLayoutReader`, and `TileResidualSyntaxReader`.
 - Reference slots already persist structural decode state, final tile CDF snapshots, and decoded temporal motion-field snapshots.
 - `DecodedPlane`, `DecodedPlanes`, and `ReferenceSurfaceSnapshot` already exist as the reconstruction/output boundary contracts.
-- `ArgbOutput` already converts `DecodedPlanes` into `ArgbIntFrame` for the current `8-bit I400/I420/I422/I444` output subset.
+- `ArgbOutput` already converts `DecodedPlanes` into `ArgbIntFrame` for the current `8-bit I400/I420/I422/I444` output subset and into `ArgbLongFrame` for the current `10-bit` / `12-bit I400/I420/I422/I444` output subset.
 - A minimal reconstruction path already exists through `FrameReconstructor`, `IntraPredictor`, and `MutablePlaneBuffer`.
 - `LumaDequantizer` and `InverseTransformer` already support the current minimal non-zero luma residual path.
 - The current CFL reconstruction path now covers the current `I420`, `I422`, and `I444` subset instead of only `I420`.
@@ -78,7 +78,7 @@ Everything else expands from that baseline after correctness is stable.
 - `show_existing_frame` now reuses one stored reconstructed reference surface for the current minimal output path when the referenced slot has a `ReferenceSurfaceSnapshot` and grain is not required, including the first real parsed-stream `I422/I444` still-picture round-trips and the earlier synthetic wider-chroma stored-surface coverage.
 - Reference surfaces are not yet consumed by a real inter-frame pixel path.
 - Postfiltering and film grain synthesis are still not implemented.
-- `ArgbLongFrame` and high bit-depth output paths are not implemented, and `I422/I444` still lack broader real parsed-stream fixture coverage beyond the current minimal still-picture subset even though direct first-pixel output and stored-surface reuse now exist.
+- `I422/I444` still lack broader real parsed-stream fixture coverage beyond the current minimal still-picture subset even though direct first-pixel output and stored-surface reuse now exist.
 - The legacy reduced still-picture directional fixture now decodes successfully through the public reader.
 - The next practical public decode gaps are no longer directional intra itself, but broader unreconstructed features such as richer chroma residual coverage, broader palette coverage, `intrabc`, inter prediction, and postfilter stages.
 
@@ -88,7 +88,7 @@ Everything else expands from that baseline after correctness is stable.
 - `Track B`: parser-side work largely complete
 - `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset
 - `Track D`: not started
-- `Track E`: partially complete for the current `8-bit I400/I420/I422/I444 -> ArgbIntFrame` subset
+- `Track E`: complete
 - `Track F`: in progress, minimal public output path exists and `show_existing_frame` now reaches `I422/I444` through both real parsed-stream still pictures and synthetic stored surfaces
 - `Track G`: in progress
 
@@ -291,7 +291,7 @@ Dependencies:
 
 Goal: convert decoded planes into public frame payloads.
 
-Status: partially complete.
+Status: complete.
 
 Scope:
 
@@ -317,6 +317,7 @@ Already complete in this track:
 - `YuvToRgbTransform`
 - `OutputFrameMetadata`
 - the current `8-bit I400/I420/I422/I444 -> ArgbIntFrame` subset, including the first direct parsed-stream `I422/I444` still pictures
+- the current `10-bit` / `12-bit I400/I420/I422/I444 -> ArgbLongFrame` subset directly from `DecodedPlanes`
 
 Write scope:
 

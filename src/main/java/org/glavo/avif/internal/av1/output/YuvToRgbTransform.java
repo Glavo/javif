@@ -17,10 +17,12 @@ package org.glavo.avif.internal.av1.output;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Fixed-point YUV-to-RGB transform for opaque `0xAARRGGBB` output.
+/// Fixed-point YUV-to-RGB transform for opaque ARGB output.
 ///
-/// Coefficients operate on 8-bit YUV inputs and use 16 fractional bits. The transform does not
-/// model alpha; callers always receive non-premultiplied opaque pixels.
+/// Coefficients are stored in the nominal 8-bit sample domain and use 16 fractional bits. The
+/// transform can emit either packed `0xAARRGGBB` pixels for 8-bit output or packed
+/// `0xAAAA_RRRR_GGGG_BBBB` pixels for higher-bit-depth output. The transform does not model
+/// alpha; callers always receive non-premultiplied opaque pixels.
 @NotNullByDefault
 public final class YuvToRgbTransform {
     /// The fixed-point coefficient scaling factor.
@@ -173,6 +175,58 @@ public final class YuvToRgbTransform {
         return 0xFF00_0000 | (red << 16) | (green << 8) | blue;
     }
 
+    /// Converts one luma sample with neutral chroma into an opaque 16-bit-per-channel grayscale
+    /// ARGB pixel.
+    ///
+    /// @param ySample the luma sample in the caller-supplied bit depth
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the packed opaque grayscale ARGB pixel in `0xAAAA_RRRR_GGGG_BBBB` format
+    public long toOpaqueGrayArgb64(int ySample, int bitDepth) {
+        int neutralChroma = scaleNominalCodeValue(chromaCenter, bitDepth);
+        return toOpaqueArgb64(ySample, neutralChroma, neutralChroma, bitDepth);
+    }
+
+    /// Converts one YUV sample triplet into a packed opaque 16-bit-per-channel ARGB pixel.
+    ///
+    /// The YUV samples are interpreted in their original decoded bit depth. RGB channels are first
+    /// computed in that same sample domain, then expanded to unsigned 16-bit output channels.
+    ///
+    /// @param ySample the luma sample in the caller-supplied bit depth
+    /// @param uSample the chroma U sample in the caller-supplied bit depth
+    /// @param vSample the chroma V sample in the caller-supplied bit depth
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the packed opaque non-premultiplied ARGB pixel in `0xAAAA_RRRR_GGGG_BBBB` format
+    public long toOpaqueArgb64(int ySample, int uSample, int vSample, int bitDepth) {
+        int sampleMax = maxSample(bitDepth);
+        int scaledLumaOffset = scaleNominalCodeValue(lumaOffset, bitDepth);
+        int scaledChromaCenter = scaleNominalCodeValue(chromaCenter, bitDepth);
+
+        long scaledLuma = (long) Math.max(0, ySample - scaledLumaOffset) * lumaCoefficient;
+        int centeredU = uSample - scaledChromaCenter;
+        int centeredV = vSample - scaledChromaCenter;
+
+        int red = clampToSampleDepth(
+                (int) ((scaledLuma + (long) centeredV * redCoefficientV + ROUNDING) >> FRACTION_BITS),
+                sampleMax
+        );
+        int green = clampToSampleDepth(
+                (int) ((scaledLuma
+                        + (long) centeredU * greenCoefficientU
+                        + (long) centeredV * greenCoefficientV
+                        + ROUNDING) >> FRACTION_BITS),
+                sampleMax
+        );
+        int blue = clampToSampleDepth(
+                (int) ((scaledLuma + (long) centeredU * blueCoefficientU + ROUNDING) >> FRACTION_BITS),
+                sampleMax
+        );
+        return packOpaqueArgb64(
+                expandSampleToWord(red, bitDepth),
+                expandSampleToWord(green, bitDepth),
+                expandSampleToWord(blue, bitDepth)
+        );
+    }
+
     /// Clamps one integer channel value to the unsigned 8-bit range.
     ///
     /// @param value the channel value before clamping
@@ -185,5 +239,66 @@ public final class YuvToRgbTransform {
             return 255;
         }
         return value;
+    }
+
+    /// Clamps one integer channel value to the caller-supplied decoded sample range.
+    ///
+    /// @param value the channel value before clamping
+    /// @param sampleMax the inclusive maximum sample value for the decoded bit depth
+    /// @return the clamped channel value
+    private static int clampToSampleDepth(int value, int sampleMax) {
+        if (value <= 0) {
+            return 0;
+        }
+        if (value >= sampleMax) {
+            return sampleMax;
+        }
+        return value;
+    }
+
+    /// Packs three unsigned 16-bit channels into opaque `0xAAAA_RRRR_GGGG_BBBB` output.
+    ///
+    /// @param red the 16-bit red channel
+    /// @param green the 16-bit green channel
+    /// @param blue the 16-bit blue channel
+    /// @return the packed opaque ARGB pixel
+    private static long packOpaqueArgb64(int red, int green, int blue) {
+        return 0xFFFF_0000_0000_0000L
+                | ((long) red << 32)
+                | ((long) green << 16)
+                | (blue & 0xFFFFL);
+    }
+
+    /// Expands one decoded sample to an unsigned 16-bit output channel.
+    ///
+    /// @param sample the decoded sample value
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the expanded unsigned 16-bit output channel
+    private static int expandSampleToWord(int sample, int bitDepth) {
+        int sampleMax = maxSample(bitDepth);
+        return (int) (((long) sample * 65_535 + (sampleMax >>> 1)) / sampleMax);
+    }
+
+    /// Scales one nominal 8-bit code value into the caller-supplied decoded bit depth.
+    ///
+    /// @param nominalCodeValue the nominal 8-bit code value
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the scaled code value in the decoded sample domain
+    private static int scaleNominalCodeValue(int nominalCodeValue, int bitDepth) {
+        if (bitDepth < 8 || bitDepth > 16) {
+            throw new IllegalArgumentException("Unsupported bitDepth: " + bitDepth);
+        }
+        return nominalCodeValue << (bitDepth - 8);
+    }
+
+    /// Returns the inclusive maximum sample value for one decoded bit depth.
+    ///
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the inclusive maximum sample value
+    private static int maxSample(int bitDepth) {
+        if (bitDepth < 1 || bitDepth > 16) {
+            throw new IllegalArgumentException("Unsupported bitDepth: " + bitDepth);
+        }
+        return (1 << bitDepth) - 1;
     }
 }
