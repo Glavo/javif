@@ -43,6 +43,7 @@ import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
+import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -74,6 +75,11 @@ final class FrameReconstructorIntegrationTest {
     /// chroma palette syntax.
     private static final byte[] BITSTREAM_DERIVED_PALETTE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
+
+    /// One deterministic real inter tile payload whose first block uses one single reference and a
+    /// zero motion vector.
+    private static final byte[] BITSTREAM_DERIVED_INTER_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
 
     /// The generated named-fixture resource backing deterministic frame-reconstructor integration payloads.
     private static final String FRAME_RECONSTRUCTOR_FIXTURE_RESOURCE_PATH =
@@ -296,6 +302,82 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsBitstreamDerivedI444PaletteLeafDuringFrameReconstruction() {
         assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat.I444);
+    }
+
+    /// Verifies that one deterministic real inter tile payload now reconstructs from one stored
+    /// `I420` reference surface instead of stopping at the old inter boundary.
+    @Test
+    void reconstructsBitstreamDerivedI420InterLeafFromStoredReferenceSurface() {
+        FrameAssembly assembly = createInterAssembly(PixelFormat.I420, BITSTREAM_DERIVED_INTER_PAYLOAD, 64, 64, 0);
+        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
+        TilePartitionTreeReader.LeafNode leafNode = firstLeaf(syntaxDecodeResult.tileRoots(0));
+
+        assertFalse(leafNode.header().skip());
+        assertFalse(leafNode.header().intra());
+        assertFalse(leafNode.header().compoundReference());
+        assertEquals(0, leafNode.header().referenceFrame0());
+
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                leafNode.header(),
+                leafNode.transformLayout(),
+                createResidualLayout(
+                        leafNode.header().position(),
+                        leafNode.header().size(),
+                        copyResidualUnitsAsAllZero(leafNode.residualLayout().lumaUnits()),
+                        copyResidualUnitsAsAllZero(leafNode.residualLayout().chromaUUnits()),
+                        copyResidualUnitsAsAllZero(leafNode.residualLayout().chromaVUnits())
+                )
+        );
+        FrameSyntaxDecodeResult zeroResidualSyntaxDecodeResult = new FrameSyntaxDecodeResult(
+                syntaxDecodeResult.assembly(),
+                new TilePartitionTreeReader.Node[][]{{zeroResidualLeaf}},
+                syntaxDecodeResult.decodedTemporalMotionFields(),
+                syntaxDecodeResult.finalTileCdfContexts()
+        );
+
+        ReferenceSurfaceSnapshot baselineReferenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                64,
+                64,
+                createGradientPlane(64, 64, 17, 1, 3),
+                createGradientPlane(32, 32, 101, 2, 5),
+                createGradientPlane(32, 32, 149, 3, 4)
+        );
+        ReferenceSurfaceSnapshot offsetReferenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                64,
+                64,
+                createGradientPlane(64, 64, 34, 1, 3),
+                createGradientPlane(32, 32, 110, 2, 5),
+                createGradientPlane(32, 32, 136, 3, 4)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baselineDecodedPlanes = reconstructor.reconstruct(
+                zeroResidualSyntaxDecodeResult,
+                createReferenceSurfaceSlots(0, baselineReferenceSurfaceSnapshot)
+        );
+        DecodedPlanes offsetDecodedPlanes = reconstructor.reconstruct(
+                zeroResidualSyntaxDecodeResult,
+                createReferenceSurfaceSlots(0, offsetReferenceSurfaceSnapshot)
+        );
+
+        DecodedPlane baselineLumaPlane = baselineDecodedPlanes.lumaPlane();
+        DecodedPlane offsetLumaPlane = offsetDecodedPlanes.lumaPlane();
+        DecodedPlane baselineChromaUPlane = requirePlane(baselineDecodedPlanes.chromaUPlane());
+        DecodedPlane offsetChromaUPlane = requirePlane(offsetDecodedPlanes.chromaUPlane());
+        DecodedPlane baselineChromaVPlane = requirePlane(baselineDecodedPlanes.chromaVPlane());
+        DecodedPlane offsetChromaVPlane = requirePlane(offsetDecodedPlanes.chromaVPlane());
+
+        assertTrue(planeDiffers(baselineLumaPlane, offsetLumaPlane));
+        assertTrue(planeDiffers(baselineChromaUPlane, offsetChromaUPlane));
+        assertTrue(planeDiffers(baselineChromaVPlane, offsetChromaVPlane));
+        assertTrue(offsetLumaPlane.sample(0, 0) > baselineLumaPlane.sample(0, 0));
+        assertTrue(offsetLumaPlane.sample(31, 31) > baselineLumaPlane.sample(31, 31));
+        assertTrue(offsetChromaUPlane.sample(0, 0) > baselineChromaUPlane.sample(0, 0));
+        assertTrue(offsetChromaUPlane.sample(15, 15) > baselineChromaUPlane.sample(15, 15));
+        assertTrue(offsetChromaVPlane.sample(0, 0) < baselineChromaVPlane.sample(0, 0));
+        assertTrue(offsetChromaVPlane.sample(15, 15) < baselineChromaVPlane.sample(15, 15));
     }
 
     /// Verifies that one synthetic `I420` leaf with only a chroma-U DC residual changes only the U plane.
@@ -2645,6 +2727,35 @@ final class FrameReconstructorIntegrationTest {
         return assembly;
     }
 
+    /// Creates one synthetic single-tile inter frame assembly whose first direct reference points
+    /// at the requested stored slot.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @return one synthetic single-tile inter frame assembly
+    private static FrameAssembly createInterAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot
+    ) {
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(pixelFormat, codedWidth, codedHeight, false);
+        FrameHeader frameHeader = createSyntheticInterFrameHeader(codedWidth, codedHeight, referenceSlot);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+        );
+        return assembly;
+    }
+
     /// Creates one synthetic single-tile frame assembly whose sequence explicitly enables screen
     /// content tools for palette-mode integration coverage.
     ///
@@ -2933,6 +3044,95 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Creates one synthetic inter frame header for reference-surface reconstruction tests.
+    ///
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @return one synthetic inter frame header for reference-surface reconstruction tests
+    private static FrameHeader createSyntheticInterFrameHeader(
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0,
+                false,
+                new int[]{referenceSlot, -1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
+                new FrameHeader.SuperResolutionInfo(false, codedWidth),
+                false,
+                false,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                false,
+                false
+        );
+    }
+
     /// Returns the fixed fixture payload whose first residual flags match the requested sequence.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
@@ -3204,6 +3404,97 @@ final class FrameReconstructorIntegrationTest {
             }
         }
         return null;
+    }
+
+    /// Creates one stored reference surface snapshot for inter reconstruction integration tests.
+    ///
+    /// @param pixelFormat the decoded chroma layout stored by the snapshot
+    /// @param codedWidth the coded width stored by the snapshot
+    /// @param codedHeight the coded height stored by the snapshot
+    /// @param lumaPlane the luma plane stored by the snapshot
+    /// @param chromaUPlane the chroma-U plane stored by the snapshot, or `null`
+    /// @param chromaVPlane the chroma-V plane stored by the snapshot, or `null`
+    /// @return one stored reference surface snapshot for inter reconstruction integration tests
+    private static ReferenceSurfaceSnapshot createStoredReferenceSurfaceSnapshot(
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int codedHeight,
+            DecodedPlane lumaPlane,
+            @Nullable DecodedPlane chromaUPlane,
+            @Nullable DecodedPlane chromaVPlane
+    ) {
+        FrameAssembly assembly = createAssembly(pixelFormat, new byte[0], codedWidth, codedHeight, FrameHeader.TransformMode.LARGEST);
+        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+        return new ReferenceSurfaceSnapshot(
+                assembly.frameHeader(),
+                syntaxDecodeResult,
+                new DecodedPlanes(
+                        8,
+                        pixelFormat,
+                        codedWidth,
+                        codedHeight,
+                        codedWidth,
+                        codedHeight,
+                        lumaPlane,
+                        chromaUPlane,
+                        chromaVPlane
+                )
+        );
+    }
+
+    /// Creates one slot-indexed stored-reference array for inter reconstruction integration tests.
+    ///
+    /// @param slot the zero-based reference slot to populate
+    /// @param referenceSurfaceSnapshot the stored reference surface to expose
+    /// @return one slot-indexed stored-reference array for inter reconstruction integration tests
+    private static ReferenceSurfaceSnapshot[] createReferenceSurfaceSlots(
+            int slot,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot
+    ) {
+        ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
+        slots[slot] = referenceSurfaceSnapshot;
+        return slots;
+    }
+
+    /// Creates one exact decoded gradient plane.
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param baseValue the sample value at `(0, 0)`
+    /// @param xStep the per-column delta
+    /// @param yStep the per-row delta
+    /// @return one exact decoded gradient plane
+    private static DecodedPlane createGradientPlane(int width, int height, int baseValue, int xStep, int yStep) {
+        short[] samples = new short[width * height];
+        int nextIndex = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                samples[nextIndex++] = (short) (baseValue + x * xStep + y * yStep);
+            }
+        }
+        return new DecodedPlane(width, height, width, samples);
+    }
+
+    /// Returns all supplied residual units converted to all-zero units with preserved geometry.
+    ///
+    /// @param residualUnits the residual units whose geometry should be preserved
+    /// @return all supplied residual units converted to all-zero units with preserved geometry
+    private static TransformResidualUnit[] copyResidualUnitsAsAllZero(TransformResidualUnit[] residualUnits) {
+        TransformResidualUnit[] zeroUnits = new TransformResidualUnit[residualUnits.length];
+        for (int i = 0; i < residualUnits.length; i++) {
+            TransformResidualUnit residualUnit = residualUnits[i];
+            zeroUnits[i] = createAllZeroResidualUnit(
+                    residualUnit.position(),
+                    residualUnit.size(),
+                    residualUnit.visibleWidthPixels(),
+                    residualUnit.visibleHeightPixels()
+            );
+        }
+        return zeroUnits;
     }
 
     /// Returns every leaf node from one tile-root array in raster reconstruction order.

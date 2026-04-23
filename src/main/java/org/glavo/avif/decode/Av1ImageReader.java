@@ -400,7 +400,7 @@ public final class Av1ImageReader implements AutoCloseable {
         @Nullable DecodedPlanes decodedPlanes = null;
         if (shouldOutput || needsSurfaceSnapshot) {
             try {
-                decodedPlanes = frameReconstructor.reconstruct(syntaxDecodeResult);
+                decodedPlanes = frameReconstructor.reconstruct(syntaxDecodeResult, currentReferenceSurfaceSnapshots());
             } catch (IllegalStateException exception) {
                 throw new DecodeException(
                         DecodeErrorCode.NOT_IMPLEMENTED,
@@ -814,6 +814,17 @@ public final class Av1ImageReader implements AutoCloseable {
             headers[i] = referenceSlots[i].frameHeader();
         }
         return headers;
+    }
+
+    /// Returns the current stored reference surfaces as one slot-indexed snapshot array.
+    ///
+    /// @return the current stored reference surfaces as one slot-indexed snapshot array
+    private @Nullable ReferenceSurfaceSnapshot[] currentReferenceSurfaceSnapshots() {
+        ReferenceSurfaceSnapshot[] snapshots = new ReferenceSurfaceSnapshot[referenceSlots.length];
+        for (int i = 0; i < referenceSlots.length; i++) {
+            snapshots[i] = referenceSlots[i].surfaceSnapshot();
+        }
+        return snapshots;
     }
 
     /// The immediate result of parsing one combined `FRAME` OBU.

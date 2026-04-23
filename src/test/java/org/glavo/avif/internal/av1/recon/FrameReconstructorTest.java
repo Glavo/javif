@@ -29,9 +29,12 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
@@ -1035,13 +1038,151 @@ final class FrameReconstructorTest {
         assertPlaneRegionEquals(afterTileZero, afterBothTiles, 0, 0, 4, 4);
     }
 
-    /// Verifies that inter blocks still fail fast in the first reconstruction subset.
+    /// Verifies that one monochrome single-reference inter block copies samples from one stored
+    /// reference surface using an integer-pel motion vector.
     @Test
-    void rejectsInterBlocks() {
+    void reconstructsSingleReferenceI400InterBlockFromStoredSurfaceWithIntegerMotionVector() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                new int[][]{
+                        {0, 1, 2, 3, 4, 5, 6, 7},
+                        {10, 11, 12, 13, 14, 15, 16, 17},
+                        {20, 21, 22, 23, 24, 25, 26, 27},
+                        {30, 31, 32, 33, 34, 35, 36, 37},
+                        {40, 41, 42, 43, 44, 45, 46, 47},
+                        {50, 51, 52, 53, 54, 55, 56, 57},
+                        {60, 61, 62, 63, 64, 65, 66, 67},
+                        {70, 71, 72, 73, 74, 75, 76, 77}
+                },
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, new MotionVector(4, 4)),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                new int[][]{
+                        {11, 12, 13, 14},
+                        {21, 22, 23, 24},
+                        {31, 32, 33, 34},
+                        {41, 42, 43, 44}
+                }
+        );
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 8, 0);
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, 0);
+    }
+
+    /// Verifies that one `I420` single-reference inter block copies both luma and chroma samples
+    /// from one stored reference surface when the motion vector stays chroma-aligned.
+    @Test
+    void reconstructsSingleReferenceI420InterBlockFromStoredSurfaceWithZeroMotionVector() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                new int[][]{
+                        {10, 11, 12, 13},
+                        {20, 21, 22, 23},
+                        {30, 31, 32, 33},
+                        {40, 41, 42, 43}
+                },
+                new int[][]{
+                        {100, 101},
+                        {110, 111}
+                },
+                new int[][]{
+                        {150, 151},
+                        {160, 161}
+                }
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, true, 0, MotionVector.zero()),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 4, 4, 0, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertPlaneEquals(planes.lumaPlane(), new int[][]{
+                {10, 11, 12, 13},
+                {20, 21, 22, 23},
+                {30, 31, 32, 33},
+                {40, 41, 42, 43}
+        });
+        assertPlaneEquals(requirePlane(planes.chromaUPlane()), new int[][]{
+                {100, 101},
+                {110, 111}
+        });
+        assertPlaneEquals(requirePlane(planes.chromaVPlane()), new int[][]{
+                {150, 151},
+                {160, 161}
+        });
+    }
+
+    /// Verifies that one monochrome inter block still applies supported residuals on top of the
+    /// copied reference prediction.
+    @Test
+    void reconstructsSingleReferenceI400InterBlockWithResidualOverlay() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                new int[][]{
+                        {10, 10, 10, 10},
+                        {10, 10, 10, 10},
+                        {10, 10, 10, 10},
+                        {10, 10, 10, 10}
+                },
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, 64)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                createDecodedPlane(new int[][]{
+                        {10, 10, 10, 10},
+                        {10, 10, 10, 10},
+                        {10, 10, 10, 10},
+                        {10, 10, 10, 10}
+                }),
+                planes.lumaPlane(),
+                1
+        );
+    }
+
+    /// Verifies that an inter block still fails fast when no stored reference surface is available.
+    @Test
+    void rejectsInterBlocksWithoutStoredReferenceSurface() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createInterBlockHeader(position, size),
+                createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
                 createTransformLayout(position, size, PixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
@@ -1049,11 +1190,54 @@ final class FrameReconstructorTest {
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
                 () -> new FrameReconstructor().reconstruct(
-                        createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, leaf)
+                        createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, leaf)
                 )
         );
 
-        assertEquals("Inter block reconstruction is not implemented yet", exception.getMessage());
+        assertEquals("Inter reconstruction requires one populated stored reference surface", exception.getMessage());
+    }
+
+    /// Verifies that one chroma-bearing inter block still rejects motion vectors that would require
+    /// fractional chroma sampling.
+    @Test
+    void rejectsI420InterBlocksWithFractionalChromaMotionVectors() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                new int[][]{
+                        {10, 11, 12, 13},
+                        {20, 21, 22, 23},
+                        {30, 31, 32, 33},
+                        {40, 41, 42, 43}
+                },
+                new int[][]{
+                        {100, 101},
+                        {110, 111}
+                },
+                new int[][]{
+                        {150, 151},
+                        {160, 161}
+                }
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, true, 0, new MotionVector(0, 4)),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> new FrameReconstructor().reconstruct(
+                        createInterFrameSyntaxDecodeResult(PixelFormat.I420, 4, 4, 0, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                )
+        );
+
+        assertEquals(
+                "Inter reconstruction currently requires chroma-aligned integer motion vectors for I420",
+                exception.getMessage()
+        );
     }
 
     /// Creates one synthetic structural frame-decode result for reconstruction tests.
@@ -1073,6 +1257,38 @@ final class FrameReconstructorTest {
     ) {
         SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
         FrameHeader frameHeader = createFrameHeader(frameType, width, height);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{roots},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one synthetic structural inter frame-decode result for reconstruction tests.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param roots the top-level tile roots for tile `0`
+    /// @return one synthetic structural inter frame-decode result
+    private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
+            PixelFormat pixelFormat,
+            int width,
+            int height,
+            int referenceSlot,
+            TilePartitionTreeReader.Node... roots
+    ) {
+        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
+        FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
@@ -1215,6 +1431,91 @@ final class FrameReconstructorTest {
                         0
                 ),
                 FrameHeader.TransformMode.LARGEST,
+                false,
+                false
+        );
+    }
+
+    /// Creates one minimal inter frame header for reconstruction tests.
+    ///
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot to expose as `LAST_FRAME`
+    /// @return one minimal inter frame header
+    private static FrameHeader createInterFrameHeader(int width, int height, int referenceSlot) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0,
+                false,
+                new int[]{referenceSlot, -1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(width, width, height, width, height),
+                new FrameHeader.SuperResolutionInfo(false, width),
+                false,
+                false,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
                 false,
                 false
         );
@@ -1389,23 +1690,37 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Creates one unsupported inter block header for reconstruction tests.
+    /// Creates one single-reference inter block header for reconstruction tests.
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
-    /// @return one unsupported inter block header
-    private static TileBlockHeaderReader.BlockHeader createInterBlockHeader(BlockPosition position, BlockSize size) {
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param motionVector the resolved primary motion vector
+    /// @return one single-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createSingleReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            MotionVector motionVector
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 size,
+                hasChroma,
                 false,
                 false,
                 false,
                 false,
                 false,
-                false,
-                0,
+                referenceFrame0,
                 -1,
+                SingleInterPredictionMode.NEARESTMV,
+                null,
+                0,
+                InterMotionVector.resolved(motionVector),
+                null,
                 false,
                 0,
                 null,
@@ -1423,6 +1738,73 @@ final class FrameReconstructorTest {
                 0,
                 0
         );
+    }
+
+    /// Creates one stored reference surface snapshot for synthetic inter reconstruction tests.
+    ///
+    /// @param pixelFormat the decoded chroma layout stored by the snapshot
+    /// @param lumaSamples the luma sample raster
+    /// @param chromaUSamples the chroma-U sample raster, or `null`
+    /// @param chromaVSamples the chroma-V sample raster, or `null`
+    /// @return one stored reference surface snapshot for synthetic inter reconstruction tests
+    private static ReferenceSurfaceSnapshot createReferenceSurfaceSnapshot(
+            PixelFormat pixelFormat,
+            int[][] lumaSamples,
+            @Nullable int[][] chromaUSamples,
+            @Nullable int[][] chromaVSamples
+    ) {
+        int width = lumaSamples[0].length;
+        int height = lumaSamples.length;
+        FrameSyntaxDecodeResult syntaxDecodeResult = createFrameSyntaxDecodeResult(pixelFormat, FrameType.KEY, width, height);
+        return new ReferenceSurfaceSnapshot(
+                syntaxDecodeResult.assembly().frameHeader(),
+                syntaxDecodeResult,
+                new DecodedPlanes(
+                        8,
+                        pixelFormat,
+                        width,
+                        height,
+                        width,
+                        height,
+                        createDecodedPlane(lumaSamples),
+                        chromaUSamples != null ? createDecodedPlane(chromaUSamples) : null,
+                        chromaVSamples != null ? createDecodedPlane(chromaVSamples) : null
+                )
+        );
+    }
+
+    /// Creates one slot-indexed reference-surface array for reconstruction tests.
+    ///
+    /// @param slot the zero-based reference slot to populate
+    /// @param snapshot the stored reference surface to expose through the populated slot
+    /// @return one slot-indexed reference-surface array for reconstruction tests
+    private static @Nullable ReferenceSurfaceSnapshot[] createReferenceSurfaceSlots(
+            int slot,
+            ReferenceSurfaceSnapshot snapshot
+    ) {
+        ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
+        slots[slot] = snapshot;
+        return slots;
+    }
+
+    /// Creates one decoded plane from an exact sample raster.
+    ///
+    /// @param samples the exact sample raster in row-major order
+    /// @return one decoded plane from the supplied exact sample raster
+    private static DecodedPlane createDecodedPlane(int[][] samples) {
+        int height = samples.length;
+        int width = samples[0].length;
+        short[] storage = new short[width * height];
+        int nextIndex = 0;
+        for (int y = 0; y < height; y++) {
+            if (samples[y].length != width) {
+                throw new IllegalArgumentException("sample rows must share the same width");
+            }
+            for (int x = 0; x < width; x++) {
+                storage[nextIndex++] = (short) samples[y][x];
+            }
+        }
+        return new DecodedPlane(width, height, width, storage);
     }
 
     /// Creates one transform layout that exactly covers one leaf block with one transform unit.
@@ -1662,11 +2044,12 @@ final class FrameReconstructorTest {
                     MutablePlaneBuffer.class,
                     MutablePlaneBuffer.class,
                     PixelFormat.class,
-                    FrameHeader.class
+                    FrameHeader.class,
+                    ReferenceSurfaceSnapshot[].class
             );
             reconstructNode.setAccessible(true);
             for (TilePartitionTreeReader.Node root : roots) {
-                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader);
+                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader, null);
             }
         } catch (ReflectiveOperationException exception) {
             throw new AssertionError("Failed to reconstruct synthetic tile roots into one shared plane", exception);
