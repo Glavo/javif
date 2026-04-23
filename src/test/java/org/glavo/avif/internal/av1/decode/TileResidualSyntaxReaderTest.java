@@ -45,6 +45,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `TileResidualSyntaxReader`.
 @NotNullByDefault
 final class TileResidualSyntaxReaderTest {
+    /// The default synthetic frame width used by residual-syntax tests.
+    private static final int DEFAULT_FRAME_WIDTH = 64;
+
+    /// The default synthetic frame height used by residual-syntax tests.
+    private static final int DEFAULT_FRAME_HEIGHT = 64;
+
     /// Verifies that a single 4x4 transform block can decode `txb_skip = true` as an all-zero residual unit.
     @Test
     void readsAllZeroResidualForSingleTransformBlock() {
@@ -216,6 +222,68 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(0, expectedChromaV.endOfBlockIndex());
         assertTrue(Math.abs(expectedChromaU.dcCoefficient()) >= 1);
         assertTrue(Math.abs(expectedChromaV.dcCoefficient()) >= 1);
+        assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
+    }
+
+    /// Verifies that minimal `I420` chroma residual decoding still works for odd visible frame dimensions.
+    @Test
+    void readsDcOnlyChromaResidualUnitsForMinimalI420BlockWithOddFrameDimensions() {
+        byte[] payload = findPayloadForDcOnlyMinimalI420ChromaResidual();
+        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 7, 7);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(0, 0);
+
+        TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+        ResidualLayout expectedResidualLayout = decodeExpectedMinimalI420ResidualLayout(payload, 7, 7);
+        TransformResidualUnit expectedChromaU = expectedResidualLayout.chromaUUnits()[0];
+        TransformResidualUnit expectedChromaV = expectedResidualLayout.chromaVUnits()[0];
+
+        assertTrue(header.hasChroma());
+        assertEquals(2, transformLayout.visibleWidth4());
+        assertEquals(2, transformLayout.visibleHeight4());
+        assertEquals(4, exactVisibleChromaWidthPixels(tileContext, position, BlockSize.SIZE_8X8));
+        assertEquals(4, exactVisibleChromaHeightPixels(tileContext, position, BlockSize.SIZE_8X8));
+        assertTrue(residualLayout.hasChromaUnits());
+        assertFalse(expectedChromaU.allZero());
+        assertFalse(expectedChromaV.allZero());
+        assertEquals(0, expectedChromaU.endOfBlockIndex());
+        assertEquals(0, expectedChromaV.endOfBlockIndex());
+        assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
+    }
+
+    /// Verifies that clipped odd-height visible chroma footprints still expose one modeled chroma unit
+    /// whose exact visible height is clipped.
+    @Test
+    void readsClippedChromaResidualUnitsForMinimalI420BlockWithClippedVisibleChromaFootprint() {
+        byte[] payload = findPayloadForDcOnlyMinimalI420ChromaResidual();
+        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 7, 5);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(0, 0);
+
+        TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+        ResidualLayout expectedResidualLayout = decodeExpectedMinimalI420ResidualLayout(payload, 7, 5);
+
+        assertTrue(header.hasChroma());
+        assertEquals(2, transformLayout.visibleWidth4());
+        assertEquals(2, transformLayout.visibleHeight4());
+        assertEquals(4, exactVisibleChromaWidthPixels(tileContext, position, BlockSize.SIZE_8X8));
+        assertEquals(3, exactVisibleChromaHeightPixels(tileContext, position, BlockSize.SIZE_8X8));
+        assertTrue(expectedResidualLayout.hasChromaUnits());
+        assertTrue(residualLayout.hasChromaUnits());
+        assertEquals(4, residualLayout.chromaUUnits()[0].visibleWidthPixels());
+        assertEquals(3, residualLayout.chromaUUnits()[0].visibleHeightPixels());
+        assertEquals(4, residualLayout.chromaVUnits()[0].visibleWidthPixels());
+        assertEquals(3, residualLayout.chromaVUnits()[0].visibleHeightPixels());
         assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
     }
 
@@ -649,7 +717,17 @@ final class TileResidualSyntaxReaderTest {
     /// @param payload the collected tile entropy payload
     /// @return the expected minimal `I420` residual layout
     private static ResidualLayout decodeExpectedMinimalI420ResidualLayout(byte[] payload) {
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST);
+        return decodeExpectedMinimalI420ResidualLayout(payload, DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT);
+    }
+
+    /// Decodes the expected minimal `I420` residual layout using a luma-only advance plus a chroma oracle.
+    ///
+    /// @param payload the collected tile entropy payload
+    /// @param codedWidth the synthetic coded frame width in pixels
+    /// @param codedHeight the synthetic coded frame height in pixels
+    /// @return the expected minimal `I420` residual layout
+    private static ResidualLayout decodeExpectedMinimalI420ResidualLayout(byte[] payload, int codedWidth, int codedHeight) {
+        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST, codedWidth, codedHeight);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -662,14 +740,26 @@ final class TileResidualSyntaxReaderTest {
         }
         TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
         TransformSize chromaTransformSize = Objects.requireNonNull(transformLayout.chromaTransformSize(), "chromaTransformSize");
+        int visibleChromaWidthPixels = exactVisibleChromaWidthPixels(tileContext, position, BlockSize.SIZE_8X8);
+        int visibleChromaHeightPixels = exactVisibleChromaHeightPixels(tileContext, position, BlockSize.SIZE_8X8);
         ResidualLayout lumaResidualLayout = residualSyntaxReader.read(header, lumaOnlyTransformLayout(transformLayout), neighborContext);
         if (header.skip()) {
             return new ResidualLayout(
                     position,
                     BlockSize.SIZE_8X8,
                     lumaResidualLayout.lumaUnits(),
-                    new TransformResidualUnit[]{createAllZeroResidualUnit(position, chromaTransformSize)},
-                    new TransformResidualUnit[]{createAllZeroResidualUnit(position, chromaTransformSize)}
+                    new TransformResidualUnit[]{createAllZeroResidualUnit(
+                            position,
+                            chromaTransformSize,
+                            visibleChromaWidthPixels,
+                            visibleChromaHeightPixels
+                    )},
+                    new TransformResidualUnit[]{createAllZeroResidualUnit(
+                            position,
+                            chromaTransformSize,
+                            visibleChromaWidthPixels,
+                            visibleChromaHeightPixels
+                    )}
             );
         }
         TileSyntaxReader syntaxReader = new TileSyntaxReader(tileContext);
@@ -678,9 +768,113 @@ final class TileResidualSyntaxReaderTest {
                 position,
                 BlockSize.SIZE_8X8,
                 lumaResidualLayout.lumaUnits(),
-                new TransformResidualUnit[]{readMinimalChromaResidualUnit(syntaxReader, position, chromaTransformSize)},
-                new TransformResidualUnit[]{readMinimalChromaResidualUnit(syntaxReader, position, chromaTransformSize)}
+                new TransformResidualUnit[]{readMinimalChromaResidualUnit(
+                        syntaxReader,
+                        position,
+                        chromaTransformSize,
+                        visibleChromaWidthPixels,
+                        visibleChromaHeightPixels
+                )},
+                new TransformResidualUnit[]{readMinimalChromaResidualUnit(
+                        syntaxReader,
+                        position,
+                        chromaTransformSize,
+                        visibleChromaWidthPixels,
+                        visibleChromaHeightPixels
+                )}
         );
+    }
+
+    /// Returns the exact visible chroma width in pixels for one luma-aligned block.
+    ///
+    /// @param tileContext the synthetic tile-local decode context
+    /// @param position the tile-relative origin of the owning block
+    /// @param blockSize the owning block size
+    /// @return the exact visible chroma width in pixels for the supplied block
+    private static int exactVisibleChromaWidthPixels(
+            TileDecodeContext tileContext,
+            BlockPosition position,
+            BlockSize blockSize
+    ) {
+        return exactVisibleChromaSpanPixels(
+                position.x4() << 2,
+                exactVisibleLumaWidthPixels(tileContext, position, blockSize),
+                chromaSubsamplingX(tileContext)
+        );
+    }
+
+    /// Returns the exact visible chroma height in pixels for one luma-aligned block.
+    ///
+    /// @param tileContext the synthetic tile-local decode context
+    /// @param position the tile-relative origin of the owning block
+    /// @param blockSize the owning block size
+    /// @return the exact visible chroma height in pixels for the supplied block
+    private static int exactVisibleChromaHeightPixels(
+            TileDecodeContext tileContext,
+            BlockPosition position,
+            BlockSize blockSize
+    ) {
+        return exactVisibleChromaSpanPixels(
+                position.y4() << 2,
+                exactVisibleLumaHeightPixels(tileContext, position, blockSize),
+                chromaSubsamplingY(tileContext)
+        );
+    }
+
+    /// Returns the exact visible luma width in pixels for one block clipped against the synthetic frame.
+    ///
+    /// @param tileContext the synthetic tile-local decode context
+    /// @param position the tile-relative origin of the owning block
+    /// @param blockSize the owning block size
+    /// @return the exact visible luma width in pixels for the supplied block
+    private static int exactVisibleLumaWidthPixels(
+            TileDecodeContext tileContext,
+            BlockPosition position,
+            BlockSize blockSize
+    ) {
+        return Math.max(0, Math.min(blockSize.widthPixels(), tileContext.width() - (position.x4() << 2)));
+    }
+
+    /// Returns the exact visible luma height in pixels for one block clipped against the synthetic frame.
+    ///
+    /// @param tileContext the synthetic tile-local decode context
+    /// @param position the tile-relative origin of the owning block
+    /// @param blockSize the owning block size
+    /// @return the exact visible luma height in pixels for the supplied block
+    private static int exactVisibleLumaHeightPixels(
+            TileDecodeContext tileContext,
+            BlockPosition position,
+            BlockSize blockSize
+    ) {
+        return Math.max(0, Math.min(blockSize.heightPixels(), tileContext.height() - (position.y4() << 2)));
+    }
+
+    /// Returns the exact visible chroma span that covers one visible luma span under subsampling.
+    ///
+    /// @param startPixels the luma-grid start coordinate in pixels
+    /// @param visibleLumaPixels the visible luma span in pixels
+    /// @param subsamplingShift the chroma subsampling shift for the relevant axis
+    /// @return the exact visible chroma span in pixels
+    private static int exactVisibleChromaSpanPixels(int startPixels, int visibleLumaPixels, int subsamplingShift) {
+        int chromaStart = startPixels >> subsamplingShift;
+        int chromaEnd = (startPixels + visibleLumaPixels + (1 << subsamplingShift) - 1) >> subsamplingShift;
+        return chromaEnd - chromaStart;
+    }
+
+    /// Returns the horizontal chroma subsampling shift for the active pixel format.
+    ///
+    /// @param tileContext the synthetic tile-local decode context
+    /// @return the horizontal chroma subsampling shift for the active pixel format
+    private static int chromaSubsamplingX(TileDecodeContext tileContext) {
+        return tileContext.sequenceHeader().colorConfig().chromaSubsamplingX() ? 1 : 0;
+    }
+
+    /// Returns the vertical chroma subsampling shift for the active pixel format.
+    ///
+    /// @param tileContext the synthetic tile-local decode context
+    /// @return the vertical chroma subsampling shift for the active pixel format
+    private static int chromaSubsamplingY(TileDecodeContext tileContext) {
+        return tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
     }
 
     /// Decodes one minimal chroma residual unit that is either all-zero or DC-only.
@@ -692,10 +886,12 @@ final class TileResidualSyntaxReaderTest {
     private static TransformResidualUnit readMinimalChromaResidualUnit(
             TileSyntaxReader syntaxReader,
             BlockPosition position,
-            TransformSize transformSize
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels
     ) {
         if (syntaxReader.readCoefficientSkipFlag(transformSize, 0)) {
-            return createAllZeroResidualUnit(position, transformSize);
+            return createAllZeroResidualUnit(position, transformSize, visibleWidthPixels, visibleHeightPixels);
         }
 
         int endOfBlockIndex = syntaxReader.readEndOfBlockIndex(transformSize, true, false);
@@ -720,6 +916,8 @@ final class TileResidualSyntaxReaderTest {
                 transformSize,
                 0,
                 coefficients,
+                visibleWidthPixels,
+                visibleHeightPixels,
                 expectedNonZeroCoefficientContextByte(signedDcCoefficient)
         );
     }
@@ -728,13 +926,22 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @param position the tile-relative origin of the residual unit
     /// @param transformSize the transform size carried by the residual unit
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
     /// @return one all-zero residual unit for the supplied position and transform size
-    private static TransformResidualUnit createAllZeroResidualUnit(BlockPosition position, TransformSize transformSize) {
+    private static TransformResidualUnit createAllZeroResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels
+    ) {
         return new TransformResidualUnit(
                 position,
                 transformSize,
                 -1,
                 new int[transformSize.widthPixels() * transformSize.heightPixels()],
+                visibleWidthPixels,
+                visibleHeightPixels,
                 0x40
         );
     }
@@ -749,6 +956,8 @@ final class TileResidualSyntaxReaderTest {
                 transformLayout.blockSize(),
                 transformLayout.visibleWidth4(),
                 transformLayout.visibleHeight4(),
+                transformLayout.visibleWidthPixels(),
+                transformLayout.visibleHeightPixels(),
                 transformLayout.maxLumaTransformSize(),
                 null,
                 transformLayout.variableLumaTransformTree(),
@@ -796,6 +1005,8 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(expected.size(), actual.size());
         assertEquals(expected.allZero(), actual.allZero());
         assertEquals(expected.endOfBlockIndex(), actual.endOfBlockIndex());
+        assertEquals(expected.visibleWidthPixels(), actual.visibleWidthPixels());
+        assertEquals(expected.visibleHeightPixels(), actual.visibleHeightPixels());
         assertEquals(expected.coefficientContextByte(), actual.coefficientContextByte());
         assertArrayEquals(expected.coefficients(), actual.coefficients());
     }
@@ -837,12 +1048,30 @@ final class TileResidualSyntaxReaderTest {
             PixelFormat pixelFormat,
             FrameHeader.TransformMode transformMode
     ) {
+        return createTileContext(payload, pixelFormat, transformMode, DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT);
+    }
+
+    /// Creates one synthetic tile-local decode context used by residual-syntax tests.
+    ///
+    /// @param payload the collected tile entropy payload
+    /// @param pixelFormat the synthetic sequence pixel format
+    /// @param transformMode the synthetic frame transform mode
+    /// @param codedWidth the synthetic coded frame width in pixels
+    /// @param codedHeight the synthetic coded frame height in pixels
+    /// @return one synthetic tile-local decode context used by residual-syntax tests
+    private static TileDecodeContext createTileContext(
+            byte[] payload,
+            PixelFormat pixelFormat,
+            FrameHeader.TransformMode transformMode,
+            int codedWidth,
+            int codedHeight
+    ) {
         boolean chromaSubsamplingX = pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422;
         boolean chromaSubsamplingY = pixelFormat == PixelFormat.I420;
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
-                64,
-                64,
+                codedWidth,
+                codedHeight,
                 new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
                 new SequenceHeader.OperatingPoint[]{
                         new SequenceHeader.OperatingPoint(2, 0, 10, 0, false, false, false, null)
@@ -908,7 +1137,7 @@ final class TileResidualSyntaxReaderTest {
                 0xFF,
                 false,
                 new int[]{-1, -1, -1, -1, -1, -1, -1},
-                new FrameHeader.FrameSize(64, 64, 64, 64, 64),
+                new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
                 new FrameHeader.SuperResolutionInfo(false, 8),
                 false,
                 false,

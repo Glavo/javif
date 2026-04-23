@@ -36,9 +36,9 @@ import java.util.Objects;
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
-/// with one tile, `I400` or `I420` chroma layout, non-directional intra prediction, filter-intra
-/// luma prediction, CFL chroma prediction for `I420`, no palette, and a minimal luma/chroma
-/// residual subset.
+/// with one tile, `I400` or `I420` chroma layout, non-directional and directional intra
+/// prediction, filter-intra luma prediction, CFL chroma prediction for `I420`, no palette, and a
+/// minimal luma/chroma residual subset including clipped frame-fringe chroma footprints.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -185,8 +185,8 @@ public final class FrameReconstructor {
 
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
-        int visibleLumaWidth = transformLayout.visibleWidth4() << 2;
-        int visibleLumaHeight = transformLayout.visibleHeight4() << 2;
+        int visibleLumaWidth = transformLayout.visibleWidthPixels();
+        int visibleLumaHeight = transformLayout.visibleHeightPixels();
 
         if (header.filterIntraMode() != null) {
             IntraPredictor.predictFilterIntraLuma(
@@ -369,10 +369,12 @@ public final class FrameReconstructor {
             );
             InverseTransformer.addResidualBlock(
                     lumaPlane,
-                    residualUnit.position().x4() << 2,
-                    residualUnit.position().y4() << 2,
-                    residualUnit.size(),
-                    residualSamples
+                residualUnit.position().x4() << 2,
+                residualUnit.position().y4() << 2,
+                residualUnit.size(),
+                residualUnit.visibleWidthPixels(),
+                residualUnit.visibleHeightPixels(),
+                residualSamples
             );
         }
     }
@@ -431,10 +433,12 @@ public final class FrameReconstructor {
             );
             InverseTransformer.addResidualBlock(
                     chromaPlane,
-                    residualUnit.position().x4() << 1,
-                    residualUnit.position().y4() << 1,
-                    residualUnit.size(),
-                    residualSamples
+                residualUnit.position().x4() << 1,
+                residualUnit.position().y4() << 1,
+                residualUnit.size(),
+                residualUnit.visibleWidthPixels(),
+                residualUnit.visibleHeightPixels(),
+                residualSamples
             );
         }
     }

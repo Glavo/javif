@@ -151,6 +151,55 @@ final class FrameReconstructorChromaResidualTest {
         assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 124);
     }
 
+    /// Verifies that one clipped `I420` chroma residual updates only the visible chroma footprint.
+    @Test
+    void reconstructsClippedI420ChromaResidualOnlyWithinVisibleFootprint() {
+        BlockPosition position = new BlockPosition(2, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        TilePartitionTreeReader.LeafNode baselineLeaf = createI420Leaf(
+                position,
+                size,
+                1,
+                2,
+                2,
+                8,
+                null,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = createI420Leaf(
+                position,
+                size,
+                1,
+                2,
+                2,
+                8,
+                null,
+                dcOnlyCoefficients(requireI420ChromaTransformSize(size), 32),
+                null
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 10, 8, baselineLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 10, 8, residualLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineOnlyWithinRectByUniformOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                4,
+                0,
+                1,
+                4,
+                4
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
     /// Verifies that unsupported non-zero `I420` chroma transform sizes still fail fast with one
     /// stable reconstruction-side error.
     @Test
@@ -196,10 +245,62 @@ final class FrameReconstructorChromaResidualTest {
             @Nullable int[] chromaUCoefficients,
             @Nullable int[] chromaVCoefficients
     ) {
+        return createI420Leaf(
+                position,
+                size,
+                size.width4(),
+                size.height4(),
+                size.widthPixels(),
+                size.heightPixels(),
+                lumaCoefficients,
+                chromaUCoefficients,
+                chromaVCoefficients
+        );
+    }
+
+    /// Creates one synthetic clipped `I420` intra leaf with optional luma/chroma residual coefficients.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param visibleWidth4 the visible block width in 4x4 units
+    /// @param visibleHeight4 the visible block height in 4x4 units
+    /// @param visibleWidthPixels the exact visible block width in pixels
+    /// @param visibleHeightPixels the exact visible block height in pixels
+    /// @param lumaCoefficients the optional luma coefficients, or `null`
+    /// @param chromaUCoefficients the optional chroma-U coefficients, or `null`
+    /// @param chromaVCoefficients the optional chroma-V coefficients, or `null`
+    /// @return one synthetic clipped `I420` intra leaf
+    private static TilePartitionTreeReader.LeafNode createI420Leaf(
+            BlockPosition position,
+            BlockSize size,
+            int visibleWidth4,
+            int visibleHeight4,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            @Nullable int[] lumaCoefficients,
+            @Nullable int[] chromaUCoefficients,
+            @Nullable int[] chromaVCoefficients
+    ) {
         return new TilePartitionTreeReader.LeafNode(
                 createIntraI420BlockHeader(position, size),
-                createTransformLayout(position, size, PixelFormat.I420),
-                createResidualLayout(position, size, lumaCoefficients, chromaUCoefficients, chromaVCoefficients)
+                createTransformLayout(
+                        position,
+                        size,
+                        visibleWidth4,
+                        visibleHeight4,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        PixelFormat.I420
+                ),
+                createResidualLayout(
+                        position,
+                        size,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        lumaCoefficients,
+                        chromaUCoefficients,
+                        chromaVCoefficients
+                )
         );
     }
 
@@ -410,12 +511,44 @@ final class FrameReconstructorChromaResidualTest {
     /// @param pixelFormat the active decoded chroma layout
     /// @return one transform layout that exactly covers one leaf block
     private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, PixelFormat pixelFormat) {
-        TransformSize transformSize = size.maxLumaTransformSize();
-        return new TransformLayout(
+        return createTransformLayout(
                 position,
                 size,
                 size.width4(),
                 size.height4(),
+                size.widthPixels(),
+                size.heightPixels(),
+                pixelFormat
+        );
+    }
+
+    /// Creates one transform layout that covers the supplied visible leaf span with one transform unit.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param visibleWidth4 the visible block width in 4x4 units
+    /// @param visibleHeight4 the visible block height in 4x4 units
+    /// @param visibleWidthPixels the exact visible block width in pixels
+    /// @param visibleHeightPixels the exact visible block height in pixels
+    /// @param pixelFormat the active decoded chroma layout
+    /// @return one transform layout that covers the supplied visible leaf span
+    private static TransformLayout createTransformLayout(
+            BlockPosition position,
+            BlockSize size,
+            int visibleWidth4,
+            int visibleHeight4,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            PixelFormat pixelFormat
+    ) {
+        TransformSize transformSize = size.maxLumaTransformSize();
+        return new TransformLayout(
+                position,
+                size,
+                visibleWidth4,
+                visibleHeight4,
+                visibleWidthPixels,
+                visibleHeightPixels,
                 transformSize,
                 size.maxChromaTransformSize(pixelFormat),
                 false,
@@ -427,6 +560,8 @@ final class FrameReconstructorChromaResidualTest {
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
+    /// @param visibleWidthPixels the exact visible luma block width in pixels
+    /// @param visibleHeightPixels the exact visible luma block height in pixels
     /// @param lumaCoefficients the optional luma coefficients, or `null`
     /// @param chromaUCoefficients the optional chroma-U coefficients, or `null`
     /// @param chromaVCoefficients the optional chroma-V coefficients, or `null`
@@ -434,18 +569,40 @@ final class FrameReconstructorChromaResidualTest {
     private static ResidualLayout createResidualLayout(
             BlockPosition position,
             BlockSize size,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
             @Nullable int[] lumaCoefficients,
             @Nullable int[] chromaUCoefficients,
             @Nullable int[] chromaVCoefficients
     ) {
         TransformSize lumaTransformSize = size.maxLumaTransformSize();
         TransformSize chromaTransformSize = requireI420ChromaTransformSize(size);
+        int visibleChromaWidthPixels = (visibleWidthPixels + 1) >> 1;
+        int visibleChromaHeightPixels = (visibleHeightPixels + 1) >> 1;
         return new ResidualLayout(
                 position,
                 size,
-                new TransformResidualUnit[]{createResidualUnit(position, lumaTransformSize, lumaCoefficients)},
-                new TransformResidualUnit[]{createResidualUnit(position, chromaTransformSize, chromaUCoefficients)},
-                new TransformResidualUnit[]{createResidualUnit(position, chromaTransformSize, chromaVCoefficients)}
+                new TransformResidualUnit[]{createResidualUnit(
+                        position,
+                        lumaTransformSize,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        lumaCoefficients
+                )},
+                new TransformResidualUnit[]{createResidualUnit(
+                        position,
+                        chromaTransformSize,
+                        visibleChromaWidthPixels,
+                        visibleChromaHeightPixels,
+                        chromaUCoefficients
+                )},
+                new TransformResidualUnit[]{createResidualUnit(
+                        position,
+                        chromaTransformSize,
+                        visibleChromaWidthPixels,
+                        visibleChromaHeightPixels,
+                        chromaVCoefficients
+                )}
         );
     }
 
@@ -453,11 +610,15 @@ final class FrameReconstructorChromaResidualTest {
     ///
     /// @param position the block origin in luma 4x4 units
     /// @param transformSize the transform size carried by the unit
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
     /// @param coefficients the optional coefficients, or `null`
     /// @return one residual unit from the supplied coefficients
     private static TransformResidualUnit createResidualUnit(
             BlockPosition position,
             TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
             @Nullable int[] coefficients
     ) {
         int[] resolvedCoefficients = coefficients != null
@@ -468,6 +629,8 @@ final class FrameReconstructorChromaResidualTest {
                 transformSize,
                 lastNonZeroIndex(resolvedCoefficients),
                 resolvedCoefficients,
+                visibleWidthPixels,
+                visibleHeightPixels,
                 hasNonZeroCoefficient(resolvedCoefficients) ? 1 : 0
         );
     }
@@ -575,6 +738,36 @@ final class FrameReconstructorChromaResidualTest {
         for (int y = 0; y < baseline.height(); y++) {
             for (int x = 0; x < baseline.width(); x++) {
                 assertEquals(expectedDelta, reconstructed.sample(x, y) - baseline.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane differs from its baseline only inside one visible rectangle.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the residual-applied plane
+    /// @param originX the zero-based rectangle origin on the X axis
+    /// @param originY the zero-based rectangle origin on the Y axis
+    /// @param width the rectangle width in samples
+    /// @param height the rectangle height in samples
+    /// @param expectedDelta the exact uniform delta required inside the visible rectangle
+    private static void assertPlaneDiffersFromBaselineOnlyWithinRectByUniformOffset(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed,
+            int originX,
+            int originY,
+            int width,
+            int height,
+            int expectedDelta
+    ) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
+                int expected = x >= originX && x < originX + width && y >= originY && y < originY + height
+                        ? expectedDelta
+                        : 0;
+                assertEquals(expected, reconstructed.sample(x, y) - baseline.sample(x, y));
             }
         }
     }

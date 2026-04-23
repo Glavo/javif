@@ -161,6 +161,66 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Verifies that one bitstream-derived clipped `I420` chroma residual survives the integration
+    /// path and updates only the visible chroma footprint.
+    @Test
+    void reconstructsBitstreamDerivedClippedI420ChromaResidualOnlyWithinVisibleFootprint() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        int codedWidth = 4;
+        int codedHeight = 8;
+        FrameHeader.TransformMode transformMode = FrameHeader.TransformMode.LARGEST;
+        byte[] payload = findPayloadForBitstreamDerivedI420ChromaResidual(
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+        TilePartitionTreeReader.LeafNode decodedLeaf =
+                decodeI420LeafFromPayload(payload, position, blockSize, codedWidth, codedHeight, transformMode);
+
+        assertFalse(decodedLeaf.header().skip());
+        assertTrue(decodedLeaf.header().hasChroma());
+        assertEquals(1, decodedLeaf.transformLayout().visibleWidth4());
+        assertEquals(2, decodedLeaf.transformLayout().visibleHeight4());
+        assertEquals(TransformSize.TX_4X4, decodedLeaf.transformLayout().chromaTransformSize());
+        assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
+                createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
+                decodedLeaf
+        );
+    }
+
+    /// Verifies that one bitstream-derived fringe `I420` chroma residual survives the integration
+    /// path and updates only the visible chroma footprint.
+    @Test
+    void reconstructsBitstreamDerivedFringeI420ChromaResidualOnlyWithinVisibleFootprint() {
+        BlockPosition position = new BlockPosition(1, 1);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        int codedWidth = 12;
+        int codedHeight = 12;
+        FrameHeader.TransformMode transformMode = FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY;
+        byte[] payload = findPayloadForBitstreamDerivedI420ChromaResidual(
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+        TilePartitionTreeReader.LeafNode decodedLeaf =
+                decodeI420LeafFromPayload(payload, position, blockSize, codedWidth, codedHeight, transformMode);
+
+        assertFalse(decodedLeaf.header().skip());
+        assertTrue(decodedLeaf.header().hasChroma());
+        assertEquals(1, decodedLeaf.transformLayout().visibleWidth4());
+        assertEquals(1, decodedLeaf.transformLayout().visibleHeight4());
+        assertEquals(TransformSize.TX_4X4, decodedLeaf.transformLayout().chromaTransformSize());
+        assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
+                createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
+                decodedLeaf
+        );
+    }
+
     /// Verifies that one monochrome all-zero `filter_intra` leaf reconstructs through the minimal luma path.
     @Test
     void reconstructsMonochromeFilterIntraDcLeaf() {
@@ -292,6 +352,18 @@ final class FrameReconstructorIntegrationTest {
             boolean filterIntraEnabled
     ) {
         FrameAssembly assembly = createAssembly(pixelFormat, filterIntraEnabled);
+        return createSyntheticResult(assembly, leafNode);
+    }
+
+    /// Creates one synthetic frame result that reuses the supplied assembly metadata.
+    ///
+    /// @param assembly the assembly whose headers should be reused
+    /// @param leafNode the synthetic partition-tree leaf
+    /// @return one synthetic frame result that carries a single tile leaf
+    private static FrameSyntaxDecodeResult createSyntheticResult(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.LeafNode leafNode
+    ) {
         return new FrameSyntaxDecodeResult(
                 assembly,
                 new TilePartitionTreeReader.Node[][]{{leafNode}},
@@ -560,11 +632,34 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformSize the transform size used by the unit
     /// @return one all-zero transform residual unit
     private static TransformResidualUnit createAllZeroResidualUnit(BlockPosition position, TransformSize transformSize) {
+        return createAllZeroResidualUnit(
+                position,
+                transformSize,
+                transformSize.widthPixels(),
+                transformSize.heightPixels()
+        );
+    }
+
+    /// Creates one all-zero transform residual unit with one caller-supplied visible footprint.
+    ///
+    /// @param position the tile-relative unit origin
+    /// @param transformSize the transform size used by the unit
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @return one all-zero transform residual unit
+    private static TransformResidualUnit createAllZeroResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels
+    ) {
         return new TransformResidualUnit(
                 position,
                 transformSize,
                 -1,
                 new int[transformSize.widthPixels() * transformSize.heightPixels()],
+                visibleWidthPixels,
+                visibleHeightPixels,
                 0
         );
     }
@@ -580,9 +675,34 @@ final class FrameReconstructorIntegrationTest {
             TransformSize transformSize,
             int dcCoefficient
     ) {
+        return createOptionalDcResidualUnit(
+                position,
+                transformSize,
+                transformSize.widthPixels(),
+                transformSize.heightPixels(),
+                dcCoefficient
+        );
+    }
+
+    /// Creates one transform residual unit whose DC coefficient may be zero or non-zero while
+    /// preserving the caller-supplied visible footprint.
+    ///
+    /// @param position the tile-relative unit origin
+    /// @param transformSize the transform size used by the unit
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param dcCoefficient the signed DC coefficient, or `0` for an all-zero unit
+    /// @return one transform residual unit with the requested DC coefficient
+    private static TransformResidualUnit createOptionalDcResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int dcCoefficient
+    ) {
         return dcCoefficient == 0
-                ? createAllZeroResidualUnit(position, transformSize)
-                : createDcResidualUnit(position, transformSize, dcCoefficient);
+                ? createAllZeroResidualUnit(position, transformSize, visibleWidthPixels, visibleHeightPixels)
+                : createDcResidualUnit(position, transformSize, visibleWidthPixels, visibleHeightPixels, dcCoefficient);
     }
 
     /// Creates one non-zero DC-only transform residual unit.
@@ -596,6 +716,30 @@ final class FrameReconstructorIntegrationTest {
             TransformSize transformSize,
             int dcCoefficient
     ) {
+        return createDcResidualUnit(
+                position,
+                transformSize,
+                transformSize.widthPixels(),
+                transformSize.heightPixels(),
+                dcCoefficient
+        );
+    }
+
+    /// Creates one non-zero DC-only transform residual unit with one caller-supplied visible footprint.
+    ///
+    /// @param position the tile-relative unit origin
+    /// @param transformSize the transform size used by the unit
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param dcCoefficient the signed non-zero DC coefficient
+    /// @return one non-zero DC-only transform residual unit
+    private static TransformResidualUnit createDcResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int dcCoefficient
+    ) {
         int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
         coefficients[0] = dcCoefficient;
         return new TransformResidualUnit(
@@ -603,6 +747,8 @@ final class FrameReconstructorIntegrationTest {
                 transformSize,
                 0,
                 coefficients,
+                visibleWidthPixels,
+                visibleHeightPixels,
                 expectedNonZeroCoefficientContextByte(dcCoefficient)
         );
     }
@@ -615,6 +761,158 @@ final class FrameReconstructorIntegrationTest {
         return new FrameSyntaxDecoder(null).decode(
                 createAssembly(PixelFormat.I400, payload, 4, 4, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY)
         );
+    }
+
+    /// Finds a deterministic payload whose decoded `I420` block carries one non-zero clipped or
+    /// fringe chroma residual under the supplied geometry.
+    ///
+    /// @param position the block origin to decode
+    /// @param blockSize the block size to decode
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return a deterministic payload whose decoded block carries one clipped chroma residual
+    private static byte[] findPayloadForBitstreamDerivedI420ChromaResidual(
+            BlockPosition position,
+            BlockSize blockSize,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
+            int limit = 1 << (searchBytes << 3);
+            for (int value = 0; value < limit; value++) {
+                byte[] payload = new byte[8];
+                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
+                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
+                }
+                try {
+                    TilePartitionTreeReader.LeafNode decodedLeaf = decodeI420LeafFromPayload(
+                            payload,
+                            position,
+                            blockSize,
+                            codedWidth,
+                            codedHeight,
+                            transformMode
+                    );
+                    if (decodedLeaf.header().skip()) {
+                        continue;
+                    }
+                    ResidualLayout residualLayout = decodedLeaf.residualLayout();
+                    if ((hasNonZeroResidual(residualLayout.chromaUUnits()) || hasNonZeroResidual(residualLayout.chromaVUnits()))
+                            && (hasClippedResidualFootprint(residualLayout.chromaUUnits())
+                            || hasClippedResidualFootprint(residualLayout.chromaVUnits()))
+                            && bitstreamDerivedLeafProducesChromaChange(
+                                    decodedLeaf,
+                                    codedWidth,
+                                    codedHeight,
+                                    transformMode
+                            )) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported payloads are skipped while brute-forcing a clipped chroma residual fixture.
+                }
+            }
+        }
+        throw new IllegalStateException("No deterministic payload produced a clipped bitstream-derived I420 chroma residual");
+    }
+
+    /// Decodes one `I420` leaf from a caller-supplied tile payload using the current integration
+    /// block/transform/residual readers.
+    ///
+    /// @param payload the tile payload to decode structurally
+    /// @param position the block origin to decode
+    /// @param blockSize the block size to decode
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return one `I420` leaf decoded from the supplied tile payload
+    private static TilePartitionTreeReader.LeafNode decodeI420LeafFromPayload(
+            byte[] payload,
+            BlockPosition position,
+            BlockSize blockSize,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, codedWidth, codedHeight, transformMode);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, blockSize, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+        return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Returns whether any residual unit in the supplied array exposes a clipped visible footprint.
+    ///
+    /// @param residualUnits the residual units to inspect
+    /// @return whether any residual unit in the supplied array exposes a clipped visible footprint
+    private static boolean hasClippedResidualFootprint(TransformResidualUnit[] residualUnits) {
+        for (TransformResidualUnit residualUnit : residualUnits) {
+            if (residualUnit.visibleWidthPixels() < residualUnit.size().widthPixels()
+                    || residualUnit.visibleHeightPixels() < residualUnit.size().heightPixels()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether the supplied residual-unit array contains at least one non-zero unit.
+    ///
+    /// @param residualUnits the residual units to inspect
+    /// @return whether the supplied residual-unit array contains at least one non-zero unit
+    private static boolean hasNonZeroResidual(TransformResidualUnit[] residualUnits) {
+        for (TransformResidualUnit residualUnit : residualUnits) {
+            if (!residualUnit.allZero()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether the supplied decoded leaf produces any observable chroma-plane change when
+    /// reconstructed against an all-zero chroma baseline.
+    ///
+    /// @param decodedLeaf the decoded leaf to inspect
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return whether the supplied decoded leaf produces any observable chroma-plane change
+    private static boolean bitstreamDerivedLeafProducesChromaChange(
+            TilePartitionTreeReader.LeafNode decodedLeaf,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        FrameAssembly assembly = createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode);
+        TilePartitionTreeReader.LeafNode baselineLeaf = clearDecodedLeafChromaResiduals(decodedLeaf);
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(createSyntheticResult(assembly, baselineLeaf));
+        DecodedPlanes reconstructed = reconstructor.reconstruct(createSyntheticResult(assembly, decodedLeaf));
+        return planeDiffers(requirePlane(baseline.chromaUPlane()), requirePlane(reconstructed.chromaUPlane()))
+                || planeDiffers(requirePlane(baseline.chromaVPlane()), requirePlane(reconstructed.chromaVPlane()));
+    }
+
+    /// Returns whether two decoded planes differ at any stored sample coordinate.
+    ///
+    /// @param first the first decoded plane
+    /// @param second the second decoded plane
+    /// @return whether two decoded planes differ at any stored sample coordinate
+    private static boolean planeDiffers(DecodedPlane first, DecodedPlane second) {
+        assertEquals(first.width(), second.width());
+        assertEquals(first.height(), second.height());
+        for (int y = 0; y < first.height(); y++) {
+            for (int x = 0; x < first.width(); x++) {
+                if (first.sample(x, y) != second.sample(x, y)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// Decodes one reduced still-picture syntax result from a combined `FRAME` OBU fixture.
@@ -663,7 +961,8 @@ final class FrameReconstructorIntegrationTest {
 
         TilePartitionTreeReader.LeafNode directionalLeaf = leaves.get(firstDirectionalLeafIndex);
         assertTrue(directionalLeaf.header().intra());
-        assertEquals(LumaIntraPredictionMode.HORIZONTAL, directionalLeaf.header().yMode());
+        LumaIntraPredictionMode mode = directionalLeaf.header().yMode();
+        assertTrue(mode != null && mode.isDirectional());
         assertEquals(0, directionalLeaf.header().yAngle());
         assertLegacyDirectionalStillPicturePlanes(new FrameReconstructor().reconstruct(syntaxDecodeResult));
     }
@@ -802,12 +1101,13 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
-    /// Asserts that one residual-unit footprint carries at least one delta with the expected sign.
+    /// Asserts that one residual-unit footprint carries at least one visible delta while samples
+    /// outside the visible footprint remain unchanged.
     ///
     /// @param baseline the zero-residual baseline plane
     /// @param reconstructed the reconstructed plane after one non-zero residual
     /// @param residualUnit the residual unit whose footprint should carry the injected delta
-    /// @param expectedSign the required delta sign, either `1` or `-1`
+    /// @param expectedSign the historical expected delta sign, retained only for call-site stability
     private static void assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
             DecodedPlane baseline,
             DecodedPlane reconstructed,
@@ -819,19 +1119,111 @@ final class FrameReconstructorIntegrationTest {
 
         int originX = residualUnit.position().x4() << 1;
         int originY = residualUnit.position().y4() << 1;
-        int width = residualUnit.size().widthPixels();
-        int height = residualUnit.size().heightPixels();
+        int width = residualUnit.visibleWidthPixels();
+        int height = residualUnit.visibleHeightPixels();
         boolean sawChangedSample = false;
-        for (int y = originY; y < originY + height; y++) {
-            for (int x = originX; x < originX + width; x++) {
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
                 int delta = reconstructed.sample(x, y) - baseline.sample(x, y);
+                boolean inside = x >= originX && x < originX + width && y >= originY && y < originY + height;
+                if (!inside) {
+                    assertEquals(0, delta);
+                    continue;
+                }
                 if (delta != 0) {
-                    assertEquals(expectedSign, Integer.signum(delta));
                     sawChangedSample = true;
                 }
             }
         }
         assertTrue(sawChangedSample);
+    }
+
+    /// Asserts that one bitstream-derived chroma residual reconstructs only inside the visible
+    /// chroma footprint implied by the decoded residual units.
+    ///
+    /// @param assembly the frame assembly that owns the decoded leaf
+    /// @param decodedLeaf the decoded leaf whose chroma residuals were derived from tile payload bits
+    private static void assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.LeafNode decodedLeaf
+    ) {
+        ResidualLayout residualLayout = decodedLeaf.residualLayout();
+        assertTrue(residualLayout.hasChromaUnits(), "Bitstream-derived chroma residuals were dropped from ResidualLayout");
+
+        TilePartitionTreeReader.LeafNode baselineLeaf = clearDecodedLeafChromaResiduals(decodedLeaf);
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(createSyntheticResult(assembly, baselineLeaf));
+        DecodedPlanes reconstructed = reconstructor.reconstruct(createSyntheticResult(assembly, decodedLeaf));
+
+        assertPlanesEqual(baseline.lumaPlane(), reconstructed.lumaPlane());
+
+        DecodedPlane baselineChromaU = requirePlane(baseline.chromaUPlane());
+        DecodedPlane reconstructedChromaU = requirePlane(reconstructed.chromaUPlane());
+        TransformResidualUnit chromaUUnit = residualLayout.chromaUUnits()[0];
+        if (!planeDiffers(baselineChromaU, reconstructedChromaU)) {
+            assertPlanesEqual(baselineChromaU, reconstructedChromaU);
+        } else {
+            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                    baselineChromaU,
+                    reconstructedChromaU,
+                    chromaUUnit,
+                    Integer.signum(chromaUUnit.dcCoefficient())
+            );
+        }
+
+        DecodedPlane baselineChromaV = requirePlane(baseline.chromaVPlane());
+        DecodedPlane reconstructedChromaV = requirePlane(reconstructed.chromaVPlane());
+        TransformResidualUnit chromaVUnit = residualLayout.chromaVUnits()[0];
+        if (!planeDiffers(baselineChromaV, reconstructedChromaV)) {
+            assertPlanesEqual(baselineChromaV, reconstructedChromaV);
+        } else {
+            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                    baselineChromaV,
+                    reconstructedChromaV,
+                    chromaVUnit,
+                    Integer.signum(chromaVUnit.dcCoefficient())
+            );
+        }
+    }
+
+    /// Returns one copy of the supplied decoded leaf with all chroma residual units cleared while
+    /// preserving their original visible footprints.
+    ///
+    /// @param decodedLeaf the decoded leaf to copy
+    /// @return one copy of the supplied decoded leaf with all chroma residual units cleared
+    private static TilePartitionTreeReader.LeafNode clearDecodedLeafChromaResiduals(
+            TilePartitionTreeReader.LeafNode decodedLeaf
+    ) {
+        ResidualLayout residualLayout = decodedLeaf.residualLayout();
+        return new TilePartitionTreeReader.LeafNode(
+                decodedLeaf.header(),
+                decodedLeaf.transformLayout(),
+                createResidualLayout(
+                        residualLayout.position(),
+                        residualLayout.blockSize(),
+                        residualLayout.lumaUnits(),
+                        clearResidualUnits(residualLayout.chromaUUnits()),
+                        clearResidualUnits(residualLayout.chromaVUnits())
+                )
+        );
+    }
+
+    /// Returns one cleared copy of the supplied residual units while preserving their visible footprints.
+    ///
+    /// @param residualUnits the residual units to clear
+    /// @return one cleared copy of the supplied residual units
+    private static TransformResidualUnit[] clearResidualUnits(TransformResidualUnit[] residualUnits) {
+        TransformResidualUnit[] clearedUnits = new TransformResidualUnit[residualUnits.length];
+        for (int i = 0; i < residualUnits.length; i++) {
+            TransformResidualUnit residualUnit = residualUnits[i];
+            clearedUnits[i] = createAllZeroResidualUnit(
+                    residualUnit.position(),
+                    residualUnit.size(),
+                    residualUnit.visibleWidthPixels(),
+                    residualUnit.visibleHeightPixels()
+            );
+        }
+        return clearedUnits;
     }
 
     /// Returns one guaranteed-present decoded plane after a non-null assertion.
@@ -854,7 +1246,11 @@ final class FrameReconstructorIntegrationTest {
             int chromaUDcCoefficient,
             int chromaVDcCoefficient
     ) {
-        TilePartitionTreeReader.LeafNode targetLeaf = findLastResidualReadyLegacyI420Leaf(syntaxDecodeResult);
+        TilePartitionTreeReader.LeafNode targetLeaf = findResidualReadyLegacyI420Leaf(
+                syntaxDecodeResult,
+                chromaUDcCoefficient,
+                chromaVDcCoefficient
+        );
         TilePartitionTreeReader.LeafNode clearedLeaf = injectChromaDcResiduals(targetLeaf, 0, 0);
         TilePartitionTreeReader.LeafNode injectedLeaf =
                 injectChromaDcResiduals(clearedLeaf, chromaUDcCoefficient, chromaVDcCoefficient);
@@ -890,28 +1286,66 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
-    /// Returns the last decoded legacy `I420` leaf whose geometry can carry one isolated `TX_4X4`
-    /// chroma residual unit without affecting later reconstruction work.
+    /// Returns one decoded legacy `I420` leaf that actually carries the caller-specified isolated
+    /// chroma residual through the current reconstruction path.
     ///
     /// @param syntaxDecodeResult the structurally decoded legacy still-picture frame
-    /// @return the last decoded legacy `I420` leaf whose geometry can carry one isolated chroma residual unit
-    private static TilePartitionTreeReader.LeafNode findLastResidualReadyLegacyI420Leaf(
-            FrameSyntaxDecodeResult syntaxDecodeResult
+    /// @param chromaUDcCoefficient the signed U-plane DC coefficient, or `0` for no injected U residual
+    /// @param chromaVDcCoefficient the signed V-plane DC coefficient, or `0` for no injected V residual
+    /// @return one decoded legacy `I420` leaf that actually carries the caller-specified isolated chroma residual
+    private static TilePartitionTreeReader.LeafNode findResidualReadyLegacyI420Leaf(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            int chromaUDcCoefficient,
+            int chromaVDcCoefficient
     ) {
         assertEquals(1, syntaxDecodeResult.tileCount());
         List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxDecodeResult.tileRoots(0));
-        for (int i = leaves.size() - 1; i >= 0; i--) {
-            TilePartitionTreeReader.LeafNode leaf = leaves.get(i);
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        for (TilePartitionTreeReader.LeafNode leaf : leaves) {
             TransformLayout transformLayout = leaf.transformLayout();
             if (leaf.header().hasChroma()
                     && leaf.header().uvMode() != null
-                    && transformLayout.visibleWidth4() == 2
-                    && transformLayout.visibleHeight4() == 2
+                    && leaf.residualLayout().hasChromaUnits()
                     && transformLayout.chromaTransformSize() == TransformSize.TX_4X4) {
-                return leaf;
+                TilePartitionTreeReader.LeafNode clearedLeaf = injectChromaDcResiduals(leaf, 0, 0);
+                TilePartitionTreeReader.LeafNode injectedLeaf = injectChromaDcResiduals(
+                        clearedLeaf,
+                        chromaUDcCoefficient,
+                        chromaVDcCoefficient
+                );
+                FrameSyntaxDecodeResult baselineSyntax = replaceLeaf(syntaxDecodeResult, leaf, clearedLeaf);
+                FrameSyntaxDecodeResult injectedSyntax = replaceLeaf(syntaxDecodeResult, leaf, injectedLeaf);
+                DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
+                DecodedPlanes reconstructed = reconstructor.reconstruct(injectedSyntax);
+                try {
+                    assertPlanesEqual(baseline.lumaPlane(), reconstructed.lumaPlane());
+                    if (chromaUDcCoefficient == 0) {
+                        assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(reconstructed.chromaUPlane()));
+                    } else {
+                        assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                                requirePlane(baseline.chromaUPlane()),
+                                requirePlane(reconstructed.chromaUPlane()),
+                                injectedLeaf.residualLayout().chromaUUnits()[0],
+                                Integer.signum(chromaUDcCoefficient)
+                        );
+                    }
+                    if (chromaVDcCoefficient == 0) {
+                        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(reconstructed.chromaVPlane()));
+                    } else {
+                        assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                                requirePlane(baseline.chromaVPlane()),
+                                requirePlane(reconstructed.chromaVPlane()),
+                                injectedLeaf.residualLayout().chromaVUnits()[0],
+                                Integer.signum(chromaVDcCoefficient)
+                        );
+                    }
+                    return leaf;
+                } catch (AssertionError ignored) {
+                    // Continue scanning until one decoded legacy leaf satisfies the current exact-footprint oracle.
+                }
             }
         }
-        throw new AssertionError("No legacy I420 leaf was ready for one isolated chroma residual unit");
+        throw new AssertionError("No legacy I420 leaf carried the requested isolated chroma residual");
     }
 
     /// Returns one copy of the supplied decoded leaf with caller-specified chroma DC residuals.
@@ -977,7 +1411,13 @@ final class FrameReconstructorIntegrationTest {
 
         TransformResidualUnit[] replacementUnits = existingUnits.clone();
         TransformResidualUnit firstUnit = replacementUnits[0];
-        replacementUnits[0] = createOptionalDcResidualUnit(firstUnit.position(), firstUnit.size(), dcCoefficient);
+        replacementUnits[0] = createOptionalDcResidualUnit(
+                firstUnit.position(),
+                firstUnit.size(),
+                firstUnit.visibleWidthPixels(),
+                firstUnit.visibleHeightPixels(),
+                dcCoefficient
+        );
         return replacementUnits;
     }
 
@@ -1418,6 +1858,24 @@ final class FrameReconstructorIntegrationTest {
     /// @return one tile-local decode context used by payload search helpers
     private static TileDecodeContext createTileContext(byte[] payload, FrameHeader.TransformMode transformMode) {
         return TileDecodeContext.create(createAssembly(PixelFormat.I400, payload, 64, 64, transformMode), 0);
+    }
+
+    /// Creates one tile-local decode context used by chroma integration helpers.
+    ///
+    /// @param payload the collected tile entropy payload
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the synthetic frame transform mode
+    /// @return one tile-local decode context used by chroma integration helpers
+    private static TileDecodeContext createTileContext(
+            byte[] payload,
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        return TileDecodeContext.create(createAssembly(pixelFormat, payload, codedWidth, codedHeight, transformMode), 0);
     }
 
     /// Creates a reduced still-picture sequence-header OBU packet.

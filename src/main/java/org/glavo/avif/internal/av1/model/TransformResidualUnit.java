@@ -41,10 +41,66 @@ public final class TransformResidualUnit {
     /// The signed transform-domain coefficients in natural raster order.
     private final int[] coefficients;
 
+    /// The exact visible residual width in pixels that should be written back into the plane.
+    private final int visibleWidthPixels;
+
+    /// The exact visible residual height in pixels that should be written back into the plane.
+    private final int visibleHeightPixels;
+
     /// The coefficient-context byte written back to neighbor state.
     private final int coefficientContextByte;
 
     /// Creates one transform residual unit.
+    ///
+    /// @param position the tile-relative block origin of this transform residual unit in luma 4x4 units
+    /// @param size the transform size used by this residual unit
+    /// @param endOfBlockIndex the scan index of the last non-zero coefficient, or `-1` for all-zero units
+    /// @param coefficients the signed transform-domain coefficients in natural raster order
+    /// @param visibleWidthPixels the exact visible residual width in pixels that should be written back into the plane
+    /// @param visibleHeightPixels the exact visible residual height in pixels that should be written back into the plane
+    /// @param coefficientContextByte the coefficient-context byte written back to neighbor state
+    public TransformResidualUnit(
+            BlockPosition position,
+            TransformSize size,
+            int endOfBlockIndex,
+            int[] coefficients,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int coefficientContextByte
+    ) {
+        this.position = Objects.requireNonNull(position, "position");
+        this.size = Objects.requireNonNull(size, "size");
+        if (endOfBlockIndex < -1 || endOfBlockIndex >= size.widthPixels() * size.heightPixels()) {
+            throw new IllegalArgumentException("endOfBlockIndex out of range: " + endOfBlockIndex);
+        }
+        this.endOfBlockIndex = endOfBlockIndex;
+        this.coefficients = Arrays.copyOf(Objects.requireNonNull(coefficients, "coefficients"), coefficients.length);
+        if (this.coefficients.length != size.widthPixels() * size.heightPixels()) {
+            throw new IllegalArgumentException("coefficients length does not match transform area");
+        }
+        if (visibleWidthPixels <= 0 || visibleWidthPixels > size.widthPixels()) {
+            throw new IllegalArgumentException("visibleWidthPixels out of range: " + visibleWidthPixels);
+        }
+        if (visibleHeightPixels <= 0 || visibleHeightPixels > size.heightPixels()) {
+            throw new IllegalArgumentException("visibleHeightPixels out of range: " + visibleHeightPixels);
+        }
+        if (endOfBlockIndex < 0) {
+            for (int coefficient : this.coefficients) {
+                if (coefficient != 0) {
+                    throw new IllegalArgumentException("all-zero residual units must not carry coefficients");
+                }
+            }
+        }
+        this.visibleWidthPixels = visibleWidthPixels;
+        this.visibleHeightPixels = visibleHeightPixels;
+        if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
+            throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
+        }
+        this.coefficientContextByte = coefficientContextByte;
+    }
+
+    /// Creates one transform residual unit whose exact visible footprint matches the coded
+    /// transform size.
     ///
     /// @param position the tile-relative block origin of this transform residual unit in luma 4x4 units
     /// @param size the transform size used by this residual unit
@@ -58,27 +114,15 @@ public final class TransformResidualUnit {
             int[] coefficients,
             int coefficientContextByte
     ) {
-        this.position = Objects.requireNonNull(position, "position");
-        this.size = Objects.requireNonNull(size, "size");
-        if (endOfBlockIndex < -1 || endOfBlockIndex >= size.widthPixels() * size.heightPixels()) {
-            throw new IllegalArgumentException("endOfBlockIndex out of range: " + endOfBlockIndex);
-        }
-        this.endOfBlockIndex = endOfBlockIndex;
-        this.coefficients = Arrays.copyOf(Objects.requireNonNull(coefficients, "coefficients"), coefficients.length);
-        if (this.coefficients.length != size.widthPixels() * size.heightPixels()) {
-            throw new IllegalArgumentException("coefficients length does not match transform area");
-        }
-        if (endOfBlockIndex < 0) {
-            for (int coefficient : this.coefficients) {
-                if (coefficient != 0) {
-                    throw new IllegalArgumentException("all-zero residual units must not carry coefficients");
-                }
-            }
-        }
-        if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
-            throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
-        }
-        this.coefficientContextByte = coefficientContextByte;
+        this(
+                position,
+                size,
+                endOfBlockIndex,
+                coefficients,
+                size.widthPixels(),
+                size.heightPixels(),
+                coefficientContextByte
+        );
     }
 
     /// Returns the tile-relative block origin of this transform residual unit in luma 4x4 units.
@@ -114,6 +158,20 @@ public final class TransformResidualUnit {
     /// @return the signed transform-domain coefficients in natural raster order
     public int[] coefficients() {
         return Arrays.copyOf(coefficients, coefficients.length);
+    }
+
+    /// Returns the exact visible residual width in pixels that should be written back into the plane.
+    ///
+    /// @return the exact visible residual width in pixels that should be written back into the plane
+    public int visibleWidthPixels() {
+        return visibleWidthPixels;
+    }
+
+    /// Returns the exact visible residual height in pixels that should be written back into the plane.
+    ///
+    /// @return the exact visible residual height in pixels that should be written back into the plane
+    public int visibleHeightPixels() {
+        return visibleHeightPixels;
     }
 
     /// Returns the decoded DC coefficient in natural raster order.

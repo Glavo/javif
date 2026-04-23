@@ -69,6 +69,8 @@ public final class TileTransformLayoutReader {
         BlockSize size = nonNullHeader.size();
         int visibleWidth4 = Math.min(size.width4(), ((tileContext.width() + 3) >> 2) - position.x4());
         int visibleHeight4 = Math.min(size.height4(), ((tileContext.height() + 3) >> 2) - position.y4());
+        int visibleWidthPixels = Math.min(size.widthPixels(), tileContext.width() - (position.x4() << 2));
+        int visibleHeightPixels = Math.min(size.heightPixels(), tileContext.height() - (position.y4() << 2));
 
         boolean lossless = tileContext.frameHeader().segmentation().lossless(nonNullHeader.segmentId());
         TransformSize maxLumaTransformSize = size.maxLumaTransformSize();
@@ -109,6 +111,8 @@ public final class TileTransformLayoutReader {
                 size,
                 visibleWidth4,
                 visibleHeight4,
+                visibleWidthPixels,
+                visibleHeightPixels,
                 effectiveMaxLumaTransformSize,
                 chromaTransformSize,
                 variableLumaTransformTree,

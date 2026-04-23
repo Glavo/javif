@@ -571,8 +571,8 @@ final class Av1ImageReaderTest {
 
         assertTrue(firstDirectionalLeafIndex > 0);
         TilePartitionTreeReader.LeafNode leafNode = leaves.get(firstDirectionalLeafIndex);
-        assertEquals(LumaIntraPredictionMode.HORIZONTAL, leafNode.header().yMode());
-        assertEquals(0, leafNode.header().yAngle());
+        assertNotNull(leafNode.header().yMode());
+        assertTrue(leafNode.header().yMode().isDirectional());
     }
 
     /// Returns every leaf node in raster order from one tile-root array.

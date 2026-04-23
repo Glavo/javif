@@ -99,6 +99,43 @@ final class InverseTransformerTest {
         assertEquals(0, plane.sample(3, 3));
     }
 
+    /// Verifies that clipped residual addition only updates the visible residual footprint.
+    @Test
+    void addsResidualBlockOnlyInsideVisibleFootprint() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                plane.setSample(x, y, 100);
+            }
+        }
+
+        InverseTransformer.addResidualBlock(
+                plane,
+                0,
+                0,
+                TransformSize.TX_4X4,
+                3,
+                2,
+                new int[]{
+                        5, 6, 7, 8,
+                        4, 3, 2, 1,
+                        9, 9, 9, 9,
+                        9, 9, 9, 9
+                }
+        );
+
+        assertEquals(105, plane.sample(0, 0));
+        assertEquals(106, plane.sample(1, 0));
+        assertEquals(107, plane.sample(2, 0));
+        assertEquals(100, plane.sample(3, 0));
+        assertEquals(104, plane.sample(0, 1));
+        assertEquals(103, plane.sample(1, 1));
+        assertEquals(102, plane.sample(2, 1));
+        assertEquals(100, plane.sample(3, 1));
+        assertEquals(100, plane.sample(0, 2));
+        assertEquals(100, plane.sample(3, 3));
+    }
+
     /// Verifies that unsupported transform sizes still fail fast in the current minimal subset.
     @Test
     void rejectsUnsupportedTransformSizes() {

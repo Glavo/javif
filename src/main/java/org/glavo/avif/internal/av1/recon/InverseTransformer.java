@@ -95,6 +95,39 @@ final class InverseTransformer {
             TransformSize transformSize,
             int[] residualSamples
     ) {
+        addResidualBlock(
+                plane,
+                x,
+                y,
+                transformSize,
+                transformSize.widthPixels(),
+                transformSize.heightPixels(),
+                residualSamples
+        );
+    }
+
+    /// Adds one already reconstructed residual block into the supplied predictor plane while
+    /// clipping writes to the visible residual footprint.
+    ///
+    /// Sample addition delegates clipping to `MutablePlaneBuffer`, so callers may pass signed
+    /// residual values directly.
+    ///
+    /// @param plane the destination predictor plane
+    /// @param x the zero-based destination x coordinate
+    /// @param y the zero-based destination y coordinate
+    /// @param transformSize the coded residual block size
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param residualSamples the signed residual sample block in natural raster order
+    static void addResidualBlock(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int[] residualSamples
+    ) {
         MutablePlaneBuffer nonNullPlane = Objects.requireNonNull(plane, "plane");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         int[] nonNullResidualSamples = Objects.requireNonNull(residualSamples, "residualSamples");
@@ -102,12 +135,17 @@ final class InverseTransformer {
         if (nonNullResidualSamples.length != transformArea) {
             throw new IllegalArgumentException("residualSamples length does not match transform area");
         }
+        if (visibleWidthPixels <= 0 || visibleWidthPixels > nonNullTransformSize.widthPixels()) {
+            throw new IllegalArgumentException("visibleWidthPixels out of range: " + visibleWidthPixels);
+        }
+        if (visibleHeightPixels <= 0 || visibleHeightPixels > nonNullTransformSize.heightPixels()) {
+            throw new IllegalArgumentException("visibleHeightPixels out of range: " + visibleHeightPixels);
+        }
 
-        int width = nonNullTransformSize.widthPixels();
-        int height = nonNullTransformSize.heightPixels();
-        for (int row = 0; row < height; row++) {
-            for (int column = 0; column < width; column++) {
-                int sampleIndex = row * width + column;
+        int transformWidth = nonNullTransformSize.widthPixels();
+        for (int row = 0; row < visibleHeightPixels; row++) {
+            for (int column = 0; column < visibleWidthPixels; column++) {
+                int sampleIndex = row * transformWidth + column;
                 int predicted = nonNullPlane.sample(x + column, y + row);
                 nonNullPlane.setSample(x + column, y + row, predicted + nonNullResidualSamples[sampleIndex]);
             }
