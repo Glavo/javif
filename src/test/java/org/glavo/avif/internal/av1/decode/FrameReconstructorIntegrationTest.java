@@ -43,6 +43,7 @@ import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -68,6 +69,11 @@ final class FrameReconstructorIntegrationTest {
     private static final byte[] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
+
+    /// One deterministic real tile payload whose first visible `8x8` leaf decodes both luma and
+    /// chroma palette syntax.
+    private static final byte[] BITSTREAM_DERIVED_I420_PALETTE_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
     /// The top-left `8x8` luma block produced by the current legacy directional still-picture fixture.
     private static final int[][] LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8 = {
@@ -182,6 +188,49 @@ final class FrameReconstructorIntegrationTest {
                         {96, 160, 96, 160},
                         {160, 96, 160, 96}
                 }
+        );
+    }
+
+    /// Verifies that one deterministic real tile payload decodes both luma and chroma palette
+    /// syntax, then reconstructs exactly the palette-mapped samples exposed by the decoded block header.
+    @Test
+    void reconstructsBitstreamDerivedI420PaletteLeafDuringFrameReconstruction() {
+        TileBlockHeaderReader.BlockHeader header =
+                decodePaletteEnabledI420HeaderFromPayload(BITSTREAM_DERIVED_I420_PALETTE_PAYLOAD);
+        TilePartitionTreeReader.LeafNode paletteLeaf = createI420LeafWithBitstreamDerivedPaletteHeader(header);
+
+        assertFalse(header.skip());
+        assertTrue(header.hasChroma());
+        assertEquals(LumaIntraPredictionMode.DC, header.yMode());
+        assertEquals(UvIntraPredictionMode.DC, header.uvMode());
+        assertTrue(header.yPaletteSize() >= 2);
+        assertTrue(header.uvPaletteSize() >= 2);
+        assertTrue(allResidualUnitsZero(paletteLeaf.residualLayout()));
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                createSyntheticResult(
+                        createPaletteEnabledAssembly(
+                                PixelFormat.I420,
+                                BITSTREAM_DERIVED_I420_PALETTE_PAYLOAD,
+                                8,
+                                8,
+                                FrameHeader.TransformMode.LARGEST
+                        ),
+                        paletteLeaf
+                )
+        );
+
+        assertPlaneEquals(
+                decodedPlanes.lumaPlane(),
+                expandPackedPaletteSamples(header.yPaletteColors(), header.yPaletteIndices(), 8, 8, 8)
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                expandPackedPaletteSamples(header.uPaletteColors(), header.uvPaletteIndices(), 4, 4, 4)
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                expandPackedPaletteSamples(header.vPaletteColors(), header.uvPaletteIndices(), 4, 4, 4)
         );
     }
 
@@ -1087,6 +1136,53 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Decodes one palette-enabled `I420` `8x8` block header from a caller-supplied tile payload.
+    ///
+    /// @param payload the tile payload to decode structurally
+    /// @return one palette-enabled `I420` block header decoded from the supplied tile payload
+    private static TileBlockHeaderReader.BlockHeader decodePaletteEnabledI420HeaderFromPayload(byte[] payload) {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        TileDecodeContext tileContext = createPaletteEnabledTileContext(
+                payload,
+                PixelFormat.I420,
+                8,
+                8,
+                FrameHeader.TransformMode.LARGEST
+        );
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        return blockHeaderReader.read(position, blockSize, neighborContext);
+    }
+
+    /// Wraps one real bitstream-derived `I420` palette block header in the minimal transform and
+    /// all-zero residual layout needed by the frame reconstructor.
+    ///
+    /// @param header the real bitstream-derived palette block header
+    /// @return one reconstruction-ready leaf that preserves the decoded palette state
+    private static TilePartitionTreeReader.LeafNode createI420LeafWithBitstreamDerivedPaletteHeader(
+            TileBlockHeaderReader.BlockHeader header
+    ) {
+        BlockPosition position = header.position();
+        BlockSize blockSize = header.size();
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                blockSize.width4(),
+                blockSize.height4(),
+                TransformSize.TX_8X8,
+                TransformSize.TX_4X4,
+                false,
+                new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
+        );
+        ResidualLayout residualLayout = createResidualLayout(
+                position,
+                blockSize,
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_8X8)}
+        );
+        return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
     /// Finds a deterministic payload whose decoded `I420` block carries one non-zero clipped or
     /// fringe chroma residual under the supplied geometry.
     ///
@@ -1257,6 +1353,29 @@ final class FrameReconstructorIntegrationTest {
         return false;
     }
 
+    /// Returns whether every decoded residual unit in one layout is all-zero.
+    ///
+    /// @param residualLayout the residual layout to inspect
+    /// @return whether every decoded residual unit in the supplied layout is all-zero
+    private static boolean allResidualUnitsZero(ResidualLayout residualLayout) {
+        return allResidualUnitsZero(residualLayout.lumaUnits())
+                && allResidualUnitsZero(residualLayout.chromaUUnits())
+                && allResidualUnitsZero(residualLayout.chromaVUnits());
+    }
+
+    /// Returns whether every residual unit in the supplied array is all-zero.
+    ///
+    /// @param residualUnits the residual units to inspect
+    /// @return whether every residual unit in the supplied array is all-zero
+    private static boolean allResidualUnitsZero(TransformResidualUnit[] residualUnits) {
+        for (TransformResidualUnit residualUnit : residualUnits) {
+            if (!residualUnit.allZero()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// Returns whether the supplied residual-unit array contains at least one multi-coefficient unit.
     ///
     /// @param residualUnits the residual units to inspect
@@ -1333,6 +1452,45 @@ final class FrameReconstructorIntegrationTest {
             }
         }
         return false;
+    }
+
+    /// Expands one packed palette map to concrete sample values using the same packed-nibble layout
+    /// consumed by the frame reconstructor.
+    ///
+    /// @param paletteColors the decoded palette entries addressed by the packed map
+    /// @param packedIndices the packed palette indices with two 4-bit entries per byte
+    /// @param visibleWidth the visible palette-map width in samples
+    /// @param visibleHeight the visible palette-map height in samples
+    /// @param packedFullWidth the coded palette-map width in samples used to derive the packed stride
+    /// @return the expanded palette-mapped sample raster
+    private static int[][] expandPackedPaletteSamples(
+            int[] paletteColors,
+            byte[] packedIndices,
+            int visibleWidth,
+            int visibleHeight,
+            int packedFullWidth
+    ) {
+        int[][] samples = new int[visibleHeight][visibleWidth];
+        int packedStride = packedFullWidth >> 1;
+        for (int y = 0; y < visibleHeight; y++) {
+            int packedRow = y * packedStride;
+            for (int x = 0; x < visibleWidth; x++) {
+                int paletteIndex = packedPaletteIndexAt(packedIndices, packedRow, x);
+                samples[y][x] = paletteColors[paletteIndex];
+            }
+        }
+        return samples;
+    }
+
+    /// Returns one unpacked palette index from the packed two-4-bit-per-byte raster layout.
+    ///
+    /// @param packedIndices the packed palette indices
+    /// @param packedRow the starting byte offset of the current packed row
+    /// @param x the zero-based sample coordinate within the current row
+    /// @return the unpacked palette index at the requested sample coordinate
+    private static int packedPaletteIndexAt(byte[] packedIndices, int packedRow, int x) {
+        int packedByte = packedIndices[packedRow + (x >> 1)] & 0xFF;
+        return (x & 1) == 0 ? packedByte & 0x0F : (packedByte >>> 4) & 0x0F;
     }
 
     /// Decodes one reduced still-picture syntax result from a combined `FRAME` OBU fixture.
@@ -2150,6 +2308,25 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             FrameHeader.TransformMode transformMode
     ) {
+        return createPaletteEnabledAssembly(pixelFormat, new byte[0], codedWidth, codedHeight, transformMode);
+    }
+
+    /// Creates one synthetic single-tile frame assembly whose sequence explicitly enables screen
+    /// content tools for palette-mode integration coverage.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return one synthetic single-tile frame assembly with palette-capable sequence features
+    private static FrameAssembly createPaletteEnabledAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
         SequenceHeader sequenceHeader = createSyntheticSequenceHeader(
                 pixelFormat,
                 codedWidth,
@@ -2157,14 +2334,21 @@ final class FrameReconstructorIntegrationTest {
                 false,
                 SequenceHeader.AdaptiveBoolean.ON
         );
-        FrameHeader frameHeader = createSyntheticFrameHeader(FrameType.KEY, codedWidth, codedHeight, 1, transformMode);
+        FrameHeader frameHeader = createSyntheticFrameHeader(
+                FrameType.KEY,
+                codedWidth,
+                codedHeight,
+                1,
+                transformMode,
+                true
+        );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
                 0,
                 0,
-                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
     }
@@ -2271,7 +2455,14 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             int tileColumns
     ) {
-        return createSyntheticFrameHeader(frameType, codedWidth, codedHeight, tileColumns, FrameHeader.TransformMode.LARGEST);
+        return createSyntheticFrameHeader(
+                frameType,
+                codedWidth,
+                codedHeight,
+                tileColumns,
+                FrameHeader.TransformMode.LARGEST,
+                false
+        );
     }
 
     /// Creates one synthetic frame header for reconstruction integration tests.
@@ -2289,6 +2480,26 @@ final class FrameReconstructorIntegrationTest {
             int tileColumns,
             FrameHeader.TransformMode transformMode
     ) {
+        return createSyntheticFrameHeader(frameType, codedWidth, codedHeight, tileColumns, transformMode, false);
+    }
+
+    /// Creates one synthetic frame header for reconstruction integration tests.
+    ///
+    /// @param frameType the frame type to expose
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param tileColumns the number of horizontal tiles to expose
+    /// @param transformMode the frame transform mode
+    /// @param allowScreenContentTools whether the synthetic frame enables screen-content tools
+    /// @return one synthetic frame header for reconstruction integration tests
+    private static FrameHeader createSyntheticFrameHeader(
+            FrameType frameType,
+            int codedWidth,
+            int codedHeight,
+            int tileColumns,
+            FrameHeader.TransformMode transformMode,
+            boolean allowScreenContentTools
+    ) {
         int[] columnStarts = new int[tileColumns + 1];
         for (int i = 0; i <= tileColumns; i++) {
             columnStarts[i] = i;
@@ -2305,7 +2516,7 @@ final class FrameReconstructorIntegrationTest {
                 false,
                 true,
                 false,
-                false,
+                allowScreenContentTools,
                 true,
                 false,
                 7,
@@ -2500,6 +2711,28 @@ final class FrameReconstructorIntegrationTest {
             FrameHeader.TransformMode transformMode
     ) {
         return TileDecodeContext.create(createAssembly(pixelFormat, payload, codedWidth, codedHeight, transformMode), 0);
+    }
+
+    /// Creates one tile-local decode context that keeps screen-content tools enabled for real
+    /// palette integration fixtures.
+    ///
+    /// @param payload the collected tile entropy payload
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the synthetic frame transform mode
+    /// @return one tile-local decode context with palette-capable sequence features
+    private static TileDecodeContext createPaletteEnabledTileContext(
+            byte[] payload,
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        return TileDecodeContext.create(
+                createPaletteEnabledAssembly(pixelFormat, payload, codedWidth, codedHeight, transformMode),
+                0
+        );
     }
 
     /// Creates a reduced still-picture sequence-header OBU packet.

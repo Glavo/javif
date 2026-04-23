@@ -18,16 +18,30 @@ package org.glavo.avif.decode;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
+import org.glavo.avif.internal.av1.decode.BlockNeighborContext;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileDecodeContext;
+import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
+import org.glavo.avif.internal.av1.decode.TileResidualSyntaxReader;
+import org.glavo.avif.internal.av1.decode.TileTransformLayoutReader;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
+import org.glavo.avif.internal.av1.model.BlockPosition;
+import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.TileBitstream;
+import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.internal.av1.model.TransformLayout;
+import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
+import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.io.BufferedInput;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -43,6 +57,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -62,6 +77,11 @@ final class Av1ImageReaderTest {
     private static final byte[] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
+
+    /// One deterministic real tile payload whose first visible `8x8` key-frame leaf uses both luma
+    /// and chroma palettes.
+    private static final byte[] PALETTE_BLOCK_TILE_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
     /// The expected packed opaque gray pixel produced by the supported still-picture payload.
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
@@ -326,6 +346,53 @@ final class Av1ImageReaderTest {
         )) {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that one standalone `show_existing_frame` header can expose a reconstructed palette
+    /// surface whose stored syntax/result state comes from a deterministic real bitstream fixture
+    /// rather than synthetic leaf injection.
+    ///
+    /// @throws Exception if the real palette fixture cannot be decoded or injected
+    @Test
+    void readFrameReturnsArgbIntFrameForShowExistingFrameBackedByRealBitstreamDerivedPaletteReferenceSurface() throws Exception {
+        InjectedReferenceState referenceState = createRealPaletteReferenceStateFromBitstreamFixture();
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(referenceState.referenceSurfaceSnapshot());
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject real palette reference state", exception);
+            }
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that one combined `FRAME` `show_existing_frame` OBU also reuses a real
+    /// bitstream-derived palette surface through the public reader.
+    ///
+    /// @throws Exception if the real palette fixture cannot be decoded or injected
+    @Test
+    void readFrameReturnsStoredReferenceSurfaceForCombinedShowExistingFrameBackedByRealBitstreamDerivedPaletteState() throws Exception {
+        InjectedReferenceState referenceState = createRealPaletteReferenceStateFromBitstreamFixture();
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(referenceState.referenceSurfaceSnapshot());
+        byte[] stream = obu(6, showExistingFrameHeaderPayload(0));
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            injectShowExistingReferenceState(reader, referenceState);
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         }
     }
@@ -632,6 +699,205 @@ final class Av1ImageReaderTest {
         }
     }
 
+    /// Decodes one deterministic real palette tile payload into structural and reconstructed
+    /// reference-slot state for public-reader `show_existing_frame` coverage.
+    ///
+    /// @return one reconstructed reference-slot state derived from the real palette fixture
+    /// @throws IOException if the real fixture cannot be structurally decoded or reconstructed
+    private static InjectedReferenceState createRealPaletteReferenceStateFromBitstreamFixture() throws IOException {
+        FrameAssembly assembly = createRealPaletteSingleTileAssemblyFromFixture();
+        TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        TileBlockHeaderReader.BlockHeader blockHeader =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
+        TransformLayout transformLayout = new TileTransformLayoutReader(tileContext).read(blockHeader, neighborContext);
+        ResidualLayout residualLayout = new TileResidualSyntaxReader(tileContext).read(blockHeader, transformLayout, neighborContext);
+        TilePartitionTreeReader.LeafNode paletteLeaf =
+                new TilePartitionTreeReader.LeafNode(blockHeader, transformLayout, residualLayout);
+        FrameSyntaxDecodeResult syntaxResult = createSingleLeafSyntaxResult(assembly, paletteLeaf);
+        requireFirstPaletteLeaf(syntaxResult);
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxResult);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                new ReferenceSurfaceSnapshot(assembly.frameHeader(), syntaxResult, decodedPlanes);
+
+        return new InjectedReferenceState(
+                parseFullSequenceHeader(),
+                assembly.frameHeader(),
+                syntaxResult,
+                referenceSurfaceSnapshot
+        );
+    }
+
+    /// Creates one complete single-tile frame assembly whose tile bytes come from the deterministic
+    /// real palette fixture used by block-header tests.
+    ///
+    /// @return one complete single-tile frame assembly whose tile bytes come from the real palette fixture
+    private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture() {
+        SequenceHeader sequenceHeader = new SequenceHeader(
+                0,
+                64,
+                64,
+                new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
+                new SequenceHeader.OperatingPoint[]{
+                        new SequenceHeader.OperatingPoint(2, 0, 10, 0, false, false, false, null)
+                },
+                true,
+                true,
+                15,
+                15,
+                false,
+                0,
+                0,
+                new SequenceHeader.FeatureConfig(
+                        false,
+                        false,
+                        false,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        0,
+                        false,
+                        false,
+                        false,
+                        false
+                ),
+                new SequenceHeader.ColorConfig(
+                        8,
+                        false,
+                        false,
+                        2,
+                        2,
+                        2,
+                        true,
+                        PixelFormat.I420,
+                        0,
+                        true,
+                        true,
+                        false
+                )
+        );
+        FrameHeader frameHeader = new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.KEY,
+                true,
+                false,
+                true,
+                false,
+                true,
+                true,
+                false,
+                7,
+                0,
+                0xFF,
+                false,
+                new int[]{-1, -1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(64, 64, 64, 64, 64),
+                new FrameHeader.SuperResolutionInfo(false, 8),
+                false,
+                false,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                false,
+                false
+        );
+
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), PALETTE_BLOCK_TILE_PAYLOAD, 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                PALETTE_BLOCK_TILE_PAYLOAD.length,
+                new TileBitstream[]{new TileBitstream(0, PALETTE_BLOCK_TILE_PAYLOAD, 0, PALETTE_BLOCK_TILE_PAYLOAD.length)}
+        );
+        return assembly;
+    }
+
+    /// Wraps one real bitstream-derived leaf in a minimal single-tile syntax result.
+    ///
+    /// @param assembly the frame assembly that owns the decoded leaf
+    /// @param leafNode the real bitstream-derived leaf node
+    /// @return one minimal single-tile syntax result that exposes the supplied leaf
+    private static FrameSyntaxDecodeResult createSingleLeafSyntaxResult(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.LeafNode leafNode
+    ) {
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{{leafNode}},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates the default per-segment data used by deterministic single-frame fixture assemblies.
+    ///
+    /// @return the default per-segment data used by deterministic single-frame fixture assemblies
+    private static FrameHeader.SegmentData[] defaultSegments() {
+        FrameHeader.SegmentData[] segments = new FrameHeader.SegmentData[8];
+        for (int i = 0; i < segments.length; i++) {
+            segments[i] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, false);
+        }
+        return segments;
+    }
+
     /// Creates one synthetic two-tile stored reference slot that reuses the real current supported
     /// opaque gray still-picture surface.
     ///
@@ -821,6 +1087,25 @@ final class Av1ImageReaderTest {
         assertArgbBlockEquals(frame, 0, 0, LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
     }
 
+    /// Asserts that one decoded still-picture frame exactly matches one stored reconstructed
+    /// reference surface exposed through the public `show_existing_frame` path.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param referenceSurfaceSnapshot the stored reconstructed reference surface that should be exposed
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertStillPictureFrameMatchesReferenceSurface(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot,
+            long expectedPresentationIndex
+    ) {
+        assertNotNull(decodedFrame);
+        assertTrue(decodedFrame instanceof ArgbIntFrame);
+
+        ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
+        assertDecodedStillPictureFrameMetadata(frame, expectedPresentationIndex);
+        assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes()), frame.pixels());
+    }
+
     /// Asserts that the reader returned one still-picture frame filled with one constant pixel.
     ///
     /// @param decodedFrame the decoded frame returned by the public reader
@@ -876,6 +1161,22 @@ final class Av1ImageReaderTest {
         assertEquals(FrameType.KEY, decodedFrame.frameType());
         assertTrue(decodedFrame.visible());
         assertEquals(expectedPresentationIndex, decodedFrame.presentationIndex());
+    }
+
+    /// Returns the first raster-order leaf whose decoded block header carries luma or chroma palette state.
+    ///
+    /// @param syntaxResult the structural decode result produced by the public reader
+    /// @return the first raster-order leaf whose decoded block header carries palette state
+    private static TilePartitionTreeReader.LeafNode requireFirstPaletteLeaf(FrameSyntaxDecodeResult syntaxResult) {
+        List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxResult.tileRoots(0));
+        for (TilePartitionTreeReader.LeafNode leaf : leaves) {
+            if (leaf.header().yPaletteSize() > 0 || leaf.header().uvPaletteSize() > 0) {
+                assertTrue(leaf.header().yPaletteSize() > 0);
+                assertTrue(leaf.header().uvPaletteSize() > 0);
+                return leaf;
+            }
+        }
+        throw new AssertionError("No palette leaf decoded from the real bitstream-derived fixture");
     }
 
     /// Asserts that every refreshed reference slot stores structural state for the same decoded frame.
