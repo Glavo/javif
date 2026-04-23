@@ -50,7 +50,6 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.Channels;
@@ -738,6 +737,55 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Verifies that one stored high-bit-depth reference surface is exposed as an `ArgbLongFrame`
+    /// through the public `show_existing_frame` path.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameReturnsArgbLongFrameForStoredHighBitDepthReferenceSurface() throws Exception {
+        InjectedReferenceState referenceState =
+                createSyntheticStoredReferenceStateWithHighBitDepthSurface(PixelFormat.I444, 12, 2048);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject synthetic high-bit-depth reference state", exception);
+            }
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertTrue(decodedFrame instanceof ArgbLongFrame);
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that `decodeFrameType = KEY` suppresses one stored non-key surface on the public
+    /// `show_existing_frame` path.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameSuppressesStoredNonKeySurfaceWhenDecodeFrameTypeIsKey() throws Exception {
+        InjectedReferenceState referenceState = createSyntheticStoredReferenceStateForDecodeFilter(FrameType.INTER, 0xFF);
+        Av1DecoderConfig config = Av1DecoderConfig.builder().decodeFrameType(DecodeFrameType.KEY).build();
+        assertStoredShowExistingFrameIsSuppressedByDecodeFrameType(referenceState, config);
+    }
+
+    /// Verifies that `decodeFrameType = REFERENCE` suppresses one stored non-reference surface on
+    /// the public `show_existing_frame` path.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameSuppressesStoredNonReferenceSurfaceWhenDecodeFrameTypeIsReference() throws Exception {
+        InjectedReferenceState referenceState = createSyntheticStoredReferenceStateForDecodeFilter(FrameType.INTRA, 0);
+        Av1DecoderConfig config = Av1DecoderConfig.builder().decodeFrameType(DecodeFrameType.REFERENCE).build();
+        assertStoredShowExistingFrameIsSuppressedByDecodeFrameType(referenceState, config);
+    }
+
     /// Verifies that `show_existing_frame` fails with one stable not-implemented boundary when the
     /// referenced slot has syntax state but no reconstructed reference surface yet.
     @Test
@@ -842,6 +890,32 @@ final class Av1ImageReaderTest {
         }
     }
 
+    /// Asserts that one stored `show_existing_frame` surface is parsed but suppressed by the
+    /// configured public decode-frame-type filter across every buffered-input adapter.
+    ///
+    /// @param referenceState the stored reference state that should be parsed but not exposed
+    /// @param config the decoder configuration whose frame-type filter should suppress output
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertStoredShowExistingFrameIsSuppressedByDecodeFrameType(
+            InjectedReferenceState referenceState,
+            Av1DecoderConfig config
+    ) throws IOException {
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+        assertAcrossBufferedInputs(stream, config, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject decode-filter reference state", exception);
+            }
+
+            assertTrue(reader.readAllFrames().isEmpty());
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertSame(referenceState.frameHeader(), reader.referenceFrameHeader(0));
+            assertSame(referenceState.syntaxResult(), reader.referenceFrameSyntaxResult(0));
+            assertSame(referenceState.referenceSurfaceSnapshot(), reader.referenceSurfaceSnapshot(0));
+        });
+    }
+
     /// Captures one populated supported-still-picture reference slot for later `show_existing_frame`
     /// reuse tests.
     ///
@@ -856,17 +930,11 @@ final class Av1ImageReaderTest {
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(sourceStream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
-            FrameHeader[] frameHeaders = getPrivateField(reader, "referenceFrameHeaders", FrameHeader[].class);
-            FrameSyntaxDecodeResult[] syntaxResults =
-                    getPrivateField(reader, "referenceFrameSyntaxResults", FrameSyntaxDecodeResult[].class);
-            ReferenceSurfaceSnapshot[] surfaceSnapshots =
-                    getPrivateField(reader, "referenceSurfaceSnapshots", ReferenceSurfaceSnapshot[].class);
-
             return new InjectedReferenceState(
                     parseFullSequenceHeader(),
-                    frameHeaders[0],
-                    syntaxResults[0],
-                    surfaceSnapshots[0]
+                    Objects.requireNonNull(reader.referenceFrameHeader(0), "frame header"),
+                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "syntax result"),
+                    Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface")
             );
         }
     }
@@ -1143,6 +1211,66 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Creates one synthetic stored reference slot whose reconstructed surface uses the requested
+    /// high bit depth and chroma layout.
+    ///
+    /// @param pixelFormat the synthetic chroma layout to expose
+    /// @param bitDepth the requested stored-surface bit depth
+    /// @param sampleValue the constant unsigned sample value stored in every plane sample
+    /// @return one synthetic stored reference slot for the requested high-bit-depth surface
+    /// @throws Exception if the base still-picture metadata cannot be captured
+    private static InjectedReferenceState createSyntheticStoredReferenceStateWithHighBitDepthSurface(
+            PixelFormat pixelFormat,
+            int bitDepth,
+            int sampleValue
+    ) throws Exception {
+        InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
+        SequenceHeader sequenceHeader =
+                copySequenceHeaderWithPixelFormatAndBitDepth(baseReferenceState.sequenceHeader(), pixelFormat, bitDepth);
+        FrameHeader frameHeader = baseReferenceState.frameHeader();
+        FrameSyntaxDecodeResult syntaxResult = createSyntheticStoredReferenceSyntaxResult(sequenceHeader, frameHeader);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                frameHeader,
+                syntaxResult,
+                createFilledDecodedPlanes(frameHeader, pixelFormat, bitDepth, sampleValue)
+        );
+        return new InjectedReferenceState(
+                sequenceHeader,
+                frameHeader,
+                syntaxResult,
+                referenceSurfaceSnapshot
+        );
+    }
+
+    /// Creates one synthetic stored reference slot whose header is modified only for
+    /// decode-frame-type filtering tests.
+    ///
+    /// @param frameType the replacement frame type
+    /// @param refreshFrameFlags the replacement refresh flags
+    /// @return one synthetic stored reference slot with the requested filter-relevant header fields
+    /// @throws Exception if the base still-picture metadata cannot be captured
+    private static InjectedReferenceState createSyntheticStoredReferenceStateForDecodeFilter(
+            FrameType frameType,
+            int refreshFrameFlags
+    ) throws Exception {
+        InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
+        FrameHeader filteredFrameHeader =
+                copyFrameHeaderWithFrameTypeAndRefreshFlags(baseReferenceState.frameHeader(), frameType, refreshFrameFlags);
+        FrameSyntaxDecodeResult syntaxResult =
+                createSyntheticStoredReferenceSyntaxResult(baseReferenceState.sequenceHeader(), filteredFrameHeader);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                filteredFrameHeader,
+                syntaxResult,
+                Objects.requireNonNull(baseReferenceState.referenceSurfaceSnapshot(), "reference surface").decodedPlanes()
+        );
+        return new InjectedReferenceState(
+                baseReferenceState.sequenceHeader(),
+                filteredFrameHeader,
+                syntaxResult,
+                referenceSurfaceSnapshot
+        );
+    }
+
     /// Creates one synthetic stored reference slot whose frame header carries minimal explicit film
     /// grain while reusing the current supported still-picture surface.
     ///
@@ -1359,7 +1487,36 @@ final class Av1ImageReaderTest {
             SequenceHeader baseSequenceHeader,
             PixelFormat pixelFormat
     ) {
+        return copySequenceHeaderWithPixelFormatAndBitDepth(
+                baseSequenceHeader,
+                pixelFormat,
+                baseSequenceHeader.colorConfig().bitDepth()
+        );
+    }
+
+    /// Copies one full-sequence-header fixture while replacing the exposed chroma layout and
+    /// decoded bit depth.
+    ///
+    /// @param baseSequenceHeader the full sequence header to copy
+    /// @param pixelFormat the replacement chroma layout
+    /// @param bitDepth the replacement decoded bit depth
+    /// @return one copied full sequence header with the requested chroma layout and bit depth
+    private static SequenceHeader copySequenceHeaderWithPixelFormatAndBitDepth(
+            SequenceHeader baseSequenceHeader,
+            PixelFormat pixelFormat,
+            int bitDepth
+    ) {
+        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
+            throw new IllegalArgumentException("Unsupported synthetic stored reference bit depth: " + bitDepth);
+        }
         SequenceHeader.ColorConfig baseColorConfig = baseSequenceHeader.colorConfig();
+        int profile = switch (pixelFormat) {
+            case I422 -> 2;
+            case I444 -> bitDepth == 12 ? 2 : 1;
+            case I400, I420 -> throw new IllegalArgumentException(
+                    "Synthetic stored reference helper expects I422 or I444: " + pixelFormat
+            );
+        };
         boolean chromaSubsamplingX = switch (pixelFormat) {
             case I422 -> true;
             case I444 -> false;
@@ -1375,7 +1532,7 @@ final class Av1ImageReaderTest {
         };
 
         return new SequenceHeader(
-                baseSequenceHeader.profile(),
+                profile,
                 baseSequenceHeader.maxWidth(),
                 baseSequenceHeader.maxHeight(),
                 baseSequenceHeader.timingInfo(),
@@ -1389,7 +1546,7 @@ final class Av1ImageReaderTest {
                 baseSequenceHeader.frameIdBits(),
                 baseSequenceHeader.features(),
                 new SequenceHeader.ColorConfig(
-                        baseColorConfig.bitDepth(),
+                        bitDepth,
                         baseColorConfig.monochrome(),
                         baseColorConfig.colorDescriptionPresent(),
                         baseColorConfig.colorPrimaries(),
@@ -1436,6 +1593,44 @@ final class Av1ImageReaderTest {
                 createFilledPlane(frameSize.codedWidth(), frameSize.height(), 128),
                 createFilledPlane(chromaWidth, chromaHeight, 128),
                 createFilledPlane(chromaWidth, chromaHeight, 128)
+        );
+    }
+
+    /// Creates one decoded-plane snapshot filled with one constant sample value in the requested
+    /// bit depth and chroma layout.
+    ///
+    /// @param frameHeader the frame header whose coded and render dimensions should be used
+    /// @param pixelFormat the chroma layout to expose
+    /// @param bitDepth the requested decoded bit depth
+    /// @param sampleValue the constant unsigned sample value to store
+    /// @return one decoded-plane snapshot filled with the requested sample value
+    private static DecodedPlanes createFilledDecodedPlanes(
+            FrameHeader frameHeader,
+            PixelFormat pixelFormat,
+            int bitDepth,
+            int sampleValue
+    ) {
+        FrameHeader.FrameSize frameSize = frameHeader.frameSize();
+        int chromaWidth = switch (pixelFormat) {
+            case I400 -> 0;
+            case I420, I422 -> (frameSize.codedWidth() + 1) / 2;
+            case I444 -> frameSize.codedWidth();
+        };
+        int chromaHeight = switch (pixelFormat) {
+            case I400 -> 0;
+            case I420 -> (frameSize.height() + 1) / 2;
+            case I422, I444 -> frameSize.height();
+        };
+        return new DecodedPlanes(
+                bitDepth,
+                pixelFormat,
+                frameSize.codedWidth(),
+                frameSize.height(),
+                frameSize.renderWidth(),
+                frameSize.renderHeight(),
+                createFilledPlane(frameSize.codedWidth(), frameSize.height(), sampleValue),
+                pixelFormat == PixelFormat.I400 ? null : createFilledPlane(chromaWidth, chromaHeight, sampleValue),
+                pixelFormat == PixelFormat.I400 ? null : createFilledPlane(chromaWidth, chromaHeight, sampleValue)
         );
     }
 
@@ -1553,24 +1748,69 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Copies one real supported still-picture frame header while replacing only its frame type and
+    /// refresh flags.
+    ///
+    /// @param baseFrameHeader the real supported still-picture frame header to copy
+    /// @param frameType the replacement frame type
+    /// @param refreshFrameFlags the replacement refresh flags
+    /// @return one copied frame header whose frame type and refresh flags match the requested values
+    private static FrameHeader copyFrameHeaderWithFrameTypeAndRefreshFlags(
+            FrameHeader baseFrameHeader,
+            FrameType frameType,
+            int refreshFrameFlags
+    ) {
+        return new FrameHeader(
+                baseFrameHeader.temporalId(),
+                baseFrameHeader.spatialId(),
+                baseFrameHeader.showExistingFrame(),
+                baseFrameHeader.existingFrameIndex(),
+                baseFrameHeader.frameId(),
+                baseFrameHeader.framePresentationDelay(),
+                frameType,
+                baseFrameHeader.showFrame(),
+                baseFrameHeader.showableFrame(),
+                baseFrameHeader.errorResilientMode(),
+                baseFrameHeader.disableCdfUpdate(),
+                baseFrameHeader.allowScreenContentTools(),
+                baseFrameHeader.forceIntegerMotionVectors(),
+                baseFrameHeader.frameSizeOverride(),
+                baseFrameHeader.primaryRefFrame(),
+                baseFrameHeader.frameOffset(),
+                refreshFrameFlags,
+                baseFrameHeader.frameSize(),
+                baseFrameHeader.superResolution(),
+                baseFrameHeader.allowIntrabc(),
+                baseFrameHeader.refreshContext(),
+                baseFrameHeader.tiling(),
+                baseFrameHeader.quantization(),
+                baseFrameHeader.segmentation(),
+                baseFrameHeader.delta(),
+                baseFrameHeader.allLossless(),
+                baseFrameHeader.loopFilter(),
+                baseFrameHeader.cdef(),
+                baseFrameHeader.restoration(),
+                baseFrameHeader.transformMode(),
+                baseFrameHeader.reducedTransformSet(),
+                baseFrameHeader.filmGrain()
+        );
+    }
+
     /// Injects one synthetic `show_existing_frame` state into a fresh reader.
     ///
     /// @param reader the fresh reader that should expose the injected state
     /// @param referenceState the reference state to inject into slot `0`
-    /// @throws Exception if reflection-based field access fails
     private static void injectShowExistingReferenceState(
             Av1ImageReader reader,
             InjectedReferenceState referenceState
-    ) throws Exception {
-        setPrivateField(reader, "sequenceHeader", referenceState.sequenceHeader());
-        FrameHeader[] frameHeaders = getPrivateField(reader, "referenceFrameHeaders", FrameHeader[].class);
-        FrameSyntaxDecodeResult[] syntaxResults =
-                getPrivateField(reader, "referenceFrameSyntaxResults", FrameSyntaxDecodeResult[].class);
-        ReferenceSurfaceSnapshot[] surfaceSnapshots =
-                getPrivateField(reader, "referenceSurfaceSnapshots", ReferenceSurfaceSnapshot[].class);
-        frameHeaders[0] = referenceState.frameHeader();
-        syntaxResults[0] = referenceState.syntaxResult();
-        surfaceSnapshots[0] = referenceState.referenceSurfaceSnapshot();
+    ) {
+        reader.injectReferenceStateForTest(
+                0,
+                referenceState.sequenceHeader(),
+                referenceState.frameHeader(),
+                referenceState.syntaxResult(),
+                referenceState.referenceSurfaceSnapshot()
+        );
     }
 
     /// Parses the test-only full sequence header that enables `show_existing_frame`.
@@ -1595,32 +1835,6 @@ final class Av1ImageReaderTest {
                 ),
                 false
         );
-    }
-
-    /// Reads one private field from the supplied object and casts it to the requested type.
-    ///
-    /// @param target the object whose field should be read
-    /// @param fieldName the private field name
-    /// @param fieldType the expected field type
-    /// @param <T> the expected field type
-    /// @return the private field value cast to the requested type
-    /// @throws Exception if reflection-based field access fails
-    private static <T> T getPrivateField(Object target, String fieldName, Class<T> fieldType) throws Exception {
-        Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        return fieldType.cast(field.get(target));
-    }
-
-    /// Writes one private field on the supplied object.
-    ///
-    /// @param target the object whose field should be written
-    /// @param fieldName the private field name
-    /// @param value the value to assign
-    /// @throws Exception if reflection-based field access fails
-    private static void setPrivateField(Object target, String fieldName, Object value) throws Exception {
-        Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.set(target, value);
     }
 
     /// Asserts that the reader returned one supported opaque gray still-picture frame.
@@ -1672,15 +1886,21 @@ final class Av1ImageReaderTest {
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
-        assertTrue(decodedFrame instanceof ArgbIntFrame);
-
-        ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
+        DecodedPlanes decodedPlanes = referenceSurfaceSnapshot.decodedPlanes();
         assertDecodedStillPictureFrameMetadata(
-                frame,
-                referenceSurfaceSnapshot.decodedPlanes().pixelFormat(),
+                decodedFrame,
+                decodedPlanes.bitDepth(),
+                decodedPlanes.pixelFormat(),
+                referenceSurfaceSnapshot.frameHeader().frameType(),
                 expectedPresentationIndex
         );
-        assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes()), frame.pixels());
+        if (decodedPlanes.bitDepth() == 8) {
+            assertTrue(decodedFrame instanceof ArgbIntFrame);
+            assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(decodedPlanes), ((ArgbIntFrame) decodedFrame).pixels());
+        } else {
+            assertTrue(decodedFrame instanceof ArgbLongFrame);
+            assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes), ((ArgbLongFrame) decodedFrame).pixels());
+        }
     }
 
     /// Asserts that the reader returned one still-picture frame filled with one constant pixel.
@@ -1748,12 +1968,36 @@ final class Av1ImageReaderTest {
             PixelFormat expectedPixelFormat,
             long expectedPresentationIndex
     ) {
+        assertDecodedStillPictureFrameMetadata(
+                decodedFrame,
+                8,
+                expectedPixelFormat,
+                FrameType.KEY,
+                expectedPresentationIndex
+        );
+    }
+
+    /// Asserts the stable decoded-frame metadata shared by the current `64x64` still-picture
+    /// fixtures for one explicit bit depth and frame type.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedBitDepth the expected decoded bit depth exposed by the public frame
+    /// @param expectedPixelFormat the expected chroma layout exposed by the public frame
+    /// @param expectedFrameType the expected AV1 frame type exposed by the public frame
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertDecodedStillPictureFrameMetadata(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            int expectedBitDepth,
+            PixelFormat expectedPixelFormat,
+            FrameType expectedFrameType,
+            long expectedPresentationIndex
+    ) {
         assertNotNull(decodedFrame);
         assertEquals(64, decodedFrame.width());
         assertEquals(64, decodedFrame.height());
-        assertEquals(8, decodedFrame.bitDepth());
+        assertEquals(expectedBitDepth, decodedFrame.bitDepth());
         assertEquals(expectedPixelFormat, decodedFrame.pixelFormat());
-        assertEquals(FrameType.KEY, decodedFrame.frameType());
+        assertEquals(expectedFrameType, decodedFrame.frameType());
         assertTrue(decodedFrame.visible());
         assertEquals(expectedPresentationIndex, decodedFrame.presentationIndex());
     }

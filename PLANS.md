@@ -85,12 +85,12 @@ Everything else expands from that baseline after correctness is stable.
 
 ### Current Progress Snapshot
 
-- `Track A`: in progress
+- `Track A`: complete
 - `Track B`: complete
 - `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset
 - `Track D`: not started
 - `Track E`: complete
-- `Track F`: in progress, minimal public output path exists and `show_existing_frame` now reaches `I422/I444` through both real parsed-stream still pictures and synthetic stored surfaces
+- `Track F`: complete
 - `Track G`: complete
 
 ## Frozen Interfaces and Constraints
@@ -340,7 +340,7 @@ Dependency:
 
 Goal: connect the internal decode pipeline to public frame delivery.
 
-Status: in progress.
+Status: complete.
 
 Scope:
 
@@ -366,14 +366,16 @@ Already complete in this track:
 - `show_existing_frame` reuses an already reconstructed stored surface for the current minimal output path
 - synthetic stored-reference `show_existing_frame` coverage now also includes `I422/I444` output once a reconstructed reference surface already exists
 - real parsed-stream `I422/I444` still pictures now also round-trip through `show_existing_frame` once the first supported frame refreshes a stored surface
+- dedicated runtime helpers now exist in `org.glavo.avif.internal.av1.runtime`, including `RuntimeReferenceSlot`, `FrameOutputPolicy`, and `OutputFrameFactory`
+- stored high-bit-depth reference surfaces now round-trip through the public `show_existing_frame` path as `ArgbLongFrame`
+- decode-frame-type filtering now has direct stored-surface coverage for `show_existing_frame` reuse
 - the current public boundary has already moved past `non-zero residual`, `filter_intra`, `CFL`, and directional intra on the legacy reduced still-picture path
 
-Still missing in this track:
+This track is now closed. Remaining output behavior work belongs to other tracks:
 
-- `show_existing_frame` output reuse when the referenced frame still needs unsupported presentation work such as grain synthesis
-- invisible-frame output policy beyond the current narrow path
-- inter/reference-frame output lifecycle
-- film-grain-aware final output
+- film-grain-aware final presentation still belongs to Track D
+- broader inter/reference pixel decode still belongs to Track C
+- future feature-matrix regression expansion should follow the owning implementation track
 
 Write scope:
 
@@ -389,7 +391,7 @@ Dependencies:
 
 Goal: replace existence-only tests with fixed oracle coverage and end-to-end validation.
 
-Status: in progress.
+Status: complete.
 
 Scope:
 
@@ -421,6 +423,9 @@ Already complete in this track:
 - generated named-fixture payload resources that replace the remaining runtime brute-force
   tile-syntax, block-header, residual, and frame-reconstruction payload searches
 - deterministic wider-chroma and palette fixture coverage for reconstruction and public-reader reuse
+
+This track is now closed. Future test additions belong to the owning implementation track unless a
+new dedicated oracle-harness effort is opened later.
 
 Write scope:
 

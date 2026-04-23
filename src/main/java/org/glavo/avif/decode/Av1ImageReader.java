@@ -27,7 +27,6 @@ import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
-import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
@@ -35,13 +34,15 @@ import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
+import org.glavo.avif.internal.av1.runtime.FrameOutputPolicy;
+import org.glavo.avif.internal.av1.runtime.OutputFrameFactory;
+import org.glavo.avif.internal.av1.runtime.RuntimeReferenceSlot;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -64,12 +65,8 @@ public final class Av1ImageReader implements AutoCloseable {
     private final TileBitstreamParser tileBitstreamParser;
     /// The most recently parsed sequence header.
     private @Nullable SequenceHeader sequenceHeader;
-    /// The refreshed frame headers stored by reference-frame slot.
-    private final FrameHeader[] referenceFrameHeaders;
-    /// The structural decode results stored by refreshed reference-frame slot.
-    private final @Nullable FrameSyntaxDecodeResult[] referenceFrameSyntaxResults;
-    /// The reconstructed reference surfaces stored by refreshed reference-frame slot.
-    private final @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots;
+    /// The runtime reference slots used for syntax inheritance and stored-surface reuse.
+    private final RuntimeReferenceSlot[] referenceSlots;
     /// The currently assembled frame when tile groups span multiple OBUs.
     private @Nullable FrameAssembly pendingFrameAssembly;
     /// The most recently completed structural frame-decode result.
@@ -93,9 +90,7 @@ public final class Av1ImageReader implements AutoCloseable {
         this.frameHeaderParser = new FrameHeaderParser();
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
         this.tileBitstreamParser = new TileBitstreamParser();
-        this.referenceFrameHeaders = new FrameHeader[8];
-        this.referenceFrameSyntaxResults = new FrameSyntaxDecodeResult[8];
-        this.referenceSurfaceSnapshots = new ReferenceSurfaceSnapshot[8];
+        this.referenceSlots = createReferenceSlots(8);
         this.frameReconstructor = new FrameReconstructor();
     }
 
@@ -136,9 +131,7 @@ public final class Av1ImageReader implements AutoCloseable {
             if (type == ObuType.SEQUENCE_HEADER) {
                 ensureNoPendingFrameAssembly(packet, "Sequence header OBU appeared before the current frame was completed");
                 sequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
-                Arrays.fill(referenceFrameHeaders, null);
-                Arrays.fill(referenceFrameSyntaxResults, null);
-                Arrays.fill(referenceSurfaceSnapshots, null);
+                clearReferenceSlots();
                 lastFrameSyntaxDecodeResult = null;
                 continue;
             }
@@ -234,10 +227,71 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param slot the zero-based reference-frame slot
     /// @return one refreshed reference-frame structural decode result, or `null`
     @Nullable FrameSyntaxDecodeResult referenceFrameSyntaxResult(int slot) {
-        if (slot < 0 || slot >= referenceFrameSyntaxResults.length) {
+        if (slot < 0 || slot >= referenceSlots.length) {
             throw new IndexOutOfBoundsException("slot out of range: " + slot);
         }
-        return referenceFrameSyntaxResults[slot];
+        return referenceSlots[slot].syntaxResult();
+    }
+
+    /// Returns one refreshed reference-frame header, or `null`.
+    ///
+    /// This accessor exists for same-package tests while the public output/runtime surface API is
+    /// still intentionally narrow.
+    ///
+    /// @param slot the zero-based reference-frame slot
+    /// @return one refreshed reference-frame header, or `null`
+    @Nullable FrameHeader referenceFrameHeader(int slot) {
+        if (slot < 0 || slot >= referenceSlots.length) {
+            throw new IndexOutOfBoundsException("slot out of range: " + slot);
+        }
+        return referenceSlots[slot].frameHeader();
+    }
+
+    /// Returns one refreshed reference-surface snapshot, or `null`.
+    ///
+    /// This accessor exists for same-package tests while the public output/runtime surface API is
+    /// still intentionally narrow.
+    ///
+    /// @param slot the zero-based reference-frame slot
+    /// @return one refreshed reference-surface snapshot, or `null`
+    @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot(int slot) {
+        if (slot < 0 || slot >= referenceSlots.length) {
+            throw new IndexOutOfBoundsException("slot out of range: " + slot);
+        }
+        return referenceSlots[slot].surfaceSnapshot();
+    }
+
+    /// Injects one full reference-slot state for same-package tests.
+    ///
+    /// This helper exists only so package-level tests can exercise public runtime behavior without
+    /// reflecting into private slot storage.
+    ///
+    /// @param slot the zero-based reference slot to refresh
+    /// @param sequenceHeader the active sequence header to associate with the injected slot
+    /// @param frameHeader the stored frame header for the injected slot
+    /// @param syntaxResult the stored structural syntax result for the injected slot
+    /// @param referenceSurfaceSnapshot the stored reconstructed reference surface snapshot, or `null`
+    void injectReferenceStateForTest(
+            int slot,
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader,
+            FrameSyntaxDecodeResult syntaxResult,
+            @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot
+    ) {
+        if (slot < 0 || slot >= referenceSlots.length) {
+            throw new IndexOutOfBoundsException("slot out of range: " + slot);
+        }
+
+        this.sequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
+        RuntimeReferenceSlot referenceSlot = referenceSlots[slot];
+        referenceSlot.clear();
+        referenceSlot.refreshSyntax(
+                Objects.requireNonNull(frameHeader, "frameHeader"),
+                Objects.requireNonNull(syntaxResult, "syntaxResult")
+        );
+        if (referenceSurfaceSnapshot != null) {
+            referenceSlot.refreshSurface(referenceSurfaceSnapshot);
+        }
     }
 
     /// Ensures that this reader has not already been closed.
@@ -257,7 +311,12 @@ public final class Av1ImageReader implements AutoCloseable {
         SequenceHeader activeSequenceHeader = requireSequenceHeader(packet);
         ensureNoPendingFrameAssembly(packet, "Standalone frame header OBU appeared before the previous frame was completed");
 
-        FrameHeader frameHeader = frameHeaderParser.parse(packet, activeSequenceHeader, config.strictStdCompliance(), referenceFrameHeaders);
+        FrameHeader frameHeader = frameHeaderParser.parse(
+                packet,
+                activeSequenceHeader,
+                config.strictStdCompliance(),
+                referenceFrameHeadersForParsing()
+        );
         enforceFrameSizeLimit(frameHeader, packet);
         if (frameHeader.showExistingFrame()) {
             return outputExistingFrame(packet, frameHeader.existingFrameIndex());
@@ -277,7 +336,13 @@ public final class Av1ImageReader implements AutoCloseable {
         ensureNoPendingFrameAssembly(packet, "Combined frame OBU appeared before the previous frame was completed");
 
         BitReader reader = new BitReader(packet.payload());
-        FrameHeader frameHeader = frameHeaderParser.parseFramePayload(reader, packet, activeSequenceHeader, config.strictStdCompliance(), referenceFrameHeaders);
+        FrameHeader frameHeader = frameHeaderParser.parseFramePayload(
+                reader,
+                packet,
+                activeSequenceHeader,
+                config.strictStdCompliance(),
+                referenceFrameHeadersForParsing()
+        );
         enforceFrameSizeLimit(frameHeader, packet);
         if (frameHeader.showExistingFrame()) {
             reader.byteAlign();
@@ -329,7 +394,7 @@ public final class Av1ImageReader implements AutoCloseable {
         FrameSyntaxDecodeResult storedSyntaxDecodeResult =
                 storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult);
         refreshReferenceFrameSyntaxState(frameHeader, storedSyntaxDecodeResult);
-        boolean shouldOutput = shouldOutputFrame(frameHeader);
+        boolean shouldOutput = FrameOutputPolicy.shouldOutputFrame(frameHeader, config);
         boolean needsSurfaceSnapshot = frameHeader.refreshFrameFlags() != 0;
 
         @Nullable DecodedPlanes decodedPlanes = null;
@@ -368,9 +433,9 @@ public final class Av1ImageReader implements AutoCloseable {
                     null
             );
         }
-        return ArgbOutput.toOpaqueArgbIntFrame(
+        return OutputFrameFactory.createFrame(
                 decodedPlanes,
-                frameHeader.frameType(),
+                frameHeader,
                 frameHeader.showFrame(),
                 nextPresentationIndex++
         );
@@ -483,7 +548,7 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param existingFrameIndex the referenced frame slot
     /// @throws DecodeException if the referenced frame slot has not been populated yet
     private void requireExistingFrameState(ObuPacket packet, int existingFrameIndex) throws DecodeException {
-        if (existingFrameIndex < 0 || existingFrameIndex >= referenceFrameHeaders.length) {
+        if (existingFrameIndex < 0 || existingFrameIndex >= referenceSlots.length) {
             throw new DecodeException(
                     DecodeErrorCode.STATE_VIOLATION,
                     DecodeStage.FRAME_DECODE,
@@ -493,7 +558,7 @@ public final class Av1ImageReader implements AutoCloseable {
                     null
             );
         }
-        if (referenceFrameHeaders[existingFrameIndex] == null || referenceFrameSyntaxResults[existingFrameIndex] == null) {
+        if (!referenceSlots[existingFrameIndex].hasSyntaxState()) {
             throw new DecodeException(
                     DecodeErrorCode.STATE_VIOLATION,
                     DecodeStage.FRAME_DECODE,
@@ -518,12 +583,13 @@ public final class Av1ImageReader implements AutoCloseable {
     ///                         unsupported presentation work such as film grain synthesis
     private @Nullable DecodedFrame outputExistingFrame(ObuPacket packet, int existingFrameIndex) throws DecodeException {
         requireExistingFrameState(packet, existingFrameIndex);
-        lastFrameSyntaxDecodeResult = referenceFrameSyntaxResults[existingFrameIndex];
-        FrameHeader referencedFrameHeader = referenceFrameHeaders[existingFrameIndex];
-        if (!shouldOutputExistingFrame(referencedFrameHeader)) {
+        RuntimeReferenceSlot slot = referenceSlots[existingFrameIndex];
+        lastFrameSyntaxDecodeResult = slot.syntaxResult();
+        FrameHeader referencedFrameHeader = Objects.requireNonNull(slot.frameHeader(), "referencedFrameHeader");
+        if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
             return null;
         }
-        @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot = referenceSurfaceSnapshots[existingFrameIndex];
+        @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot = slot.surfaceSnapshot();
         if (referenceSurfaceSnapshot == null) {
             throw new DecodeException(
                     DecodeErrorCode.NOT_IMPLEMENTED,
@@ -534,7 +600,7 @@ public final class Av1ImageReader implements AutoCloseable {
                     null
             );
         }
-        if (config.applyFilmGrain() && referencedFrameHeader.filmGrain().applyGrain()) {
+        if (FrameOutputPolicy.requiresFilmGrainSynthesis(referencedFrameHeader, config)) {
             throw new DecodeException(
                     DecodeErrorCode.NOT_IMPLEMENTED,
                     DecodeStage.OUTPUT_CONVERSION,
@@ -544,12 +610,7 @@ public final class Av1ImageReader implements AutoCloseable {
                     null
             );
         }
-        return ArgbOutput.toOpaqueArgbIntFrame(
-                referenceSurfaceSnapshot.decodedPlanes(),
-                referencedFrameHeader.frameType(),
-                true,
-                nextPresentationIndex++
-        );
+        return OutputFrameFactory.createExistingFrame(referenceSurfaceSnapshot, nextPresentationIndex++);
     }
 
     /// Creates a contextual invalid-bitstream exception for frame-assembly errors.
@@ -622,10 +683,10 @@ public final class Av1ImageReader implements AutoCloseable {
         }
 
         int primarySlot = frameHeader.referenceFrameIndex(primaryRefFrame);
-        if (primarySlot < 0 || primarySlot >= referenceFrameSyntaxResults.length) {
+        if (primarySlot < 0 || primarySlot >= referenceSlots.length) {
             return null;
         }
-        return referenceFrameSyntaxResults[primarySlot];
+        return referenceSlots[primarySlot].syntaxResult();
     }
 
     /// Returns the structural decode result whose temporal motion field should seed the next frame.
@@ -647,8 +708,8 @@ public final class Av1ImageReader implements AutoCloseable {
 
         int[] referenceFrameIndices = frameHeader.referenceFrameIndices();
         for (int referenceSlot : referenceFrameIndices) {
-            if (referenceSlot >= 0 && referenceSlot < referenceFrameSyntaxResults.length) {
-                @Nullable FrameSyntaxDecodeResult candidate = referenceFrameSyntaxResults[referenceSlot];
+            if (referenceSlot >= 0 && referenceSlot < referenceSlots.length) {
+                @Nullable FrameSyntaxDecodeResult candidate = referenceSlots[referenceSlot].syntaxResult();
                 if (candidate != null) {
                     return candidate;
                 }
@@ -687,10 +748,9 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param syntaxDecodeResult the structural frame-decode result to store in refreshed slots
     private void refreshReferenceFrameSyntaxState(FrameHeader frameHeader, FrameSyntaxDecodeResult syntaxDecodeResult) {
         int refreshFrameFlags = frameHeader.refreshFrameFlags();
-        for (int i = 0; i < referenceFrameHeaders.length; i++) {
+        for (int i = 0; i < referenceSlots.length; i++) {
             if ((refreshFrameFlags & (1 << i)) != 0) {
-                referenceFrameHeaders[i] = frameHeader;
-                referenceFrameSyntaxResults[i] = syntaxDecodeResult;
+                referenceSlots[i].refreshSyntax(frameHeader, syntaxDecodeResult);
             }
         }
     }
@@ -707,47 +767,11 @@ public final class Av1ImageReader implements AutoCloseable {
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot
     ) {
         int refreshFrameFlags = frameHeader.refreshFrameFlags();
-        for (int i = 0; i < referenceFrameHeaders.length; i++) {
+        for (int i = 0; i < referenceSlots.length; i++) {
             if ((refreshFrameFlags & (1 << i)) != 0) {
-                referenceSurfaceSnapshots[i] = referenceSurfaceSnapshot;
+                referenceSlots[i].refreshSurface(referenceSurfaceSnapshot);
             }
         }
-    }
-
-    /// Returns whether the parsed frame should be exposed through the public API.
-    ///
-    /// This first output-producing path applies frame filtering only at the public output boundary.
-    ///
-    /// @param frameHeader the parsed frame header for the current frame
-    /// @return whether the parsed frame should be exposed through the public API
-    private boolean shouldOutputFrame(FrameHeader frameHeader) {
-        if (!frameHeader.showFrame() && !config.outputInvisibleFrames()) {
-            return false;
-        }
-        return switch (config.decodeFrameType()) {
-            case ALL -> true;
-            case REFERENCE -> frameHeader.refreshFrameFlags() != 0;
-            case INTRA -> frameHeader.frameType() == FrameType.KEY || frameHeader.frameType() == FrameType.INTRA;
-            case KEY -> frameHeader.frameType() == FrameType.KEY;
-        };
-    }
-
-    /// Returns whether one referenced `show_existing_frame` surface should be exposed through the
-    /// public API.
-    ///
-    /// `show_existing_frame` is always visible presentation, so only the decode-frame-type filter
-    /// remains relevant here.
-    ///
-    /// @param referencedFrameHeader the frame header stored alongside the referenced surface
-    /// @return whether one referenced `show_existing_frame` surface should be exposed publicly
-    private boolean shouldOutputExistingFrame(FrameHeader referencedFrameHeader) {
-        return switch (config.decodeFrameType()) {
-            case ALL -> true;
-            case REFERENCE -> referencedFrameHeader.refreshFrameFlags() != 0;
-            case INTRA -> referencedFrameHeader.frameType() == FrameType.KEY
-                    || referencedFrameHeader.frameType() == FrameType.INTRA;
-            case KEY -> referencedFrameHeader.frameType() == FrameType.KEY;
-        };
     }
 
     /// Creates default tile-local CDF contexts for the supplied tile count.
@@ -760,6 +784,36 @@ public final class Av1ImageReader implements AutoCloseable {
             contexts[i] = CdfContext.createDefault();
         }
         return contexts;
+    }
+
+    /// Creates one fixed-size array of empty runtime reference slots.
+    ///
+    /// @param slotCount the number of reference slots to allocate
+    /// @return one fixed-size array of empty runtime reference slots
+    private static RuntimeReferenceSlot[] createReferenceSlots(int slotCount) {
+        RuntimeReferenceSlot[] slots = new RuntimeReferenceSlot[slotCount];
+        for (int i = 0; i < slotCount; i++) {
+            slots[i] = new RuntimeReferenceSlot();
+        }
+        return slots;
+    }
+
+    /// Clears all runtime reference slots.
+    private void clearReferenceSlots() {
+        for (RuntimeReferenceSlot referenceSlot : referenceSlots) {
+            referenceSlot.clear();
+        }
+    }
+
+    /// Returns the current reference-frame headers as one parser-facing slot array snapshot.
+    ///
+    /// @return the current reference-frame headers as one parser-facing slot array snapshot
+    private FrameHeader[] referenceFrameHeadersForParsing() {
+        FrameHeader[] headers = new FrameHeader[referenceSlots.length];
+        for (int i = 0; i < referenceSlots.length; i++) {
+            headers[i] = referenceSlots[i].frameHeader();
+        }
+        return headers;
     }
 
     /// The immediate result of parsing one combined `FRAME` OBU.
