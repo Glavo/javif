@@ -27,8 +27,8 @@ import java.util.Objects;
 
 /// Internal entry points for converting `DecodedPlanes` into opaque ARGB output.
 ///
-/// The current implementation supports only 8-bit plane snapshots, `I400`/`I420` chroma layouts,
-/// and point-sampled chroma expansion for `I420`. The render rectangle is copied directly from the
+/// The current implementation supports only 8-bit plane snapshots and point-sampled chroma
+/// expansion for `I420`, `I422`, and `I444`. The render rectangle is copied directly from the
 /// top-left portion of the coded planes, so render upscaling is intentionally unsupported here.
 @NotNullByDefault
 public final class ArgbOutput {
@@ -75,7 +75,24 @@ public final class ArgbOutput {
                     pixels,
                     checkedTransform
             );
-            case I422, I444 -> throw new IllegalArgumentException("Unsupported pixelFormat for ARGB int output: " + pixelFormat);
+            case I422 -> convertOpaqueI422(
+                    checkedDecodedPlanes.lumaPlane(),
+                    requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
+                    requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
+                    renderWidth,
+                    renderHeight,
+                    pixels,
+                    checkedTransform
+            );
+            case I444 -> convertOpaqueI444(
+                    checkedDecodedPlanes.lumaPlane(),
+                    requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
+                    requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
+                    renderWidth,
+                    renderHeight,
+                    pixels,
+                    checkedTransform
+            );
         };
     }
 
@@ -289,6 +306,108 @@ public final class ArgbOutput {
                         lumaSamples[lumaRow + x] & 0xFFFF,
                         chromaUSamples[chromaIndexU] & 0xFFFF,
                         chromaVSamples[chromaIndexV] & 0xFFFF
+                );
+            }
+        }
+        return pixels;
+    }
+
+    /// Converts one `I422` plane snapshot into opaque ARGB pixels with horizontally shared chroma.
+    ///
+    /// @param lumaPlane the decoded luma plane
+    /// @param chromaUPlane the decoded chroma U plane
+    /// @param chromaVPlane the decoded chroma V plane
+    /// @param renderWidth the presentation render width
+    /// @param renderHeight the presentation render height
+    /// @param pixels the destination ARGB pixel buffer
+    /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
+    /// @return the filled destination pixel buffer
+    private static int[] convertOpaqueI422(
+            DecodedPlane lumaPlane,
+            DecodedPlane chromaUPlane,
+            DecodedPlane chromaVPlane,
+            int renderWidth,
+            int renderHeight,
+            int[] pixels,
+            YuvToRgbTransform transform
+    ) {
+        short[] lumaSamples = lumaPlane.samples();
+        short[] chromaUSamples = chromaUPlane.samples();
+        short[] chromaVSamples = chromaVPlane.samples();
+        int lumaStride = lumaPlane.stride();
+        int chromaUStride = chromaUPlane.stride();
+        int chromaVStride = chromaVPlane.stride();
+
+        for (int y = 0; y < renderHeight; y++) {
+            int lumaRow = y * lumaStride;
+            int chromaURow = y * chromaUStride;
+            int chromaVRow = y * chromaVStride;
+            int pixelRow = y * renderWidth;
+
+            int x = 0;
+            for (; x + 1 < renderWidth; x += 2) {
+                int chromaIndexU = chromaURow + (x >> 1);
+                int chromaIndexV = chromaVRow + (x >> 1);
+                int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
+                int vSample = chromaVSamples[chromaIndexV] & 0xFFFF;
+
+                pixels[pixelRow + x] = transform.toOpaqueArgb(lumaSamples[lumaRow + x] & 0xFFFF, uSample, vSample);
+                pixels[pixelRow + x + 1] = transform.toOpaqueArgb(
+                        lumaSamples[lumaRow + x + 1] & 0xFFFF,
+                        uSample,
+                        vSample
+                );
+            }
+
+            if (x < renderWidth) {
+                int chromaIndexU = chromaURow + (x >> 1);
+                int chromaIndexV = chromaVRow + (x >> 1);
+                pixels[pixelRow + x] = transform.toOpaqueArgb(
+                        lumaSamples[lumaRow + x] & 0xFFFF,
+                        chromaUSamples[chromaIndexU] & 0xFFFF,
+                        chromaVSamples[chromaIndexV] & 0xFFFF
+                );
+            }
+        }
+        return pixels;
+    }
+
+    /// Converts one `I444` plane snapshot into opaque ARGB pixels with one chroma sample per pixel.
+    ///
+    /// @param lumaPlane the decoded luma plane
+    /// @param chromaUPlane the decoded chroma U plane
+    /// @param chromaVPlane the decoded chroma V plane
+    /// @param renderWidth the presentation render width
+    /// @param renderHeight the presentation render height
+    /// @param pixels the destination ARGB pixel buffer
+    /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
+    /// @return the filled destination pixel buffer
+    private static int[] convertOpaqueI444(
+            DecodedPlane lumaPlane,
+            DecodedPlane chromaUPlane,
+            DecodedPlane chromaVPlane,
+            int renderWidth,
+            int renderHeight,
+            int[] pixels,
+            YuvToRgbTransform transform
+    ) {
+        short[] lumaSamples = lumaPlane.samples();
+        short[] chromaUSamples = chromaUPlane.samples();
+        short[] chromaVSamples = chromaVPlane.samples();
+        int lumaStride = lumaPlane.stride();
+        int chromaUStride = chromaUPlane.stride();
+        int chromaVStride = chromaVPlane.stride();
+
+        for (int y = 0; y < renderHeight; y++) {
+            int lumaRow = y * lumaStride;
+            int chromaURow = y * chromaUStride;
+            int chromaVRow = y * chromaVStride;
+            int pixelRow = y * renderWidth;
+            for (int x = 0; x < renderWidth; x++) {
+                pixels[pixelRow + x] = transform.toOpaqueArgb(
+                        lumaSamples[lumaRow + x] & 0xFFFF,
+                        chromaUSamples[chromaURow + x] & 0xFFFF,
+                        chromaVSamples[chromaVRow + x] & 0xFFFF
                 );
             }
         }

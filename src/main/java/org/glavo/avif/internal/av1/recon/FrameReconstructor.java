@@ -36,11 +36,11 @@ import java.util.Objects;
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
-/// with the current serial tile traversal, `I400` or `I420` chroma layout, non-directional and
-/// directional intra prediction, filter-intra luma prediction, CFL chroma prediction for `I420`,
-/// the current minimal luma/chroma palette paths, and a minimal luma/chroma residual subset
-/// including clipped frame-fringe chroma footprints and the currently supported rectangular
-/// `DCT_DCT` transform sizes.
+/// with the current serial tile traversal, `I400`, `I420`, `I422`, or `I444` chroma layout,
+/// non-directional and directional intra prediction, filter-intra luma prediction, `I420` CFL
+/// chroma prediction, the current minimal luma/chroma palette paths, and a minimal luma/chroma
+/// residual subset including clipped frame-fringe chroma footprints and the currently supported
+/// rectangular `DCT_DCT` transform sizes.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -100,9 +100,11 @@ public final class FrameReconstructor {
             );
         }
         if (sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I400
-                && sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I420) {
+                && sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I420
+                && sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I422
+                && sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I444) {
             throw new IllegalStateException(
-                    "Pixel reconstruction currently supports only I400/I420: "
+                    "Pixel reconstruction currently supports only I400/I420/I422/I444: "
                             + sequenceHeader.colorConfig().pixelFormat()
             );
         }
@@ -134,7 +136,16 @@ public final class FrameReconstructor {
                     (frameSize.height() + 1) >> 1,
                     bitDepth
             );
-            case I422, I444 -> throw new IllegalStateException("Unsupported pixel format: " + pixelFormat);
+            case I422 -> new MutablePlaneBuffer(
+                    (frameSize.codedWidth() + 1) >> 1,
+                    frameSize.height(),
+                    bitDepth
+            );
+            case I444 -> new MutablePlaneBuffer(
+                    frameSize.codedWidth(),
+                    frameSize.height(),
+                    bitDepth
+            );
         };
     }
 
@@ -222,10 +233,12 @@ public final class FrameReconstructor {
         reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader);
 
         if (header.hasChroma() && chromaUPlane != null && chromaVPlane != null) {
-            int chromaX = lumaX >> 1;
-            int chromaY = lumaY >> 1;
-            int visibleChromaWidth = (visibleLumaWidth + 1) >> 1;
-            int visibleChromaHeight = (visibleLumaHeight + 1) >> 1;
+            int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+            int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+            int chromaX = lumaX >> chromaSubsamplingX;
+            int chromaY = lumaY >> chromaSubsamplingY;
+            int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
+            int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
             if (header.uvPaletteSize() != 0) {
                 reconstructChromaPalette(
                         chromaUPlane,
@@ -568,20 +581,18 @@ public final class FrameReconstructor {
             PixelFormat pixelFormat,
             int qIndex
     ) {
-        if (pixelFormat != PixelFormat.I420) {
-            throw new IllegalStateException("Chroma residual reconstruction currently supports only I420");
-        }
-
         FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
         reconstructChromaPlaneResiduals(
                 chromaUPlane,
                 residualLayout.chromaUUnits(),
-                new ChromaDequantizer.Context(qIndex, quantization.uDcDelta(), quantization.uAcDelta(), chromaUPlane.bitDepth())
+                new ChromaDequantizer.Context(qIndex, quantization.uDcDelta(), quantization.uAcDelta(), chromaUPlane.bitDepth()),
+                pixelFormat
         );
         reconstructChromaPlaneResiduals(
                 chromaVPlane,
                 residualLayout.chromaVUnits(),
-                new ChromaDequantizer.Context(qIndex, quantization.vDcDelta(), quantization.vAcDelta(), chromaVPlane.bitDepth())
+                new ChromaDequantizer.Context(qIndex, quantization.vDcDelta(), quantization.vAcDelta(), chromaVPlane.bitDepth()),
+                pixelFormat
         );
     }
 
@@ -593,8 +604,11 @@ public final class FrameReconstructor {
     private static void reconstructChromaPlaneResiduals(
             MutablePlaneBuffer chromaPlane,
             TransformResidualUnit[] residualUnits,
-            ChromaDequantizer.Context dequantizationContext
+            ChromaDequantizer.Context dequantizationContext,
+            PixelFormat pixelFormat
     ) {
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
         for (TransformResidualUnit residualUnit : residualUnits) {
             if (residualUnit.allZero()) {
                 continue;
@@ -606,13 +620,44 @@ public final class FrameReconstructor {
             );
             InverseTransformer.addResidualBlock(
                     chromaPlane,
-                residualUnit.position().x4() << 1,
-                residualUnit.position().y4() << 1,
-                residualUnit.size(),
-                residualUnit.visibleWidthPixels(),
-                residualUnit.visibleHeightPixels(),
-                residualSamples
+                    residualUnit.position().x4() << (2 - chromaSubsamplingX),
+                    residualUnit.position().y4() << (2 - chromaSubsamplingY),
+                    residualUnit.size(),
+                    residualUnit.visibleWidthPixels(),
+                    residualUnit.visibleHeightPixels(),
+                    residualSamples
             );
         }
+    }
+
+    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the active decoded chroma layout
+    /// @return the horizontal chroma subsampling shift for one decoded pixel format
+    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I444 -> 0;
+            case I420, I422 -> 1;
+        };
+    }
+
+    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the active decoded chroma layout
+    /// @return the vertical chroma subsampling shift for one decoded pixel format
+    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I422, I444 -> 0;
+            case I420 -> 1;
+        };
+    }
+
+    /// Returns the chroma-plane dimension corresponding to one visible luma span.
+    ///
+    /// @param lumaDimension the visible luma span in pixels
+    /// @param subsamplingShift the chroma subsampling shift for the axis
+    /// @return the corresponding chroma-plane dimension
+    private static int chromaDimension(int lumaDimension, int subsamplingShift) {
+        return (lumaDimension + (1 << subsamplingShift) - 1) >> subsamplingShift;
     }
 }

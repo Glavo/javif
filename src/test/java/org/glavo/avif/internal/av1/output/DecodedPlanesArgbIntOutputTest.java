@@ -52,7 +52,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 ///
 /// These tests intentionally discover the main-source converter reflectively so they can compile
 /// before `org.glavo.avif.internal.av1.output` exists. Once the output package is added, the tests
-/// enforce deterministic `I400` and `I420` pixel packing behavior.
+/// enforce deterministic `I400`, `I420`, `I422`, and `I444` pixel packing behavior.
 @NotNullByDefault
 final class DecodedPlanesArgbIntOutputTest {
     /// The test frame type supplied to converters that accept frame metadata.
@@ -153,6 +153,86 @@ final class DecodedPlanesArgbIntOutputTest {
         assertTrue(green(pixels[2]) > red(pixels[2]));
 
         assertOpaquePixels(pixels);
+        assertFrameMetadata(output.frame(), planes);
+    }
+
+    /// Verifies that 8-bit `I422` output shares chroma horizontally within each row but not across rows.
+    ///
+    /// The top row uses neutral chroma for the left pair and blue-biased chroma for the right pair. The
+    /// bottom row switches to two different chroma pairs so the expected pixels also catch accidental
+    /// `I420`-style vertical chroma reuse.
+    ///
+    /// @throws ReflectiveOperationException if reflective output invocation fails
+    @Test
+    void convertsEightBitI422SamplesUsingRowSpecificHorizontallySharedChromaIntoOpaqueArgbPixels()
+            throws ReflectiveOperationException {
+        DecodedPlanes planes = new DecodedPlanes(
+                8,
+                PixelFormat.I422,
+                4,
+                2,
+                4,
+                2,
+                plane(4, 2, 5, 40, 90, 140, 190, 1, 60, 110, 160, 210, 2),
+                plane(2, 2, 3, 128, 180, 3, 90, 150, 4),
+                plane(2, 2, 3, 128, 70, 5, 220, 160, 6)
+        );
+
+        ConvertedOutput output = requireOutputInvoker().convert(planes);
+
+        assertArrayEquals(
+                new int[]{
+                        0xFF282828,
+                        0xFF5A5A5A,
+                        0xFF3BA4E8,
+                        0xFF6DD6FF,
+                        0xFFBD0700,
+                        0xFFEF392B,
+                        0xFFCD82C7,
+                        0xFFFFB4F9
+                },
+                output.pixels()
+        );
+        assertOpaquePixels(output.pixels());
+        assertFrameMetadata(output.frame(), planes);
+    }
+
+    /// Verifies that 8-bit `I444` output uses one chroma pair per luma sample with no subsampling.
+    ///
+    /// Every visible pixel uses a different YUV triplet, while stride padding stays outside the render
+    /// rectangle. Exact packed pixels ensure the converter preserves the intended `AARRGGBB` byte order.
+    ///
+    /// @throws ReflectiveOperationException if reflective output invocation fails
+    @Test
+    void convertsEightBitI444SamplesUsingPerPixelChromaIntoOpaqueArgbPixels() throws ReflectiveOperationException {
+        DecodedPlanes planes = new DecodedPlanes(
+                8,
+                PixelFormat.I444,
+                4,
+                2,
+                4,
+                2,
+                plane(4, 2, 5, 20, 80, 140, 200, 1, 35, 95, 155, 215, 2),
+                plane(4, 2, 5, 128, 160, 96, 200, 3, 140, 110, 180, 70, 4),
+                plane(4, 2, 5, 128, 90, 210, 40, 5, 150, 70, 100, 220, 6)
+        );
+
+        ConvertedOutput output = requireOutputInvoker().convert(planes);
+
+        assertArrayEquals(
+                new int[]{
+                        0xFF141414,
+                        0xFF1B6089,
+                        0xFFFF5C53,
+                        0xFF4DEEFF,
+                        0xFF420F38,
+                        0xFF0E8F3F,
+                        0xFF749DF7,
+                        0xFFFFA970
+                },
+                output.pixels()
+        );
+        assertOpaquePixels(output.pixels());
         assertFrameMetadata(output.frame(), planes);
     }
 

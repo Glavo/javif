@@ -37,6 +37,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
+import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
@@ -54,6 +55,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.Channels;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -584,6 +586,26 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Verifies that one standalone `show_existing_frame` header can expose synthetic stored
+    /// reference surfaces for `I422` and `I444` once ARGB conversion supports those layouts.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameReturnsArgbIntFrameForShowExistingFrameBackedBySyntheticStoredReferenceSurfacesWithAdditionalChromaLayouts() throws Exception {
+        assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(PixelFormat.I422);
+        assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(PixelFormat.I444);
+    }
+
+    /// Verifies that combined `FRAME` `show_existing_frame` OBUs can expose synthetic stored
+    /// reference surfaces for `I422` and `I444` once ARGB conversion supports those layouts.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameReturnsStoredReferenceSurfaceForCombinedShowExistingFrameBackedBySyntheticStoredReferenceSurfacesWithAdditionalChromaLayouts() throws Exception {
+        assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(PixelFormat.I422);
+        assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(PixelFormat.I444);
+    }
+
     /// Verifies that `show_existing_frame` fails with one stable not-implemented boundary when the
     /// referenced slot has syntax state but no reconstructed reference surface yet.
     @Test
@@ -927,12 +949,106 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Creates one synthetic stored reference slot that exposes one neutral-gray `I422` or `I444`
+    /// surface through the public `show_existing_frame` path.
+    ///
+    /// @param pixelFormat the synthetic chroma layout to expose
+    /// @return one synthetic stored reference slot for the requested chroma layout
+    /// @throws Exception if the base still-picture metadata cannot be captured
+    private static InjectedReferenceState createSyntheticStoredReferenceStateWithAdditionalChromaLayout(
+            PixelFormat pixelFormat
+    ) throws Exception {
+        InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
+        SequenceHeader sequenceHeader =
+                copySequenceHeaderWithPixelFormat(baseReferenceState.sequenceHeader(), pixelFormat);
+        FrameHeader frameHeader = baseReferenceState.frameHeader();
+        FrameSyntaxDecodeResult syntaxResult = createSyntheticStoredReferenceSyntaxResult(sequenceHeader, frameHeader);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                frameHeader,
+                syntaxResult,
+                createNeutralGrayDecodedPlanes(frameHeader, pixelFormat)
+        );
+
+        return new InjectedReferenceState(
+                sequenceHeader,
+                frameHeader,
+                syntaxResult,
+                referenceSurfaceSnapshot
+        );
+    }
+
+    /// Asserts that one standalone `show_existing_frame` header exposes the requested synthetic
+    /// stored reference surface through every buffered-input adapter.
+    ///
+    /// @param pixelFormat the synthetic chroma layout to expose
+    /// @throws Exception if synthetic reference-state injection fails
+    private static void assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(
+            PixelFormat pixelFormat
+    ) throws Exception {
+        InjectedReferenceState referenceState =
+                createSyntheticStoredReferenceStateWithAdditionalChromaLayout(pixelFormat);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject synthetic " + pixelFormat + " reference state", exception);
+            }
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Asserts that one combined `FRAME` `show_existing_frame` OBU exposes the requested synthetic
+    /// stored reference surface through the public reader.
+    ///
+    /// @param pixelFormat the synthetic chroma layout to expose
+    /// @throws Exception if synthetic reference-state injection fails
+    private static void assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(
+            PixelFormat pixelFormat
+    ) throws Exception {
+        InjectedReferenceState referenceState =
+                createSyntheticStoredReferenceStateWithAdditionalChromaLayout(pixelFormat);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
+        byte[] stream = obu(6, showExistingFrameHeaderPayload(0));
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            injectShowExistingReferenceState(reader, referenceState);
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Creates one synthetic two-tile syntax result that reuses the supplied frame metadata.
     ///
     /// @param sequenceHeader the sequence header associated with the stored frame
     /// @param frameHeader the frame header whose tile layout should be exposed
     /// @return one synthetic structural decode result whose tile count matches the widened layout
     private static FrameSyntaxDecodeResult createSyntheticMultiTileSyntaxResult(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader
+    ) {
+        return createSyntheticStoredReferenceSyntaxResult(sequenceHeader, frameHeader);
+    }
+
+    /// Creates one synthetic stored-reference syntax result that matches the supplied frame layout.
+    ///
+    /// @param sequenceHeader the sequence header associated with the stored frame
+    /// @param frameHeader the frame header whose tile layout should be exposed
+    /// @return one synthetic structural decode result whose tile count matches the supplied layout
+    private static FrameSyntaxDecodeResult createSyntheticStoredReferenceSyntaxResult(
             SequenceHeader sequenceHeader,
             FrameHeader frameHeader
     ) {
@@ -945,6 +1061,107 @@ final class Av1ImageReaderTest {
             temporalMotionFields[i] = new TileDecodeContext.TemporalMotionField(1, 1);
         }
         return new FrameSyntaxDecodeResult(assembly, tileRoots, temporalMotionFields);
+    }
+
+    /// Copies one full-sequence-header fixture while replacing only the exposed chroma layout.
+    ///
+    /// @param baseSequenceHeader the full sequence header to copy
+    /// @param pixelFormat the replacement chroma layout
+    /// @return one copied full sequence header with the requested chroma layout
+    private static SequenceHeader copySequenceHeaderWithPixelFormat(
+            SequenceHeader baseSequenceHeader,
+            PixelFormat pixelFormat
+    ) {
+        SequenceHeader.ColorConfig baseColorConfig = baseSequenceHeader.colorConfig();
+        boolean chromaSubsamplingX = switch (pixelFormat) {
+            case I422 -> true;
+            case I444 -> false;
+            case I400, I420 -> throw new IllegalArgumentException(
+                    "Synthetic stored reference helper expects I422 or I444: " + pixelFormat
+            );
+        };
+        boolean chromaSubsamplingY = switch (pixelFormat) {
+            case I422, I444 -> false;
+            case I400, I420 -> throw new IllegalArgumentException(
+                    "Synthetic stored reference helper expects I422 or I444: " + pixelFormat
+            );
+        };
+
+        return new SequenceHeader(
+                baseSequenceHeader.profile(),
+                baseSequenceHeader.maxWidth(),
+                baseSequenceHeader.maxHeight(),
+                baseSequenceHeader.timingInfo(),
+                baseSequenceHeader.operatingPoints(),
+                baseSequenceHeader.stillPicture(),
+                baseSequenceHeader.reducedStillPictureHeader(),
+                baseSequenceHeader.widthBits(),
+                baseSequenceHeader.heightBits(),
+                baseSequenceHeader.frameIdNumbersPresent(),
+                baseSequenceHeader.deltaFrameIdBits(),
+                baseSequenceHeader.frameIdBits(),
+                baseSequenceHeader.features(),
+                new SequenceHeader.ColorConfig(
+                        baseColorConfig.bitDepth(),
+                        baseColorConfig.monochrome(),
+                        baseColorConfig.colorDescriptionPresent(),
+                        baseColorConfig.colorPrimaries(),
+                        baseColorConfig.transferCharacteristics(),
+                        baseColorConfig.matrixCoefficients(),
+                        baseColorConfig.colorRange(),
+                        pixelFormat,
+                        baseColorConfig.chromaSamplePosition(),
+                        chromaSubsamplingX,
+                        chromaSubsamplingY,
+                        baseColorConfig.separateUvDeltaQ()
+                )
+        );
+    }
+
+    /// Creates one neutral-gray decoded-plane snapshot for a synthetic stored reference surface.
+    ///
+    /// @param frameHeader the frame header whose coded and render dimensions should be used
+    /// @param pixelFormat the chroma layout to expose
+    /// @return one neutral-gray decoded-plane snapshot for the requested chroma layout
+    private static DecodedPlanes createNeutralGrayDecodedPlanes(FrameHeader frameHeader, PixelFormat pixelFormat) {
+        FrameHeader.FrameSize frameSize = frameHeader.frameSize();
+        int chromaWidth = switch (pixelFormat) {
+            case I422 -> (frameSize.codedWidth() + 1) / 2;
+            case I444 -> frameSize.codedWidth();
+            case I400, I420 -> throw new IllegalArgumentException(
+                    "Synthetic stored reference helper expects I422 or I444: " + pixelFormat
+            );
+        };
+        int chromaHeight = switch (pixelFormat) {
+            case I422, I444 -> frameSize.height();
+            case I400, I420 -> throw new IllegalArgumentException(
+                    "Synthetic stored reference helper expects I422 or I444: " + pixelFormat
+            );
+        };
+
+        return new DecodedPlanes(
+                8,
+                pixelFormat,
+                frameSize.codedWidth(),
+                frameSize.height(),
+                frameSize.renderWidth(),
+                frameSize.renderHeight(),
+                createFilledPlane(frameSize.codedWidth(), frameSize.height(), 128),
+                createFilledPlane(chromaWidth, chromaHeight, 128),
+                createFilledPlane(chromaWidth, chromaHeight, 128)
+        );
+    }
+
+    /// Creates one decoded plane filled with one constant sample value.
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param sampleValue the constant unsigned sample value to store
+    /// @return one decoded plane filled with the requested sample value
+    private static DecodedPlane createFilledPlane(int width, int height, int sampleValue) {
+        short[] samples = new short[width * height];
+        Arrays.fill(samples, (short) sampleValue);
+        return new DecodedPlane(width, height, width, samples);
     }
 
     /// Copies one real supported still-picture frame header while widening its stored tile layout
@@ -1083,7 +1300,7 @@ final class Av1ImageReaderTest {
         assertNotNull(decodedFrame);
         assertTrue(decodedFrame instanceof ArgbIntFrame);
         ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
-        assertDecodedStillPictureFrameMetadata(frame, expectedPresentationIndex);
+        assertDecodedStillPictureFrameMetadata(frame, PixelFormat.I420, expectedPresentationIndex);
         assertArgbBlockEquals(frame, 0, 0, LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
     }
 
@@ -1102,7 +1319,11 @@ final class Av1ImageReaderTest {
         assertTrue(decodedFrame instanceof ArgbIntFrame);
 
         ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
-        assertDecodedStillPictureFrameMetadata(frame, expectedPresentationIndex);
+        assertDecodedStillPictureFrameMetadata(
+                frame,
+                referenceSurfaceSnapshot.decodedPlanes().pixelFormat(),
+                expectedPresentationIndex
+        );
         assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes()), frame.pixels());
     }
 
@@ -1119,7 +1340,7 @@ final class Av1ImageReaderTest {
         assertNotNull(decodedFrame);
         assertTrue(decodedFrame instanceof ArgbIntFrame);
         ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
-        assertDecodedStillPictureFrameMetadata(frame, expectedPresentationIndex);
+        assertDecodedStillPictureFrameMetadata(frame, PixelFormat.I420, expectedPresentationIndex);
 
         int[] pixels = frame.pixels();
         assertEquals(64 * 64, pixels.length);
@@ -1145,19 +1366,21 @@ final class Av1ImageReaderTest {
         }
     }
 
-    /// Asserts the stable decoded-frame metadata shared by the current reduced still-picture fixtures.
+    /// Asserts the stable decoded-frame metadata shared by the current `64x64` still-picture fixtures.
     ///
     /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPixelFormat the expected chroma layout exposed by the public frame
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertDecodedStillPictureFrameMetadata(
             @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            PixelFormat expectedPixelFormat,
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
         assertEquals(64, decodedFrame.width());
         assertEquals(64, decodedFrame.height());
         assertEquals(8, decodedFrame.bitDepth());
-        assertEquals(PixelFormat.I420, decodedFrame.pixelFormat());
+        assertEquals(expectedPixelFormat, decodedFrame.pixelFormat());
         assertEquals(FrameType.KEY, decodedFrame.frameType());
         assertTrue(decodedFrame.visible());
         assertEquals(expectedPresentationIndex, decodedFrame.presentationIndex());

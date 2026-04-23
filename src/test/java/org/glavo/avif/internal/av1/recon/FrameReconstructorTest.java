@@ -102,6 +102,54 @@ final class FrameReconstructorTest {
         assertPlaneFilled(chromaV, 2, 2, 128);
     }
 
+    /// Verifies that a synthetic single-tile 8-bit `I422` intra frame reconstructs luma and full-height
+    /// half-width chroma planes.
+    @Test
+    void reconstructsSingleTileI422IntraFrameWithZeroResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I422),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.INTRA, 4, 4, leaf)
+        );
+
+        assertEquals(8, planes.bitDepth());
+        assertEquals(PixelFormat.I422, planes.pixelFormat());
+        assertTrue(planes.hasChroma());
+        assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
+        assertPlaneFilled(requirePlane(planes.chromaUPlane()), 2, 4, 128);
+        assertPlaneFilled(requirePlane(planes.chromaVPlane()), 2, 4, 128);
+    }
+
+    /// Verifies that a synthetic single-tile 8-bit `I444` intra frame reconstructs luma and full-size
+    /// chroma planes.
+    @Test
+    void reconstructsSingleTileI444IntraFrameWithZeroResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I444),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.INTRA, 4, 4, leaf)
+        );
+
+        assertEquals(8, planes.bitDepth());
+        assertEquals(PixelFormat.I444, planes.pixelFormat());
+        assertTrue(planes.hasChroma());
+        assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
+        assertPlaneFilled(requirePlane(planes.chromaUPlane()), 4, 4, 128);
+        assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 128);
+    }
+
     /// Verifies that one `I400` luma palette block reconstructs the stored palette raster without
     /// requiring any chroma planes.
     @Test
@@ -310,6 +358,98 @@ final class FrameReconstructorTest {
         assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline.lumaPlane(), residualPlanes.lumaPlane(), -1);
         assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(residualPlanes.chromaUPlane()));
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
+    /// Verifies that one positive `I422` chroma-U DC residual shifts only the U plane while keeping
+    /// luma and chroma-V unchanged.
+    @Test
+    void reconstructsSingleTileI422IntraFrameWithPositiveChromaUDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TileBlockHeaderReader.BlockHeader header = createIntraBlockHeader(
+                position,
+                size,
+                true,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I422),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode positiveChromaLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I422),
+                createChromaDcResidualLayout(position, size, PixelFormat.I422, 64, 0)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.INTRA, 4, 4, positiveChromaLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                1
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
+    /// Verifies that one negative `I444` chroma-V DC residual shifts only the V plane while keeping
+    /// luma and chroma-U unchanged.
+    @Test
+    void reconstructsSingleTileI444IntraFrameWithNegativeChromaVDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TileBlockHeaderReader.BlockHeader header = createIntraBlockHeader(
+                position,
+                size,
+                true,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I444),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode negativeChromaLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I444),
+                createChromaDcResidualLayout(position, size, PixelFormat.I444, 0, -64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.INTRA, 4, 4, negativeChromaLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(residualPlanes.chromaUPlane()));
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                requirePlane(baseline.chromaVPlane()),
+                requirePlane(residualPlanes.chromaVPlane()),
+                -1
+        );
     }
 
     /// Verifies that one `TX_16X16` luma DC residual now reconstructs successfully through the
@@ -1138,6 +1278,91 @@ final class FrameReconstructorTest {
                                 expectedNonZeroCoefficientContextByte(dcCoefficient)
                         )
                 }
+        );
+    }
+
+    /// Creates one residual layout whose luma units stay all-zero while one or both chroma planes
+    /// carry a caller-supplied DC coefficient.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaUDcCoefficient the signed chroma-U DC coefficient to store
+    /// @param chromaVDcCoefficient the signed chroma-V DC coefficient to store
+    /// @return one residual layout with all-zero luma units and caller-supplied chroma DC coefficients
+    private static ResidualLayout createChromaDcResidualLayout(
+            BlockPosition position,
+            BlockSize size,
+            PixelFormat pixelFormat,
+            int chromaUDcCoefficient,
+            int chromaVDcCoefficient
+    ) {
+        TransformSize lumaTransformSize = size.maxLumaTransformSize();
+        TransformResidualUnit lumaUnit = new TransformResidualUnit(
+                position,
+                lumaTransformSize,
+                -1,
+                new int[lumaTransformSize.widthPixels() * lumaTransformSize.heightPixels()],
+                0
+        );
+
+        @Nullable TransformSize chromaTransformSize = size.maxChromaTransformSize(pixelFormat);
+        if (chromaTransformSize == null) {
+            throw new AssertionError("Expected chroma transform size for " + pixelFormat);
+        }
+
+        int chromaVisibleWidth = switch (pixelFormat) {
+            case I400 -> throw new AssertionError("Expected chroma pixel format");
+            case I420, I422 -> (size.widthPixels() + 1) >> 1;
+            case I444 -> size.widthPixels();
+        };
+        int chromaVisibleHeight = switch (pixelFormat) {
+            case I400 -> throw new AssertionError("Expected chroma pixel format");
+            case I420 -> (size.heightPixels() + 1) >> 1;
+            case I422, I444 -> size.heightPixels();
+        };
+
+        return new ResidualLayout(
+                position,
+                size,
+                new TransformResidualUnit[]{lumaUnit},
+                new TransformResidualUnit[]{createResidualUnit(position, chromaTransformSize, chromaVisibleWidth, chromaVisibleHeight, chromaUDcCoefficient)},
+                new TransformResidualUnit[]{createResidualUnit(position, chromaTransformSize, chromaVisibleWidth, chromaVisibleHeight, chromaVDcCoefficient)}
+        );
+    }
+
+    /// Creates one residual unit with one caller-supplied DC coefficient and exact visible
+    /// footprint metadata.
+    ///
+    /// @param position the residual-unit origin in luma 4x4 units
+    /// @param transformSize the transform size stored in the residual unit
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param dcCoefficient the signed DC coefficient to store
+    /// @return one residual unit with one caller-supplied DC coefficient
+    private static TransformResidualUnit createResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int dcCoefficient
+    ) {
+        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        int endOfBlockIndex = -1;
+        int coefficientContextByte = 0;
+        if (dcCoefficient != 0) {
+            coefficients[0] = dcCoefficient;
+            endOfBlockIndex = 0;
+            coefficientContextByte = expectedNonZeroCoefficientContextByte(dcCoefficient);
+        }
+        return new TransformResidualUnit(
+                position,
+                transformSize,
+                endOfBlockIndex,
+                coefficients,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                coefficientContextByte
         );
     }
 
