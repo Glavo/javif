@@ -24,6 +24,7 @@ import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
@@ -32,6 +33,7 @@ import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
+import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -285,6 +287,79 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(4, residualLayout.chromaVUnits()[0].visibleWidthPixels());
         assertEquals(3, residualLayout.chromaVUnits()[0].visibleHeightPixels());
         assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
+    }
+
+    /// Verifies that one skipped synthetic `I420` block can expose multiple whole chroma residual
+    /// units when the transform layout carries a smaller chroma transform size than the visible
+    /// block-level chroma footprint.
+    @Test
+    void readsAllZeroMultiUnitChromaResidualsForSyntheticI420Leaf() {
+        TileDecodeContext tileContext = createTileContext(new byte[0], PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 16, 16);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(0, 0);
+        TileBlockHeaderReader.BlockHeader header = createSkippedSyntheticI420Header(position, BlockSize.SIZE_16X16);
+        TransformLayout transformLayout = createSyntheticI420TransformLayout(
+                position,
+                BlockSize.SIZE_16X16,
+                4,
+                4,
+                16,
+                16,
+                TransformSize.TX_4X4
+        );
+
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+
+        assertEquals(4, residualLayout.chromaUUnits().length);
+        assertEquals(4, residualLayout.chromaVUnits().length);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 4, 4), residualLayout.chromaUUnits()[0]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(2, 0), TransformSize.TX_4X4, 4, 4), residualLayout.chromaUUnits()[1]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(0, 2), TransformSize.TX_4X4, 4, 4), residualLayout.chromaUUnits()[2]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(2, 2), TransformSize.TX_4X4, 4, 4), residualLayout.chromaUUnits()[3]);
+        assertResidualLayoutEquals(
+                new ResidualLayout(
+                        position,
+                        BlockSize.SIZE_16X16,
+                        residualLayout.lumaUnits(),
+                        residualLayout.chromaUUnits(),
+                        residualLayout.chromaVUnits()
+                ),
+                residualLayout
+        );
+    }
+
+    /// Verifies that one skipped synthetic `I420` block clips the last chroma residual units to
+    /// their exact visible fringe footprints.
+    @Test
+    void readsClippedMultiUnitChromaResidualsForSyntheticI420Leaf() {
+        TileDecodeContext tileContext = createTileContext(new byte[0], PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 14, 14);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(0, 0);
+        TileBlockHeaderReader.BlockHeader header = createSkippedSyntheticI420Header(position, BlockSize.SIZE_16X16);
+        TransformLayout transformLayout = createSyntheticI420TransformLayout(
+                position,
+                BlockSize.SIZE_16X16,
+                4,
+                4,
+                14,
+                14,
+                TransformSize.TX_4X4
+        );
+
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+
+        assertEquals(4, residualLayout.chromaUUnits().length);
+        assertEquals(4, residualLayout.chromaVUnits().length);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 4, 4), residualLayout.chromaUUnits()[0]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(2, 0), TransformSize.TX_4X4, 3, 4), residualLayout.chromaUUnits()[1]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(0, 2), TransformSize.TX_4X4, 4, 3), residualLayout.chromaUUnits()[2]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(2, 2), TransformSize.TX_4X4, 3, 3), residualLayout.chromaUUnits()[3]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 4, 4), residualLayout.chromaVUnits()[0]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(2, 0), TransformSize.TX_4X4, 3, 4), residualLayout.chromaVUnits()[1]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(0, 2), TransformSize.TX_4X4, 4, 3), residualLayout.chromaVUnits()[2]);
+        assertResidualUnitEquals(createAllZeroResidualUnit(new BlockPosition(2, 2), TransformSize.TX_4X4, 3, 3), residualLayout.chromaVUnits()[3]);
     }
 
     /// Verifies that non-zero coefficient state from one 4x4 unit affects the next unit's skip context.
@@ -962,6 +1037,80 @@ final class TileResidualSyntaxReaderTest {
                 null,
                 transformLayout.variableLumaTransformTree(),
                 transformLayout.lumaUnits()
+        );
+    }
+
+    /// Creates one skipped synthetic `I420` intra header with no palette, angle, or CFL state.
+    ///
+    /// @param position the block origin in luma 4x4 units
+    /// @param size the coded block size
+    /// @return one skipped synthetic `I420` intra header
+    private static TileBlockHeaderReader.BlockHeader createSkippedSyntheticI420Header(
+            BlockPosition position,
+            BlockSize size
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                true,
+                true,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
+    /// Creates one synthetic `I420` transform layout with caller-supplied exact visible bounds and
+    /// one uniform chroma transform size.
+    ///
+    /// @param position the block origin in luma 4x4 units
+    /// @param blockSize the coded block size
+    /// @param visibleWidth4 the visible block width in luma 4x4 units
+    /// @param visibleHeight4 the visible block height in luma 4x4 units
+    /// @param visibleWidthPixels the exact visible block width in pixels
+    /// @param visibleHeightPixels the exact visible block height in pixels
+    /// @param chromaTransformSize the synthetic chroma transform size
+    /// @return one synthetic `I420` transform layout
+    private static TransformLayout createSyntheticI420TransformLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            int visibleWidth4,
+            int visibleHeight4,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            TransformSize chromaTransformSize
+    ) {
+        TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
+        return new TransformLayout(
+                position,
+                blockSize,
+                visibleWidth4,
+                visibleHeight4,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                lumaTransformSize,
+                chromaTransformSize,
+                false,
+                new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
         );
     }
 

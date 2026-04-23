@@ -28,7 +28,7 @@ import java.util.Objects;
 /// Reader for the first coefficient-side syntax elements inside one tile bitstream.
 ///
 /// The current implementation fully decodes the currently modeled two-dimensional luma residual
-/// path and the first block-level chroma-U/chroma-V residual unit pair exposed by the current
+/// path and the current visible-grid chroma-U/chroma-V residual unit arrays exposed by the current
 /// `TransformLayout`, including pixel-level clipped chroma footprints along the frame fringe.
 /// `TX_4X4` keeps its dedicated context helpers, while larger transform sizes reuse the existing
 /// simplified token-context path instead of failing once multiple coefficients are present.
@@ -126,58 +126,23 @@ public final class TileResidualSyntaxReader {
         TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[0];
         TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[0];
         TransformSize chromaTransformSize = nonNullTransformLayout.chromaTransformSize();
-        int visibleChromaWidthPixels = visibleChromaWidthPixels(nonNullTransformLayout);
-        int visibleChromaHeightPixels = visibleChromaHeightPixels(nonNullTransformLayout);
         if (nonNullHeader.hasChroma()
                 && nonNullHeader.uvPaletteSize() == 0
-                && chromaTransformSize != null
-                && supportsSingleChromaResidualLayout(
-                        chromaTransformSize,
-                        visibleChromaWidthPixels,
-                        visibleChromaHeightPixels
-                )) {
-            TransformResidualUnit chromaUUnit = nonNullHeader.skip()
-                    ? createAllZeroUnit(
-                            nonNullHeader.position(),
-                            chromaTransformSize,
-                            visibleChromaWidthPixels,
-                            visibleChromaHeightPixels
-                    )
-                    : readChromaResidualUnit(
-                            nonNullHeader,
-                            nonNullTransformLayout,
-                            chromaTransformSize,
-                            CHROMA_PLANE_U,
-                            nonNullNeighborContext
-                    );
-            nonNullNeighborContext.updateChromaCoefficientContext(
+                && chromaTransformSize != null) {
+            chromaUUnits = readChromaResidualUnits(
+                    nonNullHeader,
+                    nonNullTransformLayout,
+                    chromaTransformSize,
                     CHROMA_PLANE_U,
-                    nonNullHeader.position(),
-                    chromaTransformSize,
-                    chromaUUnit.coefficientContextByte()
+                    nonNullNeighborContext
             );
-            TransformResidualUnit chromaVUnit = nonNullHeader.skip()
-                    ? createAllZeroUnit(
-                            nonNullHeader.position(),
-                            chromaTransformSize,
-                            visibleChromaWidthPixels,
-                            visibleChromaHeightPixels
-                    )
-                    : readChromaResidualUnit(
-                            nonNullHeader,
-                            nonNullTransformLayout,
-                            chromaTransformSize,
-                            CHROMA_PLANE_V,
-                            nonNullNeighborContext
-                    );
-            nonNullNeighborContext.updateChromaCoefficientContext(
+            chromaVUnits = readChromaResidualUnits(
+                    nonNullHeader,
+                    nonNullTransformLayout,
+                    chromaTransformSize,
                     CHROMA_PLANE_V,
-                    nonNullHeader.position(),
-                    chromaTransformSize,
-                    chromaVUnit.coefficientContextByte()
+                    nonNullNeighborContext
             );
-            chromaUUnits = new TransformResidualUnit[]{chromaUUnit};
-            chromaVUnits = new TransformResidualUnit[]{chromaVUnit};
         }
         return new ResidualLayout(
                 nonNullTransformLayout.position(),
@@ -238,10 +203,10 @@ public final class TileResidualSyntaxReader {
         );
     }
 
-    /// Decodes one non-skipped chroma transform residual unit on the supplied chroma plane.
+    /// Decodes the currently modeled chroma transform residual units for one chroma plane.
     ///
-    /// The current rollout models one uniform chroma transform per block. The residual syntax
-    /// itself still follows the same token readers as luma, only switching to the shared chroma
+    /// The current rollout models one visible-grid array of uniform chroma transforms per block.
+    /// Each unit follows the same token readers as luma, only switching to the shared chroma
     /// coefficient CDF tables and per-plane neighbor contexts.
     ///
     /// @param header the owning leaf block header
@@ -249,8 +214,8 @@ public final class TileResidualSyntaxReader {
     /// @param transformSize the current chroma transform size
     /// @param plane the chroma plane index, where `0` is U and `1` is V
     /// @param neighborContext the mutable neighbor context that supplies entropy contexts
-    /// @return the decoded chroma transform residual unit
-    private TransformResidualUnit readChromaResidualUnit(
+    /// @return the decoded chroma transform residual units in bitstream order
+    private TransformResidualUnit[] readChromaResidualUnits(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             TransformSize transformSize,
@@ -261,20 +226,69 @@ public final class TileResidualSyntaxReader {
         TransformLayout nonNullTransformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
-        return readResidualUnit(
-                nonNullHeader.position(),
-                nonNullTransformSize,
-                visibleChromaWidthPixels(nonNullTransformLayout),
-                visibleChromaHeightPixels(nonNullTransformLayout),
-                true,
-                nonNullNeighborContext.chromaCoefficientSkipContext(
-                        plane,
-                        nonNullHeader.size(),
+        int visibleBlockWidthPixels = visibleChromaWidthPixels(nonNullTransformLayout);
+        int visibleBlockHeightPixels = visibleChromaHeightPixels(nonNullTransformLayout);
+        if (visibleBlockWidthPixels <= 0 || visibleBlockHeightPixels <= 0) {
+            return new TransformResidualUnit[0];
+        }
+
+        int unitsWide = divideRoundUp(visibleBlockWidthPixels, nonNullTransformSize.widthPixels());
+        int unitsHigh = divideRoundUp(visibleBlockHeightPixels, nonNullTransformSize.heightPixels());
+        TransformResidualUnit[] residualUnits = new TransformResidualUnit[unitsWide * unitsHigh];
+        int nextIndex = 0;
+        for (int unitY = 0; unitY < unitsHigh; unitY++) {
+            for (int unitX = 0; unitX < unitsWide; unitX++) {
+                BlockPosition unitPosition = chromaResidualUnitPosition(
                         nonNullHeader.position(),
-                        nonNullTransformSize
-                ),
-                nonNullNeighborContext.chromaDcSignContext(plane, nonNullHeader.position(), nonNullTransformSize)
-        );
+                        nonNullTransformSize,
+                        unitX,
+                        unitY
+                );
+                int visibleUnitWidthPixels = visibleChromaUnitWidthPixels(
+                        visibleBlockWidthPixels,
+                        nonNullTransformSize,
+                        unitX
+                );
+                int visibleUnitHeightPixels = visibleChromaUnitHeightPixels(
+                        visibleBlockHeightPixels,
+                        nonNullTransformSize,
+                        unitY
+                );
+                TransformResidualUnit residualUnit = nonNullHeader.skip()
+                        ? createAllZeroUnit(
+                                unitPosition,
+                                nonNullTransformSize,
+                                visibleUnitWidthPixels,
+                                visibleUnitHeightPixels
+                        )
+                        : readResidualUnit(
+                                unitPosition,
+                                nonNullTransformSize,
+                                visibleUnitWidthPixels,
+                                visibleUnitHeightPixels,
+                                true,
+                                nonNullNeighborContext.chromaCoefficientSkipContext(
+                                        plane,
+                                        nonNullHeader.size(),
+                                        unitPosition,
+                                        nonNullTransformSize
+                                ),
+                                nonNullNeighborContext.chromaDcSignContext(
+                                        plane,
+                                        unitPosition,
+                                        nonNullTransformSize
+                                )
+                        );
+                nonNullNeighborContext.updateChromaCoefficientContext(
+                        plane,
+                        unitPosition,
+                        nonNullTransformSize,
+                        residualUnit.coefficientContextByte()
+                );
+                residualUnits[nextIndex++] = residualUnit;
+            }
+        }
+        return residualUnits;
     }
 
     /// Decodes one transform residual unit using the supplied plane-specific contexts.
@@ -596,27 +610,85 @@ public final class TileResidualSyntaxReader {
         return (nonNullTransformLayout.visibleHeightPixels() + (1 << shift) - 1) >> shift;
     }
 
-    /// Returns whether the current block-level chroma geometry can still be modeled as a single
-    /// chroma residual unit.
+    /// Returns the luma-grid origin of one chroma residual unit inside the current block.
     ///
-    /// The current rollout supports one chroma transform unit per block, including clipped or
-    /// fringe footprints that stay inside that unit. Blocks whose visible chroma area spans
-    /// multiple coded chroma units remain outside the modeled subset.
+    /// `TransformSize` dimensions are interpreted on the chroma plane's own 4x4 grid, so the
+    /// returned position is widened back into the shared luma-grid `BlockPosition` model using the
+    /// active sequence subsampling factors.
     ///
-    /// @param transformSize the coded chroma transform size
-    /// @param visibleWidthPixels the exact visible chroma width in pixels
-    /// @param visibleHeightPixels the exact visible chroma height in pixels
-    /// @return whether the current block-level chroma geometry can be modeled as a single unit
-    private static boolean supportsSingleChromaResidualLayout(
+    /// @param blockPosition the luma-grid origin of the owning block
+    /// @param transformSize the current chroma transform size
+    /// @param unitX the zero-based horizontal chroma-unit index
+    /// @param unitY the zero-based vertical chroma-unit index
+    /// @return the luma-grid origin of the requested chroma residual unit
+    private BlockPosition chromaResidualUnitPosition(
+            BlockPosition blockPosition,
             TransformSize transformSize,
-            int visibleWidthPixels,
-            int visibleHeightPixels
+            int unitX,
+            int unitY
+    ) {
+        BlockPosition nonNullBlockPosition = Objects.requireNonNull(blockPosition, "blockPosition");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int shiftX = chromaSubsamplingX();
+        int shiftY = chromaSubsamplingY();
+        int x4 = nonNullBlockPosition.x4() + ((unitX * nonNullTransformSize.width4()) << shiftX);
+        int y4 = nonNullBlockPosition.y4() + ((unitY * nonNullTransformSize.height4()) << shiftY);
+        return new BlockPosition(x4, y4);
+    }
+
+    /// Returns the exact visible chroma-unit width in pixels for one unit index inside the current
+    /// block-level chroma footprint.
+    ///
+    /// @param visibleBlockWidthPixels the visible chroma width of the owning block in pixels
+    /// @param transformSize the current chroma transform size
+    /// @param unitX the zero-based horizontal chroma-unit index
+    /// @return the exact visible chroma-unit width in pixels
+    private static int visibleChromaUnitWidthPixels(
+            int visibleBlockWidthPixels,
+            TransformSize transformSize,
+            int unitX
     ) {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
-        return visibleWidthPixels > 0
-                && visibleHeightPixels > 0
-                && visibleWidthPixels <= nonNullTransformSize.widthPixels()
-                && visibleHeightPixels <= nonNullTransformSize.heightPixels();
+        int unitOffsetPixels = unitX * nonNullTransformSize.widthPixels();
+        return Math.min(
+                nonNullTransformSize.widthPixels(),
+                Math.max(0, visibleBlockWidthPixels - unitOffsetPixels)
+        );
+    }
+
+    /// Returns the exact visible chroma-unit height in pixels for one unit index inside the current
+    /// block-level chroma footprint.
+    ///
+    /// @param visibleBlockHeightPixels the visible chroma height of the owning block in pixels
+    /// @param transformSize the current chroma transform size
+    /// @param unitY the zero-based vertical chroma-unit index
+    /// @return the exact visible chroma-unit height in pixels
+    private static int visibleChromaUnitHeightPixels(
+            int visibleBlockHeightPixels,
+            TransformSize transformSize,
+            int unitY
+    ) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int unitOffsetPixels = unitY * nonNullTransformSize.heightPixels();
+        return Math.min(
+                nonNullTransformSize.heightPixels(),
+                Math.max(0, visibleBlockHeightPixels - unitOffsetPixels)
+        );
+    }
+
+    /// Divides one positive span by one positive unit size, rounding the quotient upward.
+    ///
+    /// @param value the positive dividend
+    /// @param unitSize the positive divisor
+    /// @return `ceil(value / unitSize)`
+    private static int divideRoundUp(int value, int unitSize) {
+        if (value <= 0) {
+            throw new IllegalArgumentException("value <= 0: " + value);
+        }
+        if (unitSize <= 0) {
+            throw new IllegalArgumentException("unitSize <= 0: " + unitSize);
+        }
+        return (value + unitSize - 1) / unitSize;
     }
 
     /// Returns the end-of-block base-token context for one supported end-of-block index.

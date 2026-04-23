@@ -200,6 +200,134 @@ final class FrameReconstructorChromaResidualTest {
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
     }
 
+    /// Verifies that multiple `I420` chroma residual units update separate U/V footprints
+    /// independently inside one synthetic leaf.
+    @Test
+    void reconstructsMultiUnitI420ChromaResidualsIndependently() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_16X16;
+        TilePartitionTreeReader.LeafNode baselineLeaf = createI420Leaf(position, size, null, null, null);
+        TilePartitionTreeReader.LeafNode residualLeaf = createI420LeafWithResidualUnits(
+                position,
+                size,
+                new TransformResidualUnit[]{
+                        createResidualUnit(position, size.maxLumaTransformSize(), size.widthPixels(), size.heightPixels(), null)
+                },
+                new TransformResidualUnit[]{
+                        createDcOnlyResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 4, 4, 32),
+                        createDcOnlyResidualUnit(new BlockPosition(2, 0), TransformSize.TX_4X4, 4, 4, -32)
+                },
+                new TransformResidualUnit[]{
+                        createDcOnlyResidualUnit(new BlockPosition(0, 2), TransformSize.TX_4X4, 4, 4, -32),
+                        createDcOnlyResidualUnit(new BlockPosition(2, 2), TransformSize.TX_4X4, 4, 4, 32)
+                }
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 16, baselineLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 16, residualLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByRaster(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                new int[][]{
+                        {4, 4, 4, 4, -4, -4, -4, -4},
+                        {4, 4, 4, 4, -4, -4, -4, -4},
+                        {4, 4, 4, 4, -4, -4, -4, -4},
+                        {4, 4, 4, 4, -4, -4, -4, -4},
+                        {0, 0, 0, 0, 0, 0, 0, 0},
+                        {0, 0, 0, 0, 0, 0, 0, 0},
+                        {0, 0, 0, 0, 0, 0, 0, 0},
+                        {0, 0, 0, 0, 0, 0, 0, 0}
+                }
+        );
+        assertPlaneDiffersFromBaselineByRaster(
+                requirePlane(baseline.chromaVPlane()),
+                requirePlane(residualPlanes.chromaVPlane()),
+                new int[][]{
+                        {0, 0, 0, 0, 0, 0, 0, 0},
+                        {0, 0, 0, 0, 0, 0, 0, 0},
+                        {0, 0, 0, 0, 0, 0, 0, 0},
+                        {0, 0, 0, 0, 0, 0, 0, 0},
+                        {-4, -4, -4, -4, 4, 4, 4, 4},
+                        {-4, -4, -4, -4, 4, 4, 4, 4},
+                        {-4, -4, -4, -4, 4, 4, 4, 4},
+                        {-4, -4, -4, -4, 4, 4, 4, 4}
+                }
+        );
+    }
+
+    /// Verifies that multiple clipped `I420` chroma residual units each respect their own visible
+    /// footprint on one frame fringe.
+    @Test
+    void reconstructsClippedMultiUnitI420ChromaResidualsIndependently() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_16X16;
+        TilePartitionTreeReader.LeafNode baselineLeaf = createI420Leaf(
+                position,
+                size,
+                4,
+                4,
+                14,
+                14,
+                null,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = createI420LeafWithResidualUnits(
+                position,
+                size,
+                4,
+                4,
+                14,
+                14,
+                new TransformResidualUnit[]{
+                        createResidualUnit(position, size.maxLumaTransformSize(), 14, 14, null)
+                },
+                new TransformResidualUnit[]{
+                        createDcOnlyResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 4, 4, 32),
+                        createDcOnlyResidualUnit(new BlockPosition(2, 0), TransformSize.TX_4X4, 3, 4, -32),
+                        createDcOnlyResidualUnit(new BlockPosition(0, 2), TransformSize.TX_4X4, 4, 3, -32),
+                        createDcOnlyResidualUnit(new BlockPosition(2, 2), TransformSize.TX_4X4, 3, 3, 32)
+                },
+                new TransformResidualUnit[]{
+                        createResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 4, 4, null),
+                        createResidualUnit(new BlockPosition(2, 0), TransformSize.TX_4X4, 3, 4, null),
+                        createResidualUnit(new BlockPosition(0, 2), TransformSize.TX_4X4, 4, 3, null),
+                        createResidualUnit(new BlockPosition(2, 2), TransformSize.TX_4X4, 3, 3, null)
+                }
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 14, 14, baselineLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 14, 14, residualLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByRaster(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                new int[][]{
+                        {4, 4, 4, 4, -4, -4, -4},
+                        {4, 4, 4, 4, -4, -4, -4},
+                        {4, 4, 4, 4, -4, -4, -4},
+                        {4, 4, 4, 4, -4, -4, -4},
+                        {-4, -4, -4, -4, 4, 4, 4},
+                        {-4, -4, -4, -4, 4, 4, 4},
+                        {-4, -4, -4, -4, 4, 4, 4}
+                }
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
     /// Verifies that unsupported non-zero `I420` chroma transform sizes still fail fast with one
     /// stable reconstruction-side error.
     @Test
@@ -258,6 +386,34 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
+    /// Creates one synthetic `I420` intra leaf with caller-supplied residual-unit arrays.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param lumaUnits the luma residual units
+    /// @param chromaUUnits the chroma-U residual units
+    /// @param chromaVUnits the chroma-V residual units
+    /// @return one synthetic `I420` intra leaf backed by the supplied residual units
+    private static TilePartitionTreeReader.LeafNode createI420LeafWithResidualUnits(
+            BlockPosition position,
+            BlockSize size,
+            TransformResidualUnit[] lumaUnits,
+            TransformResidualUnit[] chromaUUnits,
+            TransformResidualUnit[] chromaVUnits
+    ) {
+        return createI420LeafWithResidualUnits(
+                position,
+                size,
+                size.width4(),
+                size.height4(),
+                size.widthPixels(),
+                size.heightPixels(),
+                lumaUnits,
+                chromaUUnits,
+                chromaVUnits
+        );
+    }
+
     /// Creates one synthetic clipped `I420` intra leaf with optional luma/chroma residual coefficients.
     ///
     /// @param position the block origin in 4x4 units
@@ -301,6 +457,44 @@ final class FrameReconstructorChromaResidualTest {
                         chromaUCoefficients,
                         chromaVCoefficients
                 )
+        );
+    }
+
+    /// Creates one synthetic clipped `I420` intra leaf with caller-supplied residual-unit arrays.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param visibleWidth4 the visible block width in 4x4 units
+    /// @param visibleHeight4 the visible block height in 4x4 units
+    /// @param visibleWidthPixels the exact visible block width in pixels
+    /// @param visibleHeightPixels the exact visible block height in pixels
+    /// @param lumaUnits the luma residual units
+    /// @param chromaUUnits the chroma-U residual units
+    /// @param chromaVUnits the chroma-V residual units
+    /// @return one synthetic clipped `I420` intra leaf backed by the supplied residual units
+    private static TilePartitionTreeReader.LeafNode createI420LeafWithResidualUnits(
+            BlockPosition position,
+            BlockSize size,
+            int visibleWidth4,
+            int visibleHeight4,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            TransformResidualUnit[] lumaUnits,
+            TransformResidualUnit[] chromaUUnits,
+            TransformResidualUnit[] chromaVUnits
+    ) {
+        return new TilePartitionTreeReader.LeafNode(
+                createIntraI420BlockHeader(position, size),
+                createTransformLayout(
+                        position,
+                        size,
+                        visibleWidth4,
+                        visibleHeight4,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        PixelFormat.I420
+                ),
+                createResidualLayout(position, size, lumaUnits, chromaUUnits, chromaVUnits)
         );
     }
 
@@ -606,6 +800,24 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
+    /// Creates one residual layout from caller-supplied residual-unit arrays.
+    ///
+    /// @param position the block origin in luma 4x4 units
+    /// @param size the coded block size
+    /// @param lumaUnits the luma residual units
+    /// @param chromaUUnits the chroma-U residual units
+    /// @param chromaVUnits the chroma-V residual units
+    /// @return one residual layout backed by the supplied unit arrays
+    private static ResidualLayout createResidualLayout(
+            BlockPosition position,
+            BlockSize size,
+            TransformResidualUnit[] lumaUnits,
+            TransformResidualUnit[] chromaUUnits,
+            TransformResidualUnit[] chromaVUnits
+    ) {
+        return new ResidualLayout(position, size, lumaUnits, chromaUUnits, chromaVUnits);
+    }
+
     /// Creates one residual unit from one optional caller-supplied coefficient array.
     ///
     /// @param position the block origin in luma 4x4 units
@@ -632,6 +844,30 @@ final class FrameReconstructorChromaResidualTest {
                 visibleWidthPixels,
                 visibleHeightPixels,
                 hasNonZeroCoefficient(resolvedCoefficients) ? 1 : 0
+        );
+    }
+
+    /// Creates one DC-only residual unit with one caller-supplied visible footprint.
+    ///
+    /// @param position the block origin in luma 4x4 units
+    /// @param transformSize the transform size carried by the unit
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param dcCoefficient the signed DC coefficient
+    /// @return one DC-only residual unit
+    private static TransformResidualUnit createDcOnlyResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int dcCoefficient
+    ) {
+        return createResidualUnit(
+                position,
+                transformSize,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                dcOnlyCoefficients(transformSize, dcCoefficient)
         );
     }
 
@@ -768,6 +1004,28 @@ final class FrameReconstructorChromaResidualTest {
                         ? expectedDelta
                         : 0;
                 assertEquals(expected, reconstructed.sample(x, y) - baseline.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane differs from its baseline by one caller-supplied per-sample
+    /// delta raster.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the residual-applied plane
+    /// @param expectedDelta the expected signed delta raster
+    private static void assertPlaneDiffersFromBaselineByRaster(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed,
+            int[][] expectedDelta
+    ) {
+        assertEquals(expectedDelta[0].length, baseline.width());
+        assertEquals(expectedDelta.length, baseline.height());
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+        for (int y = 0; y < expectedDelta.length; y++) {
+            for (int x = 0; x < expectedDelta[y].length; x++) {
+                assertEquals(expectedDelta[y][x], reconstructed.sample(x, y) - baseline.sample(x, y));
             }
         }
     }

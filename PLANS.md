@@ -27,7 +27,7 @@ The repository already has:
 - `I400` and `I420`
 - non-directional and directional intra prediction, filter-intra luma prediction, and `I420` CFL chroma prediction
 - minimal luma `DCT_DCT` residual support for `TX_4X4` and `TX_8X8`
-- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for single-unit `TX_4X4` / `TX_8X8` U/V paths, including clipped or fringe visible footprints
+- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for uniform visible-grid `TX_4X4` / `TX_8X8` U/V paths, including clipped, fringe, and multi-unit footprints
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -64,8 +64,8 @@ Everything else expands from that baseline after correctness is stable.
 
 - Multi-tile frames are still rejected by the reconstruction/output path.
 - Non-zero reconstruction currently covers only luma `DCT_DCT` `TX_4X4` and `TX_8X8` within the existing key/intra subset.
-- The public reader now consumes a minimal real bitstream-derived `I420` chroma residual path for single-unit U/V layouts, including clipped or fringe visible chroma footprints.
-- Multi-unit chroma residual layouts are still not modeled through the public path.
+- The public reader now consumes a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid U/V layouts, including clipped, fringe, and multi-unit footprints when the current transform layout exposes smaller chroma units.
+- Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Palette, `intrabc`, inter prediction, and motion compensation remain unsupported.
 - Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
 - `show_existing_frame` still validates slot state but does not yet return a reused output frame.
@@ -115,7 +115,7 @@ Current status:
 - `DecodedPlanes` exists and is already consumed by the output layer.
 - `ReferenceSurfaceSnapshot` exists and is already used as the reference-surface storage contract.
 - `FilmGrainParams` already exists in normalized form inside `FrameHeader`.
-- `ResidualLayout` now carries split U/V residual-unit arrays and supports the current single-unit bitstream-side chroma population path, including clipped visible footprints.
+- `ResidualLayout` now carries split U/V residual-unit arrays and supports the current uniform visible-grid bitstream-side chroma population path, including clipped and multi-unit visible footprints.
 - `TransformResidualUnit` still needs expansion before full reconstruction, especially for richer transform and coefficient coverage.
 
 ## Remaining Work Tracks
@@ -143,7 +143,7 @@ Exit criteria:
 Current gap after the first-pixel milestone:
 
 - Non-zero residual decode and reconstruction still do not cover the full reconstruction-ready coefficient space.
-- Chroma residual syntax now covers the minimal single-unit path, including clipped/fringe visible footprints, but still does not model multi-unit chroma layouts.
+- Chroma residual syntax now covers the minimal uniform visible-grid path, including clipped/fringe and multi-unit visible footprints, but still does not cover the full chroma transform and coefficient space.
 - Several block features remain syntax-only or rejected during reconstruction: palette, inter prediction, and motion compensation-related paths.
 
 Write scope:
@@ -219,12 +219,12 @@ Completed within this track already:
 - directional intra reconstruction
 - `I420` CFL chroma reconstruction
 - minimal reconstruction-side `I420` chroma residual application for split U/V residual units
-- minimal bitstream-side `I420` chroma residual syntax for single-unit U/V layouts, including clipped/fringe visible footprints
+- minimal bitstream-side `I420` chroma residual syntax for uniform visible-grid U/V layouts, including clipped/fringe and multi-unit visible footprints
 
 Immediate next steps inside this track:
 
 - richer AC coverage and larger transform support
-- multi-unit chroma residual syntax beyond the current single-unit path
+- fuller chroma transform-layout and coefficient coverage beyond the current uniform visible-grid path
 - palette pixel application
 - inter reconstruction and reference-surface consumption
 
@@ -493,8 +493,8 @@ Acceptance:
 Status:
 
 - partially achieved now
-- current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-directional-plus-filter-intra/CFL subset, including the minimal non-zero luma residual subset and a minimal real bitstream-derived `I420` chroma residual path for single-unit whole or clipped/fringe visible footprints
-- reconstruction-side and integration coverage now both include the current minimal `I420` chroma residual path, but multi-unit chroma syntax, palette/inter paths, and a less artificial sample set are still missing
+- current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-directional-plus-filter-intra/CFL subset, including the minimal non-zero luma residual subset and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints
+- reconstruction-side and integration coverage now both include the current minimal `I420` chroma residual path, but fuller chroma transform/token coverage, palette/inter paths, and a less artificial sample set are still missing
 - milestone is not closed until chroma residuals, palette/inter paths, and a less artificial sample set are covered
 
 ### M3: Reference and Inter Frames
