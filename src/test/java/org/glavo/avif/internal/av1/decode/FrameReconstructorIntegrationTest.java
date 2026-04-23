@@ -221,6 +221,40 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Verifies that one bitstream-derived larger-transform `I420` chroma residual survives the
+    /// integration path and updates only the decoded larger chroma-transform footprint.
+    @Test
+    void reconstructsBitstreamDerivedLargerTransformI420ChromaResidualOnlyWithinVisibleFootprint() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_16X16;
+        int codedWidth = 16;
+        int codedHeight = 16;
+        FrameHeader.TransformMode transformMode = FrameHeader.TransformMode.LARGEST;
+        byte[] payload = findPayloadForBitstreamDerivedLargerTransformI420ChromaResidual(
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+        TilePartitionTreeReader.LeafNode decodedLeaf =
+                decodeI420LeafFromPayload(payload, position, blockSize, codedWidth, codedHeight, transformMode);
+
+        assertFalse(decodedLeaf.header().skip());
+        assertTrue(decodedLeaf.header().hasChroma());
+        assertEquals(4, decodedLeaf.transformLayout().visibleWidth4());
+        assertEquals(4, decodedLeaf.transformLayout().visibleHeight4());
+        assertEquals(TransformSize.TX_8X8, decodedLeaf.transformLayout().chromaTransformSize());
+        assertTrue(
+                hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaUUnits())
+                        || hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaVUnits())
+        );
+        assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
+                createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
+                decodedLeaf
+        );
+    }
+
     /// Verifies that one monochrome all-zero `filter_intra` leaf reconstructs through the minimal luma path.
     @Test
     void reconstructsMonochromeFilterIntraDcLeaf() {
@@ -818,6 +852,65 @@ final class FrameReconstructorIntegrationTest {
         throw new IllegalStateException("No deterministic payload produced a clipped bitstream-derived I420 chroma residual");
     }
 
+    /// Finds a deterministic payload whose decoded `I420` block carries one non-zero
+    /// larger-transform chroma residual with multiple decoded coefficients.
+    ///
+    /// @param position the block origin to decode
+    /// @param blockSize the block size to decode
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return a deterministic payload whose decoded block carries one larger-transform chroma residual
+    private static byte[] findPayloadForBitstreamDerivedLargerTransformI420ChromaResidual(
+            BlockPosition position,
+            BlockSize blockSize,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
+            int limit = 1 << (searchBytes << 3);
+            for (int value = 0; value < limit; value++) {
+                byte[] payload = new byte[8];
+                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
+                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
+                }
+                try {
+                    TilePartitionTreeReader.LeafNode decodedLeaf = decodeI420LeafFromPayload(
+                            payload,
+                            position,
+                            blockSize,
+                            codedWidth,
+                            codedHeight,
+                            transformMode
+                    );
+                    if (decodedLeaf.header().skip() || !decodedLeaf.header().hasChroma()) {
+                        continue;
+                    }
+                    if (decodedLeaf.transformLayout().chromaTransformSize() != TransformSize.TX_8X8) {
+                        continue;
+                    }
+                    ResidualLayout residualLayout = decodedLeaf.residualLayout();
+                    if ((hasMultiCoefficientResidual(residualLayout.chromaUUnits())
+                            || hasMultiCoefficientResidual(residualLayout.chromaVUnits()))
+                            && bitstreamDerivedLeafProducesChromaChange(
+                                    decodedLeaf,
+                                    codedWidth,
+                                    codedHeight,
+                                    transformMode
+                            )) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported payloads are skipped while brute-forcing a larger-transform chroma residual fixture.
+                }
+            }
+        }
+        throw new IllegalStateException(
+                "No deterministic payload produced a larger-transform bitstream-derived I420 chroma residual"
+        );
+    }
+
     /// Decodes one `I420` leaf from a caller-supplied tile payload using the current integration
     /// block/transform/residual readers.
     ///
@@ -872,6 +965,43 @@ final class FrameReconstructorIntegrationTest {
             }
         }
         return false;
+    }
+
+    /// Returns whether the supplied residual-unit array contains at least one multi-coefficient unit.
+    ///
+    /// @param residualUnits the residual units to inspect
+    /// @return whether the supplied residual-unit array contains at least one multi-coefficient unit
+    private static boolean hasMultiCoefficientResidual(TransformResidualUnit[] residualUnits) {
+        for (TransformResidualUnit residualUnit : residualUnits) {
+            if (hasMultiCoefficientResidual(residualUnit)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether the supplied residual unit exposes at least two decoded non-zero coefficients.
+    ///
+    /// @param residualUnit the residual unit to inspect
+    /// @return whether the supplied residual unit exposes multiple decoded coefficients
+    private static boolean hasMultiCoefficientResidual(TransformResidualUnit residualUnit) {
+        return !residualUnit.allZero()
+                && residualUnit.endOfBlockIndex() > 1
+                && countNonZeroCoefficients(residualUnit.coefficients()) >= 2;
+    }
+
+    /// Counts the number of non-zero coefficients in one dense transform-domain coefficient array.
+    ///
+    /// @param coefficients the dense transform-domain coefficient array in natural raster order
+    /// @return the number of non-zero coefficients in the supplied array
+    private static int countNonZeroCoefficients(int[] coefficients) {
+        int count = 0;
+        for (int coefficient : coefficients) {
+            if (coefficient != 0) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /// Returns whether the supplied decoded leaf produces any observable chroma-plane change when
