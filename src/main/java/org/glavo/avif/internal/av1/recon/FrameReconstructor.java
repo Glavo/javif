@@ -38,7 +38,8 @@ import java.util.Objects;
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
 /// with one tile, `I400` or `I420` chroma layout, non-directional and directional intra
 /// prediction, filter-intra luma prediction, CFL chroma prediction for `I420`, no palette, and a
-/// minimal luma/chroma residual subset including clipped frame-fringe chroma footprints.
+/// minimal luma/chroma residual subset including clipped frame-fringe chroma footprints and the
+/// currently supported rectangular `DCT_DCT` transform sizes.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -308,7 +309,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8/TX_16X16 DCT_DCT luma units: "
+                        "Non-zero residual reconstruction currently supports only the current 4/8/16-sized DCT_DCT luma units: "
                                 + residualUnit.size()
                 );
             }
@@ -316,7 +317,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.chromaUUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8/TX_16X16 DCT_DCT chroma units: "
+                        "Non-zero residual reconstruction currently supports only the current 4/8/16-sized DCT_DCT chroma units: "
                                 + residualUnit.size()
                 );
             }
@@ -324,7 +325,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.chromaVUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8/TX_16X16 DCT_DCT chroma units: "
+                        "Non-zero residual reconstruction currently supports only the current 4/8/16-sized DCT_DCT chroma units: "
                                 + residualUnit.size()
                 );
             }
@@ -336,9 +337,18 @@ public final class FrameReconstructor {
     /// @param transformSize the transform size to inspect
     /// @return whether one transform size currently supports non-zero residual reconstruction
     private static boolean isSupportedNonZeroResidualSize(TransformSize transformSize) {
-        return transformSize == TransformSize.TX_4X4
-                || transformSize == TransformSize.TX_8X8
-                || transformSize == TransformSize.TX_16X16;
+        return switch (transformSize) {
+            case TX_4X4,
+                    RTX_4X8,
+                    RTX_8X4,
+                    TX_8X8,
+                    RTX_4X16,
+                    RTX_16X4,
+                    RTX_8X16,
+                    RTX_16X8,
+                    TX_16X16 -> true;
+            default -> false;
+        };
     }
 
     /// Reconstructs the currently supported luma residual subset into the destination plane.

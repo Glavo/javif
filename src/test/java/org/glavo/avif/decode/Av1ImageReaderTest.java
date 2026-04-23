@@ -15,16 +15,25 @@
  */
 package org.glavo.avif.decode;
 
+import org.glavo.avif.internal.av1.bitstream.ObuHeader;
+import org.glavo.avif.internal.av1.bitstream.ObuPacket;
+import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
+import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.Channels;
@@ -396,6 +405,113 @@ final class Av1ImageReaderTest {
         assertEquals("show_existing_frame references a frame slot that has not been populated", exception.getMessage());
     }
 
+    /// Verifies that one standalone `show_existing_frame` header reuses the currently supported
+    /// opaque gray still-picture fixture through the public reader.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsStoredReferenceSurfaceForShowExistingFrame() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload()),
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                obu(3, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
+            FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(firstSyntaxResult);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that one combined `FRAME` `show_existing_frame` also reuses the currently
+    /// supported legacy directional still-picture fixture through the public reader.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readFrameReturnsStoredReferenceSurfaceForCombinedShowExistingFrame() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload()),
+                obu(3, fullStillPictureFrameHeaderPayload()),
+                obu(4, singleTileGroupPayload()),
+                obu(6, showExistingFrameHeaderPayload(0))
+        );
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(firstSyntaxResult);
+            assertLegacyDirectionalLeafDecoded(firstSyntaxResult);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 1);
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that `readAllFrames()` includes the reused `show_existing_frame` output across all
+    /// buffered-input adapters.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readAllFramesIncludesShowExistingFrameOutputAcrossBufferedInputs() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload()),
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                obu(6, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            List<DecodedFrame> frames = reader.readAllFrames();
+            assertEquals(2, frames.size());
+            assertOpaqueGrayStillPictureFrame(frames.get(0), 0);
+            assertOpaqueGrayStillPictureFrame(frames.get(1), 1);
+            assertNotNull(reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+        });
+    }
+
+    /// Verifies that `show_existing_frame` fails with one stable not-implemented boundary when the
+    /// referenced slot has syntax state but no reconstructed reference surface yet.
+    @Test
+    void readFrameRejectsShowExistingFrameWithoutReconstructedReferenceSurface() throws Exception {
+        InjectedReferenceState referenceState = captureReferenceStateFromSupportedStillPicture();
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            injectShowExistingReferenceState(
+                    reader,
+                    new InjectedReferenceState(
+                            referenceState.sequenceHeader(),
+                            referenceState.frameHeader(),
+                            referenceState.syntaxResult(),
+                            null
+                    )
+            );
+
+            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
+            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
+            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+            assertEquals(
+                    "show_existing_frame output currently requires a reconstructed reference surface",
+                    exception.getMessage()
+            );
+        }
+    }
+
     /// Verifies that combined `FRAME` OBUs reject trailing tile data when `show_existing_frame` is set.
     @Test
     void readFrameRejectsCombinedShowExistingFrameWithTrailingTileData() {
@@ -450,6 +566,96 @@ final class Av1ImageReaderTest {
         )) {
             assertion.accept(reader);
         }
+    }
+
+    /// Captures one populated supported-still-picture reference slot for later `show_existing_frame`
+    /// reuse tests.
+    ///
+    /// @return one populated supported-still-picture reference slot for later reuse tests
+    private static InjectedReferenceState captureReferenceStateFromSupportedStillPicture() throws Exception {
+        byte[] sourceStream = concat(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+        );
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(sourceStream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
+            FrameHeader[] frameHeaders = getPrivateField(reader, "referenceFrameHeaders", FrameHeader[].class);
+            FrameSyntaxDecodeResult[] syntaxResults =
+                    getPrivateField(reader, "referenceFrameSyntaxResults", FrameSyntaxDecodeResult[].class);
+            ReferenceSurfaceSnapshot[] surfaceSnapshots =
+                    getPrivateField(reader, "referenceSurfaceSnapshots", ReferenceSurfaceSnapshot[].class);
+
+            return new InjectedReferenceState(
+                    parseFullSequenceHeader(),
+                    frameHeaders[0],
+                    syntaxResults[0],
+                    surfaceSnapshots[0]
+            );
+        }
+    }
+
+    /// Injects one synthetic `show_existing_frame` state into a fresh reader.
+    ///
+    /// @param reader the fresh reader that should expose the injected state
+    /// @param referenceState the reference state to inject into slot `0`
+    /// @throws Exception if reflection-based field access fails
+    private static void injectShowExistingReferenceState(
+            Av1ImageReader reader,
+            InjectedReferenceState referenceState
+    ) throws Exception {
+        setPrivateField(reader, "sequenceHeader", referenceState.sequenceHeader());
+        FrameHeader[] frameHeaders = getPrivateField(reader, "referenceFrameHeaders", FrameHeader[].class);
+        FrameSyntaxDecodeResult[] syntaxResults =
+                getPrivateField(reader, "referenceFrameSyntaxResults", FrameSyntaxDecodeResult[].class);
+        ReferenceSurfaceSnapshot[] surfaceSnapshots =
+                getPrivateField(reader, "referenceSurfaceSnapshots", ReferenceSurfaceSnapshot[].class);
+        frameHeaders[0] = referenceState.frameHeader();
+        syntaxResults[0] = referenceState.syntaxResult();
+        surfaceSnapshots[0] = referenceState.referenceSurfaceSnapshot();
+    }
+
+    /// Parses the test-only full sequence header that enables `show_existing_frame`.
+    ///
+    /// @return the parsed test-only full sequence header that enables `show_existing_frame`
+    private static SequenceHeader parseFullSequenceHeader() throws IOException {
+        return new SequenceHeaderParser().parse(
+                new ObuPacket(
+                        new ObuHeader(ObuType.SEQUENCE_HEADER, false, true, 0, 0),
+                        fullSequenceHeaderPayload(),
+                        0,
+                        0
+                ),
+                false
+        );
+    }
+
+    /// Reads one private field from the supplied object and casts it to the requested type.
+    ///
+    /// @param target the object whose field should be read
+    /// @param fieldName the private field name
+    /// @param fieldType the expected field type
+    /// @param <T> the expected field type
+    /// @return the private field value cast to the requested type
+    /// @throws Exception if reflection-based field access fails
+    private static <T> T getPrivateField(Object target, String fieldName, Class<T> fieldType) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return fieldType.cast(field.get(target));
+    }
+
+    /// Writes one private field on the supplied object.
+    ///
+    /// @param target the object whose field should be written
+    /// @param fieldName the private field name
+    /// @param value the value to assign
+    /// @throws Exception if reflection-based field access fails
+    private static void setPrivateField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     /// Asserts that the reader returned one supported opaque gray still-picture frame.
@@ -679,78 +885,47 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
-    /// Creates one full sequence header payload that enables `show_existing_frame`.
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// `show_existing_frame` while keeping the current `64x64` `8-bit I420` fixture geometry.
     ///
-    /// @return one full sequence header payload that enables `show_existing_frame`
+    /// @return one non-reduced still-picture-compatible sequence header payload
     private static byte[] fullSequenceHeaderPayload() {
         BitWriter writer = new BitWriter();
-        writer.writeBits(2, 3);
+        writer.writeBits(0, 3);
         writer.writeFlag(false);
         writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeBits(1000, 32);
-        writer.writeBits(60_000, 32);
         writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeBits(4, 5);
-        writer.writeBits(100, 32);
-        writer.writeBits(3, 5);
-        writer.writeBits(2, 5);
-        writer.writeFlag(true);
-        writer.writeBits(1, 5);
-
-        writer.writeBits(0x101, 12);
+        writer.writeFlag(false);
+        writer.writeBits(0, 5);
+        writer.writeBits(0, 12);
         writer.writeBits(3, 3);
         writer.writeBits(1, 2);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeBits(17, 5);
-        writer.writeBits(3, 5);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeBits(2, 4);
-
-        writer.writeBits(0, 12);
-        writer.writeBits(1, 3);
-        writer.writeBits(0, 2);
+        writer.writeFlag(false);
+        writer.writeBits(5, 4);
+        writer.writeBits(5, 4);
+        writer.writeBits(63, 6);
+        writer.writeBits(63, 6);
         writer.writeFlag(false);
         writer.writeFlag(false);
-
-        writer.writeBits(11, 4);
-        writer.writeBits(10, 4);
-        writer.writeBits(2047, 12);
-        writer.writeBits(1023, 11);
-        writer.writeFlag(true);
-        writer.writeBits(2, 4);
-        writer.writeBits(1, 3);
-
         writer.writeFlag(true);
         writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeBits(4, 3);
-        writer.writeFlag(true);
+        writer.writeBits(1, 2);
         writer.writeFlag(true);
         writer.writeFlag(false);
-
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeBits(1, 8);
-        writer.writeBits(13, 8);
-        writer.writeBits(0, 8);
-        writer.writeFlag(false);
-        writer.writeFlag(true);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -765,6 +940,16 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one non-reduced still-picture-compatible key frame header payload.
+    ///
+    /// @return one non-reduced still-picture-compatible key frame header payload
+    private static byte[] fullStillPictureFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writeFullStillPictureFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
     /// Creates a minimal standalone `show_existing_frame` header payload.
     ///
     /// @param existingFrameIndex the referenced frame slot
@@ -773,8 +958,6 @@ final class Av1ImageReaderTest {
         BitWriter writer = new BitWriter();
         writer.writeFlag(true);
         writer.writeBits(existingFrameIndex, 3);
-        writer.writeBits(0, 3);
-        writer.writeBits(0, 6);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -798,6 +981,18 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one non-reduced still-picture-compatible combined frame payload with a caller-supplied
+    /// tile group.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the frame header
+    /// @return one non-reduced still-picture-compatible combined frame payload
+    private static byte[] fullStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writeFullStillPictureFrameHeaderBits(writer);
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
     /// Creates a minimal single-tile tile-group payload.
     ///
     /// @return a minimal single-tile tile-group payload
@@ -815,6 +1010,29 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+    }
+
+    /// Writes one non-reduced still-picture-compatible key frame header syntax without standalone
+    /// trailing bits.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeFullStillPictureFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
         writer.writeBits(0, 8);
         writer.writeFlag(false);
         writer.writeFlag(false);
@@ -907,5 +1125,67 @@ final class Av1ImageReaderTest {
         /// @param reader the freshly opened reader
         /// @throws IOException if the reader cannot be consumed
         void accept(Av1ImageReader reader) throws IOException;
+    }
+
+    /// One injected reference-slot state used by `show_existing_frame` tests.
+    @NotNullByDefault
+    private static final class InjectedReferenceState {
+        /// The sequence header that enables `show_existing_frame` parsing.
+        private final SequenceHeader sequenceHeader;
+
+        /// The stored frame header for the referenced slot.
+        private final FrameHeader frameHeader;
+
+        /// The stored structural syntax result for the referenced slot.
+        private final FrameSyntaxDecodeResult syntaxResult;
+
+        /// The stored reconstructed reference surface snapshot, or `null`.
+        private final @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot;
+
+        /// Creates one injected reference-slot state.
+        ///
+        /// @param sequenceHeader the sequence header that enables `show_existing_frame` parsing
+        /// @param frameHeader the stored frame header for the referenced slot
+        /// @param syntaxResult the stored structural syntax result for the referenced slot
+        /// @param referenceSurfaceSnapshot the stored reconstructed reference surface snapshot, or `null`
+        private InjectedReferenceState(
+                SequenceHeader sequenceHeader,
+                FrameHeader frameHeader,
+                FrameSyntaxDecodeResult syntaxResult,
+                @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot
+        ) {
+            this.sequenceHeader = sequenceHeader;
+            this.frameHeader = frameHeader;
+            this.syntaxResult = syntaxResult;
+            this.referenceSurfaceSnapshot = referenceSurfaceSnapshot;
+        }
+
+        /// Returns the sequence header that enables `show_existing_frame` parsing.
+        ///
+        /// @return the sequence header that enables `show_existing_frame` parsing
+        private SequenceHeader sequenceHeader() {
+            return sequenceHeader;
+        }
+
+        /// Returns the stored frame header for the referenced slot.
+        ///
+        /// @return the stored frame header for the referenced slot
+        private FrameHeader frameHeader() {
+            return frameHeader;
+        }
+
+        /// Returns the stored structural syntax result for the referenced slot.
+        ///
+        /// @return the stored structural syntax result for the referenced slot
+        private FrameSyntaxDecodeResult syntaxResult() {
+            return syntaxResult;
+        }
+
+        /// Returns the stored reconstructed reference surface snapshot, or `null`.
+        ///
+        /// @return the stored reconstructed reference surface snapshot, or `null`
+        private @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot() {
+            return referenceSurfaceSnapshot;
+        }
     }
 }

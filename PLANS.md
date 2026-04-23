@@ -26,8 +26,8 @@ The repository already has:
 - `8-bit`
 - `I400` and `I420`
 - non-directional and directional intra prediction, filter-intra luma prediction, and `I420` CFL chroma prediction
-- minimal luma `DCT_DCT` residual support for `TX_4X4`, `TX_8X8`, and `TX_16X16`
-- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for uniform visible-grid `TX_4X4` / `TX_8X8` U/V paths, including clipped, fringe, and multi-unit footprints, plus reconstruction-side `TX_16X16` support
+- minimal luma `DCT_DCT` residual support for the current `4/8/16` square and rectangular transform subset
+- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for the current uniform visible-grid `4/8/16` transform subset, including clipped, fringe, and multi-unit footprints
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -63,12 +63,12 @@ Everything else expands from that baseline after correctness is stable.
 ### Remaining Decode Boundary
 
 - Multi-tile frames are still rejected by the reconstruction/output path.
-- Non-zero reconstruction currently covers luma/chroma `DCT_DCT` `TX_4X4`, `TX_8X8`, and `TX_16X16` within the existing key/intra subset, but does not yet cover the broader transform-type and coefficient space.
+- Non-zero reconstruction currently covers the current luma/chroma `DCT_DCT` subset whose transform axes stay within `4`, `8`, and `16` samples, including the first rectangular sizes needed by `I400/I420` key/intra reconstruction, but does not yet cover the broader transform-type and coefficient space.
 - The public reader now consumes a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid U/V layouts, including clipped, fringe, and multi-unit footprints when the current transform layout exposes smaller chroma units.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Palette, `intrabc`, inter prediction, and motion compensation remain unsupported.
 - Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
-- `show_existing_frame` still validates slot state but does not yet return a reused output frame.
+- `show_existing_frame` now reuses one stored reconstructed reference surface for the current minimal output path when the referenced slot has a `ReferenceSurfaceSnapshot` and grain is not required.
 - Reference surfaces are not yet consumed by a real inter-frame pixel path.
 - Postfiltering and film grain synthesis are still not implemented.
 - `ArgbLongFrame`, `I422`, `I444`, and high bit-depth output paths are not implemented.
@@ -213,18 +213,18 @@ Completed within this track already:
 - mutable plane storage
 - minimal intra prediction
 - first public first-pixel path for single-tile `8-bit I400/I420` key/intra frames with all-zero residual
-- luma dequantization and inverse transform for `TX_4X4` / `TX_8X8` / `TX_16X16` `DCT_DCT`
+- luma/chroma dequantization and inverse transform for the current `4/8/16` square and rectangular `DCT_DCT` subset
 - minimal non-zero luma residual reconstruction inside the current key/intra subset
 - luma filter-intra reconstruction
 - directional intra reconstruction
 - `I420` CFL chroma reconstruction
 - minimal reconstruction-side `I420` chroma residual application for split U/V residual units
 - minimal bitstream-side `I420` chroma residual syntax for uniform visible-grid U/V layouts, including clipped/fringe and multi-unit visible footprints
-- `TX_16X16` non-zero `DCT_DCT` reconstruction for the current luma/chroma key/intra subset
+- non-zero rectangular `DCT_DCT` reconstruction for the current `4/8/16` luma/chroma key/intra subset
 
 Immediate next steps inside this track:
 
-- richer AC coverage beyond the current `DCT_DCT` square-transform subset and broader transform-type support
+- richer AC coverage beyond the current `4/8/16` square-and-rectangular `DCT_DCT` subset and broader transform-type support
 - fuller chroma transform-layout and coefficient coverage beyond the current uniform visible-grid path
 - palette pixel application
 - inter reconstruction and reference-surface consumption
@@ -338,11 +338,12 @@ Already complete in this track:
 - `readFrame()` returns `ArgbIntFrame` for the current narrow first-pixel subset
 - frame filtering for `decodeFrameType` is applied at the current public output boundary
 - syntax reference state and reconstructed reference surfaces are stored separately
+- `show_existing_frame` reuses an already reconstructed stored surface for the current minimal output path
 - the current public boundary has already moved past `non-zero residual`, `filter_intra`, `CFL`, and directional intra on the legacy reduced still-picture path
 
 Still missing in this track:
 
-- `show_existing_frame` output reuse
+- `show_existing_frame` output reuse when the referenced frame still needs unsupported presentation work such as grain synthesis
 - invisible-frame output policy beyond the current narrow path
 - inter/reference-frame output lifecycle
 - film-grain-aware final output
@@ -494,7 +495,7 @@ Acceptance:
 Status:
 
 - partially achieved now
-- current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-directional-plus-filter-intra/CFL subset, including the minimal non-zero `DCT_DCT` luma/chroma residual subset for `TX_4X4` / `TX_8X8` / `TX_16X16` and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints
+- current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-directional-plus-filter-intra/CFL subset, including the minimal non-zero `DCT_DCT` luma/chroma residual subset for the current `4/8/16` square and rectangular transforms and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints
 - reconstruction-side and integration coverage now both include the current minimal `I420` chroma residual path, but fuller chroma transform/token coverage, palette/inter paths, and a less artificial sample set are still missing
 - milestone is not closed until chroma residuals, palette/inter paths, and a less artificial sample set are covered
 
@@ -514,7 +515,9 @@ Acceptance:
 
 Status:
 
-- not started
+- partially started
+- minimal `show_existing_frame` output reuse is now wired for already reconstructed stored surfaces
+- inter/reference pixel decode itself is still not started
 
 ### M4: Full Presentation Pipeline
 

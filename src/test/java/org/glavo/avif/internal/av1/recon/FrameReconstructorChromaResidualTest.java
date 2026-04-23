@@ -116,6 +116,86 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
+    /// Verifies that one non-uniform `TX_4X4` chroma-U residual matches the monochrome residual
+    /// oracle exactly while leaving luma and chroma-V untouched.
+    @Test
+    void reconstructsSingleTileI420IntraFrameWithTx4x4ChromaUMultiCoefficientResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] chromaCoefficients = multiCoefficientTx4x4Coefficients();
+        TilePartitionTreeReader.LeafNode baselineLeaf = createI420Leaf(position, size, null, null, null);
+        TilePartitionTreeReader.LeafNode residualLeaf = createI420Leaf(
+                position,
+                size,
+                null,
+                chromaCoefficients,
+                null
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, baselineLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByRaster(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                deriveMonochromeResidualDeltaRaster(BlockSize.SIZE_4X4, 4, 4, chromaCoefficients)
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
+    /// Verifies that one clipped non-uniform `TX_4X4` chroma-U residual preserves the monochrome
+    /// residual oracle inside the visible chroma footprint and leaves other planes untouched.
+    @Test
+    void reconstructsClippedI420Tx4x4ChromaUMultiCoefficientResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] chromaCoefficients = multiCoefficientTx4x4Coefficients();
+        TilePartitionTreeReader.LeafNode baselineLeaf = createI420Leaf(
+                position,
+                size,
+                2,
+                2,
+                7,
+                5,
+                null,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = createI420Leaf(
+                position,
+                size,
+                2,
+                2,
+                7,
+                5,
+                null,
+                chromaCoefficients,
+                null
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 7, 5, baselineLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 7, 5, residualLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByRaster(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                deriveMonochromeResidualDeltaRaster(BlockSize.SIZE_4X4, 4, 3, chromaCoefficients)
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
     /// Verifies that one synthetic `I420` block can carry non-zero luma and chroma residuals at
     /// the same time without any cross-plane writes.
     @Test
@@ -362,6 +442,40 @@ final class FrameReconstructorChromaResidualTest {
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
     }
 
+    /// Verifies that one rectangular `RTX_8X4` chroma-U DC residual updates the entire chroma-U
+    /// plane above the zero-residual `I420` baseline without affecting luma or chroma-V.
+    @Test
+    void reconstructsSingleTileI420IntraFrameWithPositiveRectangularChromaUDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_16X8;
+        TransformSize chromaTransformSize = requireI420ChromaTransformSize(size);
+        assertEquals(TransformSize.RTX_8X4, chromaTransformSize);
+
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = createI420Leaf(position, size, null, null, null);
+        TilePartitionTreeReader.LeafNode positiveChromaULeaf = createI420Leaf(
+                position,
+                size,
+                null,
+                dcOnlyCoefficients(chromaTransformSize, 64),
+                null
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 8, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 8, positiveChromaULeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByUniformPositiveOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane())
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
     /// Creates one synthetic `I420` intra leaf with optional luma/chroma residual coefficients.
     ///
     /// @param position the block origin in 4x4 units
@@ -387,6 +501,42 @@ final class FrameReconstructorChromaResidualTest {
                 lumaCoefficients,
                 chromaUCoefficients,
                 chromaVCoefficients
+        );
+    }
+
+    /// Creates one synthetic clipped monochrome intra leaf with one optional luma residual block.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param visibleWidthPixels the exact visible block width in pixels
+    /// @param visibleHeightPixels the exact visible block height in pixels
+    /// @param lumaCoefficients the optional luma coefficients, or `null`
+    /// @return one synthetic clipped monochrome intra leaf
+    private static TilePartitionTreeReader.LeafNode createI400Leaf(
+            BlockPosition position,
+            BlockSize size,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            @Nullable int[] lumaCoefficients
+    ) {
+        return new TilePartitionTreeReader.LeafNode(
+                createIntraI400BlockHeader(position, size),
+                createTransformLayout(
+                        position,
+                        size,
+                        (visibleWidthPixels + 3) >> 2,
+                        (visibleHeightPixels + 3) >> 2,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        PixelFormat.I400
+                ),
+                createMonochromeResidualLayout(
+                        position,
+                        size,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        lumaCoefficients
+                )
         );
     }
 
@@ -499,6 +649,38 @@ final class FrameReconstructorChromaResidualTest {
                         PixelFormat.I420
                 ),
                 createResidualLayout(position, size, lumaUnits, chromaUUnits, chromaVUnits)
+        );
+    }
+
+    /// Creates one minimal monochrome residual layout with one optional luma residual unit and no
+    /// chroma units.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param visibleWidthPixels the exact visible luma block width in pixels
+    /// @param visibleHeightPixels the exact visible luma block height in pixels
+    /// @param lumaCoefficients the optional luma coefficients, or `null`
+    /// @return one monochrome residual layout
+    private static ResidualLayout createMonochromeResidualLayout(
+            BlockPosition position,
+            BlockSize size,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            @Nullable int[] lumaCoefficients
+    ) {
+        TransformSize lumaTransformSize = size.maxLumaTransformSize();
+        return createResidualLayout(
+                position,
+                size,
+                new TransformResidualUnit[]{createResidualUnit(
+                        position,
+                        lumaTransformSize,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        lumaCoefficients
+                )},
+                new TransformResidualUnit[0],
+                new TransformResidualUnit[0]
         );
     }
 
@@ -687,6 +869,42 @@ final class FrameReconstructorChromaResidualTest {
                 0,
                 LumaIntraPredictionMode.DC,
                 UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
+    /// Creates one supported monochrome intra block header with zero directional and palette state.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @return one supported monochrome intra block header
+    private static TileBlockHeaderReader.BlockHeader createIntraI400BlockHeader(BlockPosition position, BlockSize size) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                null,
                 0,
                 0,
                 new int[0],
@@ -906,6 +1124,18 @@ final class FrameReconstructorChromaResidualTest {
         return coefficients;
     }
 
+    /// Returns one deterministic non-uniform `TX_4X4` coefficient block for chroma oracle tests.
+    ///
+    /// @return one deterministic non-uniform `TX_4X4` coefficient block
+    private static int[] multiCoefficientTx4x4Coefficients() {
+        int[] coefficients = new int[TransformSize.TX_4X4.widthPixels() * TransformSize.TX_4X4.heightPixels()];
+        coefficients[0] = 32;
+        coefficients[1] = -16;
+        coefficients[4] = 24;
+        coefficients[5] = 48;
+        return coefficients;
+    }
+
     /// Returns whether one coefficient array contains any non-zero coefficient.
     ///
     /// @param coefficients the coefficient array to inspect
@@ -931,6 +1161,91 @@ final class FrameReconstructorChromaResidualTest {
             }
         }
         return -1;
+    }
+
+    /// Derives one expected delta raster by reconstructing the same residual coefficients through a
+    /// monochrome luma path with matching transform geometry.
+    ///
+    /// @param size the coded monochrome block size used by the oracle
+    /// @param visibleWidthPixels the exact visible residual width in pixels
+    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param coefficients the non-zero residual coefficients to reconstruct
+    /// @return one expected residual delta raster
+    private static int[][] deriveMonochromeResidualDeltaRaster(
+            BlockSize size,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            int[] coefficients
+    ) {
+        BlockPosition position = new BlockPosition(0, 0);
+        TilePartitionTreeReader.LeafNode baselineLeaf = createI400Leaf(
+                position,
+                size,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                null
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = createI400Leaf(
+                position,
+                size,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                coefficients
+        );
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlane baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        FrameType.INTRA,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        baselineLeaf
+                )
+        ).lumaPlane();
+        DecodedPlane residual = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        FrameType.INTRA,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        residualLeaf
+                )
+        ).lumaPlane();
+        int[][] deltaRaster = deltaRaster(baseline, residual);
+        assertTrue(hasNonZeroDelta(deltaRaster));
+        return deltaRaster;
+    }
+
+    /// Returns one signed per-sample delta raster between two decoded planes.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the residual-applied plane
+    /// @return one signed per-sample delta raster
+    private static int[][] deltaRaster(DecodedPlane baseline, DecodedPlane reconstructed) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+        int[][] deltaRaster = new int[baseline.height()][baseline.width()];
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
+                deltaRaster[y][x] = reconstructed.sample(x, y) - baseline.sample(x, y);
+            }
+        }
+        return deltaRaster;
+    }
+
+    /// Returns whether one signed delta raster contains any visible non-zero change.
+    ///
+    /// @param deltaRaster the signed delta raster to inspect
+    /// @return whether the raster contains any non-zero delta
+    private static boolean hasNonZeroDelta(int[][] deltaRaster) {
+        for (int[] row : deltaRaster) {
+            for (int delta : row) {
+                if (delta != 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// Asserts that one decoded plane is filled with one constant sample value.

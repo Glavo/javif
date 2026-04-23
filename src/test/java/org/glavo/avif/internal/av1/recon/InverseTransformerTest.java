@@ -80,6 +80,60 @@ final class InverseTransformerTest {
         );
     }
 
+    /// Verifies that rectangular `RTX_4X8` DC-only `DCT_DCT` reconstruction yields one constant
+    /// residual block.
+    @Test
+    void reconstructsFourByEightDcOnlyResidualBlock() {
+        int[] coefficients = new int[32];
+        coefficients[0] = 256;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_4X8);
+
+        assertBlockFilledWithPositiveValue(residual, 4, 8);
+    }
+
+    /// Verifies that one horizontal rectangular basis for `RTX_8X4` stays row-constant and
+    /// left-right antisymmetric.
+    @Test
+    void reconstructsEightByFourHorizontalAcResidualPattern() {
+        int[] coefficients = new int[32];
+        coefficients[1] = 4096;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_8X4);
+
+        assertRowsMatchFirstRow(residual, 8, 4);
+        assertHorizontalAntisymmetry(residual, 8, 4);
+        assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
+        assertTrue(residual[7] < 0, "Mirrored horizontal basis sample should stay negative");
+    }
+
+    /// Verifies that one vertical rectangular basis for `RTX_4X8` stays column-constant and
+    /// top-bottom antisymmetric.
+    @Test
+    void reconstructsFourByEightVerticalAcResidualPattern() {
+        int[] coefficients = new int[32];
+        coefficients[4] = 4096;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_4X8);
+
+        assertColumnsMatchFirstColumn(residual, 4, 8);
+        assertVerticalAntisymmetry(residual, 4, 8);
+        assertTrue(residual[0] > 0, "First vertical basis sample should stay positive");
+        assertTrue(residual[28] < 0, "Mirrored vertical basis sample should stay negative");
+    }
+
+    /// Verifies that rectangular `RTX_16X8` DC-only `DCT_DCT` reconstruction yields one constant
+    /// residual block.
+    @Test
+    void reconstructsSixteenByEightDcOnlyResidualBlock() {
+        int[] coefficients = new int[128];
+        coefficients[0] = 256;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_16X8);
+
+        assertBlockFilledWithPositiveValue(residual, 16, 8);
+    }
+
     /// Verifies that residual addition clips through the mutable plane buffer.
     @Test
     void addsResidualBlockIntoPredictorPlaneWithClipping() {
@@ -244,6 +298,24 @@ final class InverseTransformerTest {
         }
     }
 
+    /// Verifies that every row in one rectangular residual block equals the first row.
+    ///
+    /// @param residual the residual samples in natural raster order
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    private static void assertRowsMatchFirstRow(int[] residual, int width, int height) {
+        for (int row = 1; row < height; row++) {
+            int rowOffset = row * width;
+            for (int column = 0; column < width; column++) {
+                assertEquals(
+                        residual[column],
+                        residual[rowOffset + column],
+                        "Residual row mismatch at row " + row + ", column " + column
+                );
+            }
+        }
+    }
+
     /// Verifies that each row in one square residual block is horizontally antisymmetric.
     ///
     /// @param residual the residual samples in natural raster order
@@ -258,6 +330,77 @@ final class InverseTransformerTest {
                         -residual[rowOffset + mirroredColumn],
                         "Residual row is not horizontally antisymmetric at row " + row
                 );
+            }
+        }
+    }
+
+    /// Verifies that each row in one rectangular residual block is horizontally antisymmetric.
+    ///
+    /// @param residual the residual samples in natural raster order
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    private static void assertHorizontalAntisymmetry(int[] residual, int width, int height) {
+        for (int row = 0; row < height; row++) {
+            int rowOffset = row * width;
+            for (int column = 0; column < width / 2; column++) {
+                int mirroredColumn = width - 1 - column;
+                assertEquals(
+                        residual[rowOffset + column],
+                        -residual[rowOffset + mirroredColumn],
+                        "Residual row is not horizontally antisymmetric at row " + row
+                );
+            }
+        }
+    }
+
+    /// Verifies that every column in one rectangular residual block equals the first column.
+    ///
+    /// @param residual the residual samples in natural raster order
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    private static void assertColumnsMatchFirstColumn(int[] residual, int width, int height) {
+        for (int column = 1; column < width; column++) {
+            for (int row = 0; row < height; row++) {
+                assertEquals(
+                        residual[row * width],
+                        residual[row * width + column],
+                        "Residual column mismatch at row " + row + ", column " + column
+                );
+            }
+        }
+    }
+
+    /// Verifies that each column in one rectangular residual block is vertically antisymmetric.
+    ///
+    /// @param residual the residual samples in natural raster order
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    private static void assertVerticalAntisymmetry(int[] residual, int width, int height) {
+        for (int row = 0; row < height / 2; row++) {
+            int mirroredRow = height - 1 - row;
+            for (int column = 0; column < width; column++) {
+                assertEquals(
+                        residual[row * width + column],
+                        -residual[mirroredRow * width + column],
+                        "Residual column is not vertically antisymmetric at column " + column
+                );
+            }
+        }
+    }
+
+    /// Verifies that every sample in one rectangular residual block equals one shared positive
+    /// constant.
+    ///
+    /// @param residual the residual samples in natural raster order
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    private static void assertBlockFilledWithPositiveValue(int[] residual, int width, int height) {
+        assertEquals(width * height, residual.length);
+        int first = residual[0];
+        assertTrue(first > 0, "DC-only rectangular residual should stay positive");
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                assertEquals(first, residual[row * width + column]);
             }
         }
     }

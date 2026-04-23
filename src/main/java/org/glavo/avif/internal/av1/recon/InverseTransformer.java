@@ -22,10 +22,10 @@ import java.util.Objects;
 
 /// Minimal inverse-transform helper for the first residual-producing reconstruction path.
 ///
-/// The current implementation assumes the rollout's fixed luma `DCT_DCT` transform type and
-/// supports square `TX_4X4`, `TX_8X8`, and `TX_16X16` blocks. It exposes one method that
-/// reconstructs a residual sample block and one method that adds that block into an already
-/// predicted plane.
+/// The current implementation assumes the rollout's fixed luma/chroma `DCT_DCT` transform type
+/// and supports the currently needed square and rectangular transforms whose dimensions stay
+/// within `4`, `8`, and `16` samples on each axis. It exposes one method that reconstructs a
+/// residual sample block and one method that adds that block into an already predicted plane.
 @NotNullByDefault
 final class InverseTransformer {
     /// The AV1 inverse-transform cosine precision.
@@ -106,6 +106,12 @@ final class InverseTransformer {
             case TX_4X4 -> reconstructFourByFour(nonNullCoefficients);
             case TX_8X8 -> reconstructEightByEight(nonNullCoefficients);
             case TX_16X16 -> reconstructSixteenBySixteen(nonNullCoefficients);
+            case RTX_4X8 -> reconstructRectangularDctDct(nonNullCoefficients, 4, 8, 0);
+            case RTX_8X4 -> reconstructRectangularDctDct(nonNullCoefficients, 8, 4, 0);
+            case RTX_4X16 -> reconstructRectangularDctDct(nonNullCoefficients, 4, 16, 1);
+            case RTX_16X4 -> reconstructRectangularDctDct(nonNullCoefficients, 16, 4, 1);
+            case RTX_8X16 -> reconstructRectangularDctDct(nonNullCoefficients, 8, 16, 1);
+            case RTX_16X8 -> reconstructRectangularDctDct(nonNullCoefficients, 16, 8, 1);
             default -> throw unsupportedTransformSize(nonNullTransformSize);
         };
     }
@@ -286,6 +292,72 @@ final class InverseTransformer {
             }
         }
         return output;
+    }
+
+    /// Reconstructs one supported rectangular `DCT_DCT` residual block.
+    ///
+    /// This follows the same high-level schedule used by `dav1d` for rectangular transforms:
+    /// apply one pre-scale for `2:1` shapes, run one row transform, apply the size-specific
+    /// intermediate shift, run one column transform, then finish with the shared `>> 4`
+    /// post-transform scaling.
+    ///
+    /// @param coefficients the dequantized coefficients in natural raster order
+    /// @param width the transform width in pixels
+    /// @param height the transform height in pixels
+    /// @param intermediateShift the AV1 size-specific intermediate shift applied after the first pass
+    /// @return one signed rectangular residual sample block
+    private static int[] reconstructRectangularDctDct(
+            int[] coefficients,
+            int width,
+            int height,
+            int intermediateShift
+    ) {
+        int[] buffer = new int[width * height];
+        int[] output = new int[width * height];
+        int[] rowScratchIn = new int[width];
+        int[] rowScratchOut = new int[width];
+        int[] columnScratchIn = new int[height];
+        int[] columnScratchOut = new int[height];
+        boolean requiresRectangularPrescale = width * 2 == height || height * 2 == width;
+
+        for (int row = 0; row < height; row++) {
+            int rowOffset = row * width;
+            for (int column = 0; column < width; column++) {
+                int coefficient = coefficients[rowOffset + column];
+                rowScratchIn[column] = requiresRectangularPrescale
+                        ? roundShift((long) coefficient * 181, 8)
+                        : coefficient;
+            }
+            inverseDct(rowScratchIn, rowScratchOut, width);
+            for (int column = 0; column < width; column++) {
+                buffer[rowOffset + column] = roundShift(rowScratchOut[column], intermediateShift);
+            }
+        }
+
+        for (int column = 0; column < width; column++) {
+            for (int row = 0; row < height; row++) {
+                columnScratchIn[row] = buffer[row * width + column];
+            }
+            inverseDct(columnScratchIn, columnScratchOut, height);
+            for (int row = 0; row < height; row++) {
+                output[row * width + column] = roundShift(columnScratchOut[row], 4);
+            }
+        }
+        return output;
+    }
+
+    /// Reconstructs one supported one-dimensional inverse DCT vector.
+    ///
+    /// @param input the dequantized input vector
+    /// @param output the reconstructed output vector
+    /// @param length the vector length in samples
+    private static void inverseDct(int[] input, int[] output, int length) {
+        switch (length) {
+            case 4 -> inverseDct4(input, output);
+            case 8 -> inverseDct8(input, output);
+            case 16 -> inverseDct16(input, output);
+            default -> throw new IllegalStateException("Unsupported inverse DCT length: " + length);
+        }
     }
 
     /// Reconstructs one one-dimensional `DCT_4` vector.
@@ -497,7 +569,9 @@ final class InverseTransformer {
     private static int checkedTransformArea(TransformSize transformSize) {
         return switch (transformSize) {
             case TX_4X4 -> 16;
+            case RTX_4X8, RTX_8X4 -> 32;
             case TX_8X8 -> 64;
+            case RTX_4X16, RTX_16X4, RTX_8X16, RTX_16X8 -> 128;
             case TX_16X16 -> 256;
             default -> throw unsupportedTransformSize(transformSize);
         };

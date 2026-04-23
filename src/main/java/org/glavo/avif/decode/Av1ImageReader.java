@@ -143,11 +143,18 @@ public final class Av1ImageReader implements AutoCloseable {
                 continue;
             }
             if (type == ObuType.FRAME_HEADER) {
-                startStandaloneFrameAssembly(packet);
+                DecodedFrame frame = startStandaloneFrameAssembly(packet);
+                if (frame != null) {
+                    return frame;
+                }
                 continue;
             }
             if (type == ObuType.FRAME) {
-                FrameAssembly assembly = startCombinedFrameAssembly(packet);
+                CombinedFrameStart start = startCombinedFrameAssembly(packet);
+                if (start.resolvedImmediately()) {
+                    return start.immediateOutput();
+                }
+                FrameAssembly assembly = start.frameAssembly();
                 if (assembly.isComplete()) {
                     pendingFrameAssembly = null;
                     DecodedFrame frame = completeFrameAssembly(assembly, packet);
@@ -246,19 +253,18 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param packet the standalone frame-header OBU
     /// @throws IOException if the OBU is unreadable, malformed, or out of order
-    private void startStandaloneFrameAssembly(ObuPacket packet) throws IOException {
+    private @Nullable DecodedFrame startStandaloneFrameAssembly(ObuPacket packet) throws IOException {
         SequenceHeader activeSequenceHeader = requireSequenceHeader(packet);
         ensureNoPendingFrameAssembly(packet, "Standalone frame header OBU appeared before the previous frame was completed");
 
         FrameHeader frameHeader = frameHeaderParser.parse(packet, activeSequenceHeader, config.strictStdCompliance(), referenceFrameHeaders);
         enforceFrameSizeLimit(frameHeader, packet);
         if (frameHeader.showExistingFrame()) {
-            requireExistingFrameState(packet, frameHeader.existingFrameIndex());
-            lastFrameSyntaxDecodeResult = referenceFrameSyntaxResults[frameHeader.existingFrameIndex()];
-            throw showExistingFrameNotImplemented(packet);
+            return outputExistingFrame(packet, frameHeader.existingFrameIndex());
         }
 
         pendingFrameAssembly = new FrameAssembly(activeSequenceHeader, frameHeader, packet.streamOffset(), packet.obuIndex());
+        return null;
     }
 
     /// Starts a new frame assembly from a combined `FRAME` OBU.
@@ -266,7 +272,7 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param packet the combined frame OBU
     /// @return the started frame assembly, including the first tile group
     /// @throws IOException if the OBU is unreadable, malformed, or out of order
-    private FrameAssembly startCombinedFrameAssembly(ObuPacket packet) throws IOException {
+    private CombinedFrameStart startCombinedFrameAssembly(ObuPacket packet) throws IOException {
         SequenceHeader activeSequenceHeader = requireSequenceHeader(packet);
         ensureNoPendingFrameAssembly(packet, "Combined frame OBU appeared before the previous frame was completed");
 
@@ -281,9 +287,7 @@ public final class Av1ImageReader implements AutoCloseable {
                         "Combined frame OBU must not carry tile data when show_existing_frame is set"
                 );
             }
-            requireExistingFrameState(packet, frameHeader.existingFrameIndex());
-            lastFrameSyntaxDecodeResult = referenceFrameSyntaxResults[frameHeader.existingFrameIndex()];
-            throw showExistingFrameNotImplemented(packet);
+            return CombinedFrameStart.immediateOutput(outputExistingFrame(packet, frameHeader.existingFrameIndex()));
         }
 
         FrameAssembly assembly = new FrameAssembly(activeSequenceHeader, frameHeader, packet.streamOffset(), packet.obuIndex());
@@ -291,14 +295,15 @@ public final class Av1ImageReader implements AutoCloseable {
         TileGroupHeader tileGroupHeader = tileGroupHeaderParser.parse(reader, packet, frameHeader);
         reader.byteAlign();
         appendTileGroup(assembly, packet, tileGroupHeader, reader.byteOffset());
-        return assembly;
+        return CombinedFrameStart.frameAssembly(assembly);
     }
 
-    /// Finalizes a completed frame assembly by refreshing reference slots before reporting the decode boundary.
+    /// Finalizes a completed frame assembly by refreshing reference slots and optionally returning
+    /// one decoded public frame.
     ///
     /// @param assembly the completed frame assembly
     /// @param packet the OBU that completed the frame assembly
-    /// @throws DecodeException always, to report that pixel decoding is not implemented yet
+    /// @return the decoded public frame, or `null` when current output filtering suppresses it
     private @Nullable DecodedFrame completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
@@ -352,9 +357,6 @@ public final class Av1ImageReader implements AutoCloseable {
         }
         if (!shouldOutput) {
             return null;
-        }
-        if (decodedPlanes == null) {
-            throw notImplementedForFrame(packet);
         }
         if (config.applyFilmGrain() && frameHeader.filmGrain().applyGrain()) {
             throw new DecodeException(
@@ -503,33 +505,50 @@ public final class Av1ImageReader implements AutoCloseable {
         }
     }
 
-    /// Creates the stable not-implemented exception used once a full frame structure is assembled.
+    /// Returns one decoded `show_existing_frame` output from the requested reference slot, or
+    /// `null` when current public filtering suppresses presentation.
     ///
-    /// @param packet the OBU that completed the frame assembly
-    /// @return the stable not-implemented exception used for frame decoding
-    private static DecodeException notImplementedForFrame(ObuPacket packet) {
-        return new DecodeException(
-                DecodeErrorCode.NOT_IMPLEMENTED,
-                DecodeStage.FRAME_DECODE,
-                "AV1 frame decoding is not implemented yet",
-                packet.streamOffset(),
-                packet.obuIndex(),
-                null
-        );
-    }
-
-    /// Creates the stable not-implemented exception used for `show_existing_frame`.
+    /// This first implementation reuses the already stored reconstructed reference surface
+    /// directly and therefore requires a populated `ReferenceSurfaceSnapshot`.
     ///
-    /// @param packet the OBU whose frame header requested `show_existing_frame`
-    /// @return the stable not-implemented exception used for `show_existing_frame`
-    private static DecodeException showExistingFrameNotImplemented(ObuPacket packet) {
-        return new DecodeException(
-                DecodeErrorCode.NOT_IMPLEMENTED,
-                DecodeStage.FRAME_DECODE,
-                "show_existing_frame output is not implemented yet",
-                packet.streamOffset(),
-                packet.obuIndex(),
-                null
+    /// @param packet the source OBU packet that requested `show_existing_frame`
+    /// @param existingFrameIndex the referenced frame slot
+    /// @return one decoded `show_existing_frame` output, or `null` when output filtering suppresses it
+    /// @throws DecodeException if the referenced slot is invalid, missing state, or would require
+    ///                         unsupported presentation work such as film grain synthesis
+    private @Nullable DecodedFrame outputExistingFrame(ObuPacket packet, int existingFrameIndex) throws DecodeException {
+        requireExistingFrameState(packet, existingFrameIndex);
+        lastFrameSyntaxDecodeResult = referenceFrameSyntaxResults[existingFrameIndex];
+        FrameHeader referencedFrameHeader = referenceFrameHeaders[existingFrameIndex];
+        if (!shouldOutputExistingFrame(referencedFrameHeader)) {
+            return null;
+        }
+        @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot = referenceSurfaceSnapshots[existingFrameIndex];
+        if (referenceSurfaceSnapshot == null) {
+            throw new DecodeException(
+                    DecodeErrorCode.NOT_IMPLEMENTED,
+                    DecodeStage.FRAME_DECODE,
+                    "show_existing_frame output currently requires a reconstructed reference surface",
+                    packet.streamOffset(),
+                    packet.obuIndex(),
+                    null
+            );
+        }
+        if (config.applyFilmGrain() && referencedFrameHeader.filmGrain().applyGrain()) {
+            throw new DecodeException(
+                    DecodeErrorCode.NOT_IMPLEMENTED,
+                    DecodeStage.OUTPUT_CONVERSION,
+                    "Film grain synthesis is not implemented yet",
+                    packet.streamOffset(),
+                    packet.obuIndex(),
+                    null
+            );
+        }
+        return ArgbOutput.toOpaqueArgbIntFrame(
+                referenceSurfaceSnapshot.decodedPlanes(),
+                referencedFrameHeader.frameType(),
+                true,
+                nextPresentationIndex++
         );
     }
 
@@ -713,6 +732,24 @@ public final class Av1ImageReader implements AutoCloseable {
         };
     }
 
+    /// Returns whether one referenced `show_existing_frame` surface should be exposed through the
+    /// public API.
+    ///
+    /// `show_existing_frame` is always visible presentation, so only the decode-frame-type filter
+    /// remains relevant here.
+    ///
+    /// @param referencedFrameHeader the frame header stored alongside the referenced surface
+    /// @return whether one referenced `show_existing_frame` surface should be exposed publicly
+    private boolean shouldOutputExistingFrame(FrameHeader referencedFrameHeader) {
+        return switch (config.decodeFrameType()) {
+            case ALL -> true;
+            case REFERENCE -> referencedFrameHeader.refreshFrameFlags() != 0;
+            case INTRA -> referencedFrameHeader.frameType() == FrameType.KEY
+                    || referencedFrameHeader.frameType() == FrameType.INTRA;
+            case KEY -> referencedFrameHeader.frameType() == FrameType.KEY;
+        };
+    }
+
     /// Creates default tile-local CDF contexts for the supplied tile count.
     ///
     /// @param tileCount the number of tiles in the frame
@@ -723,5 +760,76 @@ public final class Av1ImageReader implements AutoCloseable {
             contexts[i] = CdfContext.createDefault();
         }
         return contexts;
+    }
+
+    /// The immediate result of parsing one combined `FRAME` OBU.
+    ///
+    /// Combined frames either start a normal `FrameAssembly` or resolve immediately through the
+    /// `show_existing_frame` output path.
+    @NotNullByDefault
+    private static final class CombinedFrameStart {
+        /// The started frame assembly, or `null` when output resolved immediately.
+        private final @Nullable FrameAssembly frameAssembly;
+
+        /// The immediate output frame, or `null` when normal frame assembly should continue.
+        private final @Nullable DecodedFrame immediateOutput;
+
+        /// Whether this combined frame resolved immediately through `show_existing_frame`.
+        private final boolean resolvedImmediately;
+
+        /// Creates one combined-frame start result.
+        ///
+        /// @param frameAssembly the started frame assembly, or `null`
+        /// @param immediateOutput the immediate output frame, or `null`
+        /// @param resolvedImmediately whether this combined frame resolved immediately
+        private CombinedFrameStart(
+                @Nullable FrameAssembly frameAssembly,
+                @Nullable DecodedFrame immediateOutput,
+                boolean resolvedImmediately
+        ) {
+            this.frameAssembly = frameAssembly;
+            this.immediateOutput = immediateOutput;
+            this.resolvedImmediately = resolvedImmediately;
+        }
+
+        /// Creates one result that continues with normal frame assembly.
+        ///
+        /// @param frameAssembly the started frame assembly
+        /// @return one result that continues with normal frame assembly
+        private static CombinedFrameStart frameAssembly(FrameAssembly frameAssembly) {
+            return new CombinedFrameStart(Objects.requireNonNull(frameAssembly, "frameAssembly"), null, false);
+        }
+
+        /// Creates one result that resolves immediately to output.
+        ///
+        /// @param immediateOutput the immediate output frame, or `null` when filtering suppresses output
+        /// @return one result that resolves immediately to output
+        private static CombinedFrameStart immediateOutput(@Nullable DecodedFrame immediateOutput) {
+            return new CombinedFrameStart(null, immediateOutput, true);
+        }
+
+        /// Returns whether this combined frame resolved immediately through `show_existing_frame`.
+        ///
+        /// @return whether this combined frame resolved immediately through `show_existing_frame`
+        private boolean resolvedImmediately() {
+            return resolvedImmediately;
+        }
+
+        /// Returns the started frame assembly.
+        ///
+        /// @return the started frame assembly
+        private FrameAssembly frameAssembly() {
+            if (frameAssembly == null) {
+                throw new IllegalStateException("Combined frame start resolved without a frame assembly");
+            }
+            return frameAssembly;
+        }
+
+        /// Returns the immediate output frame, or `null`.
+        ///
+        /// @return the immediate output frame, or `null`
+        private @Nullable DecodedFrame immediateOutput() {
+            return immediateOutput;
+        }
     }
 }
