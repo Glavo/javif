@@ -53,6 +53,18 @@ final class TileResidualSyntaxReaderTest {
     /// The default synthetic frame height used by residual-syntax tests.
     private static final int DEFAULT_FRAME_HEIGHT = 64;
 
+    /// The padded `levels` grid size used by the mirrored `TX_4X4` chroma oracle.
+    private static final int FOUR_BY_FOUR_LEVEL_GRID_SIZE = 6;
+
+    /// The `dav1d` low-token context offsets for the mirrored `TX_4X4` chroma oracle.
+    private static final int[][] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
+            {0, 1, 6, 6, 21},
+            {1, 6, 6, 21, 21},
+            {6, 6, 21, 21, 21},
+            {6, 21, 21, 21, 21},
+            {21, 21, 21, 21, 21}
+    };
+
     /// Verifies that a single 4x4 transform block can decode `txb_skip = true` as an all-zero residual unit.
     @Test
     void readsAllZeroResidualForSingleTransformBlock() {
@@ -224,6 +236,30 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(0, expectedChromaV.endOfBlockIndex());
         assertTrue(Math.abs(expectedChromaU.dcCoefficient()) >= 1);
         assertTrue(Math.abs(expectedChromaV.dcCoefficient()) >= 1);
+        assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
+    }
+
+    /// Verifies that a minimal `I420` block now supports one bitstream-derived multi-coefficient chroma-U residual unit.
+    @Test
+    void readsMultiCoefficientChromaUResidualUnitForMinimalI420Block() {
+        byte[] payload = findPayloadForMultiCoefficientMinimalI420ChromaUResidual();
+        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(0, 0);
+
+        TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+        ResidualLayout expectedResidualLayout = decodeExpectedMinimalI420ResidualLayout(payload);
+        TransformResidualUnit expectedChromaU = expectedResidualLayout.chromaUUnits()[0];
+
+        assertTrue(header.hasChroma());
+        assertEquals(TransformSize.TX_4X4, transformLayout.chromaTransformSize());
+        assertTrue(hasMultiCoefficientResidual(expectedChromaU));
+        assertTrue(expectedChromaU.coefficients()[expectedFourByFourOutputIndex(expectedChromaU.endOfBlockIndex())] != 0);
         assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
     }
 
@@ -590,6 +626,66 @@ final class TileResidualSyntaxReaderTest {
         throw new IllegalStateException("No deterministic payload produced minimal non-zero I420 chroma residuals");
     }
 
+    /// Finds a payload whose minimal `I420` chroma-U residual exposes one supported
+    /// multi-coefficient `TX_4X4` unit.
+    ///
+    /// @return a payload whose minimal `I420` chroma-U residual exposes one multi-coefficient unit
+    private static byte[] findPayloadForMultiCoefficientMinimalI420ChromaUResidual() {
+        byte[] isolatedPayload = findPayloadForMultiCoefficientMinimalI420ChromaUResidual(true);
+        if (isolatedPayload != null) {
+            return isolatedPayload;
+        }
+        byte[] fallbackPayload = findPayloadForMultiCoefficientMinimalI420ChromaUResidual(false);
+        if (fallbackPayload != null) {
+            return fallbackPayload;
+        }
+        throw new IllegalStateException("No deterministic payload produced a minimal multi-coefficient I420 chroma-U residual");
+    }
+
+    /// Finds a payload whose minimal `I420` chroma-U residual exposes one supported
+    /// multi-coefficient `TX_4X4` unit, or `null`.
+    ///
+    /// @param requireAllZeroLuma whether the leading luma unit should stay all-zero to isolate chroma
+    /// @return a payload whose minimal `I420` chroma-U residual exposes one multi-coefficient unit, or `null`
+    private static byte[] findPayloadForMultiCoefficientMinimalI420ChromaUResidual(boolean requireAllZeroLuma) {
+        BlockPosition position = new BlockPosition(0, 0);
+        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
+            int limit = 1 << (searchBytes << 3);
+            for (int value = 0; value < limit; value++) {
+                byte[] payload = new byte[8];
+                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
+                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
+                }
+                try {
+                    TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST);
+                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+                    TileBlockHeaderReader.BlockHeader header =
+                            blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
+                    if (header.skip() || !header.hasChroma()) {
+                        continue;
+                    }
+                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+                    if (transformLayout.chromaTransformSize() != TransformSize.TX_4X4) {
+                        continue;
+                    }
+                    ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+                    if (requireAllZeroLuma && !residualLayout.lumaUnits()[0].allZero()) {
+                        continue;
+                    }
+                    if (hasMultiCoefficientResidual(residualLayout.chromaUUnits()[0])) {
+                        return payload;
+                    }
+                } catch (IllegalStateException ignored) {
+                    // Unsupported luma or chroma trees are skipped while brute-forcing one chroma-U unit.
+                }
+            }
+        }
+        return null;
+    }
+
     /// Finds a payload whose minimal `I420` chroma residuals match the requested mode, or `null`.
     ///
     /// @param requireAllZeroLuma whether the leading luma unit should stay all-zero to isolate chroma
@@ -779,6 +875,16 @@ final class TileResidualSyntaxReaderTest {
         return count;
     }
 
+    /// Returns whether one residual unit exposes at least two decoded non-zero coefficients.
+    ///
+    /// @param residualUnit the residual unit to inspect
+    /// @return whether the supplied residual unit exposes multiple decoded coefficients
+    private static boolean hasMultiCoefficientResidual(TransformResidualUnit residualUnit) {
+        return !residualUnit.allZero()
+                && residualUnit.endOfBlockIndex() > 1
+                && countNonZeroCoefficients(residualUnit.coefficients()) >= 2;
+    }
+
     /// Returns the expected skip context for the second 4x4 unit in a `FOUR_BY_FOUR_ONLY` 8x8 block.
     ///
     /// @param firstCoefficientContextByte the stored coefficient-context byte of the first 4x4 unit
@@ -843,14 +949,14 @@ final class TileResidualSyntaxReaderTest {
                 position,
                 BlockSize.SIZE_8X8,
                 lumaResidualLayout.lumaUnits(),
-                new TransformResidualUnit[]{readMinimalChromaResidualUnit(
+                new TransformResidualUnit[]{readExpectedChromaResidualUnit(
                         syntaxReader,
                         position,
                         chromaTransformSize,
                         visibleChromaWidthPixels,
                         visibleChromaHeightPixels
                 )},
-                new TransformResidualUnit[]{readMinimalChromaResidualUnit(
+                new TransformResidualUnit[]{readExpectedChromaResidualUnit(
                         syntaxReader,
                         position,
                         chromaTransformSize,
@@ -952,49 +1058,189 @@ final class TileResidualSyntaxReaderTest {
         return tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
     }
 
-    /// Decodes one minimal chroma residual unit that is either all-zero or DC-only.
+    /// Decodes one expected minimal-block chroma residual unit using a mirrored `TX_4X4` oracle.
     ///
     /// @param syntaxReader the syntax reader positioned at the start of one chroma unit
     /// @param position the tile-relative origin of the owning block
     /// @param transformSize the modeled chroma transform size
-    /// @return the decoded minimal chroma residual unit
-    private static TransformResidualUnit readMinimalChromaResidualUnit(
+    /// @return the decoded expected chroma residual unit
+    private static TransformResidualUnit readExpectedChromaResidualUnit(
             TileSyntaxReader syntaxReader,
             BlockPosition position,
             TransformSize transformSize,
             int visibleWidthPixels,
             int visibleHeightPixels
     ) {
+        if (transformSize != TransformSize.TX_4X4) {
+            throw new IllegalStateException("Minimal chroma oracle only supports TX_4X4 residual units");
+        }
+
         if (syntaxReader.readCoefficientSkipFlag(transformSize, 0)) {
             return createAllZeroResidualUnit(position, transformSize, visibleWidthPixels, visibleHeightPixels);
         }
 
         int endOfBlockIndex = syntaxReader.readEndOfBlockIndex(transformSize, true, false);
-        if (endOfBlockIndex != 0) {
-            throw new IllegalStateException("Minimal chroma oracle only supports DC-only residual units");
-        }
-
-        int dcToken = syntaxReader.readEndOfBlockBaseToken(transformSize, true, 0);
-        if (dcToken == 3) {
-            dcToken = syntaxReader.readDcHighToken(transformSize, true);
-        }
-        if (dcToken == 15) {
-            dcToken += syntaxReader.readCoefficientGolomb();
-        }
-
-        boolean negative = syntaxReader.readDcSignFlag(true, 0);
-        int signedDcCoefficient = negative ? -dcToken : dcToken;
         int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
-        coefficients[0] = signedDcCoefficient;
+        int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
+        int[][] levelBytes = new int[FOUR_BY_FOUR_LEVEL_GRID_SIZE][FOUR_BY_FOUR_LEVEL_GRID_SIZE];
+
+        if (endOfBlockIndex > 0) {
+            int lastCoefficientIndex = expectedFourByFourOutputIndex(endOfBlockIndex);
+            int lastX = lastCoefficientIndex & 3;
+            int lastY = lastCoefficientIndex >> 2;
+            int lastToken = syntaxReader.readEndOfBlockBaseToken(
+                    TransformSize.TX_4X4,
+                    true,
+                    endOfBlockTokenContext(endOfBlockIndex, TransformSize.TX_4X4)
+            );
+            if (lastToken == 3) {
+                lastToken = syntaxReader.readHighToken(
+                        TransformSize.TX_4X4,
+                        true,
+                        fourByFourEndOfBlockHighTokenContext(lastX, lastY)
+                );
+            }
+            coefficientTokens[endOfBlockIndex] = lastToken;
+            levelBytes[lastX][lastY] = coefficientLevelByte(lastToken);
+
+            for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
+                int coefficientIndex = expectedFourByFourOutputIndex(scanIndex);
+                int x = coefficientIndex & 3;
+                int y = coefficientIndex >> 2;
+                int token = syntaxReader.readBaseToken(
+                        TransformSize.TX_4X4,
+                        true,
+                        fourByFourBaseTokenContext(levelBytes, x, y)
+                );
+                if (token == 3) {
+                    token = syntaxReader.readHighToken(
+                            TransformSize.TX_4X4,
+                            true,
+                            fourByFourHighTokenContext(levelBytes, x, y)
+                    );
+                }
+                coefficientTokens[scanIndex] = token;
+                levelBytes[x][y] = coefficientLevelByte(token);
+            }
+        }
+
+        int dcToken = endOfBlockIndex == 0
+                ? syntaxReader.readEndOfBlockBaseToken(TransformSize.TX_4X4, true, 0)
+                : syntaxReader.readBaseToken(TransformSize.TX_4X4, true, 0);
+        if (dcToken == 3) {
+            dcToken = syntaxReader.readHighToken(TransformSize.TX_4X4, true, fourByFourDcHighTokenContext(levelBytes));
+        }
+
+        int signedDcCoefficient = 0;
+        if (dcToken != 0) {
+            boolean negative = syntaxReader.readDcSignFlag(true, 0);
+            if (dcToken == 15) {
+                dcToken += syntaxReader.readCoefficientGolomb();
+            }
+            signedDcCoefficient = negative ? -dcToken : dcToken;
+            coefficients[0] = signedDcCoefficient;
+        }
+
+        for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
+            int token = coefficientTokens[scanIndex];
+            if (token == 0) {
+                continue;
+            }
+            boolean negative = syntaxReader.readCoefficientSignFlag();
+            if (token == 15) {
+                token += syntaxReader.readCoefficientGolomb();
+            }
+            coefficients[expectedFourByFourOutputIndex(scanIndex)] = negative ? -token : token;
+        }
+
         return new TransformResidualUnit(
                 position,
                 transformSize,
-                0,
+                endOfBlockIndex,
                 coefficients,
                 visibleWidthPixels,
                 visibleHeightPixels,
-                expectedNonZeroCoefficientContextByte(signedDcCoefficient)
+                expectedCoefficientContextByte(coefficients)
         );
+    }
+
+    /// Returns the end-of-block base-token context for one supported end-of-block index.
+    ///
+    /// @param endOfBlockIndex the supported end-of-block index
+    /// @param transformSize the active transform size
+    /// @return the end-of-block base-token context for the supplied index
+    private static int endOfBlockTokenContext(int endOfBlockIndex, TransformSize transformSize) {
+        if (endOfBlockIndex < 0) {
+            throw new IllegalArgumentException("endOfBlockIndex < 0: " + endOfBlockIndex);
+        }
+        int tx2dSizeContext = Math.min(transformSize.log2Width4(), 3) + Math.min(transformSize.log2Height4(), 3);
+        return 1 + (endOfBlockIndex > (2 << tx2dSizeContext) ? 1 : 0)
+                + (endOfBlockIndex > (4 << tx2dSizeContext) ? 1 : 0);
+    }
+
+    /// Returns the stored level byte written into the mirrored `levels` grid for one coefficient token.
+    ///
+    /// @param token the decoded coefficient token before the optional Golomb extension
+    /// @return the stored level byte written into the local `levels` grid
+    private static int coefficientLevelByte(int token) {
+        if (token == 0) {
+            return 0;
+        }
+        if (token < 3) {
+            return token * 0x41;
+        }
+        return token + (3 << 6);
+    }
+
+    /// Returns the `br_tok` high-token context for the last non-zero `TX_4X4` coefficient.
+    ///
+    /// @param x the zero-based coefficient row in `[0, 4)`
+    /// @param y the zero-based coefficient column in `[0, 4)`
+    /// @return the `br_tok` high-token context for the supplied coefficient
+    private static int fourByFourEndOfBlockHighTokenContext(int x, int y) {
+        return ((x | y) > 1) ? 14 : 7;
+    }
+
+    /// Returns the base-token context for one non-EOB `TX_4X4` coefficient.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the zero-based coefficient row in `[0, 4)`
+    /// @param y the zero-based coefficient column in `[0, 4)`
+    /// @return the base-token context for the supplied coefficient
+    private static int fourByFourBaseTokenContext(int[][] levelBytes, int x, int y) {
+        int magnitude = fourByFourHighMagnitude(levelBytes, x, y) + levelBytes[x][y + 2] + levelBytes[x + 2][y];
+        int offset = FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS[Math.min(y, 4)][Math.min(x, 4)];
+        return offset + (magnitude > 512 ? 4 : (magnitude + 64) >> 7);
+    }
+
+    /// Returns the high-token context for one non-EOB `TX_4X4` coefficient.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the zero-based coefficient row in `[0, 4)`
+    /// @param y the zero-based coefficient column in `[0, 4)`
+    /// @return the high-token context for the supplied coefficient
+    private static int fourByFourHighTokenContext(int[][] levelBytes, int x, int y) {
+        int magnitude = fourByFourHighMagnitude(levelBytes, x, y) & 0x3F;
+        return (((x | y) > 1) ? 14 : 7) + (magnitude > 12 ? 6 : (magnitude + 1) >> 1);
+    }
+
+    /// Returns the DC high-token context for one `TX_4X4` residual block.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @return the DC high-token context for the current residual block
+    private static int fourByFourDcHighTokenContext(int[][] levelBytes) {
+        int magnitude = fourByFourHighMagnitude(levelBytes, 0, 0) & 0x3F;
+        return magnitude > 12 ? 6 : (magnitude + 1) >> 1;
+    }
+
+    /// Returns the `dav1d` high-magnitude accumulator for one `TX_4X4` coefficient position.
+    ///
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the zero-based coefficient row in `[0, 4)`
+    /// @param y the zero-based coefficient column in `[0, 4)`
+    /// @return the `dav1d` high-magnitude accumulator for the supplied coefficient position
+    private static int fourByFourHighMagnitude(int[][] levelBytes, int x, int y) {
+        return levelBytes[x][y + 1] + levelBytes[x + 1][y] + levelBytes[x + 1][y + 1];
     }
 
     /// Creates one all-zero residual unit for the supplied position and transform size.

@@ -362,8 +362,8 @@ public final class TileResidualSyntaxReader {
 
         if (endOfBlockIndex > 0) {
             int lastCoefficientIndex = FOUR_BY_FOUR_SCAN[endOfBlockIndex];
-            int lastX = lastCoefficientIndex >> 2;
-            int lastY = lastCoefficientIndex & 3;
+            int lastX = lastCoefficientIndex & 3;
+            int lastY = lastCoefficientIndex >> 2;
             int lastToken = syntaxReader.readEndOfBlockBaseToken(
                     TransformSize.TX_4X4,
                     chroma,
@@ -381,8 +381,8 @@ public final class TileResidualSyntaxReader {
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
                 int coefficientIndex = FOUR_BY_FOUR_SCAN[scanIndex];
-                int x = coefficientIndex >> 2;
-                int y = coefficientIndex & 3;
+                int x = coefficientIndex & 3;
+                int y = coefficientIndex >> 2;
                 int token = syntaxReader.readBaseToken(
                         TransformSize.TX_4X4,
                         chroma,

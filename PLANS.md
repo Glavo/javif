@@ -27,7 +27,7 @@ The repository already has:
 - `I400` and `I420`
 - non-directional and directional intra prediction, filter-intra luma prediction, and `I420` CFL chroma prediction
 - minimal luma `DCT_DCT` residual support for the current `4/8/16` square and rectangular transform subset
-- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for the current uniform visible-grid `4/8/16` transform subset, including clipped, fringe, and multi-unit footprints
+- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for the current uniform visible-grid `4/8/16` transform subset, including clipped, fringe, multi-unit footprints, and a deterministic `TX_4X4` multi-coefficient path
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -64,7 +64,7 @@ Everything else expands from that baseline after correctness is stable.
 
 - Multi-tile frames are still rejected by the reconstruction/output path.
 - Non-zero reconstruction currently covers the current luma/chroma `DCT_DCT` subset whose transform axes stay within `4`, `8`, and `16` samples, including the first rectangular sizes needed by `I400/I420` key/intra reconstruction, but does not yet cover the broader transform-type and coefficient space.
-- The public reader now consumes a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid U/V layouts, including clipped, fringe, and multi-unit footprints when the current transform layout exposes smaller chroma units.
+- The public reader now consumes a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid U/V layouts, including clipped, fringe, multi-unit footprints, and the first deterministic `TX_4X4` multi-coefficient case when the current transform layout exposes smaller chroma units.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Palette, `intrabc`, inter prediction, and motion compensation remain unsupported.
 - Only `8-bit I400/I420 -> ArgbIntFrame` is wired through the public reader.
@@ -143,7 +143,7 @@ Exit criteria:
 Current gap after the first-pixel milestone:
 
 - Non-zero residual decode and reconstruction still do not cover the full reconstruction-ready coefficient space.
-- Chroma residual syntax now covers the minimal uniform visible-grid path, including clipped/fringe and multi-unit visible footprints, but still does not cover the full chroma transform and coefficient space.
+- Chroma residual syntax now covers the minimal uniform visible-grid path, including clipped/fringe and multi-unit visible footprints plus the first deterministic `TX_4X4` multi-coefficient path, but still does not cover the full chroma transform and coefficient space.
 - Several block features remain syntax-only or rejected during reconstruction: palette, inter prediction, and motion compensation-related paths.
 
 Write scope:
@@ -220,6 +220,7 @@ Completed within this track already:
 - `I420` CFL chroma reconstruction
 - minimal reconstruction-side `I420` chroma residual application for split U/V residual units
 - minimal bitstream-side `I420` chroma residual syntax for uniform visible-grid U/V layouts, including clipped/fringe and multi-unit visible footprints
+- deterministic `TX_4X4` multi-coefficient bitstream-derived `I420` chroma residual coverage, with corrected `TX_4X4` coefficient-context coordinate handling
 - non-zero rectangular `DCT_DCT` reconstruction for the current `4/8/16` luma/chroma key/intra subset
 
 Immediate next steps inside this track:
