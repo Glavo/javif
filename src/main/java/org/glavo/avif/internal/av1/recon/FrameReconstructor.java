@@ -37,10 +37,10 @@ import java.util.Objects;
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
 /// with the current serial tile traversal, `I400`, `I420`, `I422`, or `I444` chroma layout,
-/// non-directional and directional intra prediction, filter-intra luma prediction, `I420` CFL
-/// chroma prediction, the current minimal luma/chroma palette paths, and a minimal luma/chroma
-/// residual subset including clipped frame-fringe chroma footprints and the currently supported
-/// rectangular `DCT_DCT` transform sizes.
+/// non-directional and directional intra prediction, filter-intra luma prediction, the current
+/// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, and
+/// a minimal luma/chroma residual subset including clipped frame-fringe chroma footprints and the
+/// currently supported rectangular `DCT_DCT` transform sizes.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -248,7 +248,7 @@ public final class FrameReconstructor {
                         visibleChromaHeight
                 );
             } else if (header.uvMode() == UvIntraPredictionMode.CFL) {
-                IntraPredictor.predictChromaCflI420(
+                IntraPredictor.predictChromaCfl(
                         chromaUPlane,
                         lumaPlane,
                         chromaX,
@@ -257,9 +257,11 @@ public final class FrameReconstructor {
                         lumaY,
                         visibleChromaWidth,
                         visibleChromaHeight,
-                        header.cflAlphaU()
+                        header.cflAlphaU(),
+                        chromaSubsamplingX,
+                        chromaSubsamplingY
                 );
-                IntraPredictor.predictChromaCflI420(
+                IntraPredictor.predictChromaCfl(
                         chromaVPlane,
                         lumaPlane,
                         chromaX,
@@ -268,7 +270,9 @@ public final class FrameReconstructor {
                         lumaY,
                         visibleChromaWidth,
                         visibleChromaHeight,
-                        header.cflAlphaV()
+                        header.cflAlphaV(),
+                        chromaSubsamplingX,
+                        chromaSubsamplingY
                 );
             } else {
                 IntraPredictor.predictChroma(
@@ -322,11 +326,6 @@ public final class FrameReconstructor {
         if (header.hasChroma()) {
             if (header.uvPaletteSize() == 0 && header.uvMode() == null) {
                 throw new IllegalStateException("Chroma reconstruction requires uvMode");
-            }
-            if (header.uvPaletteSize() == 0
-                    && header.uvMode() == UvIntraPredictionMode.CFL
-                    && pixelFormat != PixelFormat.I420) {
-                throw new IllegalStateException("CFL reconstruction currently supports only I420");
             }
             if (header.uvPaletteSize() != 0 && pixelFormat != PixelFormat.I420) {
                 throw new IllegalStateException("Palette chroma reconstruction currently supports only I420");

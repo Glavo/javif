@@ -23,8 +23,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 /// Minimal intra predictor used by the first reconstruction-capable decode path.
 ///
 /// The current implementation supports the AV1 non-directional intra modes, directional intra
-/// prediction with signed `angle_delta`, luma filter-intra, and `I420` CFL chroma prediction. It
-/// uses frame-edge midpoint samples when top or left neighbors are unavailable.
+/// prediction with signed `angle_delta`, luma filter-intra, and the current `I420` / `I422` /
+/// `I444` CFL chroma subset. It uses frame-edge midpoint samples when top or left neighbors are
+/// unavailable.
 @NotNullByDefault
 final class IntraPredictor {
     /// The AV1 directional base angles in `VERTICAL`-through-`VERTICAL_LEFT` order.
@@ -292,10 +293,61 @@ final class IntraPredictor {
         );
     }
 
-    /// Reconstructs one `I420` CFL chroma block directly into the destination plane.
+    /// Reconstructs one CFL chroma block directly into the destination plane.
     ///
     /// The current implementation consumes already reconstructed luma samples, including any luma
-    /// residuals that were applied before chroma prediction begins.
+    /// residuals that were applied before chroma prediction begins, and supports the current
+    /// `I420`, `I422`, and `I444` subsampling patterns through explicit horizontal and vertical
+    /// subsampling shifts.
+    ///
+    /// @param chromaPlane the mutable chroma destination plane
+    /// @param lumaPlane the already reconstructed luma plane
+    /// @param chromaX the zero-based horizontal chroma sample coordinate
+    /// @param chromaY the zero-based vertical chroma sample coordinate
+    /// @param lumaX the zero-based horizontal luma sample coordinate
+    /// @param lumaY the zero-based vertical luma sample coordinate
+    /// @param width the chroma block width in samples
+    /// @param height the chroma block height in samples
+    /// @param alpha the signed CFL alpha
+    /// @param subsamplingX the horizontal chroma subsampling shift
+    /// @param subsamplingY the vertical chroma subsampling shift
+    static void predictChromaCfl(
+            MutablePlaneBuffer chromaPlane,
+            MutablePlaneBuffer lumaPlane,
+            int chromaX,
+            int chromaY,
+            int lumaX,
+            int lumaY,
+            int width,
+            int height,
+            int alpha,
+            int subsamplingX,
+            int subsamplingY
+    ) {
+        if (width <= 0) {
+            throw new IllegalArgumentException("width <= 0: " + width);
+        }
+        if (height <= 0) {
+            throw new IllegalArgumentException("height <= 0: " + height);
+        }
+        if (subsamplingX < 0 || subsamplingX > 1) {
+            throw new IllegalArgumentException("subsamplingX must be 0 or 1: " + subsamplingX);
+        }
+        if (subsamplingY < 0 || subsamplingY > 1) {
+            throw new IllegalArgumentException("subsamplingY must be 0 or 1: " + subsamplingY);
+        }
+        int dc = dcPredictionValue(chromaPlane, chromaX, chromaY, width, height);
+        int[] ac = cflAc(lumaPlane, lumaX, lumaY, width, height, subsamplingX, subsamplingY);
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                int diff = alpha * ac[row * width + column];
+                int predicted = dc + applySign((Math.abs(diff) + 32) >> 6, diff);
+                chromaPlane.setSample(chromaX + column, chromaY + row, predicted);
+            }
+        }
+    }
+
+    /// Reconstructs one `I420` CFL chroma block directly into the destination plane.
     ///
     /// @param chromaPlane the mutable chroma destination plane
     /// @param lumaPlane the already reconstructed luma plane
@@ -317,21 +369,7 @@ final class IntraPredictor {
             int height,
             int alpha
     ) {
-        if (width <= 0) {
-            throw new IllegalArgumentException("width <= 0: " + width);
-        }
-        if (height <= 0) {
-            throw new IllegalArgumentException("height <= 0: " + height);
-        }
-        int dc = dcPredictionValue(chromaPlane, chromaX, chromaY, width, height);
-        int[] ac = cflAcI420(lumaPlane, lumaX, lumaY, width, height);
-        for (int row = 0; row < height; row++) {
-            for (int column = 0; column < width; column++) {
-                int diff = alpha * ac[row * width + column];
-                int predicted = dc + applySign((Math.abs(diff) + 32) >> 6, diff);
-                chromaPlane.setSample(chromaX + column, chromaY + row, predicted);
-            }
-        }
+        predictChromaCfl(chromaPlane, lumaPlane, chromaX, chromaY, lumaX, lumaY, width, height, alpha, 1, 1);
     }
 
     /// Validates one luma prediction mode and maps it into the internal supported subset.
@@ -733,35 +771,46 @@ final class IntraPredictor {
         return defaultSample;
     }
 
-    /// Returns the signed CFL AC buffer for one `I420` chroma block.
+    /// Returns the signed CFL AC buffer for one subsampled chroma block.
     ///
-    /// The returned buffer has one entry per chroma sample in raster order.
+    /// The returned buffer has one entry per chroma sample in raster order. The current
+    /// implementation supports the same `I420`, `I422`, and `I444` subsampling patterns exposed by
+    /// the first reconstruction path.
     ///
     /// @param lumaPlane the already reconstructed luma plane
     /// @param lumaX the zero-based horizontal luma sample coordinate
     /// @param lumaY the zero-based vertical luma sample coordinate
     /// @param chromaWidth the chroma block width in samples
     /// @param chromaHeight the chroma block height in samples
-    /// @return the signed CFL AC buffer for one `I420` chroma block
-    private static int[] cflAcI420(
+    /// @param subsamplingX the horizontal chroma subsampling shift
+    /// @param subsamplingY the vertical chroma subsampling shift
+    /// @return the signed CFL AC buffer for one subsampled chroma block
+    private static int[] cflAc(
             MutablePlaneBuffer lumaPlane,
             int lumaX,
             int lumaY,
             int chromaWidth,
-            int chromaHeight
+            int chromaHeight,
+            int subsamplingX,
+            int subsamplingY
     ) {
         int[] ac = new int[chromaWidth * chromaHeight];
         int sum = 1 << (Integer.numberOfTrailingZeros(chromaWidth) + Integer.numberOfTrailingZeros(chromaHeight) - 1);
+        int horizontalSpan = 1 << subsamplingX;
+        int verticalSpan = 1 << subsamplingY;
+        int valueShift = 3 - subsamplingX - subsamplingY;
         for (int row = 0; row < chromaHeight; row++) {
             int rowOffset = row * chromaWidth;
-            int sourceY = lumaY + (row << 1);
+            int sourceY = lumaY + (row << subsamplingY);
             for (int column = 0; column < chromaWidth; column++) {
-                int sourceX = lumaX + (column << 1);
-                int acSum = lumaPlane.sample(sourceX, sourceY)
-                        + lumaPlane.sample(sourceX + 1, sourceY)
-                        + lumaPlane.sample(sourceX, sourceY + 1)
-                        + lumaPlane.sample(sourceX + 1, sourceY + 1);
-                int value = acSum << 1;
+                int sourceX = lumaX + (column << subsamplingX);
+                int acSum = 0;
+                for (int sampleY = 0; sampleY < verticalSpan; sampleY++) {
+                    for (int sampleX = 0; sampleX < horizontalSpan; sampleX++) {
+                        acSum += lumaPlane.sample(sourceX + sampleX, sourceY + sampleY);
+                    }
+                }
+                int value = acSum << valueShift;
                 ac[rowOffset + column] = value;
                 sum += value;
             }

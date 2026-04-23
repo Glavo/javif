@@ -314,6 +314,44 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Verifies that one bitstream-derived clipped `I422` chroma residual survives the integration
+    /// path and updates only the visible wider-chroma footprint.
+    @Test
+    void reconstructsBitstreamDerivedClippedI422ChromaResidualOnlyWithinVisibleFootprint() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        int codedWidth = 7;
+        int codedHeight = 5;
+        FrameHeader.TransformMode transformMode = FrameHeader.TransformMode.LARGEST;
+        byte[] payload = findPayloadForBitstreamDerivedChromaResidual(
+                PixelFormat.I422,
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+        TilePartitionTreeReader.LeafNode decodedLeaf = decodeChromaLeafFromPayload(
+                PixelFormat.I422,
+                payload,
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+
+        assertFalse(decodedLeaf.header().skip());
+        assertTrue(decodedLeaf.header().hasChroma());
+        assertEquals(2, decodedLeaf.transformLayout().visibleWidth4());
+        assertEquals(2, decodedLeaf.transformLayout().visibleHeight4());
+        assertEquals(TransformSize.RTX_4X8, decodedLeaf.transformLayout().chromaTransformSize());
+        assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
+                createAssembly(PixelFormat.I422, new byte[0], codedWidth, codedHeight, transformMode),
+                decodedLeaf
+        );
+    }
+
     /// Verifies that one bitstream-derived fringe `I420` chroma residual survives the integration
     /// path and updates only the visible chroma footprint.
     @Test
@@ -1199,6 +1237,34 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             FrameHeader.TransformMode transformMode
     ) {
+        return findPayloadForBitstreamDerivedChromaResidual(
+                PixelFormat.I420,
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+    }
+
+    /// Finds a deterministic payload whose decoded chroma block carries one non-zero clipped or
+    /// fringe chroma residual under the supplied geometry.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param position the block origin to decode
+    /// @param blockSize the block size to decode
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return a deterministic payload whose decoded block carries one clipped chroma residual
+    private static byte[] findPayloadForBitstreamDerivedChromaResidual(
+            PixelFormat pixelFormat,
+            BlockPosition position,
+            BlockSize blockSize,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
         for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
             int limit = 1 << (searchBytes << 3);
             for (int value = 0; value < limit; value++) {
@@ -1207,7 +1273,8 @@ final class FrameReconstructorIntegrationTest {
                     payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
                 }
                 try {
-                    TilePartitionTreeReader.LeafNode decodedLeaf = decodeI420LeafFromPayload(
+                    TilePartitionTreeReader.LeafNode decodedLeaf = decodeChromaLeafFromPayload(
+                            pixelFormat,
                             payload,
                             position,
                             blockSize,
@@ -1224,6 +1291,7 @@ final class FrameReconstructorIntegrationTest {
                             || hasClippedResidualFootprint(residualLayout.chromaVUnits()))
                             && bitstreamDerivedLeafProducesChromaChange(
                                     decodedLeaf,
+                                    pixelFormat,
                                     codedWidth,
                                     codedHeight,
                                     transformMode
@@ -1235,7 +1303,9 @@ final class FrameReconstructorIntegrationTest {
                 }
             }
         }
-        throw new IllegalStateException("No deterministic payload produced a clipped bitstream-derived I420 chroma residual");
+        throw new IllegalStateException(
+                "No deterministic payload produced a clipped bitstream-derived " + pixelFormat + " chroma residual"
+        );
     }
 
     /// Finds a deterministic payload whose decoded `I420` block carries one non-zero
@@ -1281,6 +1351,7 @@ final class FrameReconstructorIntegrationTest {
                             || hasMultiCoefficientResidual(residualLayout.chromaVUnits()))
                             && bitstreamDerivedLeafProducesChromaChange(
                                     decodedLeaf,
+                                    PixelFormat.I420,
                                     codedWidth,
                                     codedHeight,
                                     transformMode
@@ -1315,7 +1386,38 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             FrameHeader.TransformMode transformMode
     ) {
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, codedWidth, codedHeight, transformMode);
+        return decodeChromaLeafFromPayload(
+                PixelFormat.I420,
+                payload,
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+    }
+
+    /// Decodes one chroma-carrying leaf from a caller-supplied tile payload using the current
+    /// integration block/transform/residual readers.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload to decode structurally
+    /// @param position the block origin to decode
+    /// @param blockSize the block size to decode
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return one chroma-carrying leaf decoded from the supplied tile payload
+    private static TilePartitionTreeReader.LeafNode decodeChromaLeafFromPayload(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            BlockPosition position,
+            BlockSize blockSize,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        TileDecodeContext tileContext = createTileContext(payload, pixelFormat, codedWidth, codedHeight, transformMode);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -1423,11 +1525,12 @@ final class FrameReconstructorIntegrationTest {
     /// @return whether the supplied decoded leaf produces any observable chroma-plane change
     private static boolean bitstreamDerivedLeafProducesChromaChange(
             TilePartitionTreeReader.LeafNode decodedLeaf,
+            PixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
     ) {
-        FrameAssembly assembly = createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode);
+        FrameAssembly assembly = createAssembly(pixelFormat, new byte[0], codedWidth, codedHeight, transformMode);
         TilePartitionTreeReader.LeafNode baselineLeaf = clearDecodedLeafChromaResiduals(decodedLeaf);
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(createSyntheticResult(assembly, baselineLeaf));
@@ -2435,7 +2538,7 @@ final class FrameReconstructorIntegrationTest {
                         true,
                         pixelFormat,
                         0,
-                        pixelFormat == PixelFormat.I420,
+                        pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422,
                         pixelFormat == PixelFormat.I420,
                         false
                 )

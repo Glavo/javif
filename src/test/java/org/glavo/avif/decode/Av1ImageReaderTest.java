@@ -312,6 +312,17 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Verifies that the same supported real tile payload also decodes through parsed `I422` and
+    /// `I444` reduced still-picture combined streams.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForSupportedCombinedStillPictureStreamsWithRealI422AndI444SequenceHeaders()
+            throws IOException {
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I422, true);
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I444, true);
+    }
+
     /// Verifies that `readAllFrames()` preserves the current supported first-pixel combined
     /// still-picture success path across all buffered-input adapters.
     ///
@@ -350,6 +361,39 @@ final class Av1ImageReaderTest {
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         }
+    }
+
+    /// Verifies that the same supported real tile payload also decodes through parsed `I422` and
+    /// `I444` reduced still-picture standalone streams.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForSupportedStandaloneStillPictureStreamsWithRealI422AndI444SequenceHeaders()
+            throws IOException {
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I422, false);
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I444, false);
+    }
+
+    /// Verifies that one real parsed `I422` or `I444` still-picture decode can immediately refresh
+    /// a reference slot and then round-trip through one standalone `show_existing_frame` header.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForShowExistingFrameBackedByRealParsedStillPicturesWithAdditionalChromaLayouts()
+            throws IOException {
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, false);
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, false);
+    }
+
+    /// Verifies that one real parsed `I422` or `I444` still-picture decode can immediately refresh
+    /// a reference slot and then round-trip through one combined `FRAME` `show_existing_frame` OBU.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForCombinedShowExistingFrameBackedByRealParsedStillPicturesWithAdditionalChromaLayouts()
+            throws IOException {
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, true);
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, true);
     }
 
     /// Verifies that one standalone `show_existing_frame` header can expose a reconstructed palette
@@ -977,6 +1021,67 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Asserts that the supported minimal real tile payload round-trips through the public reader
+    /// with one parsed `I422` or `I444` reduced still-picture sequence header.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @param combined whether to use one combined `FRAME` OBU instead of standalone frame assembly
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(
+            PixelFormat pixelFormat,
+            boolean combined
+    ) throws IOException {
+        byte[] stream = combined
+                ? concat(
+                        obu(1, reducedStillPicturePayload(pixelFormat)),
+                        obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+                )
+                : concat(
+                        obu(1, reducedStillPicturePayload(pixelFormat)),
+                        obu(3, reducedStillPictureFrameHeaderPayload()),
+                        obu(4, SUPPORTED_SINGLE_TILE_PAYLOAD)
+                );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), pixelFormat, 0);
+            assertFirstDecodedLeafIsIntra(reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Asserts that one real parsed still-picture decode in the requested additional chroma layout
+    /// immediately refreshes a reference slot and then round-trips through `show_existing_frame`.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(
+            PixelFormat pixelFormat,
+            boolean combinedShowExisting
+    ) throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload(pixelFormat)),
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                obu(combinedShowExisting ? 6 : 3, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame firstFrame = reader.readFrame();
+            assertOpaqueGrayStillPictureFrame(firstFrame, pixelFormat, 0);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+
+            DecodedFrame reusedFrame = reader.readFrame();
+            assertOpaqueGrayStillPictureFrame(reusedFrame, pixelFormat, 1);
+            assertNotNull(firstFrame);
+            assertNotNull(reusedFrame);
+            assertTrue(firstFrame instanceof ArgbIntFrame);
+            assertTrue(reusedFrame instanceof ArgbIntFrame);
+            assertArrayEquals(((ArgbIntFrame) firstFrame).pixels(), ((ArgbIntFrame) reusedFrame).pixels());
+            assertNull(reader.readFrame());
+        });
+    }
+
     /// Asserts that one standalone `show_existing_frame` header exposes the requested synthetic
     /// stored reference surface through every buffered-input adapter.
     ///
@@ -1286,7 +1391,21 @@ final class Av1ImageReaderTest {
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertOpaqueGrayStillPictureFrame(@org.jetbrains.annotations.Nullable DecodedFrame decodedFrame, long expectedPresentationIndex) {
-        assertStillPictureFrameFilledWith(decodedFrame, expectedPresentationIndex, OPAQUE_MID_GRAY);
+        assertOpaqueGrayStillPictureFrame(decodedFrame, PixelFormat.I420, expectedPresentationIndex);
+    }
+
+    /// Asserts that the reader returned one supported opaque gray still-picture frame with the
+    /// requested public chroma layout.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPixelFormat the expected chroma layout exposed by the public frame
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertOpaqueGrayStillPictureFrame(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            PixelFormat expectedPixelFormat,
+            long expectedPresentationIndex
+    ) {
+        assertStillPictureFrameFilledWith(decodedFrame, expectedPixelFormat, expectedPresentationIndex, OPAQUE_MID_GRAY);
     }
 
     /// Asserts that the reader returned one legacy directional opaque gray still-picture frame.
@@ -1337,10 +1456,26 @@ final class Av1ImageReaderTest {
             long expectedPresentationIndex,
             int expectedPixel
     ) {
+        assertStillPictureFrameFilledWith(decodedFrame, PixelFormat.I420, expectedPresentationIndex, expectedPixel);
+    }
+
+    /// Asserts that the reader returned one still-picture frame filled with one constant pixel and
+    /// exposing the requested public chroma layout.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPixelFormat the expected chroma layout exposed by the public frame
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    /// @param expectedPixel the expected constant packed ARGB pixel value
+    private static void assertStillPictureFrameFilledWith(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            PixelFormat expectedPixelFormat,
+            long expectedPresentationIndex,
+            int expectedPixel
+    ) {
         assertNotNull(decodedFrame);
         assertTrue(decodedFrame instanceof ArgbIntFrame);
         ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
-        assertDecodedStillPictureFrameMetadata(frame, PixelFormat.I420, expectedPresentationIndex);
+        assertDecodedStillPictureFrameMetadata(frame, expectedPixelFormat, expectedPresentationIndex);
 
         int[] pixels = frame.pixels();
         assertEquals(64 * 64, pixels.length);
@@ -1400,6 +1535,18 @@ final class Av1ImageReaderTest {
             }
         }
         throw new AssertionError("No palette leaf decoded from the real bitstream-derived fixture");
+    }
+
+    /// Asserts that the first raster-order decoded leaf is intra-coded.
+    ///
+    /// @param syntaxResult the structural decode result produced by the public reader
+    private static void assertFirstDecodedLeafIsIntra(
+            @org.jetbrains.annotations.Nullable FrameSyntaxDecodeResult syntaxResult
+    ) {
+        assertNotNull(syntaxResult);
+        List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxResult.tileRoots(0));
+        assertFalse(leaves.isEmpty());
+        assertTrue(leaves.get(0).header().intra());
     }
 
     /// Asserts that every refreshed reference slot stores structural state for the same decoded frame.
@@ -1522,8 +1669,17 @@ final class Av1ImageReaderTest {
     ///
     /// @return the reduced still-picture sequence header payload
     private static byte[] reducedStillPicturePayload() {
+        return reducedStillPicturePayload(PixelFormat.I420);
+    }
+
+    /// Creates a reduced still-picture sequence header payload for one requested public chroma
+    /// layout.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @return the reduced still-picture sequence header payload
+    private static byte[] reducedStillPicturePayload(PixelFormat pixelFormat) {
         BitWriter writer = new BitWriter();
-        writer.writeBits(0, 3);
+        writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeBits(5, 3);
@@ -1539,14 +1695,62 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeBits(1, 2);
-        writer.writeFlag(true);
-        writer.writeFlag(false);
+        writeReducedStillPictureColorConfig(writer, pixelFormat);
         writer.writeTrailingBits();
         return writer.toByteArray();
+    }
+
+    /// Returns the AV1 sequence-profile value used by the reduced still-picture fixture for the
+    /// requested public chroma layout.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @return the reduced still-picture sequence-profile value
+    private static int reducedStillPictureProfile(PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I420 -> 0;
+            case I422 -> 2;
+            case I444 -> 1;
+            case I400 -> throw new IllegalArgumentException(
+                    "Reduced still-picture fixture expects I420, I422, or I444: " + pixelFormat
+            );
+        };
+    }
+
+    /// Writes the reduced still-picture color-configuration bits for the requested public chroma
+    /// layout.
+    ///
+    /// @param writer the destination bit writer
+    /// @param pixelFormat the requested public chroma layout
+    private static void writeReducedStillPictureColorConfig(BitWriter writer, PixelFormat pixelFormat) {
+        switch (pixelFormat) {
+            case I420 -> {
+                writer.writeFlag(false);
+                writer.writeFlag(false);
+                writer.writeFlag(false);
+                writer.writeFlag(true);
+                writer.writeBits(1, 2);
+                writer.writeFlag(true);
+                writer.writeFlag(false);
+            }
+            case I422 -> {
+                writer.writeFlag(false);
+                writer.writeFlag(false);
+                writer.writeFlag(false);
+                writer.writeFlag(true);
+                writer.writeFlag(true);
+                writer.writeFlag(false);
+            }
+            case I444 -> {
+                writer.writeFlag(false);
+                writer.writeFlag(false);
+                writer.writeFlag(true);
+                writer.writeFlag(true);
+                writer.writeFlag(false);
+            }
+            case I400 -> throw new IllegalArgumentException(
+                    "Reduced still-picture fixture expects I420, I422, or I444: " + pixelFormat
+            );
+        }
     }
 
     /// Creates one non-reduced still-picture-compatible sequence header payload that enables
@@ -1554,8 +1758,17 @@ final class Av1ImageReaderTest {
     ///
     /// @return one non-reduced still-picture-compatible sequence header payload
     private static byte[] fullSequenceHeaderPayload() {
+        return fullSequenceHeaderPayload(PixelFormat.I420);
+    }
+
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// `show_existing_frame` while exposing the requested `8-bit` public chroma layout.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @return one non-reduced still-picture-compatible sequence header payload
+    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat) {
         BitWriter writer = new BitWriter();
-        writer.writeBits(0, 3);
+        writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
@@ -1586,10 +1799,7 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeBits(1, 2);
-        writer.writeFlag(true);
-        writer.writeFlag(false);
+        writeReducedStillPictureColorConfig(writer, pixelFormat);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }

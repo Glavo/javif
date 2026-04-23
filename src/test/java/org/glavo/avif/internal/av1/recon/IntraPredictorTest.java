@@ -196,6 +196,72 @@ final class IntraPredictorTest {
         );
     }
 
+    /// Verifies that generalized `I422` CFL prediction derives signed AC from horizontally
+    /// subsampled reconstructed luma.
+    @Test
+    void chromaCflPredictionUsesHorizontallySubsampledLumaAc() {
+        MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(4, 4, 8);
+        int[][] lumaSamples = {
+                {128, 136, 144, 152},
+                {64, 96, 120, 144},
+                {132, 147, 164, 164},
+                {68, 101, 133, 155}
+        };
+        for (int row = 0; row < lumaSamples.length; row++) {
+            for (int column = 0; column < lumaSamples[row].length; column++) {
+                lumaPlane.setSample(column, row, lumaSamples[row][column]);
+            }
+        }
+
+        MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(2, 4, 8);
+        IntraPredictor.predictChromaCfl(chromaPlane, lumaPlane, 0, 0, 0, 0, 2, 4, 4, 1, 0);
+
+        assertBlockEquals(
+                chromaPlane,
+                0,
+                0,
+                new int[][]{
+                        {130, 138},
+                        {104, 130},
+                        {134, 146},
+                        {106, 136}
+                }
+        );
+    }
+
+    /// Verifies that generalized `I444` CFL prediction derives signed AC from full-resolution
+    /// reconstructed luma.
+    @Test
+    void chromaCflPredictionUsesFullResolutionLumaAc() {
+        MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(4, 4, 8);
+        int[][] lumaSamples = {
+                {128, 136, 144, 152},
+                {64, 96, 120, 144},
+                {132, 147, 164, 164},
+                {68, 101, 133, 155}
+        };
+        for (int row = 0; row < lumaSamples.length; row++) {
+            for (int column = 0; column < lumaSamples[row].length; column++) {
+                lumaPlane.setSample(column, row, lumaSamples[row][column]);
+            }
+        }
+
+        MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(4, 4, 8);
+        IntraPredictor.predictChromaCfl(chromaPlane, lumaPlane, 0, 0, 0, 0, 4, 4, 4, 0, 0);
+
+        assertBlockEquals(
+                chromaPlane,
+                0,
+                0,
+                new int[][]{
+                        {128, 132, 136, 140},
+                        {96, 112, 124, 136},
+                        {130, 138, 146, 146},
+                        {98, 114, 131, 142}
+                }
+        );
+    }
+
     /// Verifies that directional luma prediction interpolates along the top edge in the shallow-angle zone.
     @Test
     void directionalLumaPredictionInterpolatesFromTopEdge() {

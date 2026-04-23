@@ -562,6 +562,120 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Verifies that generalized CFL reconstruction for the current `I422` subset derives chroma
+    /// AC from horizontally subsampled reconstructed luma.
+    @Test
+    void reconstructsI422BlockWithFilterIntraAndCflPrediction() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.CFL,
+                        FilterIntraMode.DC,
+                        0,
+                        0,
+                        4,
+                        -4
+                ),
+                createTransformLayout(position, size, PixelFormat.I422),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.KEY, 4, 4, leaf)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                new int[][]{
+                        {128, 136, 144, 152},
+                        {64, 96, 120, 144},
+                        {132, 147, 164, 164},
+                        {68, 101, 133, 155}
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaUPlane()),
+                new int[][]{
+                        {130, 138},
+                        {104, 130},
+                        {134, 146},
+                        {106, 136}
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaVPlane()),
+                new int[][]{
+                        {126, 118},
+                        {152, 126},
+                        {122, 110},
+                        {150, 120}
+                }
+        );
+    }
+
+    /// Verifies that generalized CFL reconstruction for the current `I444` subset derives chroma
+    /// AC from full-resolution reconstructed luma.
+    @Test
+    void reconstructsI444BlockWithFilterIntraAndCflPrediction() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.CFL,
+                        FilterIntraMode.DC,
+                        0,
+                        0,
+                        4,
+                        -4
+                ),
+                createTransformLayout(position, size, PixelFormat.I444),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.KEY, 4, 4, leaf)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                new int[][]{
+                        {128, 136, 144, 152},
+                        {64, 96, 120, 144},
+                        {132, 147, 164, 164},
+                        {68, 101, 133, 155}
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaUPlane()),
+                new int[][]{
+                        {128, 132, 136, 140},
+                        {96, 112, 124, 136},
+                        {130, 138, 146, 146},
+                        {98, 114, 131, 142}
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaVPlane()),
+                new int[][]{
+                        {128, 124, 120, 116},
+                        {160, 144, 132, 120},
+                        {126, 118, 110, 110},
+                        {158, 142, 125, 114}
+                }
+        );
+    }
+
     /// Verifies that one synthetic directional `I420` leaf reconstructs successfully after top neighbors are already available.
     @Test
     void reconstructsDirectionalI420LeafFromReconstructedTopNeighbors() {
