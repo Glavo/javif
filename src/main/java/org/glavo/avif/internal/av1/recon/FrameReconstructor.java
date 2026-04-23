@@ -42,7 +42,8 @@ import java.util.Objects;
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
 /// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, and
 /// a minimal luma/chroma residual subset including clipped frame-fringe chroma footprints and the
-/// currently supported rectangular `DCT_DCT` transform sizes.
+/// currently supported square and rectangular `DCT_DCT` transform sizes whose axes stay within
+/// `64` samples.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -425,7 +426,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current 4/8/16-sized DCT_DCT luma units: "
+                        "Non-zero residual reconstruction currently supports only the current modeled DCT_DCT luma units: "
                                 + residualUnit.size()
                 );
             }
@@ -433,7 +434,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.chromaUUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current 4/8/16-sized DCT_DCT chroma units: "
+                        "Non-zero residual reconstruction currently supports only the current modeled DCT_DCT chroma units: "
                                 + residualUnit.size()
                 );
             }
@@ -441,7 +442,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.chromaVUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current 4/8/16-sized DCT_DCT chroma units: "
+                        "Non-zero residual reconstruction currently supports only the current modeled DCT_DCT chroma units: "
                                 + residualUnit.size()
                 );
             }
@@ -794,14 +795,24 @@ public final class FrameReconstructor {
     private static boolean isSupportedNonZeroResidualSize(TransformSize transformSize) {
         return switch (transformSize) {
             case TX_4X4,
+                    TX_8X8,
+                    TX_16X16,
+                    TX_32X32,
+                    TX_64X64,
                     RTX_4X8,
                     RTX_8X4,
-                    TX_8X8,
                     RTX_4X16,
                     RTX_16X4,
                     RTX_8X16,
                     RTX_16X8,
-                    TX_16X16 -> true;
+                    RTX_16X32,
+                    RTX_32X16,
+                    RTX_32X64,
+                    RTX_64X32,
+                    RTX_8X32,
+                    RTX_32X8,
+                    RTX_16X64,
+                    RTX_64X16 -> true;
             default -> false;
         };
     }

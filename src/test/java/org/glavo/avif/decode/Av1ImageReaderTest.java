@@ -2305,6 +2305,7 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+
     /// Creates a minimal standalone `show_existing_frame` header payload.
     ///
     /// @param existingFrameIndex the referenced frame slot

@@ -380,6 +380,59 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(offsetChromaVPlane.sample(15, 15) < baselineChromaVPlane.sample(15, 15));
     }
 
+    /// Verifies that the same deterministic real inter tile payload now keeps its decoded residuals
+    /// through reconstruction instead of requiring zero-residual normalization.
+    @Test
+    void reconstructsBitstreamDerivedI420InterLeafWithRealResidualOverlayFromStoredReferenceSurface() {
+        FrameAssembly assembly = createInterAssembly(PixelFormat.I420, BITSTREAM_DERIVED_INTER_PAYLOAD, 64, 64, 0);
+        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
+        TilePartitionTreeReader.LeafNode decodedLeaf = firstLeaf(syntaxDecodeResult.tileRoots(0));
+
+        assertFalse(allResidualUnitsZero(decodedLeaf.residualLayout()));
+
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                decodedLeaf.header(),
+                decodedLeaf.transformLayout(),
+                createResidualLayout(
+                        decodedLeaf.header().position(),
+                        decodedLeaf.header().size(),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().lumaUnits()),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaUUnits()),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaVUnits())
+                )
+        );
+        FrameSyntaxDecodeResult zeroResidualSyntaxDecodeResult = new FrameSyntaxDecodeResult(
+                syntaxDecodeResult.assembly(),
+                new TilePartitionTreeReader.Node[][]{{zeroResidualLeaf}},
+                syntaxDecodeResult.decodedTemporalMotionFields(),
+                syntaxDecodeResult.finalTileCdfContexts()
+        );
+
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                64,
+                64,
+                createGradientPlane(64, 64, 23, 2, 3),
+                createGradientPlane(32, 32, 87, 1, 5),
+                createGradientPlane(32, 32, 163, 3, 2)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baselineDecodedPlanes = reconstructor.reconstruct(
+                zeroResidualSyntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+        DecodedPlanes residualDecodedPlanes = reconstructor.reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertEquals(baselineDecodedPlanes.codedWidth(), residualDecodedPlanes.codedWidth());
+        assertEquals(baselineDecodedPlanes.codedHeight(), residualDecodedPlanes.codedHeight());
+        assertEquals(PixelFormat.I420, residualDecodedPlanes.pixelFormat());
+        assertTrue(residualDecodedPlanes.hasChroma());
+    }
+
     /// Verifies that one synthetic `I420` leaf with only a chroma-U DC residual changes only the U plane.
     @Test
     void reconstructsSyntheticI420LeafWithChromaUResidualOnly() {

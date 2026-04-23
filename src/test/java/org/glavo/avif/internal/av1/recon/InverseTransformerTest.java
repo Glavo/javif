@@ -35,6 +35,18 @@ final class InverseTransformerTest {
     /// The sample count of one `TX_16X16` block.
     private static final int TX_16X16_AREA = TX_16X16_SIDE * TX_16X16_SIDE;
 
+    /// The side length in pixels of one `TX_32X32` block.
+    private static final int TX_32X32_SIDE = 32;
+
+    /// The sample count of one `TX_32X32` block.
+    private static final int TX_32X32_AREA = TX_32X32_SIDE * TX_32X32_SIDE;
+
+    /// The side length in pixels of one `TX_64X64` block.
+    private static final int TX_64X64_SIDE = 64;
+
+    /// The sample count of one `TX_64X64` block.
+    private static final int TX_64X64_AREA = TX_64X64_SIDE * TX_64X64_SIDE;
+
     /// The stable unsupported-size failure used before `TX_16X16` support lands.
     private static final String UNSUPPORTED_TX_16X16_MESSAGE = "Unsupported inverse transform size: TX_16X16";
 
@@ -245,6 +257,72 @@ final class InverseTransformerTest {
         assertHorizontalAntisymmetry(residual, TX_16X16_SIDE);
         assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
         assertTrue(residual[TX_16X16_SIDE - 1] < 0, "Mirrored horizontal basis sample should stay negative");
+    }
+
+    /// Verifies that `TX_32X32` DC-only `DCT_DCT` reconstruction yields one constant residual
+    /// block.
+    @Test
+    void reconstructsThirtyTwoByThirtyTwoDcOnlyResidualBlock() {
+        int[] coefficients = new int[TX_32X32_AREA];
+        coefficients[0] = 1024;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_32X32);
+
+        assertArrayEquals(filledSamples(TX_32X32_AREA, 4), residual);
+    }
+
+    /// Verifies that the first horizontal `TX_32X32` `DCT_DCT` AC basis stays row-constant and
+    /// left-right antisymmetric.
+    @Test
+    void reconstructsThirtyTwoByThirtyTwoHorizontalAcResidualPattern() {
+        int[] coefficients = new int[TX_32X32_AREA];
+        coefficients[1] = 16384;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_32X32);
+
+        assertRowsMatchFirstRow(residual, TX_32X32_SIDE);
+        assertHorizontalAntisymmetry(residual, TX_32X32_SIDE);
+        assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
+        assertTrue(residual[TX_32X32_SIDE - 1] < 0, "Mirrored horizontal basis sample should stay negative");
+    }
+
+    /// Verifies that `TX_64X64` DC-only `DCT_DCT` reconstruction yields one constant residual
+    /// block.
+    @Test
+    void reconstructsSixtyFourBySixtyFourDcOnlyResidualBlock() {
+        int[] coefficients = new int[TX_64X64_AREA];
+        coefficients[0] = 2048;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_64X64);
+
+        assertArrayEquals(filledSamples(TX_64X64_AREA, 4), residual);
+    }
+
+    /// Verifies that larger rectangular `RTX_32X64` DC-only `DCT_DCT` reconstruction yields one
+    /// constant residual block.
+    @Test
+    void reconstructsThirtyTwoBySixtyFourDcOnlyResidualBlock() {
+        int[] coefficients = new int[32 * 64];
+        coefficients[0] = 4096;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_32X64);
+
+        assertBlockFilledWithPositiveValue(residual, 32, 64);
+    }
+
+    /// Verifies that one larger rectangular horizontal basis for `RTX_64X16` stays row-constant
+    /// and left-right antisymmetric.
+    @Test
+    void reconstructsSixtyFourBySixteenHorizontalAcResidualPattern() {
+        int[] coefficients = new int[64 * 16];
+        coefficients[1] = 16384;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_64X16);
+
+        assertRowsMatchFirstRow(residual, 64, 16);
+        assertHorizontalAntisymmetry(residual, 64, 16);
+        assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
+        assertTrue(residual[63] < 0, "Mirrored horizontal basis sample should stay negative");
     }
 
     /// Skips the calling test until `TX_16X16` inverse-transform support is wired in.

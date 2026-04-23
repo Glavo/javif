@@ -23,9 +23,11 @@ import java.util.Objects;
 /// Minimal inverse-transform helper for the first residual-producing reconstruction path.
 ///
 /// The current implementation assumes the rollout's fixed luma/chroma `DCT_DCT` transform type
-/// and supports the currently needed square and rectangular transforms whose dimensions stay
-/// within `4`, `8`, and `16` samples on each axis. It exposes one method that reconstructs a
-/// residual sample block and one method that adds that block into an already predicted plane.
+/// and supports the currently needed square and rectangular transforms. Exact staged integer
+/// kernels are used for the `4` / `8` / `16` subset, while larger `32` / `64` axes fall back to
+/// orthonormal cosine synthesis with the same final AV1-style `>> 3` scaling. It exposes one
+/// method that reconstructs a residual sample block and one method that adds that block into an
+/// already predicted plane.
 @NotNullByDefault
 final class InverseTransformer {
     /// The AV1 inverse-transform cosine precision.
@@ -82,6 +84,18 @@ final class InverseTransformer {
     /// The `dav1d` literal used by the `TX_16X16` odd stages.
     private static final int COSPI_DELTA_3784 = 3784 - 4096;
 
+    /// The cached orthonormal inverse-DCT basis for one `8`-point vector.
+    private static final double[][] INVERSE_DCT_BASIS_8 = createInverseDctBasis(8);
+
+    /// The cached orthonormal inverse-DCT basis for one `16`-point vector.
+    private static final double[][] INVERSE_DCT_BASIS_16 = createInverseDctBasis(16);
+
+    /// The cached orthonormal inverse-DCT basis for one `32`-point vector.
+    private static final double[][] INVERSE_DCT_BASIS_32 = createInverseDctBasis(32);
+
+    /// The cached orthonormal inverse-DCT basis for one `64`-point vector.
+    private static final double[][] INVERSE_DCT_BASIS_64 = createInverseDctBasis(64);
+
     /// Prevents instantiation of this utility class.
     private InverseTransformer() {
     }
@@ -112,6 +126,16 @@ final class InverseTransformer {
             case RTX_16X4 -> reconstructRectangularDctDct(nonNullCoefficients, 16, 4, 1);
             case RTX_8X16 -> reconstructRectangularDctDct(nonNullCoefficients, 8, 16, 1);
             case RTX_16X8 -> reconstructRectangularDctDct(nonNullCoefficients, 16, 8, 1);
+            case TX_32X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 32);
+            case TX_64X64 -> reconstructGenericLargeDctDct(nonNullCoefficients, 64, 64);
+            case RTX_16X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 16, 32);
+            case RTX_32X16 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 16);
+            case RTX_32X64 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 64);
+            case RTX_64X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 64, 32);
+            case RTX_8X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 8, 32);
+            case RTX_32X8 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 8);
+            case RTX_16X64 -> reconstructGenericLargeDctDct(nonNullCoefficients, 16, 64);
+            case RTX_64X16 -> reconstructGenericLargeDctDct(nonNullCoefficients, 64, 16);
             default -> throw unsupportedTransformSize(nonNullTransformSize);
         };
     }
@@ -346,6 +370,49 @@ final class InverseTransformer {
         return output;
     }
 
+    /// Reconstructs one larger square or rectangular `DCT_DCT` residual block through cached
+    /// orthonormal inverse-DCT basis matrices.
+    ///
+    /// The current rollout uses this slower path only for transform sizes whose larger axis has not
+    /// yet been hand-lowered into one staged integer kernel. Final output scaling still follows the
+    /// same AV1 residual-domain convention as the smaller exact kernels by applying one final `/ 8`
+    /// after the separable 2-D synthesis.
+    ///
+    /// @param coefficients the dequantized coefficients in natural raster order
+    /// @param width the transform width in samples
+    /// @param height the transform height in samples
+    /// @return one signed residual sample block in natural raster order
+    private static int[] reconstructGenericLargeDctDct(int[] coefficients, int width, int height) {
+        double[][] rowBasis = inverseDctBasis(width);
+        double[][] columnBasis = inverseDctBasis(height);
+        double[] rowBuffer = new double[width * height];
+        int[] output = new int[width * height];
+
+        for (int row = 0; row < height; row++) {
+            int rowOffset = row * width;
+            for (int column = 0; column < width; column++) {
+                double sum = 0.0;
+                double[] columnBasisRow = rowBasis[column];
+                for (int frequency = 0; frequency < width; frequency++) {
+                    sum += columnBasisRow[frequency] * coefficients[rowOffset + frequency];
+                }
+                rowBuffer[rowOffset + column] = sum;
+            }
+        }
+
+        for (int column = 0; column < width; column++) {
+            for (int row = 0; row < height; row++) {
+                double sum = 0.0;
+                double[] rowBasisRow = columnBasis[row];
+                for (int frequency = 0; frequency < height; frequency++) {
+                    sum += rowBasisRow[frequency] * rowBuffer[frequency * width + column];
+                }
+                output[row * width + column] = saturatedInt(Math.round(sum / 8.0));
+            }
+        }
+        return output;
+    }
+
     /// Reconstructs one supported one-dimensional inverse DCT vector.
     ///
     /// @param input the dequantized input vector
@@ -356,6 +423,7 @@ final class InverseTransformer {
             case 4 -> inverseDct4(input, output);
             case 8 -> inverseDct8(input, output);
             case 16 -> inverseDct16(input, output);
+            case 32, 64 -> inverseDctLarge(input, output, length);
             default -> throw new IllegalStateException("Unsupported inverse DCT length: " + length);
         }
     }
@@ -511,6 +579,66 @@ final class InverseTransformer {
         output[15] = clip((long) evenOutput[0] - t15a2);
     }
 
+    /// Reconstructs one one-dimensional larger `DCT_N` vector through cached orthonormal cosine
+    /// basis rows.
+    ///
+    /// This path is currently used for `N = 32` and `N = 64`.
+    ///
+    /// @param input the dequantized `DCT_N` input vector
+    /// @param output the reconstructed output vector
+    /// @param length the transform length in samples
+    private static void inverseDctLarge(int[] input, int[] output, int length) {
+        double[][] basis = inverseDctBasis(length);
+        for (int row = 0; row < length; row++) {
+            double sum = 0.0;
+            double[] basisRow = basis[row];
+            for (int frequency = 0; frequency < length; frequency++) {
+                sum += basisRow[frequency] * input[frequency];
+            }
+            output[row] = saturatedInt(Math.round(sum));
+        }
+    }
+
+    /// Returns one cached orthonormal inverse-DCT basis matrix for the requested supported vector
+    /// length.
+    ///
+    /// The first index selects the reconstructed spatial position; the second index selects the
+    /// input frequency.
+    ///
+    /// @param length the requested vector length
+    /// @return one cached orthonormal inverse-DCT basis matrix
+    private static double[][] inverseDctBasis(int length) {
+        return switch (length) {
+            case 8 -> INVERSE_DCT_BASIS_8;
+            case 16 -> INVERSE_DCT_BASIS_16;
+            case 32 -> INVERSE_DCT_BASIS_32;
+            case 64 -> INVERSE_DCT_BASIS_64;
+            default -> throw new IllegalStateException("Unsupported inverse DCT basis length: " + length);
+        };
+    }
+
+    /// Creates one orthonormal inverse-DCT basis matrix for the supplied vector length.
+    ///
+    /// The generated rows implement the standard DCT-III synthesis basis whose `u = 0` column uses
+    /// the lower `1 / sqrt(n)` normalization while every other frequency uses `sqrt(2 / n)`.
+    ///
+    /// @param length the vector length in samples
+    /// @return one orthonormal inverse-DCT basis matrix for the supplied vector length
+    private static double[][] createInverseDctBasis(int length) {
+        double[][] basis = new double[length][length];
+        double inverseLength = 1.0 / length;
+        double dcScale = Math.sqrt(inverseLength);
+        double acScale = Math.sqrt(2.0 * inverseLength);
+        for (int row = 0; row < length; row++) {
+            for (int frequency = 0; frequency < length; frequency++) {
+                double normalization = frequency == 0 ? dcScale : acScale;
+                basis[row][frequency] = normalization
+                        * Math.cos(((2.0 * row + 1.0) * frequency * Math.PI) / (2.0 * length));
+            }
+        }
+        return basis;
+    }
+
     /// Applies one AV1 half-butterfly operation with inverse-transform rounding.
     ///
     /// @param weight0 the first cosine weight
@@ -567,14 +695,7 @@ final class InverseTransformer {
     /// @param transformSize the transform size to validate
     /// @return the transform area in samples
     private static int checkedTransformArea(TransformSize transformSize) {
-        return switch (transformSize) {
-            case TX_4X4 -> 16;
-            case RTX_4X8, RTX_8X4 -> 32;
-            case TX_8X8 -> 64;
-            case RTX_4X16, RTX_16X4, RTX_8X16, RTX_16X8 -> 128;
-            case TX_16X16 -> 256;
-            default -> throw unsupportedTransformSize(transformSize);
-        };
+        return transformSize.widthPixels() * transformSize.heightPixels();
     }
 
     /// Creates one stable unsupported-transform failure.

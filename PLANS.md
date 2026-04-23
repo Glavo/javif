@@ -27,11 +27,11 @@ The repository already has:
 - `I400`, `I420`, and the first real parsed-stream plus synthetic `I422` / `I444` reconstruction-output subset
 - non-directional and directional intra prediction, filter-intra luma prediction, and the current `I420` / `I422` / `I444` CFL chroma subset
 - minimal luma/chroma palette reconstruction for the current synthetic `I400` / `I420` / `I422` / `I444` key/intra path plus the first real bitstream-derived fixture-backed path for `I400` / `I420` direct parsed streams and `I422` / `I444` reconstruction/integration plus stored-surface reuse
-- minimal luma `DCT_DCT` residual support for the current `4/8/16` square and rectangular transform subset
-- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for the current uniform visible-grid `4/8/16` transform subset, including clipped, fringe, multi-unit footprints, a deterministic `TX_4X4` multi-coefficient path, and the first deterministic larger-transform `TX_8X8` path
+- minimal luma `DCT_DCT` residual support for the current square and rectangular transform subset whose axes stay within `64` samples
+- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for the current uniform visible-grid transform subset, including clipped, fringe, multi-unit footprints, a deterministic `TX_4X4` multi-coefficient path, and the first deterministic larger-transform `TX_8X8` path
 - serial multi-tile traversal inside the current reconstruction subset, so the first-pixel path no longer hard-rejects multi-tile frame-syntax results before pixel reconstruction begins
 - the first real parsed-stream `I422` / `I444` still-picture fixtures for direct public `ArgbIntFrame` output and immediate `show_existing_frame` round-trips on refreshed supported surfaces
-- a first single-reference inter/reference reconstruction subset that copies from stored reference surfaces when the motion vector stays integer-aligned on every active plane
+- a first single-reference inter/reference reconstruction subset that copies from stored reference surfaces when the motion vector stays integer-aligned on every active plane, with larger real parsed-stream residual sizes no longer blocked at the inverse-transform boundary
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -68,7 +68,7 @@ Everything else expands from that baseline after correctness is stable.
 
 ### Remaining Decode Boundary
 
-- Non-zero reconstruction currently covers the current luma/chroma `DCT_DCT` subset whose transform axes stay within `4`, `8`, and `16` samples, including the first rectangular sizes needed by `I400/I420` key/intra reconstruction, but does not yet cover the broader transform-type and coefficient space.
+- Non-zero reconstruction currently covers the current luma/chroma `DCT_DCT` subset whose transform axes stay within `64` samples, including larger square and rectangular sizes needed by the current real inter fixture, but does not yet cover the broader transform-type and coefficient space.
 - The public reader now consumes a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid U/V layouts, including clipped, fringe, multi-unit footprints, the first deterministic `TX_4X4` multi-coefficient case, and the first deterministic larger-transform `TX_8X8` case when the current transform layout exposes smaller chroma units.
 - The syntax and integration layers now also cover the first real bitstream-derived `I422` chroma residual path, including deterministic DC-only, clipped-footprint, and larger-transform multi-coefficient coverage.
 - The serial reconstruction/output path no longer hard-rejects multi-tile frame-syntax results, and the public reader can already present a stored synthetic multi-tile reference surface through the current `show_existing_frame` output path.
@@ -76,10 +76,10 @@ Everything else expands from that baseline after correctness is stable.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Minimal synthetic palette reconstruction now covers the current `I400` / `I420` / `I422` / `I444` subset, and the first deterministic real bitstream-driven palette fixture now also covers `I422` / `I444` at the reconstruction/integration layer plus stored-surface public reuse; broader palette edge cases, direct parsed wider-chroma palette streams, and wider-chroma real fixture variety are still missing.
 - `intrabc` remains unsupported.
-- Inter/reference reconstruction has now started at a narrow copy-based subset, but broader motion compensation, compound prediction, subpel interpolation, and general parsed-stream inter sample support remain incomplete.
+- Inter/reference reconstruction has now started at a narrow copy-based subset, and the current real inter fixture no longer needs zero-residual normalization just to cross the reconstruction boundary; broader motion compensation, compound prediction, subpel interpolation, and general parsed-stream inter sample support still remain incomplete.
 - Direct parsed-stream first-pixel output now covers the current `8-bit I400/I420/I422/I444 -> ArgbIntFrame` still-picture subset, while broader `I422/I444` feature coverage still remains incomplete.
 - `show_existing_frame` now reuses one stored reconstructed reference surface for the current minimal output path when the referenced slot has a `ReferenceSurfaceSnapshot` and grain is not required, including the first real parsed-stream `I422/I444` still-picture round-trips and the earlier synthetic wider-chroma stored-surface coverage.
-- Reference surfaces are now consumed by a first synthetic-plus-integration inter-frame pixel path, but broader parsed-stream inter output is still blocked by larger residual and motion-compensation gaps.
+- Reference surfaces are now consumed by a first synthetic-plus-integration inter-frame pixel path, and the current real inter fixture now reconstructs through its native larger residual sizes in integration tests; broader parsed-stream inter output is still blocked by motion-compensation and direct public-stream coverage gaps.
 - Postfiltering and film grain synthesis are still not implemented.
 - `I422/I444` still lack broader real parsed-stream fixture coverage beyond the current minimal still-picture subset even though direct first-pixel output and stored-surface reuse now exist.
 - The legacy reduced still-picture directional fixture now decodes successfully through the public reader.
@@ -89,7 +89,7 @@ Everything else expands from that baseline after correctness is stable.
 
 - `Track A`: complete
 - `Track B`: complete
-- `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset
+- `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset with larger `32/64`-axis residual support and the first real inter residual integration coverage
 - `Track D`: not started
 - `Track E`: complete
 - `Track F`: complete
@@ -198,7 +198,7 @@ Write scope:
 
 Goal: create decoded planes from block syntax and residuals.
 
-Status: in progress. First-pixel baseline and minimal non-zero luma residual support reached.
+Status: in progress. First-pixel baseline, broader `32/64`-axis `DCT_DCT` residual support, and the first real inter residual integration path are in place.
 
 Scope:
 
@@ -230,7 +230,7 @@ Completed within this track already:
 - mutable plane storage
 - minimal intra prediction
 - first public first-pixel path for single-tile `8-bit I400/I420` key/intra frames with all-zero residual
-- luma/chroma dequantization and inverse transform for the current `4/8/16` square and rectangular `DCT_DCT` subset
+- luma/chroma dequantization and inverse transform for the current square and rectangular `DCT_DCT` subset whose axes stay within `64` samples
 - minimal non-zero luma residual reconstruction inside the current key/intra subset
 - luma filter-intra reconstruction
 - directional intra reconstruction
@@ -240,19 +240,19 @@ Completed within this track already:
 - deterministic `TX_4X4` multi-coefficient bitstream-derived `I420` chroma residual coverage, with corrected `TX_4X4` coefficient-context coordinate handling
 - deterministic larger-transform `TX_8X8` bitstream-derived `I420` chroma residual coverage at the syntax and integration levels
 - deterministic bitstream-derived `I422` chroma residual coverage at the syntax and integration levels, including DC-only, clipped-footprint, and larger-transform multi-coefficient paths
-- non-zero rectangular `DCT_DCT` reconstruction for the current `4/8/16` luma/chroma key/intra subset
+- non-zero square and rectangular `DCT_DCT` reconstruction for the current luma/chroma key/intra subset whose axes stay within `64` samples
 - serial multi-tile reconstruction for the current supported key/intra subset, plus synthetic frame-syntax and public-reader `show_existing_frame` multi-tile coverage
 - minimal synthetic luma/chroma palette reconstruction coverage across the current `I400` / `I420` / `I422` / `I444` subset plus a first deterministic real bitstream-driven palette fixture at the reconstruction/integration level for the same wider-chroma subset and at the public-reader level through stored-surface reuse
 - minimal synthetic `I422/I444` key/intra reconstruction and `ArgbIntFrame` output coverage, including zero-residual chroma prediction, the first synthetic chroma residual paths, and stored-surface `show_existing_frame` public output coverage
 - the first real parsed-stream `I422/I444` still-picture public-output subset, including direct first-pixel decode and immediate `show_existing_frame` round-trips on refreshed supported surfaces
-- a first single-reference inter/reference reconstruction subset that consumes stored reference surfaces when the motion vector stays integer-aligned on every active plane, including synthetic reconstruction tests, residual-overlay coverage, and real inter syntax integration after zero-residual normalization of the decoded leaf
+- a first single-reference inter/reference reconstruction subset that consumes stored reference surfaces when the motion vector stays integer-aligned on every active plane, including synthetic reconstruction tests, residual-overlay coverage, one larger-residual real inter integration path without zero-residual normalization, and the first real parsed-stream residual-size support up through the current `TX_64X64` / `TX_32X32` fixture geometry
 
 Immediate next steps inside this track:
 
-- richer AC coverage beyond the current `4/8/16` square-and-rectangular `DCT_DCT` subset and broader transform-type support
+- richer AC coverage beyond the current `64`-axis `DCT_DCT` subset and broader transform-type support
 - fuller chroma transform-layout and coefficient coverage beyond the current `I420/I422` uniform visible-grid path
 - broader real bitstream-driven palette coverage and palette edge-case coverage beyond the current single wider-chroma palette fixture, including one dedicated direct parsed wider-chroma palette stream
-- broader inter motion compensation beyond the current single-reference integer-aligned copy subset, including subpel, compound, and more realistic parsed-stream inter residual sizes
+- broader inter motion compensation beyond the current single-reference integer-aligned copy subset, including subpel, compound, and direct public-stream coverage for real parsed inter fixtures
 - stable real bitstream multi-tile first-pixel fixtures, so the widened serial multi-tile path is covered by deterministic corpus samples instead of only synthetic runtime state
 - broader real parsed-stream `I422/I444` fixtures, including richer residual and non-gray paths, so the widened wider-chroma subset is covered by deterministic corpus samples instead of only the current minimal still-picture/runtime state
 
@@ -533,7 +533,7 @@ Acceptance:
 Status:
 
 - partially achieved now
-- current first-pixel output works for the current serial `8-bit I400/I420` key/intra subset, including synthetic multi-tile frame-syntax results, the minimal non-zero `DCT_DCT` luma/chroma residual subset for the current `4/8/16` square and rectangular transforms, and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints up through the first deterministic larger-transform `TX_8X8` case
+- current first-pixel output works for the current serial `8-bit I400/I420` key/intra subset, including synthetic multi-tile frame-syntax results, the minimal non-zero `DCT_DCT` luma/chroma residual subset for the current square and rectangular transforms whose axes stay within `64` samples, and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints up through the first deterministic larger-transform `TX_8X8` case
 - the current reconstruction/output layer now also covers the first synthetic plus real parsed-stream `I422/I444` key/intra subset, including `ArgbIntFrame` conversion, generalized wider-chroma CFL, direct still-picture first-pixel output, and `show_existing_frame` output reuse on refreshed supported surfaces
 - reconstruction-side, integration, and public-reader coverage now also include the current minimal synthetic luma/chroma palette path across `I400/I420/I422/I444` plus a first deterministic real bitstream-driven palette fixture whose wider-chroma coverage is already exercised through reconstruction/integration and stored-surface public reuse, but fuller chroma transform/token coverage, broader real palette coverage, direct parsed wider-chroma palette streams, inter paths, and a less artificial sample set are still missing
 - milestone is not closed until broader chroma residuals, broader real parsed-stream `I422/I444` fixtures, broader real palette coverage, inter paths, and a less artificial sample set are covered
@@ -556,7 +556,7 @@ Status:
 
 - partially started
 - minimal `show_existing_frame` output reuse is now wired for already reconstructed stored surfaces
-- minimal inter/reference pixel decode is now started inside the reconstruction core for single-reference integer-aligned copy prediction backed by stored reference surfaces, but broader parsed-stream inter output still stops at larger residual and motion-compensation gaps
+- minimal inter/reference pixel decode is now started inside the reconstruction core for single-reference integer-aligned copy prediction backed by stored reference surfaces, and the current real inter fixture now crosses the reconstruction boundary without zero-residual normalization, but broader parsed-stream inter output still stops at motion-compensation and direct public-stream coverage gaps
 
 ### M4: Full Presentation Pipeline
 

@@ -613,6 +613,110 @@ final class FrameReconstructorTest {
         assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
     }
 
+    /// Verifies that one `TX_32X32` luma DC residual now reconstructs successfully through the
+    /// first-pixel path.
+    @Test
+    void reconstructsSingleTileI400KeyFrameWithPositiveThirtyTwoByThirtyTwoDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_32X32;
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, 64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlane baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 32, 32, zeroResidualLeaf)
+        ).lumaPlane();
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 32, 32, positiveResidualLeaf)
+        );
+
+        assertFalse(residualPlanes.hasChroma());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
+    }
+
+    /// Verifies that one `TX_64X64` luma DC residual now reconstructs successfully through the
+    /// first-pixel path.
+    @Test
+    void reconstructsSingleTileI400KeyFrameWithPositiveSixtyFourBySixtyFourDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_64X64;
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, 64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlane baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 64, 64, zeroResidualLeaf)
+        ).lumaPlane();
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 64, 64, positiveResidualLeaf)
+        );
+
+        assertFalse(residualPlanes.hasChroma());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
+    }
+
+    /// Verifies that one larger `I420` chroma residual now reconstructs through the current
+    /// wider-transform chroma path without perturbing luma or the V plane.
+    @Test
+    void reconstructsSingleTileI420KeyFrameWithPositiveThirtyTwoByThirtyTwoChromaResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_64X64;
+        TileBlockHeaderReader.BlockHeader header = createIntraBlockHeader(
+                position,
+                size,
+                true,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode positiveChromaLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, PixelFormat.I420),
+                createChromaDcResidualLayout(position, size, PixelFormat.I420, 64, 0)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 64, 64, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 64, 64, positiveChromaLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane()),
+                1
+        );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
+    }
+
     /// Verifies that the first reconstruction path now supports filter-intra luma and `I420` CFL chroma.
     @Test
     void reconstructsI420BlockWithFilterIntraAndCflPrediction() {
