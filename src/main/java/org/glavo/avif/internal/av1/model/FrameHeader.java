@@ -1971,6 +1971,12 @@ public final class FrameHeader {
     /// Normalized film grain parameters for a frame.
     @NotNullByDefault
     public static final class FilmGrainParams {
+        /// The AV1 maximum luma scaling-point count.
+        private static final int MAX_Y_POINTS = 14;
+        /// The AV1 maximum chroma scaling-point count.
+        private static final int MAX_UV_POINTS = 10;
+        /// The total AV1 reference-slot count.
+        private static final int TOTAL_REFERENCE_FRAMES = 8;
         /// Whether film grain should be synthesized for the frame.
         private final boolean applyGrain;
         /// The pseudo-random seed used during film grain synthesis.
@@ -2001,17 +2007,17 @@ public final class FrameHeader {
         private final int arCoeffShift;
         /// The grain scale shift used during synthesis.
         private final int grainScaleShift;
-        /// The Cb component multiplier for chroma scaling.
+        /// The normalized Cb component multiplier for chroma scaling with the bitstream `-128` bias applied.
         private final int cbMult;
-        /// The luma multiplier contributing to the Cb scaling index.
+        /// The normalized luma multiplier contributing to the Cb scaling index with the bitstream `-128` bias applied.
         private final int cbLumaMult;
-        /// The Cb scaling-function input offset.
+        /// The normalized Cb scaling-function input offset with the bitstream `-256` bias applied.
         private final int cbOffset;
-        /// The Cr component multiplier for chroma scaling.
+        /// The normalized Cr component multiplier for chroma scaling with the bitstream `-128` bias applied.
         private final int crMult;
-        /// The luma multiplier contributing to the Cr scaling index.
+        /// The normalized luma multiplier contributing to the Cr scaling index with the bitstream `-128` bias applied.
         private final int crLumaMult;
-        /// The Cr scaling-function input offset.
+        /// The normalized Cr scaling-function input offset with the bitstream `-256` bias applied.
         private final int crOffset;
         /// Whether overlap between neighboring grain blocks is enabled.
         private final boolean overlapEnabled;
@@ -2035,12 +2041,12 @@ public final class FrameHeader {
         /// @param arCoefficientsCr the normalized Cr auto-regressive coefficients
         /// @param arCoeffShift the normalized auto-regressive coefficient shift
         /// @param grainScaleShift the grain scale shift used during synthesis
-        /// @param cbMult the Cb component multiplier for chroma scaling
-        /// @param cbLumaMult the luma multiplier contributing to the Cb scaling index
-        /// @param cbOffset the Cb scaling-function input offset
-        /// @param crMult the Cr component multiplier for chroma scaling
-        /// @param crLumaMult the luma multiplier contributing to the Cr scaling index
-        /// @param crOffset the Cr scaling-function input offset
+        /// @param cbMult the normalized Cb component multiplier for chroma scaling
+        /// @param cbLumaMult the normalized luma multiplier contributing to the Cb scaling index
+        /// @param cbOffset the normalized Cb scaling-function input offset
+        /// @param crMult the normalized Cr component multiplier for chroma scaling
+        /// @param crLumaMult the normalized luma multiplier contributing to the Cr scaling index
+        /// @param crOffset the normalized Cr scaling-function input offset
         /// @param overlapEnabled whether overlap between neighboring grain blocks is enabled
         /// @param clipToRestrictedRange whether synthesized samples should be clipped to the restricted range
         public FilmGrainParams(
@@ -2068,26 +2074,63 @@ public final class FrameHeader {
                 boolean overlapEnabled,
                 boolean clipToRestrictedRange
         ) {
+            validateReferenceState(applyGrain, updated, referenceFrameIndex);
             this.applyGrain = applyGrain;
+            requireRange(grainSeed, 0, 0xFFFF, "grainSeed");
             this.grainSeed = grainSeed;
             this.updated = updated;
             this.referenceFrameIndex = referenceFrameIndex;
             this.yPoints = Arrays.copyOf(Objects.requireNonNull(yPoints, "yPoints"), yPoints.length);
+            validateScalingPoints(this.yPoints, MAX_Y_POINTS, "yPoints");
             this.chromaScalingFromLuma = chromaScalingFromLuma;
             this.cbPoints = Arrays.copyOf(Objects.requireNonNull(cbPoints, "cbPoints"), cbPoints.length);
+            validateScalingPoints(this.cbPoints, MAX_UV_POINTS, "cbPoints");
             this.crPoints = Arrays.copyOf(Objects.requireNonNull(crPoints, "crPoints"), crPoints.length);
+            validateScalingPoints(this.crPoints, MAX_UV_POINTS, "crPoints");
+            if (chromaScalingFromLuma && (this.cbPoints.length != 0 || this.crPoints.length != 0)) {
+                throw new IllegalArgumentException(
+                        "Film grain chroma scaling derived from luma must not carry explicit chroma scaling points"
+                );
+            }
+            requireRange(scalingShift, 8, 11, "scalingShift");
             this.scalingShift = scalingShift;
+            requireRange(arCoeffLag, 0, 3, "arCoeffLag");
             this.arCoeffLag = arCoeffLag;
             this.arCoefficientsY = Arrays.copyOf(Objects.requireNonNull(arCoefficientsY, "arCoefficientsY"), arCoefficientsY.length);
+            int expectedLumaCoefficientCount = this.yPoints.length > 0
+                    ? 2 * arCoeffLag * (arCoeffLag + 1)
+                    : 0;
+            validateCoefficientArray(this.arCoefficientsY, expectedLumaCoefficientCount, "arCoefficientsY");
             this.arCoefficientsCb = Arrays.copyOf(Objects.requireNonNull(arCoefficientsCb, "arCoefficientsCb"), arCoefficientsCb.length);
+            int expectedChromaCoefficientCount = this.yPoints.length > 0
+                    ? expectedLumaCoefficientCount + 1
+                    : expectedLumaCoefficientCount;
+            validateCoefficientArray(
+                    this.arCoefficientsCb,
+                    chromaScalingFromLuma || this.cbPoints.length > 0 ? expectedChromaCoefficientCount : 0,
+                    "arCoefficientsCb"
+            );
             this.arCoefficientsCr = Arrays.copyOf(Objects.requireNonNull(arCoefficientsCr, "arCoefficientsCr"), arCoefficientsCr.length);
+            validateCoefficientArray(
+                    this.arCoefficientsCr,
+                    chromaScalingFromLuma || this.crPoints.length > 0 ? expectedChromaCoefficientCount : 0,
+                    "arCoefficientsCr"
+            );
+            requireRange(arCoeffShift, 6, 9, "arCoeffShift");
             this.arCoeffShift = arCoeffShift;
+            requireRange(grainScaleShift, 0, 3, "grainScaleShift");
             this.grainScaleShift = grainScaleShift;
+            requireRange(cbMult, -128, 127, "cbMult");
             this.cbMult = cbMult;
+            requireRange(cbLumaMult, -128, 127, "cbLumaMult");
             this.cbLumaMult = cbLumaMult;
+            requireRange(cbOffset, -256, 255, "cbOffset");
             this.cbOffset = cbOffset;
+            requireRange(crMult, -128, 127, "crMult");
             this.crMult = crMult;
+            requireRange(crLumaMult, -128, 127, "crLumaMult");
             this.crLumaMult = crLumaMult;
+            requireRange(crOffset, -256, 255, "crOffset");
             this.crOffset = crOffset;
             this.overlapEnabled = overlapEnabled;
             this.clipToRestrictedRange = clipToRestrictedRange;
@@ -2229,44 +2272,44 @@ public final class FrameHeader {
             return grainScaleShift;
         }
 
-        /// Returns the Cb component multiplier for chroma scaling.
+        /// Returns the normalized Cb component multiplier for chroma scaling.
         ///
-        /// @return the Cb component multiplier for chroma scaling
+        /// @return the normalized Cb component multiplier for chroma scaling
         public int cbMult() {
             return cbMult;
         }
 
-        /// Returns the luma multiplier contributing to the Cb scaling index.
+        /// Returns the normalized luma multiplier contributing to the Cb scaling index.
         ///
-        /// @return the luma multiplier contributing to the Cb scaling index
+        /// @return the normalized luma multiplier contributing to the Cb scaling index
         public int cbLumaMult() {
             return cbLumaMult;
         }
 
-        /// Returns the Cb scaling-function input offset.
+        /// Returns the normalized Cb scaling-function input offset.
         ///
-        /// @return the Cb scaling-function input offset
+        /// @return the normalized Cb scaling-function input offset
         public int cbOffset() {
             return cbOffset;
         }
 
-        /// Returns the Cr component multiplier for chroma scaling.
+        /// Returns the normalized Cr component multiplier for chroma scaling.
         ///
-        /// @return the Cr component multiplier for chroma scaling
+        /// @return the normalized Cr component multiplier for chroma scaling
         public int crMult() {
             return crMult;
         }
 
-        /// Returns the luma multiplier contributing to the Cr scaling index.
+        /// Returns the normalized luma multiplier contributing to the Cr scaling index.
         ///
-        /// @return the luma multiplier contributing to the Cr scaling index
+        /// @return the normalized luma multiplier contributing to the Cr scaling index
         public int crLumaMult() {
             return crLumaMult;
         }
 
-        /// Returns the Cr scaling-function input offset.
+        /// Returns the normalized Cr scaling-function input offset.
         ///
-        /// @return the Cr scaling-function input offset
+        /// @return the normalized Cr scaling-function input offset
         public int crOffset() {
             return crOffset;
         }
@@ -2283,6 +2326,91 @@ public final class FrameHeader {
         /// @return whether synthesized samples should be clipped to the restricted range
         public boolean clipToRestrictedRange() {
             return clipToRestrictedRange;
+        }
+
+        /// Validates the normalized grain-reference relationship.
+        ///
+        /// @param applyGrain whether film grain is enabled
+        /// @param updated whether the frame signaled fresh parameters
+        /// @param referenceFrameIndex the referenced frame slot, or `-1`
+        private static void validateReferenceState(boolean applyGrain, boolean updated, int referenceFrameIndex) {
+            if (!applyGrain) {
+                if (updated) {
+                    throw new IllegalArgumentException("Disabled film grain must not be marked as updated");
+                }
+                if (referenceFrameIndex != -1) {
+                    throw new IllegalArgumentException("Disabled film grain must not reference another frame");
+                }
+                return;
+            }
+
+            if (updated) {
+                if (referenceFrameIndex != -1) {
+                    throw new IllegalArgumentException("Updated film grain must not reference another frame");
+                }
+            } else if (referenceFrameIndex < 0 || referenceFrameIndex >= TOTAL_REFERENCE_FRAMES) {
+                throw new IllegalArgumentException(
+                        "Referenced film grain must use one AV1 reference slot in the range 0..7"
+                );
+            }
+        }
+
+        /// Validates one normalized scaling-point array.
+        ///
+        /// @param points the scaling-point array to validate
+        /// @param maximumPointCount the AV1 maximum point count for the component
+        /// @param fieldName the field name used in error messages
+        private static void validateScalingPoints(
+                FilmGrainPoint[] points,
+                int maximumPointCount,
+                String fieldName
+        ) {
+            if (points.length > maximumPointCount) {
+                throw new IllegalArgumentException(
+                        fieldName + " exceeds the AV1 maximum point count of " + maximumPointCount
+                );
+            }
+
+            int previousValue = -1;
+            for (FilmGrainPoint point : points) {
+                int value = point.value();
+                requireRange(value, 0, 255, fieldName + ".value");
+                requireRange(point.scaling(), 0, 255, fieldName + ".scaling");
+                if (value <= previousValue) {
+                    throw new IllegalArgumentException(fieldName + " values must increase strictly");
+                }
+                previousValue = value;
+            }
+        }
+
+        /// Validates one normalized auto-regressive coefficient array.
+        ///
+        /// @param coefficients the coefficient array to validate
+        /// @param expectedLength the exact AV1 coefficient count expected for the current state
+        /// @param fieldName the field name used in error messages
+        private static void validateCoefficientArray(int[] coefficients, int expectedLength, String fieldName) {
+            if (coefficients.length != expectedLength) {
+                throw new IllegalArgumentException(
+                        fieldName + " must contain exactly " + expectedLength + " coefficients"
+                );
+            }
+            for (int coefficient : coefficients) {
+                requireRange(coefficient, -128, 127, fieldName + " element");
+            }
+        }
+
+        /// Requires one integer value to stay within one inclusive range.
+        ///
+        /// @param value the integer value to validate
+        /// @param minimum the inclusive minimum
+        /// @param maximum the inclusive maximum
+        /// @param fieldName the field name used in error messages
+        private static void requireRange(int value, int minimum, int maximum, String fieldName) {
+            if (value < minimum || value > maximum) {
+                throw new IllegalArgumentException(
+                        fieldName + " must stay in the inclusive range " + minimum + ".." + maximum
+                );
+            }
         }
     }
 }

@@ -52,7 +52,7 @@ Everything else expands from that baseline after correctness is stable.
 - Input abstraction is already unified around `BufferedInput`.
 - Public API types already exist: `Av1ImageReader`, `Av1DecoderConfig`, `DecodeException`, `DecodedFrame`, `ArgbIntFrame`, and `ArgbLongFrame`.
 - `SequenceHeaderParser` and `FrameHeaderParser` already cover most frame-level syntax, including tiling, quantization, segmentation, loop filter, CDEF, restoration, skip mode, and reference-state inheritance.
-- Film grain parameters are already parsed and normalized into `FrameHeader`; synthesis is still deferred.
+- Film grain parameters are already parsed and normalized into `FrameHeader`, including signed chroma multiplier and offset normalization plus model-level invariant checks; synthesis is still deferred.
 - Tile parsing is already connected through `TileGroupHeaderParser`, `TileDataParser`, and `TileBitstreamParser`.
 - Structural decoding already exists through `FrameSyntaxDecoder`, `TilePartitionTreeReader`, `TileBlockHeaderReader`, `TileTransformLayoutReader`, and `TileResidualSyntaxReader`.
 - Reference slots already persist structural decode state, final tile CDF snapshots, and decoded temporal motion-field snapshots.
@@ -63,6 +63,7 @@ Everything else expands from that baseline after correctness is stable.
 - The current CFL reconstruction path now covers the current `I420`, `I422`, and `I444` subset instead of only `I420`.
 - Transform and residual modeling now preserve exact visible pixel footprints, not just 4x4 visibility.
 - `Av1ImageReader` already connects structural decode -> reconstruction -> ARGB output for the current supported subset.
+- The public reader already treats film-grain-bearing frames with a stable runtime contract: `applyFilmGrain=false` exposes the stored pre-grain surface, while `applyFilmGrain=true` stops at the explicit `NOT_IMPLEMENTED` presentation boundary until synthesis exists.
 
 ### Remaining Decode Boundary
 
@@ -85,7 +86,7 @@ Everything else expands from that baseline after correctness is stable.
 ### Current Progress Snapshot
 
 - `Track A`: in progress
-- `Track B`: parser-side work largely complete
+- `Track B`: complete
 - `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset
 - `Track D`: not started
 - `Track E`: complete
@@ -163,7 +164,7 @@ Write scope:
 
 Goal: finish frame-level parsing so later runtime and postfilter stages do not need parser changes.
 
-Status: mostly complete on the parser/model side.
+Status: complete.
 
 Scope:
 
@@ -176,7 +177,14 @@ Exit criteria:
 - `FrameHeader` fully represents grain-related and postfilter-related frame state.
 - No valid grain-bearing frame fails in the parser with `NOT_IMPLEMENTED`.
 
-Remaining work inside this track is now mostly validation and downstream consumption, not core parser bring-up.
+Completed in this track:
+
+- full frame-header film-grain parsing and normalized storage
+- signed chroma multiplier and offset normalization aligned with the upstream parser model
+- film-grain inheritance validation and negative parser regressions
+- public reader runtime-policy coverage for `applyFilmGrain=false` pass-through vs. `applyFilmGrain=true` rejection
+
+This track is now closed. Remaining grain work belongs to Track D, which covers synthesis and application.
 
 Write scope:
 

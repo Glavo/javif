@@ -1405,18 +1405,18 @@ public final class FrameHeaderParser {
         int cbLumaMult = 0;
         int cbOffset = 0;
         if (cbPoints.length > 0) {
-            cbMult = readInt(reader, 8);
-            cbLumaMult = readInt(reader, 8);
-            cbOffset = readInt(reader, 9);
+            cbMult = readInt(reader, 8) - 128;
+            cbLumaMult = readInt(reader, 8) - 128;
+            cbOffset = readInt(reader, 9) - 256;
         }
 
         int crMult = 0;
         int crLumaMult = 0;
         int crOffset = 0;
         if (crPoints.length > 0) {
-            crMult = readInt(reader, 8);
-            crLumaMult = readInt(reader, 8);
-            crOffset = readInt(reader, 9);
+            crMult = readInt(reader, 8) - 128;
+            crLumaMult = readInt(reader, 8) - 128;
+            crOffset = readInt(reader, 9) - 256;
         }
 
         boolean overlapEnabled = reader.readFlag();

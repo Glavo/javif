@@ -15,6 +15,9 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
+import org.glavo.avif.decode.DecodeErrorCode;
+import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.decode.DecodeStage;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -30,6 +33,7 @@ import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FrameHeaderParser`.
@@ -215,12 +219,12 @@ final class FrameHeaderParserTest {
         assertArrayEquals(new int[]{0, 1, 2, 3, -1}, filmGrain.arCoefficientsCr());
         assertEquals(7, filmGrain.arCoeffShift());
         assertEquals(3, filmGrain.grainScaleShift());
-        assertEquals(77, filmGrain.cbMult());
-        assertEquals(88, filmGrain.cbLumaMult());
-        assertEquals(300, filmGrain.cbOffset());
-        assertEquals(66, filmGrain.crMult());
-        assertEquals(55, filmGrain.crLumaMult());
-        assertEquals(123, filmGrain.crOffset());
+        assertEquals(-51, filmGrain.cbMult());
+        assertEquals(-40, filmGrain.cbLumaMult());
+        assertEquals(44, filmGrain.cbOffset());
+        assertEquals(-62, filmGrain.crMult());
+        assertEquals(-73, filmGrain.crLumaMult());
+        assertEquals(-133, filmGrain.crOffset());
         assertTrue(filmGrain.overlapEnabled());
         assertFalse(filmGrain.clipToRestrictedRange());
     }
@@ -270,6 +274,65 @@ final class FrameHeaderParserTest {
         assertEquals(48, yPoints[0].scaling());
         assertEquals(160, yPoints[1].value());
         assertEquals(200, yPoints[1].scaling());
+    }
+
+    /// Verifies that film grain inheritance rejects a referenced slot that is not one of the frame's signaled references.
+    @Test
+    void rejectsReferencedFilmGrainFromUnusedReferenceSlot() {
+        assertFilmGrainParseFailure(
+                interFrameHeaderPayloadWithReferencedFilmGrain(7),
+                createInterReferenceFrames(),
+                "film_grain_params_ref_idx must match one of the frame reference slots"
+        );
+    }
+
+    /// Verifies that 4:2:0 film grain rejects signaling Cr scaling points without corresponding Cb points.
+    @Test
+    void rejects420FilmGrainCrPointsWithoutCbPoints() {
+        assertFilmGrainParseFailure(
+                interFrameHeaderPayloadWithCrOnlyFilmGrainPoints(),
+                createInterReferenceFrames(),
+                "4:2:0 film grain must not signal Cr points without Cb points"
+        );
+    }
+
+    /// Verifies that 4:2:0 film grain rejects signaling Cb scaling points without corresponding Cr points.
+    @Test
+    void rejects420FilmGrainCbPointsWithoutCrPoints() {
+        assertFilmGrainParseFailure(
+                interFrameHeaderPayloadWithCbOnlyFilmGrainPoints(),
+                createInterReferenceFrames(),
+                "4:2:0 film grain must signal Cr points when Cb points are present"
+        );
+    }
+
+    /// Verifies that film grain scaling points remain strictly increasing for each component.
+    @Test
+    void rejectsNonMonotonicLumaFilmGrainPoints() {
+        assertFilmGrainParseFailure(
+                interFrameHeaderPayloadWithNonMonotonicLumaFilmGrainPoints(),
+                createInterReferenceFrames(),
+                "luma film grain point values must increase strictly"
+        );
+    }
+
+    /// Asserts that parsing fails with the expected film grain validation message.
+    ///
+    /// @param payload the raw frame header payload under test
+    /// @param references the refreshed reference headers exposed to the parser
+    /// @param expectedMessage the expected validation message
+    private static void assertFilmGrainParseFailure(byte[] payload, FrameHeader[] references, String expectedMessage) {
+        DecodeException exception = assertThrows(DecodeException.class, () ->
+                new FrameHeaderParser().parse(
+                        frameHeaderObu(payload),
+                        fullInterSequenceHeader(true),
+                        false,
+                        references
+                )
+        );
+        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(DecodeStage.FRAME_HEADER_PARSE, exception.stage());
+        assertEquals(expectedMessage, exception.getMessage());
     }
 
     /// Wraps a payload in a synthetic sequence header OBU packet.
@@ -721,44 +784,7 @@ final class FrameHeaderParserTest {
     ///
     /// @return a standalone inter frame header payload with explicit film grain parameters
     private static byte[] interFrameHeaderPayloadWithFilmGrain() {
-        BitWriter writer = new BitWriter();
-        writer.writeFlag(false);
-        writer.writeBits(1, 2);
-        writer.writeFlag(true);
-        writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeBits(10, 4);
-        writer.writeBits(7, 3);
-        writer.writeBits(0x12, 8);
-        writer.writeFlag(false);
-        writer.writeBits(0, 3);
-        writer.writeBits(1, 3);
-        writer.writeBits(2, 3);
-        writer.writeBits(3, 3);
-        writer.writeBits(4, 3);
-        writer.writeBits(5, 3);
-        writer.writeBits(6, 3);
-        writer.writeFlag(true);
-        writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeBits(0, 8);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeBits(0x1234, 16);
-        writer.writeFlag(true);
+        BitWriter writer = interFrameHeaderWriterWithFilmGrain(0x1234, true);
         writer.writeBits(2, 4);
         writer.writeBits(16, 8);
         writer.writeBits(32, 8);
@@ -805,7 +831,86 @@ final class FrameHeaderParserTest {
     ///
     /// @return a standalone inter frame header payload with referenced film grain parameters
     private static byte[] interFrameHeaderPayloadWithReferencedFilmGrain() {
+        return interFrameHeaderPayloadWithReferencedFilmGrain(3);
+    }
+
+    /// Creates a standalone inter frame header payload that reuses film grain parameters from the requested reference slot.
+    ///
+    /// @param referenceFrameIndex the reference slot used for film grain inheritance
+    /// @return a standalone inter frame header payload with referenced film grain parameters
+    private static byte[] interFrameHeaderPayloadWithReferencedFilmGrain(int referenceFrameIndex) {
+        BitWriter writer = interFrameHeaderWriterWithFilmGrain(0x4567, false);
+        writer.writeBits(referenceFrameIndex, 3);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a standalone inter frame header payload that incorrectly signals Cr points without any Cb points in 4:2:0.
+    ///
+    /// @return a standalone inter frame header payload with invalid Cr-only chroma points
+    private static byte[] interFrameHeaderPayloadWithCrOnlyFilmGrainPoints() {
+        BitWriter writer = interFrameHeaderWriterWithFilmGrain(0x3333, true);
+        writer.writeBits(1, 4);
+        writer.writeBits(16, 8);
+        writer.writeBits(32, 8);
+        writer.writeFlag(false);
+        writer.writeBits(0, 4);
+        writer.writeBits(1, 4);
+        writer.writeBits(96, 8);
+        writer.writeBits(112, 8);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a standalone inter frame header payload that incorrectly signals Cb points without any Cr points in 4:2:0.
+    ///
+    /// @return a standalone inter frame header payload with invalid Cb-only chroma points
+    private static byte[] interFrameHeaderPayloadWithCbOnlyFilmGrainPoints() {
+        BitWriter writer = interFrameHeaderWriterWithFilmGrain(0x4444, true);
+        writer.writeBits(1, 4);
+        writer.writeBits(16, 8);
+        writer.writeBits(32, 8);
+        writer.writeFlag(false);
+        writer.writeBits(1, 4);
+        writer.writeBits(64, 8);
+        writer.writeBits(80, 8);
+        writer.writeBits(0, 4);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a standalone inter frame header payload whose luma film grain points are not strictly increasing.
+    ///
+    /// @return a standalone inter frame header payload with invalid luma point ordering
+    private static byte[] interFrameHeaderPayloadWithNonMonotonicLumaFilmGrainPoints() {
+        BitWriter writer = interFrameHeaderWriterWithFilmGrain(0x5555, true);
+        writer.writeBits(2, 4);
+        writer.writeBits(16, 8);
+        writer.writeBits(32, 8);
+        writer.writeBits(16, 8);
+        writer.writeBits(64, 8);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a writer positioned at the start of inter-frame film grain syntax elements.
+    ///
+    /// @param grainSeed the pseudo-random seed used for film grain parsing
+    /// @param updated whether the payload carries explicit film grain parameters
+    /// @return a writer positioned immediately after the `update_grain` flag
+    private static BitWriter interFrameHeaderWriterWithFilmGrain(int grainSeed, boolean updated) {
         BitWriter writer = new BitWriter();
+        writeInterFrameHeaderPrefixForFilmGrain(writer);
+        writer.writeFlag(true);
+        writer.writeBits(grainSeed, 16);
+        writer.writeFlag(updated);
+        return writer;
+    }
+
+    /// Writes the common inter-frame header fields used by synthetic film grain parser tests.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeInterFrameHeaderPrefixForFilmGrain(BitWriter writer) {
         writer.writeFlag(false);
         writer.writeBits(1, 2);
         writer.writeFlag(true);
@@ -840,12 +945,6 @@ final class FrameHeaderParserTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
-        writer.writeFlag(true);
-        writer.writeBits(0x4567, 16);
-        writer.writeFlag(false);
-        writer.writeBits(3, 3);
-        writer.writeTrailingBits();
-        return writer.toByteArray();
     }
 
     /// Creates normalized film grain parameters for reference-copy tests.
@@ -875,12 +974,12 @@ final class FrameHeaderParserTest {
                 new int[]{-4, -3, -2, -1, 0},
                 8,
                 2,
-                21,
+                -12,
                 34,
-                123,
+                -45,
                 55,
-                89,
-                321,
+                -39,
+                65,
                 false,
                 true
         );

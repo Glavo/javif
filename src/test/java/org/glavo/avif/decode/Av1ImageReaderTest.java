@@ -684,6 +684,60 @@ final class Av1ImageReaderTest {
         assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(PixelFormat.I444);
     }
 
+    /// Verifies that disabling film grain synthesis still exposes one stored reconstructed
+    /// reference surface through `show_existing_frame` when the referenced frame carries film grain.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameReturnsStoredReferenceSurfaceForFilmGrainBearingShowExistingFrameWhenFilmGrainIsDisabled()
+            throws Exception {
+        InjectedReferenceState referenceState = createFilmGrainBearingReferenceStateFromSupportedStillPicture();
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+        Av1DecoderConfig config = Av1DecoderConfig.builder().applyFilmGrain(false).build();
+
+        assertTrue(referenceState.frameHeader().filmGrain().applyGrain());
+        assertAcrossBufferedInputs(stream, config, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject film-grain-bearing reference state", exception);
+            }
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that enabling film grain synthesis rejects `show_existing_frame` output when the
+    /// referenced slot carries film grain.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameRejectsFilmGrainBearingShowExistingFrameWhenFilmGrainIsEnabled() throws Exception {
+        InjectedReferenceState referenceState = createFilmGrainBearingReferenceStateFromSupportedStillPicture();
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+        Av1DecoderConfig config = Av1DecoderConfig.builder().applyFilmGrain(true).build();
+
+        assertTrue(referenceState.frameHeader().filmGrain().applyGrain());
+        assertAcrossBufferedInputs(stream, config, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject film-grain-bearing reference state", exception);
+            }
+
+            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
+            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
+            assertEquals(DecodeStage.OUTPUT_CONVERSION, exception.stage());
+            assertEquals("Film grain synthesis is not implemented yet", exception.getMessage());
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+        });
+    }
+
     /// Verifies that `show_existing_frame` fails with one stable not-implemented boundary when the
     /// referenced slot has syntax state but no reconstructed reference surface yet.
     @Test
@@ -753,18 +807,36 @@ final class Av1ImageReaderTest {
     /// @param assertion the reader assertion to run for every adapter
     /// @throws IOException if one adapter cannot be opened or consumed
     private static void assertAcrossBufferedInputs(byte[] stream, ReaderAssertion assertion) throws IOException {
+        assertAcrossBufferedInputs(stream, Av1DecoderConfig.builder().build(), assertion);
+    }
+
+    /// Runs the supplied assertion across all currently supported buffered-input adapters with one
+    /// explicit immutable decoder configuration.
+    ///
+    /// @param stream the raw test stream
+    /// @param config the decoder configuration used for every reader
+    /// @param assertion the reader assertion to run for every adapter
+    /// @throws IOException if one adapter cannot be opened or consumed
+    private static void assertAcrossBufferedInputs(
+            byte[] stream,
+            Av1DecoderConfig config,
+            ReaderAssertion assertion
+    ) throws IOException {
         try (Av1ImageReader reader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
+                config
         )) {
             assertion.accept(reader);
         }
         try (Av1ImageReader reader = Av1ImageReader.open(
-                new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))
+                new BufferedInput.OfInputStream(new ByteArrayInputStream(stream)),
+                config
         )) {
             assertion.accept(reader);
         }
         try (Av1ImageReader reader = Av1ImageReader.open(
-                new BufferedInput.OfByteChannel(Channels.newChannel(new ByteArrayInputStream(stream)))
+                new BufferedInput.OfByteChannel(Channels.newChannel(new ByteArrayInputStream(stream))),
+                config
         )) {
             assertion.accept(reader);
         }
@@ -1071,6 +1143,35 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Creates one synthetic stored reference slot whose frame header carries minimal explicit film
+    /// grain while reusing the current supported still-picture surface.
+    ///
+    /// @return one synthetic stored reference slot whose referenced frame carries film grain
+    /// @throws Exception if the base still-picture metadata cannot be captured
+    private static InjectedReferenceState createFilmGrainBearingReferenceStateFromSupportedStillPicture() throws Exception {
+        InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
+        ReferenceSurfaceSnapshot baseSurfaceSnapshot =
+                Objects.requireNonNull(baseReferenceState.referenceSurfaceSnapshot(), "base reference surface");
+        FrameHeader filmGrainFrameHeader = copyFrameHeaderWithFilmGrain(
+                baseReferenceState.frameHeader(),
+                minimalFilmGrainParams(0x1234)
+        );
+        FrameSyntaxDecodeResult syntaxResult =
+                createSyntheticStoredReferenceSyntaxResult(baseReferenceState.sequenceHeader(), filmGrainFrameHeader);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                filmGrainFrameHeader,
+                syntaxResult,
+                baseSurfaceSnapshot.decodedPlanes()
+        );
+
+        return new InjectedReferenceState(
+                baseReferenceState.sequenceHeader(),
+                filmGrainFrameHeader,
+                syntaxResult,
+                referenceSurfaceSnapshot
+        );
+    }
+
     /// Asserts that the supported minimal real tile payload round-trips through the public reader
     /// with one parsed `I422` or `I444` reduced still-picture sequence header.
     ///
@@ -1348,6 +1449,52 @@ final class Av1ImageReaderTest {
         short[] samples = new short[width * height];
         Arrays.fill(samples, (short) sampleValue);
         return new DecodedPlane(width, height, width, samples);
+    }
+
+    /// Copies one real supported still-picture frame header while replacing only its normalized film
+    /// grain state.
+    ///
+    /// @param baseFrameHeader the real supported still-picture frame header to copy
+    /// @param filmGrain the replacement normalized film grain state
+    /// @return one copied frame header whose film grain state matches the requested value
+    private static FrameHeader copyFrameHeaderWithFilmGrain(
+            FrameHeader baseFrameHeader,
+            FrameHeader.FilmGrainParams filmGrain
+    ) {
+        return new FrameHeader(
+                baseFrameHeader.temporalId(),
+                baseFrameHeader.spatialId(),
+                baseFrameHeader.showExistingFrame(),
+                baseFrameHeader.existingFrameIndex(),
+                baseFrameHeader.frameId(),
+                baseFrameHeader.framePresentationDelay(),
+                baseFrameHeader.frameType(),
+                baseFrameHeader.showFrame(),
+                baseFrameHeader.showableFrame(),
+                baseFrameHeader.errorResilientMode(),
+                baseFrameHeader.disableCdfUpdate(),
+                baseFrameHeader.allowScreenContentTools(),
+                baseFrameHeader.forceIntegerMotionVectors(),
+                baseFrameHeader.frameSizeOverride(),
+                baseFrameHeader.primaryRefFrame(),
+                baseFrameHeader.frameOffset(),
+                baseFrameHeader.refreshFrameFlags(),
+                baseFrameHeader.frameSize(),
+                baseFrameHeader.superResolution(),
+                baseFrameHeader.allowIntrabc(),
+                baseFrameHeader.refreshContext(),
+                baseFrameHeader.tiling(),
+                baseFrameHeader.quantization(),
+                baseFrameHeader.segmentation(),
+                baseFrameHeader.delta(),
+                baseFrameHeader.allLossless(),
+                baseFrameHeader.loopFilter(),
+                baseFrameHeader.cdef(),
+                baseFrameHeader.restoration(),
+                baseFrameHeader.transformMode(),
+                baseFrameHeader.reducedTransformSet(),
+                filmGrain
+        );
     }
 
     /// Copies one real supported still-picture frame header while widening its stored tile layout
@@ -2005,6 +2152,39 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+    }
+
+    /// Creates one minimal normalized film grain state that matches
+    /// the current output-path contract tests.
+    ///
+    /// @param grainSeed the pseudo-random seed stored in the normalized state
+    /// @return one minimal normalized film grain state
+    private static FrameHeader.FilmGrainParams minimalFilmGrainParams(int grainSeed) {
+        return new FrameHeader.FilmGrainParams(
+                true,
+                grainSeed,
+                true,
+                -1,
+                new FrameHeader.FilmGrainPoint[0],
+                false,
+                new FrameHeader.FilmGrainPoint[0],
+                new FrameHeader.FilmGrainPoint[0],
+                8,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                6,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                false,
+                false
+        );
     }
 
     /// Small MSB-first bit writer used to build AV1 test payloads.
