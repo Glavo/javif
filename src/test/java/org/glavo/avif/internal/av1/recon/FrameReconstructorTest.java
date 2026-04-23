@@ -43,6 +43,7 @@ import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
+import org.glavo.avif.testutil.InterPredictionOracle;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -1440,6 +1441,182 @@ final class FrameReconstructorTest {
         assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 0, 2, 4, 2, 0);
     }
 
+    /// Verifies that one monochrome single-reference inter block samples one stored reference
+    /// surface through the current fixed `EIGHT_TAP_REGULAR` subpel path.
+    @Test
+    void reconstructsSingleReferenceI400InterBlockFromStoredSurfaceWithRegularEightTapSubpelMotionVector() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(3, 1);
+        int[][] lumaSamples = {
+                {0, 1, 2, 3, 4, 5, 6, 7},
+                {10, 11, 12, 13, 14, 15, 16, 17},
+                {20, 21, 22, 23, 24, 25, 26, 27},
+                {30, 31, 32, 33, 34, 35, 36, 37},
+                {40, 41, 42, 43, 44, 45, 46, 47},
+                {50, 51, 52, 53, 54, 55, 56, 57},
+                {60, 61, 62, 63, 64, 65, 66, 67},
+                {70, 71, 72, 73, 74, 75, 76, 77}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                lumaSamples,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        createDecodedPlane(lumaSamples),
+                        4,
+                        4,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        4,
+                        4,
+                        4,
+                        4,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                )
+        );
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 8, 0);
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, 0);
+    }
+
+    /// Verifies that one `I420` single-reference inter block samples both luma and chroma
+    /// footprints through the current fixed `EIGHT_TAP_SMOOTH` subpel path.
+    @Test
+    void reconstructsSingleReferenceI420InterBlockFromStoredSurfaceWithSmoothEightTapSubpelMotionVector() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(2, 6);
+        int[][] lumaSamples = {
+                {0, 1, 2, 3, 4, 5, 6, 7},
+                {10, 11, 12, 13, 14, 15, 16, 17},
+                {20, 21, 22, 23, 24, 25, 26, 27},
+                {30, 31, 32, 33, 34, 35, 36, 37},
+                {40, 41, 42, 43, 44, 45, 46, 47},
+                {50, 51, 52, 53, 54, 55, 56, 57},
+                {60, 61, 62, 63, 64, 65, 66, 67},
+                {70, 71, 72, 73, 74, 75, 76, 77}
+        };
+        int[][] chromaUSamples = {
+                {100, 101, 102, 103},
+                {110, 111, 112, 113},
+                {120, 121, 122, 123},
+                {130, 131, 132, 133}
+        };
+        int[][] chromaVSamples = {
+                {150, 151, 152, 153},
+                {160, 161, 162, 163},
+                {170, 171, 172, 173},
+                {180, 181, 182, 183}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                lumaSamples,
+                chromaUSamples,
+                chromaVSamples
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, true, 0, motionVector),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I420,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        createDecodedPlane(lumaSamples),
+                        4,
+                        4,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        4,
+                        4,
+                        4,
+                        4,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        createDecodedPlane(chromaUSamples),
+                        2,
+                        2,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        8,
+                        8,
+                        2,
+                        2,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaVPlane()),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        createDecodedPlane(chromaVSamples),
+                        2,
+                        2,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        8,
+                        8,
+                        2,
+                        2,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
+                )
+        );
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 8, 0);
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, 0);
+        assertPlaneBlockFilled(requirePlane(planes.chromaUPlane()), 2, 0, 2, 4, 0);
+        assertPlaneBlockFilled(requirePlane(planes.chromaUPlane()), 0, 2, 4, 2, 0);
+        assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 2, 0, 2, 4, 0);
+        assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 0, 2, 4, 2, 0);
+    }
+
     /// Verifies that one `I420` compound-reference inter block averages two bilinearly sampled
     /// reference surfaces on both luma and chroma planes.
     @Test
@@ -1540,6 +1717,192 @@ final class FrameReconstructorTest {
         });
     }
 
+    /// Verifies that one `I420` compound-reference inter block averages two fixed
+    /// `EIGHT_TAP_SHARP` subpel predictions on both luma and chroma planes.
+    @Test
+    void reconstructsCompoundReferenceI420InterBlockFromStoredSurfacesWithSharpEightTapSubpelMotionVectors() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector0 = new MotionVector(3, 1);
+        MotionVector motionVector1 = new MotionVector(1, 3);
+        int[][] lumaSamples0 = {
+                {0, 8, 16, 24, 32, 40, 48, 56},
+                {16, 24, 32, 40, 48, 56, 64, 72},
+                {32, 40, 48, 56, 64, 72, 80, 88},
+                {48, 56, 64, 72, 80, 88, 96, 104},
+                {64, 72, 80, 88, 96, 104, 112, 120},
+                {80, 88, 96, 104, 112, 120, 128, 136},
+                {96, 104, 112, 120, 128, 136, 144, 152},
+                {112, 120, 128, 136, 144, 152, 160, 168}
+        };
+        int[][] chromaUSamples0 = {
+                {100, 132, 164, 196},
+                {116, 148, 180, 212},
+                {132, 164, 196, 228},
+                {148, 180, 212, 244}
+        };
+        int[][] chromaVSamples0 = {
+                {80, 112, 144, 176},
+                {96, 128, 160, 192},
+                {112, 144, 176, 208},
+                {128, 160, 192, 224}
+        };
+        int[][] lumaSamples1 = {
+                {200, 192, 184, 176, 168, 160, 152, 144},
+                {184, 176, 168, 160, 152, 144, 136, 128},
+                {168, 160, 152, 144, 136, 128, 120, 112},
+                {152, 144, 136, 128, 120, 112, 104, 96},
+                {136, 128, 120, 112, 104, 96, 88, 80},
+                {120, 112, 104, 96, 88, 80, 72, 64},
+                {104, 96, 88, 80, 72, 64, 56, 48},
+                {88, 80, 72, 64, 56, 48, 40, 32}
+        };
+        int[][] chromaUSamples1 = {
+                {200, 168, 136, 104},
+                {184, 152, 120, 88},
+                {168, 136, 104, 72},
+                {152, 120, 88, 56}
+        };
+        int[][] chromaVSamples1 = {
+                {220, 188, 156, 124},
+                {204, 172, 140, 108},
+                {188, 156, 124, 92},
+                {172, 140, 108, 76}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                lumaSamples0,
+                chromaUSamples0,
+                chromaVSamples0
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                lumaSamples1,
+                chromaUSamples1,
+                chromaVSamples1
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        true,
+                        0,
+                        1,
+                        motionVector0,
+                        motionVector1
+                ),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I420,
+                        8,
+                        8,
+                        0,
+                        1,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(lumaSamples0),
+                                4,
+                                4,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                4,
+                                4,
+                                4,
+                                4,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(lumaSamples1),
+                                4,
+                                4,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                4,
+                                4,
+                                4,
+                                4,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+                        )
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaUSamples0),
+                                2,
+                                2,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaUSamples1),
+                                2,
+                                2,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+                        )
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaVPlane()),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaVSamples0),
+                                2,
+                                2,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaVSamples1),
+                                2,
+                                2,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+                        )
+                )
+        );
+    }
+
     /// Verifies that one monochrome inter block still applies supported residuals on top of the
     /// copied reference prediction.
     @Test
@@ -1602,9 +1965,9 @@ final class FrameReconstructorTest {
     }
 
     /// Verifies that one chroma-bearing inter block still rejects fractional motion vectors when
-    /// the frame-level interpolation filter is not `BILINEAR`.
+    /// the frame-level interpolation filter is not one fixed supported mode.
     @Test
-    void rejectsI420InterBlocksWithFractionalMotionVectorsWithoutBilinearFilter() {
+    void rejectsI420InterBlocksWithFractionalMotionVectorsWithSwitchableFilter() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
@@ -1646,7 +2009,7 @@ final class FrameReconstructorTest {
                                 8,
                                 8,
                                 0,
-                                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                                FrameHeader.InterpolationFilter.SWITCHABLE,
                                 leaf
                         ),
                         createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
@@ -1654,7 +2017,7 @@ final class FrameReconstructorTest {
         );
 
         assertEquals(
-                "Inter reconstruction currently supports fractional motion vectors only with BILINEAR filter for I420",
+                "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters for I420",
                 exception.getMessage()
         );
     }

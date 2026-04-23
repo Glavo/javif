@@ -37,8 +37,8 @@ import java.util.Objects;
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
-/// plus a first single-reference inter subset with integer-copy and bilinear-subpel prediction over
-/// the current serial tile traversal,
+/// plus a first single-reference and average-compound inter subset with integer-copy and the
+/// current fixed-filter subpel prediction path over the current serial tile traversal,
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
 /// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, and
@@ -47,6 +47,118 @@ import java.util.Objects;
 /// `64` samples.
 @NotNullByDefault
 public final class FrameReconstructor {
+    /// The number of coefficients in one 8-tap interpolation kernel.
+    private static final int INTER_FILTER_TAP_COUNT = 8;
+
+    /// The signed source-sample offset of the first tap relative to the integer source position.
+    private static final int INTER_FILTER_START_OFFSET = 3;
+
+    /// The AV1 fixed-filter normalization shift.
+    private static final int INTER_FILTER_BITS = 6;
+
+    /// The AV1 fixed-filter normalization factor.
+    private static final int INTER_FILTER_SCALE = 1 << INTER_FILTER_BITS;
+
+    /// The supported AV1 fractional phases for fixed interpolation filters.
+    private static final int INTER_FILTER_PHASES = 16;
+
+    /// The default AV1 regular 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
+    private static final int[][] REGULAR_SUBPEL_FILTERS = {
+            {0, 1, -3, 63, 4, -1, 0, 0},
+            {0, 1, -5, 61, 9, -2, 0, 0},
+            {0, 1, -6, 58, 14, -4, 1, 0},
+            {0, 1, -7, 55, 19, -5, 1, 0},
+            {0, 1, -7, 51, 24, -6, 1, 0},
+            {0, 1, -8, 47, 29, -6, 1, 0},
+            {0, 1, -7, 42, 33, -6, 1, 0},
+            {0, 1, -7, 38, 38, -7, 1, 0},
+            {0, 1, -6, 33, 42, -7, 1, 0},
+            {0, 1, -6, 29, 47, -8, 1, 0},
+            {0, 1, -6, 24, 51, -7, 1, 0},
+            {0, 1, -5, 19, 55, -7, 1, 0},
+            {0, 1, -4, 14, 58, -6, 1, 0},
+            {0, 0, -2, 9, 61, -5, 1, 0},
+            {0, 0, -1, 4, 63, -3, 1, 0}
+    };
+
+    /// The default AV1 smooth 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
+    private static final int[][] SMOOTH_SUBPEL_FILTERS = {
+            {0, 1, 14, 31, 17, 1, 0, 0},
+            {0, 0, 13, 31, 18, 2, 0, 0},
+            {0, 0, 11, 31, 20, 2, 0, 0},
+            {0, 0, 10, 30, 21, 3, 0, 0},
+            {0, 0, 9, 29, 22, 4, 0, 0},
+            {0, 0, 8, 28, 23, 5, 0, 0},
+            {0, -1, 8, 27, 24, 6, 0, 0},
+            {0, -1, 7, 26, 26, 7, -1, 0},
+            {0, 0, 6, 24, 27, 8, -1, 0},
+            {0, 0, 5, 23, 28, 8, 0, 0},
+            {0, 0, 4, 22, 29, 9, 0, 0},
+            {0, 0, 3, 21, 30, 10, 0, 0},
+            {0, 0, 2, 20, 31, 11, 0, 0},
+            {0, 0, 2, 18, 31, 13, 0, 0},
+            {0, 0, 1, 17, 31, 14, 1, 0}
+    };
+
+    /// The default AV1 sharp 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
+    private static final int[][] SHARP_SUBPEL_FILTERS = {
+            {-1, 1, -3, 63, 4, -1, 1, 0},
+            {-1, 3, -6, 62, 8, -3, 2, -1},
+            {-1, 4, -9, 60, 13, -5, 3, -1},
+            {-2, 5, -11, 58, 19, -7, 3, -1},
+            {-2, 5, -11, 54, 24, -9, 4, -1},
+            {-2, 5, -12, 50, 30, -10, 4, -1},
+            {-2, 5, -12, 45, 35, -11, 5, -1},
+            {-2, 6, -12, 40, 40, -12, 6, -2},
+            {-1, 5, -11, 35, 45, -12, 5, -2},
+            {-1, 4, -10, 30, 50, -12, 5, -2},
+            {-1, 4, -9, 24, 54, -11, 5, -2},
+            {-1, 3, -7, 19, 58, -11, 5, -2},
+            {-1, 3, -5, 13, 60, -9, 4, -1},
+            {-1, 2, -3, 8, 62, -6, 3, -1},
+            {0, 1, -1, 4, 63, -3, 1, -1}
+    };
+
+    /// The reduced-width AV1 regular 8-tap subpel filters used when the sampled axis is at most
+    /// four samples wide.
+    private static final int[][] SMALL_REGULAR_SUBPEL_FILTERS = {
+            {0, 0, -2, 63, 4, -1, 0, 0},
+            {0, 0, -4, 61, 9, -2, 0, 0},
+            {0, 0, -5, 58, 14, -3, 0, 0},
+            {0, 0, -6, 55, 19, -4, 0, 0},
+            {0, 0, -6, 51, 24, -5, 0, 0},
+            {0, 0, -7, 47, 29, -5, 0, 0},
+            {0, 0, -6, 42, 33, -5, 0, 0},
+            {0, 0, -6, 38, 38, -6, 0, 0},
+            {0, 0, -5, 33, 42, -6, 0, 0},
+            {0, 0, -5, 29, 47, -7, 0, 0},
+            {0, 0, -5, 24, 51, -6, 0, 0},
+            {0, 0, -4, 19, 55, -6, 0, 0},
+            {0, 0, -3, 14, 58, -5, 0, 0},
+            {0, 0, -2, 9, 61, -4, 0, 0},
+            {0, 0, -1, 4, 63, -2, 0, 0}
+    };
+
+    /// The reduced-width AV1 smooth 8-tap subpel filters used when the sampled axis is at most
+    /// four samples wide.
+    private static final int[][] SMALL_SMOOTH_SUBPEL_FILTERS = {
+            {0, 0, 15, 31, 17, 1, 0, 0},
+            {0, 0, 13, 31, 18, 2, 0, 0},
+            {0, 0, 11, 31, 20, 2, 0, 0},
+            {0, 0, 10, 30, 21, 3, 0, 0},
+            {0, 0, 9, 29, 22, 4, 0, 0},
+            {0, 0, 8, 28, 23, 5, 0, 0},
+            {0, 0, 7, 27, 24, 6, 0, 0},
+            {0, 0, 6, 26, 26, 6, 0, 0},
+            {0, 0, 6, 24, 27, 7, 0, 0},
+            {0, 0, 5, 23, 28, 8, 0, 0},
+            {0, 0, 4, 22, 29, 9, 0, 0},
+            {0, 0, 3, 21, 30, 10, 0, 0},
+            {0, 0, 2, 20, 31, 11, 0, 0},
+            {0, 0, 2, 18, 31, 13, 0, 0},
+            {0, 0, 1, 17, 31, 15, 0, 0}
+    };
+
     /// Reconstructs one supported structural frame result into decoded planes.
     ///
     /// @param syntaxDecodeResult the structural frame result to reconstruct
@@ -554,7 +666,10 @@ public final class FrameReconstructor {
                 motionVector.columnQuarterPel(),
                 motionVector.rowQuarterPel(),
                 4,
-                4
+                4,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                frameHeader.subpelFilterMode()
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -580,7 +695,10 @@ public final class FrameReconstructor {
                 motionVector.columnQuarterPel(),
                 motionVector.rowQuarterPel(),
                 chromaDenominatorX,
-                chromaDenominatorY
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                frameHeader.subpelFilterMode()
         );
         reconstructInterPlanePrediction(
                 chromaVPlane,
@@ -592,13 +710,16 @@ public final class FrameReconstructor {
                 motionVector.columnQuarterPel(),
                 motionVector.rowQuarterPel(),
                 chromaDenominatorX,
-                chromaDenominatorY
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                frameHeader.subpelFilterMode()
         );
     }
 
     /// Reconstructs the currently supported compound-reference inter prediction subset by averaging
     /// the two predicted reference surfaces after each one has been sampled with the current
-    /// integer-copy or bilinear-subpel path.
+    /// integer-copy or fixed-filter subpel path.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -644,7 +765,10 @@ public final class FrameReconstructor {
                 motionVector1.columnQuarterPel(),
                 motionVector1.rowQuarterPel(),
                 4,
-                4
+                4,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                frameHeader.subpelFilterMode()
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -673,7 +797,10 @@ public final class FrameReconstructor {
                 motionVector1.columnQuarterPel(),
                 motionVector1.rowQuarterPel(),
                 chromaDenominatorX,
-                chromaDenominatorY
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                frameHeader.subpelFilterMode()
         );
         reconstructCompoundInterPlanePrediction(
                 chromaVPlane,
@@ -688,12 +815,15 @@ public final class FrameReconstructor {
                 motionVector1.columnQuarterPel(),
                 motionVector1.rowQuarterPel(),
                 chromaDenominatorX,
-                chromaDenominatorY
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                frameHeader.subpelFilterMode()
         );
     }
 
-    /// Reconstructs one inter-predicted plane using either integer-copy or bilinear subpel
-    /// sampling depending on the supplied motion-vector alignment.
+    /// Reconstructs one inter-predicted plane using either integer-copy or the current fixed AV1
+    /// subpel filter depending on the supplied motion-vector alignment.
     ///
     /// @param destinationPlane the mutable destination plane
     /// @param referencePlane the immutable reference plane
@@ -705,6 +835,9 @@ public final class FrameReconstructor {
     /// @param sourceOffsetQuarterPelY the signed vertical motion-vector component in luma quarter-pel units
     /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
     /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
+    /// @param filterMode the frame-level interpolation filter mode
     private static void reconstructInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
@@ -715,7 +848,10 @@ public final class FrameReconstructor {
             int sourceOffsetQuarterPelX,
             int sourceOffsetQuarterPelY,
             int denominatorX,
-            int denominatorY
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter filterMode
     ) {
         if (Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
                 && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
@@ -732,7 +868,7 @@ public final class FrameReconstructor {
             return;
         }
 
-        bilinearReferencePlaneBlock(
+        filteredReferencePlaneBlock(
                 destinationPlane,
                 referencePlane,
                 destinationX,
@@ -742,7 +878,10 @@ public final class FrameReconstructor {
                 destinationX * denominatorX + sourceOffsetQuarterPelX,
                 destinationY * denominatorY + sourceOffsetQuarterPelY,
                 denominatorX,
-                denominatorY
+                denominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                filterMode
         );
     }
 
@@ -775,7 +914,10 @@ public final class FrameReconstructor {
             int sourceOffsetQuarterPelX1,
             int sourceOffsetQuarterPelY1,
             int denominatorX,
-            int denominatorY
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter filterMode
     ) {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -786,7 +928,10 @@ public final class FrameReconstructor {
                         sourceOffsetQuarterPelX0,
                         sourceOffsetQuarterPelY0,
                         denominatorX,
-                        denominatorY
+                        denominatorY,
+                        widthForFilterSelection,
+                        heightForFilterSelection,
+                        filterMode
                 );
                 int sample1 = sampleInterPlaneValue(
                         referencePlane1,
@@ -795,15 +940,18 @@ public final class FrameReconstructor {
                         sourceOffsetQuarterPelX1,
                         sourceOffsetQuarterPelY1,
                         denominatorX,
-                        denominatorY
+                        denominatorY,
+                        widthForFilterSelection,
+                        heightForFilterSelection,
+                        filterMode
                 );
                 destinationPlane.setSample(destinationX + x, destinationY + y, averageCompoundSamples(sample0, sample1));
             }
         }
     }
 
-    /// Returns one inter-predicted plane sample using either integer-copy or bilinear-subpel
-    /// sampling depending on the supplied motion-vector alignment.
+    /// Returns one inter-predicted plane sample using either integer-copy or the current fixed AV1
+    /// subpel filter depending on the supplied motion-vector alignment.
     ///
     /// @param referencePlane the immutable reference plane
     /// @param destinationX the zero-based horizontal destination coordinate
@@ -820,7 +968,10 @@ public final class FrameReconstructor {
             int sourceOffsetQuarterPelX,
             int sourceOffsetQuarterPelY,
             int denominatorX,
-            int denominatorY
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter filterMode
     ) {
         if (Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
                 && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
@@ -829,12 +980,15 @@ public final class FrameReconstructor {
                     clamp(destinationY + sourceOffsetQuarterPelY / denominatorY, 0, referencePlane.height() - 1)
             );
         }
-        return bilinearInterpolateAt(
+        return filteredInterpolateAt(
                 referencePlane,
                 destinationX * denominatorX + sourceOffsetQuarterPelX,
                 destinationY * denominatorY + sourceOffsetQuarterPelY,
                 denominatorX,
-                denominatorY
+                denominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                filterMode
         );
     }
 
@@ -872,8 +1026,8 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Samples one rectangular reference-plane footprint into the destination plane using bilinear
-    /// interpolation with edge extension.
+    /// Samples one rectangular reference-plane footprint into the destination plane using the
+    /// current fixed AV1 subpel filter with edge extension.
     ///
     /// @param destinationPlane the mutable destination plane
     /// @param referencePlane the immutable reference plane
@@ -885,7 +1039,7 @@ public final class FrameReconstructor {
     /// @param sourceNumeratorY the source origin numerator in plane-local sample units
     /// @param denominatorX the horizontal plane-local denominator
     /// @param denominatorY the vertical plane-local denominator
-    private static void bilinearReferencePlaneBlock(
+    private static void filteredReferencePlaneBlock(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
             int destinationX,
@@ -895,23 +1049,107 @@ public final class FrameReconstructor {
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
-            int denominatorY
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter filterMode
     ) {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 destinationPlane.setSample(
                         destinationX + x,
                         destinationY + y,
-                        bilinearInterpolateAt(
+                        filteredInterpolateAt(
                                 referencePlane,
                                 sourceNumeratorX + x * denominatorX,
                                 sourceNumeratorY + y * denominatorY,
                                 denominatorX,
-                                denominatorY
+                                denominatorY,
+                                widthForFilterSelection,
+                                heightForFilterSelection,
+                                filterMode
                         )
                 );
             }
         }
+    }
+
+    /// Returns one fixed-filter interpolated unsigned sample at the supplied plane-local source
+    /// numerator coordinates.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
+    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param denominatorY the vertical interpolation denominator
+    /// @param widthForFilterSelection the sampled block width in pixels
+    /// @param heightForFilterSelection the sampled block height in pixels
+    /// @param filterMode the frame-level interpolation filter
+    /// @return one fixed-filter interpolated unsigned sample
+    private static int filteredInterpolateAt(
+            DecodedPlane referencePlane,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter filterMode
+    ) {
+        if (filterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            return bilinearInterpolateAt(referencePlane, sourceNumeratorX, sourceNumeratorY, denominatorX, denominatorY);
+        }
+        if (!supportsFixedFractionalInterFilter(filterMode)) {
+            throw new IllegalStateException(
+                    "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
+            );
+        }
+
+        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
+        int phaseY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
+        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
+        int phaseX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
+        if (phaseX == 0 && phaseY == 0) {
+            return referencePlane.sample(
+                    clamp(sourceX0, 0, referencePlane.width() - 1),
+                    clamp(sourceY0, 0, referencePlane.height() - 1)
+            );
+        }
+
+        @Nullable int[] horizontalFilter =
+                phaseX == 0 ? null : selectSubpelFilter(filterMode, phaseX, widthForFilterSelection);
+        @Nullable int[] verticalFilter =
+                phaseY == 0 ? null : selectSubpelFilter(filterMode, phaseY, heightForFilterSelection);
+        if (verticalFilter == null) {
+            long filtered = horizontalInterpolate(
+                    referencePlane,
+                    sourceX0,
+                    sourceY0,
+                    Objects.requireNonNull(horizontalFilter, "horizontalFilter")
+            );
+            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, 255);
+        }
+        if (horizontalFilter == null) {
+            long filtered = verticalInterpolate(
+                    referencePlane,
+                    sourceX0,
+                    sourceY0,
+                    Objects.requireNonNull(verticalFilter, "verticalFilter")
+            );
+            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, 255);
+        }
+
+        long[] horizontallyFilteredRows = new long[INTER_FILTER_TAP_COUNT];
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            int sourceY = clamp(sourceY0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.height() - 1);
+            horizontallyFilteredRows[tapIndex] = horizontalInterpolate(referencePlane, sourceX0, sourceY, horizontalFilter);
+        }
+
+        long combined = 0;
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            combined += (long) Objects.requireNonNull(verticalFilter, "verticalFilter")[tapIndex] * horizontallyFilteredRows[tapIndex];
+        }
+        return clamp(roundShiftSigned(combined, INTER_FILTER_BITS * 2), 0, 255);
     }
 
     /// Returns one bilinearly interpolated unsigned sample at the supplied plane-local source
@@ -948,6 +1186,109 @@ public final class FrameReconstructor {
                 fractionY,
                 denominatorY
         );
+    }
+
+    /// Returns one filtered horizontal interpolation sum before normalization.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceX0 the integer horizontal source position
+    /// @param sourceY the integer vertical source position
+    /// @param filter the selected AV1 subpel filter taps
+    /// @return one filtered horizontal interpolation sum before normalization
+    private static long horizontalInterpolate(
+            DecodedPlane referencePlane,
+            int sourceX0,
+            int sourceY,
+            int[] filter
+    ) {
+        long filtered = 0;
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            int sourceX = clamp(sourceX0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.width() - 1);
+            filtered += (long) filter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+        }
+        return filtered;
+    }
+
+    /// Returns one filtered vertical interpolation sum before normalization.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceX the integer horizontal source position
+    /// @param sourceY0 the integer vertical source position
+    /// @param filter the selected AV1 subpel filter taps
+    /// @return one filtered vertical interpolation sum before normalization
+    private static long verticalInterpolate(
+            DecodedPlane referencePlane,
+            int sourceX,
+            int sourceY0,
+            int[] filter
+    ) {
+        long filtered = 0;
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            int sourceY = clamp(sourceY0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.height() - 1);
+            filtered += (long) filter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+        }
+        return filtered;
+    }
+
+    /// Returns the selected AV1 fixed-filter taps for one fractional phase and sampled axis size.
+    ///
+    /// @param filterMode the requested interpolation filter mode
+    /// @param phase the normalized AV1 fractional phase in `[1, 15]`
+    /// @param axisSize the sampled axis size in pixels
+    /// @return the selected AV1 fixed-filter taps
+    private static int[] selectSubpelFilter(
+            FrameHeader.InterpolationFilter filterMode,
+            int phase,
+            int axisSize
+    ) {
+        if (phase <= 0 || phase >= INTER_FILTER_PHASES) {
+            throw new IllegalStateException("AV1 fixed-filter phase out of range: " + phase);
+        }
+        return switch (filterMode) {
+            case EIGHT_TAP_REGULAR -> (axisSize <= 4 ? SMALL_REGULAR_SUBPEL_FILTERS : REGULAR_SUBPEL_FILTERS)[phase - 1];
+            case EIGHT_TAP_SMOOTH -> (axisSize <= 4 ? SMALL_SMOOTH_SUBPEL_FILTERS : SMOOTH_SUBPEL_FILTERS)[phase - 1];
+            case EIGHT_TAP_SHARP -> SHARP_SUBPEL_FILTERS[phase - 1];
+            default -> throw new IllegalStateException(
+                    "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
+            );
+        };
+    }
+
+    /// Returns the normalized AV1 subpel phase for the supplied plane-local fraction.
+    ///
+    /// @param fraction the plane-local source fraction
+    /// @param denominator the plane-local interpolation denominator
+    /// @return the normalized AV1 subpel phase in `[0, 15]`
+    private static int interpolationPhase(int fraction, int denominator) {
+        if (fraction == 0) {
+            return 0;
+        }
+        return Math.multiplyExact(fraction, INTER_FILTER_PHASES) / denominator;
+    }
+
+    /// Rounds one signed integer by the requested arithmetic right shift.
+    ///
+    /// @param value the signed value to round
+    /// @param bits the number of low bits to discard
+    /// @return the rounded signed value
+    private static int roundShiftSigned(long value, int bits) {
+        long roundingOffset = 1L << (bits - 1);
+        if (value >= 0) {
+            return (int) ((value + roundingOffset) >> bits);
+        }
+        return (int) -(((-value) + roundingOffset) >> bits);
+    }
+
+    /// Returns whether one frame-level interpolation filter is currently supported for fractional
+    /// inter reconstruction.
+    ///
+    /// @param filterMode the frame-level interpolation filter mode
+    /// @return whether one frame-level interpolation filter is currently supported for fractional inter reconstruction
+    private static boolean supportsFixedFractionalInterFilter(FrameHeader.InterpolationFilter filterMode) {
+        return filterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
+                || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
     }
 
     /// Returns one bilinearly interpolated unsigned sample.
@@ -1050,9 +1391,9 @@ public final class FrameReconstructor {
         boolean lumaFractional = (checkedMotionVector.rowQuarterPel() & 0x03) != 0
                 || (checkedMotionVector.columnQuarterPel() & 0x03) != 0;
         if (!hasChroma || pixelFormat == PixelFormat.I400) {
-            if (lumaFractional && subpelFilterMode != FrameHeader.InterpolationFilter.BILINEAR) {
+            if (lumaFractional && !supportsFixedFractionalInterFilter(subpelFilterMode)) {
                 throw new IllegalStateException(
-                        "Inter reconstruction currently supports fractional luma motion vectors only with BILINEAR filter"
+                        "Inter reconstruction currently supports fractional luma motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
                 );
             }
             return;
@@ -1062,9 +1403,10 @@ public final class FrameReconstructor {
         int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
         boolean chromaFractional = Math.floorMod(checkedMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
                 || Math.floorMod(checkedMotionVector.rowQuarterPel(), chromaVerticalAlignment) != 0;
-        if ((lumaFractional || chromaFractional) && subpelFilterMode != FrameHeader.InterpolationFilter.BILINEAR) {
+        if ((lumaFractional || chromaFractional) && !supportsFixedFractionalInterFilter(subpelFilterMode)) {
             throw new IllegalStateException(
-                    "Inter reconstruction currently supports fractional motion vectors only with BILINEAR filter for " + pixelFormat
+                    "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters for "
+                            + pixelFormat
             );
         }
     }
