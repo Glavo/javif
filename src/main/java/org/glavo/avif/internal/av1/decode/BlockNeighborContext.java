@@ -68,6 +68,12 @@ public final class BlockNeighborContext {
     /// The tile height rounded up to 4x4 units.
     private final int tileHeight4;
 
+    /// The horizontal chroma subsampling shift, or `0` when chroma uses full horizontal resolution.
+    private final int chromaSubsamplingX;
+
+    /// The vertical chroma subsampling shift, or `0` when chroma uses full vertical resolution.
+    private final int chromaSubsamplingY;
+
     /// Whether reference-frame motion vectors are enabled for the active frame.
     private final boolean useReferenceFrameMotionVectors;
 
@@ -194,10 +200,18 @@ public final class BlockNeighborContext {
     /// The left-edge luma coefficient-context bytes indexed in 4x4 units.
     private final byte[] leftLumaCoefficientContext;
 
+    /// The above-edge chroma coefficient-context bytes indexed as plane/chroma-4x4 X.
+    private final byte[][] aboveChromaCoefficientContext;
+
+    /// The left-edge chroma coefficient-context bytes indexed as plane/chroma-4x4 Y.
+    private final byte[][] leftChromaCoefficientContext;
+
     /// Creates tile-local neighbor context state.
     ///
     /// @param tileWidth4 the tile width rounded up to 4x4 units
     /// @param tileHeight4 the tile height rounded up to 4x4 units
+    /// @param chromaSubsamplingX the horizontal chroma subsampling shift
+    /// @param chromaSubsamplingY the vertical chroma subsampling shift
     /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
     /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
@@ -240,9 +254,13 @@ public final class BlockNeighborContext {
     /// @param leftInterTransformHeightLog2 the left-edge inter var-tx heights indexed in 4x4 units
     /// @param aboveLumaCoefficientContext the above-edge luma coefficient-context bytes indexed in 4x4 units
     /// @param leftLumaCoefficientContext the left-edge luma coefficient-context bytes indexed in 4x4 units
+    /// @param aboveChromaCoefficientContext the above-edge chroma coefficient-context bytes indexed as plane/chroma-4x4 X
+    /// @param leftChromaCoefficientContext the left-edge chroma coefficient-context bytes indexed as plane/chroma-4x4 Y
     private BlockNeighborContext(
             int tileWidth4,
             int tileHeight4,
+            int chromaSubsamplingX,
+            int chromaSubsamplingY,
             boolean useReferenceFrameMotionVectors,
             TileDecodeContext.TemporalMotionField temporalMotionField,
             TileDecodeContext.TemporalMotionField decodedTemporalMotionField,
@@ -284,10 +302,14 @@ public final class BlockNeighborContext {
             byte[] aboveInterTransformWidthLog2,
             byte[] leftInterTransformHeightLog2,
             byte[] aboveLumaCoefficientContext,
-            byte[] leftLumaCoefficientContext
+            byte[] leftLumaCoefficientContext,
+            byte[][] aboveChromaCoefficientContext,
+            byte[][] leftChromaCoefficientContext
     ) {
         this.tileWidth4 = tileWidth4;
         this.tileHeight4 = tileHeight4;
+        this.chromaSubsamplingX = chromaSubsamplingX;
+        this.chromaSubsamplingY = chromaSubsamplingY;
         this.useReferenceFrameMotionVectors = useReferenceFrameMotionVectors;
         this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
         this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
@@ -342,6 +364,14 @@ public final class BlockNeighborContext {
                 leftLumaCoefficientContext,
                 "leftLumaCoefficientContext"
         );
+        this.aboveChromaCoefficientContext = Objects.requireNonNull(
+                aboveChromaCoefficientContext,
+                "aboveChromaCoefficientContext"
+        );
+        this.leftChromaCoefficientContext = Objects.requireNonNull(
+                leftChromaCoefficientContext,
+                "leftChromaCoefficientContext"
+        );
     }
 
     /// Creates initialized neighbor context state for one tile.
@@ -354,6 +384,10 @@ public final class BlockNeighborContext {
         int tileHeight4 = (nonNullTileContext.height() + 3) >> 2;
         int tileWidth8 = (nonNullTileContext.width() + 7) >> 3;
         int tileHeight8 = (nonNullTileContext.height() + 7) >> 3;
+        int chromaSubsamplingX = chromaSubsamplingX(nonNullTileContext.sequenceHeader().colorConfig().pixelFormat());
+        int chromaSubsamplingY = chromaSubsamplingY(nonNullTileContext.sequenceHeader().colorConfig().pixelFormat());
+        int chromaTileWidth4 = chromaTileSpan(tileWidth4, chromaSubsamplingX);
+        int chromaTileHeight4 = chromaTileSpan(tileHeight4, chromaSubsamplingY);
         boolean keyFrame = nonNullTileContext.frameHeader().frameType() == FrameType.KEY;
 
         byte[] aboveIntra = new byte[tileWidth4];
@@ -368,6 +402,8 @@ public final class BlockNeighborContext {
         byte[] leftInterTransformHeightLog2 = new byte[tileHeight4];
         byte[] aboveLumaCoefficientContext = new byte[tileWidth4];
         byte[] leftLumaCoefficientContext = new byte[tileHeight4];
+        byte[][] aboveChromaCoefficientContext = new byte[2][chromaTileWidth4];
+        byte[][] leftChromaCoefficientContext = new byte[2][chromaTileHeight4];
         InterMotionVector[] aboveMotionVector0 = new InterMotionVector[tileWidth4];
         InterMotionVector[] leftMotionVector0 = new InterMotionVector[tileHeight4];
         InterMotionVector[] aboveMotionVector1 = new InterMotionVector[tileWidth4];
@@ -381,6 +417,10 @@ public final class BlockNeighborContext {
         Arrays.fill(leftInterTransformHeightLog2, (byte) -1);
         Arrays.fill(aboveLumaCoefficientContext, (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
         Arrays.fill(leftLumaCoefficientContext, (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
+        Arrays.fill(aboveChromaCoefficientContext[0], (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
+        Arrays.fill(aboveChromaCoefficientContext[1], (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
+        Arrays.fill(leftChromaCoefficientContext[0], (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
+        Arrays.fill(leftChromaCoefficientContext[1], (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
         Arrays.fill(aboveReferenceFrame0, (byte) -1);
         Arrays.fill(leftReferenceFrame0, (byte) -1);
         Arrays.fill(aboveReferenceFrame1, (byte) -1);
@@ -399,6 +439,8 @@ public final class BlockNeighborContext {
         return new BlockNeighborContext(
                 tileWidth4,
                 tileHeight4,
+                chromaSubsamplingX,
+                chromaSubsamplingY,
                 nonNullTileContext.frameHeader().useReferenceFrameMotionVectors(),
                 nonNullTileContext.temporalMotionField(),
                 nonNullTileContext.decodedTemporalMotionField(),
@@ -440,8 +482,46 @@ public final class BlockNeighborContext {
                 aboveInterTransformWidthLog2,
                 leftInterTransformHeightLog2,
                 aboveLumaCoefficientContext,
-                leftLumaCoefficientContext
+                leftLumaCoefficientContext,
+                aboveChromaCoefficientContext,
+                leftChromaCoefficientContext
         );
+    }
+
+    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the decoded sequence pixel format
+    /// @return the horizontal chroma subsampling shift for the supplied pixel format
+    private static int chromaSubsamplingX(org.glavo.avif.decode.PixelFormat pixelFormat) {
+        org.glavo.avif.decode.PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        return switch (nonNullPixelFormat) {
+            case I400, I444 -> 0;
+            case I420, I422 -> 1;
+        };
+    }
+
+    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the decoded sequence pixel format
+    /// @return the vertical chroma subsampling shift for the supplied pixel format
+    private static int chromaSubsamplingY(org.glavo.avif.decode.PixelFormat pixelFormat) {
+        org.glavo.avif.decode.PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        return switch (nonNullPixelFormat) {
+            case I400, I422, I444 -> 0;
+            case I420 -> 1;
+        };
+    }
+
+    /// Returns the rounded chroma-grid span corresponding to one luma-grid span and subsampling shift.
+    ///
+    /// @param lumaSpan4 the luma-grid span in 4x4 units
+    /// @param subsamplingShift the chroma subsampling shift for the relevant axis
+    /// @return the rounded chroma-grid span corresponding to the supplied luma-grid span
+    private static int chromaTileSpan(int lumaSpan4, int subsamplingShift) {
+        if (lumaSpan4 <= 0) {
+            return 0;
+        }
+        return (lumaSpan4 + (1 << subsamplingShift) - 1) >> subsamplingShift;
     }
 
     /// Returns the tile width rounded up to 4x4 units.
@@ -1317,6 +1397,71 @@ public final class BlockNeighborContext {
         return (signBalance != 0 ? 1 : 0) + (signBalance > 0 ? 1 : 0);
     }
 
+    /// Returns the chroma coefficient skip-context for one transform unit on the supplied plane.
+    ///
+    /// The current implementation stores chroma coefficient-context bytes on a chroma-grid edge
+    /// that already accounts for sequence subsampling, so the supplied block origin and transform
+    /// size can stay in the existing block-position and transform-size model. Each chroma plane
+    /// keeps its own edge state, matching the fact that U and V residual syntax do not share
+    /// coefficient neighbor history.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @param blockSize the coded block size that owns the current chroma transform unit
+    /// @param position the current block origin in tile-relative luma 4x4 units
+    /// @param transformSize the current chroma transform size
+    /// @return the chroma coefficient skip-context in `[0, 7)`
+    public int chromaCoefficientSkipContext(
+            int plane,
+            BlockSize blockSize,
+            BlockPosition position,
+            TransformSize transformSize
+    ) {
+        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        if (chromaBlockWidth4(nonNullBlockSize) == nonNullTransformSize.width4()
+                && chromaBlockHeight4(nonNullBlockSize) == nonNullTransformSize.height4()) {
+            return 0;
+        }
+
+        byte[] aboveContexts = selectAboveChromaCoefficientContext(plane);
+        byte[] leftContexts = selectLeftChromaCoefficientContext(plane);
+        int aboveContext = mergeCoefficientContext(
+                aboveContexts,
+                chromaX4(nonNullPosition),
+                nonNullTransformSize.width4()
+        );
+        int leftContext = mergeCoefficientContext(
+                leftContexts,
+                chromaY4(nonNullPosition),
+                nonNullTransformSize.height4()
+        );
+        return LUMA_COEFFICIENT_SKIP_CONTEXTS[Math.min(aboveContext & 0x3F, 4)][Math.min(leftContext & 0x3F, 4)];
+    }
+
+    /// Returns the chroma DC-sign context for one transform unit on the supplied plane.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @param position the current block origin in tile-relative luma 4x4 units
+    /// @param transformSize the current chroma transform size
+    /// @return the chroma DC-sign context in `[0, 3)`
+    public int chromaDcSignContext(int plane, BlockPosition position, TransformSize transformSize) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        byte[] aboveContexts = selectAboveChromaCoefficientContext(plane);
+        byte[] leftContexts = selectLeftChromaCoefficientContext(plane);
+        int signBalance = sumDcSignClasses(
+                aboveContexts,
+                chromaX4(nonNullPosition),
+                nonNullTransformSize.width4()
+        ) + sumDcSignClasses(
+                leftContexts,
+                chromaY4(nonNullPosition),
+                nonNullTransformSize.height4()
+        );
+        return (signBalance != 0 ? 1 : 0) + (signBalance > 0 ? 1 : 0);
+    }
+
     /// Updates the default transform-context dimensions after one block header is decoded.
     ///
     /// Inter blocks use their coded block dimensions for subsequent transform-size contexts, which
@@ -1421,6 +1566,38 @@ public final class BlockNeighborContext {
         }
     }
 
+    /// Updates the chroma coefficient-context state after one chroma transform residual unit is decoded.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @param position the current block origin in tile-relative luma 4x4 units
+    /// @param transformSize the current chroma transform size
+    /// @param coefficientContextByte the coefficient-context byte written back for the decoded unit
+    public void updateChromaCoefficientContext(
+            int plane,
+            BlockPosition position,
+            TransformSize transformSize,
+            int coefficientContextByte
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
+            throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
+        }
+        byte[] aboveContexts = selectAboveChromaCoefficientContext(plane);
+        byte[] leftContexts = selectLeftChromaCoefficientContext(plane);
+        int startX4 = chromaX4(nonNullPosition);
+        int startY4 = chromaY4(nonNullPosition);
+        int endX4 = Math.min(aboveContexts.length, startX4 + nonNullTransformSize.width4());
+        int endY4 = Math.min(leftContexts.length, startY4 + nonNullTransformSize.height4());
+        byte storedValue = (byte) coefficientContextByte;
+        for (int x4 = startX4; x4 < endX4; x4++) {
+            aboveContexts[x4] = storedValue;
+        }
+        for (int y4 = startY4; y4 < endY4; y4++) {
+            leftContexts[y4] = storedValue;
+        }
+    }
+
     /// Writes one transform-context width/height pair across the visible edges of one block span.
     ///
     /// @param position the local tile-relative block origin
@@ -1472,6 +1649,65 @@ public final class BlockNeighborContext {
             sum += ((contexts[index] & 0xFF) >>> 6) - 1;
         }
         return sum;
+    }
+
+    /// Returns the chroma-grid X coordinate corresponding to one tile-relative luma-grid origin.
+    ///
+    /// @param position the tile-relative luma-grid origin
+    /// @return the chroma-grid X coordinate corresponding to the supplied origin
+    private int chromaX4(BlockPosition position) {
+        return Objects.requireNonNull(position, "position").x4() >> chromaSubsamplingX;
+    }
+
+    /// Returns the chroma-grid Y coordinate corresponding to one tile-relative luma-grid origin.
+    ///
+    /// @param position the tile-relative luma-grid origin
+    /// @return the chroma-grid Y coordinate corresponding to the supplied origin
+    private int chromaY4(BlockPosition position) {
+        return Objects.requireNonNull(position, "position").y4() >> chromaSubsamplingY;
+    }
+
+    /// Returns the effective chroma-block width in chroma 4x4 units for one coded block size.
+    ///
+    /// @param blockSize the coded block size to inspect
+    /// @return the effective chroma-block width in chroma 4x4 units
+    private int chromaBlockWidth4(BlockSize blockSize) {
+        return Math.max(1, Objects.requireNonNull(blockSize, "blockSize").width4() >> chromaSubsamplingX);
+    }
+
+    /// Returns the effective chroma-block height in chroma 4x4 units for one coded block size.
+    ///
+    /// @param blockSize the coded block size to inspect
+    /// @return the effective chroma-block height in chroma 4x4 units
+    private int chromaBlockHeight4(BlockSize blockSize) {
+        return Math.max(1, Objects.requireNonNull(blockSize, "blockSize").height4() >> chromaSubsamplingY);
+    }
+
+    /// Returns the stored above-edge chroma coefficient-context bytes for one chroma plane.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @return the stored above-edge chroma coefficient-context bytes for the supplied plane
+    private byte[] selectAboveChromaCoefficientContext(int plane) {
+        return aboveChromaCoefficientContext[requireChromaPlaneIndex(plane)];
+    }
+
+    /// Returns the stored left-edge chroma coefficient-context bytes for one chroma plane.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @return the stored left-edge chroma coefficient-context bytes for the supplied plane
+    private byte[] selectLeftChromaCoefficientContext(int plane) {
+        return leftChromaCoefficientContext[requireChromaPlaneIndex(plane)];
+    }
+
+    /// Validates and returns one chroma plane index used by the chroma coefficient-context helpers.
+    ///
+    /// @param plane the requested chroma plane index
+    /// @return the same chroma plane index after validation
+    private static int requireChromaPlaneIndex(int plane) {
+        if (plane != 0 && plane != 1) {
+            throw new IllegalArgumentException("plane must be 0 (U) or 1 (V): " + plane);
+        }
+        return plane;
     }
 
     /// Updates the neighbor state after decoding one block header.

@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
@@ -27,8 +28,9 @@ import java.util.Objects;
 /// Reader for the first coefficient-side syntax elements inside one tile bitstream.
 ///
 /// The current implementation fully decodes the currently modeled two-dimensional luma residual
-/// path. `TX_4X4` keeps its dedicated context helpers, while larger transform sizes reuse the
-/// existing simplified non-chroma token-context path instead of failing once multiple coefficients
+/// path and the first uniform chroma-U/chroma-V residual unit pair exposed by the current
+/// `TransformLayout`. `TX_4X4` keeps its dedicated context helpers, while larger transform sizes
+/// reuse the existing simplified token-context path instead of failing once multiple coefficients
 /// are present.
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
@@ -40,6 +42,12 @@ public final class TileResidualSyntaxReader {
 
     /// The shared fallback `br_tok` context used by the current larger-transform path.
     private static final int GENERIC_HIGH_TOKEN_CONTEXT = 7;
+
+    /// The chroma-U plane index used by chroma coefficient-context helpers.
+    private static final int CHROMA_PLANE_U = 0;
+
+    /// The chroma-V plane index used by chroma coefficient-context helpers.
+    private static final int CHROMA_PLANE_V = 1;
 
     /// The `dav1d` natural-order scan for two-dimensional `TX_4X4` transforms.
     private static final int[] FOUR_BY_FOUR_SCAN = {
@@ -64,6 +72,9 @@ public final class TileResidualSyntaxReader {
     /// The padded `levels` grid size used by the `TX_4X4` token-context helpers.
     private static final int FOUR_BY_FOUR_LEVEL_GRID_SIZE = 6;
 
+    /// The tile-local decode state that owns the active sequence and frame headers.
+    private final TileDecodeContext tileContext;
+
     /// The typed syntax reader used to consume coefficient-side entropy symbols.
     private final TileSyntaxReader syntaxReader;
 
@@ -71,7 +82,8 @@ public final class TileResidualSyntaxReader {
     ///
     /// @param tileContext the tile-local decode state that owns the active tile bitstream
     public TileResidualSyntaxReader(TileDecodeContext tileContext) {
-        this.syntaxReader = new TileSyntaxReader(Objects.requireNonNull(tileContext, "tileContext"));
+        this.tileContext = Objects.requireNonNull(tileContext, "tileContext");
+        this.syntaxReader = new TileSyntaxReader(this.tileContext);
     }
 
     /// Decodes the first residual syntax pass for one already-decoded block.
@@ -98,12 +110,91 @@ public final class TileResidualSyntaxReader {
         for (int i = 0; i < transformUnits.length; i++) {
             TransformUnit transformUnit = transformUnits[i];
             TransformResidualUnit residualUnit = nonNullHeader.skip()
-                    ? createAllZeroUnit(transformUnit)
+                    ? createAllZeroUnit(transformUnit.position(), transformUnit.size())
                     : readLumaResidualUnit(nonNullHeader, transformUnit, nonNullNeighborContext);
             residualUnits[i] = residualUnit;
             nonNullNeighborContext.updateLumaCoefficientContext(transformUnit, residualUnit.coefficientContextByte());
         }
-        return new ResidualLayout(nonNullTransformLayout.position(), nonNullTransformLayout.blockSize(), residualUnits);
+
+        TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[0];
+        TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[0];
+        TransformSize chromaTransformSize = nonNullTransformLayout.chromaTransformSize();
+        if (nonNullHeader.hasChroma()
+                && nonNullHeader.uvPaletteSize() == 0
+                && chromaTransformSize != null
+                && supportsUniformChromaResidualLayout(nonNullTransformLayout, chromaTransformSize)) {
+            TransformResidualUnit chromaUUnit = nonNullHeader.skip()
+                    ? createAllZeroUnit(nonNullHeader.position(), chromaTransformSize)
+                    : readChromaResidualUnit(nonNullHeader, chromaTransformSize, CHROMA_PLANE_U, nonNullNeighborContext);
+            nonNullNeighborContext.updateChromaCoefficientContext(
+                    CHROMA_PLANE_U,
+                    nonNullHeader.position(),
+                    chromaTransformSize,
+                    chromaUUnit.coefficientContextByte()
+            );
+            TransformResidualUnit chromaVUnit = nonNullHeader.skip()
+                    ? createAllZeroUnit(nonNullHeader.position(), chromaTransformSize)
+                    : readChromaResidualUnit(nonNullHeader, chromaTransformSize, CHROMA_PLANE_V, nonNullNeighborContext);
+            nonNullNeighborContext.updateChromaCoefficientContext(
+                    CHROMA_PLANE_V,
+                    nonNullHeader.position(),
+                    chromaTransformSize,
+                    chromaVUnit.coefficientContextByte()
+            );
+            chromaUUnits = new TransformResidualUnit[]{chromaUUnit};
+            chromaVUnits = new TransformResidualUnit[]{chromaVUnit};
+        }
+        return new ResidualLayout(
+                nonNullTransformLayout.position(),
+                nonNullTransformLayout.blockSize(),
+                residualUnits,
+                chromaUUnits,
+                chromaVUnits
+        );
+    }
+
+    /// Returns whether the current transform layout exposes one uniformly modeled chroma unit that
+    /// exactly matches the visible chroma sample rectangle.
+    ///
+    /// The current reconstruction path only models one whole-block chroma transform unit. Fringe
+    /// chroma blocks created by subsampling or tile clipping are therefore kept out of
+    /// `ResidualLayout` until the reader can represent smaller clipped chroma units explicitly.
+    ///
+    /// @param transformLayout the decoded transform layout for the current block
+    /// @param chromaTransformSize the current chroma transform size
+    /// @return whether the current transform layout exposes one uniformly modeled chroma unit
+    private boolean supportsUniformChromaResidualLayout(
+            TransformLayout transformLayout,
+            TransformSize chromaTransformSize
+    ) {
+        TransformLayout nonNullTransformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(chromaTransformSize, "chromaTransformSize");
+        int chromaSubsamplingX = chromaSubsamplingX();
+        int chromaSubsamplingY = chromaSubsamplingY();
+        int visibleChromaWidth = ((nonNullTransformLayout.visibleWidth4() << 2) + (1 << chromaSubsamplingX) - 1) >> chromaSubsamplingX;
+        int visibleChromaHeight = ((nonNullTransformLayout.visibleHeight4() << 2) + (1 << chromaSubsamplingY) - 1) >> chromaSubsamplingY;
+        return visibleChromaWidth == nonNullTransformSize.widthPixels()
+                && visibleChromaHeight == nonNullTransformSize.heightPixels();
+    }
+
+    /// Returns the horizontal chroma subsampling shift used by the active sequence pixel format.
+    ///
+    /// @return the horizontal chroma subsampling shift used by the active sequence pixel format
+    private int chromaSubsamplingX() {
+        return switch (tileContext.sequenceHeader().colorConfig().pixelFormat()) {
+            case I400, I444 -> 0;
+            case I420, I422 -> 1;
+        };
+    }
+
+    /// Returns the vertical chroma subsampling shift used by the active sequence pixel format.
+    ///
+    /// @return the vertical chroma subsampling shift used by the active sequence pixel format
+    private int chromaSubsamplingY() {
+        return switch (tileContext.sequenceHeader().colorConfig().pixelFormat()) {
+            case I400, I422, I444 -> 0;
+            case I420 -> 1;
+        };
     }
 
     /// Decodes one non-skipped luma transform residual unit.
@@ -119,33 +210,94 @@ public final class TileResidualSyntaxReader {
     ) {
         TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
-        if (syntaxReader.readCoefficientSkipFlag(
+        return readResidualUnit(
+                nonNullTransformUnit.position(),
                 nonNullTransformUnit.size(),
-                nonNullNeighborContext.lumaCoefficientSkipContext(Objects.requireNonNull(header, "header").size(), nonNullTransformUnit)
-        )) {
-            return createAllZeroUnit(nonNullTransformUnit);
-        }
-
-        int endOfBlockIndex = syntaxReader.readEndOfBlockIndex(nonNullTransformUnit.size(), false, false);
-        if (nonNullTransformUnit.size() == TransformSize.TX_4X4) {
-            return readFourByFourLumaResidualUnit(nonNullTransformUnit, endOfBlockIndex, nonNullNeighborContext);
-        }
-        return readGenericLumaResidualUnit(nonNullTransformUnit, endOfBlockIndex, nonNullNeighborContext);
+                false,
+                nonNullNeighborContext.lumaCoefficientSkipContext(
+                        Objects.requireNonNull(header, "header").size(),
+                        nonNullTransformUnit
+                ),
+                nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit)
+        );
     }
 
-    /// Decodes the fully supported two-dimensional `TX_4X4` luma residual syntax.
+    /// Decodes one non-skipped chroma transform residual unit on the supplied chroma plane.
     ///
-    /// @param transformUnit the current `TX_4X4` luma transform unit
-    /// @param endOfBlockIndex the already-decoded end-of-block scan index
-    /// @param neighborContext the mutable neighbor context that supplies the DC-sign context
-    /// @return the decoded `TX_4X4` luma transform residual unit
-    private TransformResidualUnit readFourByFourLumaResidualUnit(
-            TransformUnit transformUnit,
-            int endOfBlockIndex,
+    /// The current rollout models one uniform chroma transform per block. The residual syntax
+    /// itself still follows the same token readers as luma, only switching to the shared chroma
+    /// coefficient CDF tables and per-plane neighbor contexts.
+    ///
+    /// @param header the owning leaf block header
+    /// @param transformSize the current chroma transform size
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @param neighborContext the mutable neighbor context that supplies entropy contexts
+    /// @return the decoded chroma transform residual unit
+    private TransformResidualUnit readChromaResidualUnit(
+            TileBlockHeaderReader.BlockHeader header,
+            TransformSize transformSize,
+            int plane,
             BlockNeighborContext neighborContext
     ) {
-        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
+        return readResidualUnit(
+                nonNullHeader.position(),
+                nonNullTransformSize,
+                true,
+                nonNullNeighborContext.chromaCoefficientSkipContext(
+                        plane,
+                        nonNullHeader.size(),
+                        nonNullHeader.position(),
+                        nonNullTransformSize
+                ),
+                nonNullNeighborContext.chromaDcSignContext(plane, nonNullHeader.position(), nonNullTransformSize)
+        );
+    }
+
+    /// Decodes one transform residual unit using the supplied plane-specific contexts.
+    ///
+    /// @param position the transform origin in the current block-position grid
+    /// @param transformSize the active transform size
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param coefficientSkipContext the coefficient skip-context for the current unit
+    /// @param dcSignContext the DC-sign context for the current unit
+    /// @return the decoded transform residual unit
+    private TransformResidualUnit readResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            boolean chroma,
+            int coefficientSkipContext,
+            int dcSignContext
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        if (syntaxReader.readCoefficientSkipFlag(nonNullTransformSize, coefficientSkipContext)) {
+            return createAllZeroUnit(nonNullPosition, nonNullTransformSize);
+        }
+
+        int endOfBlockIndex = syntaxReader.readEndOfBlockIndex(nonNullTransformSize, chroma, false);
+        if (nonNullTransformSize == TransformSize.TX_4X4) {
+            return readFourByFourResidualUnit(nonNullPosition, chroma, endOfBlockIndex, dcSignContext);
+        }
+        return readGenericResidualUnit(nonNullPosition, nonNullTransformSize, chroma, endOfBlockIndex, dcSignContext);
+    }
+
+    /// Decodes the fully supported two-dimensional `TX_4X4` residual syntax for one plane.
+    ///
+    /// @param position the transform origin in the current block-position grid
+    /// @param chroma whether the syntax belongs to a chroma plane
+    /// @param endOfBlockIndex the already-decoded end-of-block scan index
+    /// @param dcSignContext the plane-specific DC-sign context
+    /// @return the decoded `TX_4X4` residual unit
+    private TransformResidualUnit readFourByFourResidualUnit(
+            BlockPosition position,
+            boolean chroma,
+            int endOfBlockIndex,
+            int dcSignContext
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         int[] coefficients = new int[16];
         int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
         int[][] levelBytes = new int[FOUR_BY_FOUR_LEVEL_GRID_SIZE][FOUR_BY_FOUR_LEVEL_GRID_SIZE];
@@ -156,13 +308,13 @@ public final class TileResidualSyntaxReader {
             int lastY = lastCoefficientIndex & 3;
             int lastToken = syntaxReader.readEndOfBlockBaseToken(
                     TransformSize.TX_4X4,
-                    false,
+                    chroma,
                     endOfBlockTokenContext(endOfBlockIndex, TransformSize.TX_4X4)
             );
             if (lastToken == 3) {
                 lastToken = syntaxReader.readHighToken(
                         TransformSize.TX_4X4,
-                        false,
+                        chroma,
                         fourByFourEndOfBlockHighTokenContext(lastX, lastY)
                 );
             }
@@ -175,13 +327,13 @@ public final class TileResidualSyntaxReader {
                 int y = coefficientIndex & 3;
                 int token = syntaxReader.readBaseToken(
                         TransformSize.TX_4X4,
-                        false,
+                        chroma,
                         fourByFourBaseTokenContext(levelBytes, x, y)
                 );
                 if (token == 3) {
                     token = syntaxReader.readHighToken(
                             TransformSize.TX_4X4,
-                            false,
+                            chroma,
                             fourByFourHighTokenContext(levelBytes, x, y)
                     );
                 }
@@ -191,16 +343,16 @@ public final class TileResidualSyntaxReader {
         }
 
         int dcToken = endOfBlockIndex == 0
-                ? syntaxReader.readEndOfBlockBaseToken(TransformSize.TX_4X4, false, 0)
-                : syntaxReader.readBaseToken(TransformSize.TX_4X4, false, 0);
+                ? syntaxReader.readEndOfBlockBaseToken(TransformSize.TX_4X4, chroma, 0)
+                : syntaxReader.readBaseToken(TransformSize.TX_4X4, chroma, 0);
         if (dcToken == 3) {
-            dcToken = syntaxReader.readHighToken(TransformSize.TX_4X4, false, fourByFourDcHighTokenContext(levelBytes));
+            dcToken = syntaxReader.readHighToken(TransformSize.TX_4X4, chroma, fourByFourDcHighTokenContext(levelBytes));
         }
 
         int cumulativeLevel = 0;
         int signedDcLevel = 0;
         if (dcToken != 0) {
-            boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
+            boolean negative = syntaxReader.readDcSignFlag(chroma, dcSignContext);
             if (dcToken == 15) {
                 dcToken += syntaxReader.readCoefficientGolomb();
             }
@@ -223,61 +375,64 @@ public final class TileResidualSyntaxReader {
         }
 
         return new TransformResidualUnit(
-                nonNullTransformUnit.position(),
-                nonNullTransformUnit.size(),
+                nonNullPosition,
+                TransformSize.TX_4X4,
                 endOfBlockIndex,
                 coefficients,
                 createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel)
         );
     }
 
-    /// Decodes one non-`TX_4X4` luma residual unit with the shared larger-transform token contexts.
+    /// Decodes one non-`TX_4X4` residual unit with the shared larger-transform token contexts.
     ///
-    /// @param transformUnit the current luma transform unit
+    /// @param position the transform origin in the current block-position grid
+    /// @param transformSize the active transform size
+    /// @param chroma whether the syntax belongs to a chroma plane
     /// @param endOfBlockIndex the already-decoded end-of-block scan index
-    /// @param neighborContext the mutable neighbor context that supplies the DC-sign context
-    /// @return the decoded larger-transform luma residual unit
-    private TransformResidualUnit readGenericLumaResidualUnit(
-            TransformUnit transformUnit,
+    /// @param dcSignContext the plane-specific DC-sign context
+    /// @return the decoded larger-transform residual unit
+    private TransformResidualUnit readGenericResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            boolean chroma,
             int endOfBlockIndex,
-            BlockNeighborContext neighborContext
+            int dcSignContext
     ) {
-        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
-        TransformSize transformSize = nonNullTransformUnit.size();
-        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int[] coefficients = new int[nonNullTransformSize.widthPixels() * nonNullTransformSize.heightPixels()];
         int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
         if (endOfBlockIndex > 0) {
             int lastToken = syntaxReader.readEndOfBlockBaseToken(
-                    transformSize,
-                    false,
-                    endOfBlockTokenContext(endOfBlockIndex, transformSize)
+                    nonNullTransformSize,
+                    chroma,
+                    endOfBlockTokenContext(endOfBlockIndex, nonNullTransformSize)
             );
             if (lastToken == 3) {
-                lastToken = syntaxReader.readHighToken(transformSize, false, GENERIC_HIGH_TOKEN_CONTEXT);
+                lastToken = syntaxReader.readHighToken(nonNullTransformSize, chroma, GENERIC_HIGH_TOKEN_CONTEXT);
             }
             coefficientTokens[endOfBlockIndex] = lastToken;
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
-                int token = syntaxReader.readBaseToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT);
+                int token = syntaxReader.readBaseToken(nonNullTransformSize, chroma, GENERIC_BASE_TOKEN_CONTEXT);
                 if (token == 3) {
-                    token = syntaxReader.readHighToken(transformSize, false, GENERIC_HIGH_TOKEN_CONTEXT);
+                    token = syntaxReader.readHighToken(nonNullTransformSize, chroma, GENERIC_HIGH_TOKEN_CONTEXT);
                 }
                 coefficientTokens[scanIndex] = token;
             }
         }
 
         int dcToken = endOfBlockIndex == 0
-                ? syntaxReader.readEndOfBlockBaseToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT)
-                : syntaxReader.readBaseToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT);
+                ? syntaxReader.readEndOfBlockBaseToken(nonNullTransformSize, chroma, GENERIC_BASE_TOKEN_CONTEXT)
+                : syntaxReader.readBaseToken(nonNullTransformSize, chroma, GENERIC_BASE_TOKEN_CONTEXT);
         if (dcToken == 3) {
-            dcToken = syntaxReader.readHighToken(transformSize, false, GENERIC_BASE_TOKEN_CONTEXT);
+            dcToken = syntaxReader.readHighToken(nonNullTransformSize, chroma, GENERIC_BASE_TOKEN_CONTEXT);
         }
 
-        BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
         int cumulativeLevel = 0;
         int signedDcLevel = 0;
         if (dcToken != 0) {
-            boolean negative = syntaxReader.readDcSignFlag(false, nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit));
+            boolean negative = syntaxReader.readDcSignFlag(chroma, dcSignContext);
             if (dcToken == 15) {
                 dcToken += syntaxReader.readCoefficientGolomb();
             }
@@ -286,7 +441,7 @@ public final class TileResidualSyntaxReader {
             cumulativeLevel += dcToken;
         }
 
-        int[] scan = DEFAULT_SCANS[transformSize.ordinal()];
+        int[] scan = DEFAULT_SCANS[nonNullTransformSize.ordinal()];
         for (int scanIndex = 1; scanIndex <= endOfBlockIndex; scanIndex++) {
             int token = coefficientTokens[scanIndex];
             if (token == 0) {
@@ -301,8 +456,8 @@ public final class TileResidualSyntaxReader {
         }
 
         return new TransformResidualUnit(
-                nonNullTransformUnit.position(),
-                transformSize,
+                nonNullPosition,
+                nonNullTransformSize,
                 endOfBlockIndex,
                 coefficients,
                 createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel)
@@ -311,15 +466,17 @@ public final class TileResidualSyntaxReader {
 
     /// Creates one all-zero transform residual unit.
     ///
-    /// @param transformUnit the transform unit whose residual syntax is all-zero
+    /// @param position the transform origin in the current block-position grid
+    /// @param transformSize the transform size whose residual syntax is all-zero
     /// @return one all-zero transform residual unit
-    private static TransformResidualUnit createAllZeroUnit(TransformUnit transformUnit) {
-        TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+    private static TransformResidualUnit createAllZeroUnit(BlockPosition position, TransformSize transformSize) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         return new TransformResidualUnit(
-                nonNullTransformUnit.position(),
-                nonNullTransformUnit.size(),
+                nonNullPosition,
+                nonNullTransformSize,
                 -1,
-                new int[nonNullTransformUnit.size().widthPixels() * nonNullTransformUnit.size().heightPixels()],
+                new int[nonNullTransformSize.widthPixels() * nonNullTransformSize.heightPixels()],
                 ALL_ZERO_COEFFICIENT_CONTEXT_BYTE
         );
     }

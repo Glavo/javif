@@ -205,6 +205,32 @@ final class FrameReconstructorIntegrationTest {
         assertNull(reconstructed.chromaVPlane());
     }
 
+    /// Verifies that one structurally decoded legacy combined still-picture leaf can carry one
+    /// injected chroma-U residual through reconstruction without perturbing luma or the V plane.
+    ///
+    /// @throws IOException if the legacy fixture cannot be parsed
+    @Test
+    void reconstructsLegacyDirectionalCombinedFixtureWithInjectedChromaUResidualOnDecodedLeaf() throws IOException {
+        assertLegacyStillPictureFixtureCarriesInjectedChromaResidual(
+                decodeReducedStillPictureSyntaxResultFromCombinedFrame(singleTileGroupPayload()),
+                64,
+                0
+        );
+    }
+
+    /// Verifies that one structurally decoded legacy standalone still-picture leaf can carry one
+    /// injected chroma-V residual through reconstruction without perturbing luma or the U plane.
+    ///
+    /// @throws IOException if the legacy fixture cannot be parsed
+    @Test
+    void reconstructsLegacyDirectionalStandaloneFixtureWithInjectedChromaVResidualOnDecodedLeaf() throws IOException {
+        assertLegacyStillPictureFixtureCarriesInjectedChromaResidual(
+                decodeReducedStillPictureSyntaxResultFromStandaloneObus(singleTileGroupPayload()),
+                0,
+                -64
+        );
+    }
+
     /// Verifies that the supported reduced still-picture combined fixture still reconstructs one
     /// opaque gray `I420` frame after real structural frame decode.
     ///
@@ -776,6 +802,38 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
+    /// Asserts that one residual-unit footprint carries at least one delta with the expected sign.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the reconstructed plane after one non-zero residual
+    /// @param residualUnit the residual unit whose footprint should carry the injected delta
+    /// @param expectedSign the required delta sign, either `1` or `-1`
+    private static void assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed,
+            TransformResidualUnit residualUnit,
+            int expectedSign
+    ) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+
+        int originX = residualUnit.position().x4() << 1;
+        int originY = residualUnit.position().y4() << 1;
+        int width = residualUnit.size().widthPixels();
+        int height = residualUnit.size().heightPixels();
+        boolean sawChangedSample = false;
+        for (int y = originY; y < originY + height; y++) {
+            for (int x = originX; x < originX + width; x++) {
+                int delta = reconstructed.sample(x, y) - baseline.sample(x, y);
+                if (delta != 0) {
+                    assertEquals(expectedSign, Integer.signum(delta));
+                    sawChangedSample = true;
+                }
+            }
+        }
+        assertTrue(sawChangedSample);
+    }
+
     /// Returns one guaranteed-present decoded plane after a non-null assertion.
     ///
     /// @param plane the decoded plane reference, or `null`
@@ -783,6 +841,217 @@ final class FrameReconstructorIntegrationTest {
     private static DecodedPlane requirePlane(@Nullable DecodedPlane plane) {
         assertNotNull(plane);
         return plane;
+    }
+
+    /// Asserts that one structurally decoded legacy still-picture fixture can carry one injected
+    /// chroma residual unit through reconstruction while leaving unrelated output unchanged.
+    ///
+    /// @param syntaxDecodeResult the structurally decoded legacy still-picture frame
+    /// @param chromaUDcCoefficient the signed U-plane DC coefficient, or `0` for no injected U residual
+    /// @param chromaVDcCoefficient the signed V-plane DC coefficient, or `0` for no injected V residual
+    private static void assertLegacyStillPictureFixtureCarriesInjectedChromaResidual(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            int chromaUDcCoefficient,
+            int chromaVDcCoefficient
+    ) {
+        TilePartitionTreeReader.LeafNode targetLeaf = findLastResidualReadyLegacyI420Leaf(syntaxDecodeResult);
+        TilePartitionTreeReader.LeafNode clearedLeaf = injectChromaDcResiduals(targetLeaf, 0, 0);
+        TilePartitionTreeReader.LeafNode injectedLeaf =
+                injectChromaDcResiduals(clearedLeaf, chromaUDcCoefficient, chromaVDcCoefficient);
+        FrameSyntaxDecodeResult baselineSyntax = replaceLeaf(syntaxDecodeResult, targetLeaf, clearedLeaf);
+        FrameSyntaxDecodeResult injectedSyntax = replaceLeaf(syntaxDecodeResult, targetLeaf, injectedLeaf);
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(baselineSyntax);
+        DecodedPlanes reconstructed = reconstructor.reconstruct(injectedSyntax);
+
+        assertPlanesEqual(baseline.lumaPlane(), reconstructed.lumaPlane());
+
+        if (chromaUDcCoefficient == 0) {
+            assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(reconstructed.chromaUPlane()));
+        } else {
+            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                    requirePlane(baseline.chromaUPlane()),
+                    requirePlane(reconstructed.chromaUPlane()),
+                    injectedLeaf.residualLayout().chromaUUnits()[0],
+                    Integer.signum(chromaUDcCoefficient)
+            );
+        }
+
+        if (chromaVDcCoefficient == 0) {
+            assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(reconstructed.chromaVPlane()));
+        } else {
+            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                    requirePlane(baseline.chromaVPlane()),
+                    requirePlane(reconstructed.chromaVPlane()),
+                    injectedLeaf.residualLayout().chromaVUnits()[0],
+                    Integer.signum(chromaVDcCoefficient)
+            );
+        }
+    }
+
+    /// Returns the last decoded legacy `I420` leaf whose geometry can carry one isolated `TX_4X4`
+    /// chroma residual unit without affecting later reconstruction work.
+    ///
+    /// @param syntaxDecodeResult the structurally decoded legacy still-picture frame
+    /// @return the last decoded legacy `I420` leaf whose geometry can carry one isolated chroma residual unit
+    private static TilePartitionTreeReader.LeafNode findLastResidualReadyLegacyI420Leaf(
+            FrameSyntaxDecodeResult syntaxDecodeResult
+    ) {
+        assertEquals(1, syntaxDecodeResult.tileCount());
+        List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxDecodeResult.tileRoots(0));
+        for (int i = leaves.size() - 1; i >= 0; i--) {
+            TilePartitionTreeReader.LeafNode leaf = leaves.get(i);
+            TransformLayout transformLayout = leaf.transformLayout();
+            if (leaf.header().hasChroma()
+                    && leaf.header().uvMode() != null
+                    && transformLayout.visibleWidth4() == 2
+                    && transformLayout.visibleHeight4() == 2
+                    && transformLayout.chromaTransformSize() == TransformSize.TX_4X4) {
+                return leaf;
+            }
+        }
+        throw new AssertionError("No legacy I420 leaf was ready for one isolated chroma residual unit");
+    }
+
+    /// Returns one copy of the supplied decoded leaf with caller-specified chroma DC residuals.
+    ///
+    /// Original header, transform layout, and luma residual units are preserved so the integration
+    /// coverage stays anchored to the real structural frame-decode result.
+    ///
+    /// @param decodedLeaf the decoded legacy leaf to copy
+    /// @param chromaUDcCoefficient the signed U-plane DC coefficient, or `0` for an all-zero U unit
+    /// @param chromaVDcCoefficient the signed V-plane DC coefficient, or `0` for an all-zero V unit
+    /// @return one copy of the supplied decoded leaf with caller-specified chroma DC residuals
+    private static TilePartitionTreeReader.LeafNode injectChromaDcResiduals(
+            TilePartitionTreeReader.LeafNode decodedLeaf,
+            int chromaUDcCoefficient,
+            int chromaVDcCoefficient
+    ) {
+        TransformLayout transformLayout = decodedLeaf.transformLayout();
+        assertEquals(TransformSize.TX_4X4, transformLayout.chromaTransformSize());
+
+        ResidualLayout residualLayout = decodedLeaf.residualLayout();
+        return new TilePartitionTreeReader.LeafNode(
+                decodedLeaf.header(),
+                transformLayout,
+                createResidualLayout(
+                        residualLayout.position(),
+                        residualLayout.blockSize(),
+                        residualLayout.lumaUnits(),
+                        replaceOrCreateChromaResidualUnits(
+                                residualLayout.chromaUUnits(),
+                                decodedLeaf.position(),
+                                TransformSize.TX_4X4,
+                                chromaUDcCoefficient
+                        ),
+                        replaceOrCreateChromaResidualUnits(
+                                residualLayout.chromaVUnits(),
+                                decodedLeaf.position(),
+                                TransformSize.TX_4X4,
+                                chromaVDcCoefficient
+                        )
+                )
+        );
+    }
+
+    /// Returns one chroma residual-unit array whose first unit reflects the caller-supplied DC
+    /// coefficient while any remaining decoded units are preserved.
+    ///
+    /// @param existingUnits the already-decoded chroma residual units
+    /// @param defaultPosition the default block origin used when the decoded leaf carried no chroma units
+    /// @param defaultTransformSize the default transform size used when the decoded leaf carried no chroma units
+    /// @param dcCoefficient the signed DC coefficient, or `0` for an all-zero first unit
+    /// @return one chroma residual-unit array whose first unit reflects the caller-supplied DC coefficient
+    private static TransformResidualUnit[] replaceOrCreateChromaResidualUnits(
+            TransformResidualUnit[] existingUnits,
+            BlockPosition defaultPosition,
+            TransformSize defaultTransformSize,
+            int dcCoefficient
+    ) {
+        if (existingUnits.length == 0) {
+            return new TransformResidualUnit[]{
+                    createOptionalDcResidualUnit(defaultPosition, defaultTransformSize, dcCoefficient)
+            };
+        }
+
+        TransformResidualUnit[] replacementUnits = existingUnits.clone();
+        TransformResidualUnit firstUnit = replacementUnits[0];
+        replacementUnits[0] = createOptionalDcResidualUnit(firstUnit.position(), firstUnit.size(), dcCoefficient);
+        return replacementUnits;
+    }
+
+    /// Returns one copy of the supplied frame-syntax result with one decoded leaf replaced.
+    ///
+    /// @param syntaxDecodeResult the original structural frame-decode result
+    /// @param targetLeaf the decoded leaf to replace
+    /// @param replacementLeaf the replacement decoded leaf
+    /// @return one copy of the supplied frame-syntax result with one decoded leaf replaced
+    private static FrameSyntaxDecodeResult replaceLeaf(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            TilePartitionTreeReader.LeafNode targetLeaf,
+            TilePartitionTreeReader.LeafNode replacementLeaf
+    ) {
+        TilePartitionTreeReader.Node[][] replacementRoots = syntaxDecodeResult.tileRoots();
+        boolean replaced = false;
+        for (int tileIndex = 0; tileIndex < replacementRoots.length; tileIndex++) {
+            TilePartitionTreeReader.Node[] tileRoots = replacementRoots[tileIndex];
+            for (int rootIndex = 0; rootIndex < tileRoots.length; rootIndex++) {
+                TilePartitionTreeReader.Node originalRoot = tileRoots[rootIndex];
+                TilePartitionTreeReader.Node replacementRoot = replaceLeaf(originalRoot, targetLeaf, replacementLeaf);
+                tileRoots[rootIndex] = replacementRoot;
+                if (replacementRoot != originalRoot) {
+                    replaced = true;
+                }
+            }
+        }
+        assertTrue(replaced, "Target legacy leaf was not present in the decoded frame tree");
+        return new FrameSyntaxDecodeResult(
+                syntaxDecodeResult.assembly(),
+                replacementRoots,
+                syntaxDecodeResult.decodedTemporalMotionFields(),
+                syntaxDecodeResult.finalTileCdfContexts()
+        );
+    }
+
+    /// Returns one copy of the supplied node subtree with one decoded leaf replaced.
+    ///
+    /// @param node the subtree root to copy
+    /// @param targetLeaf the decoded leaf to replace
+    /// @param replacementLeaf the replacement decoded leaf
+    /// @return one copy of the supplied node subtree with one decoded leaf replaced
+    private static TilePartitionTreeReader.Node replaceLeaf(
+            TilePartitionTreeReader.Node node,
+            TilePartitionTreeReader.LeafNode targetLeaf,
+            TilePartitionTreeReader.LeafNode replacementLeaf
+    ) {
+        if (node == targetLeaf) {
+            return replacementLeaf;
+        }
+        if (node instanceof TilePartitionTreeReader.LeafNode) {
+            return node;
+        }
+
+        TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
+        TilePartitionTreeReader.Node[] children = partitionNode.children();
+        boolean replacedChild = false;
+        for (int i = 0; i < children.length; i++) {
+            TilePartitionTreeReader.Node originalChild = children[i];
+            TilePartitionTreeReader.Node replacementChild = replaceLeaf(originalChild, targetLeaf, replacementLeaf);
+            children[i] = replacementChild;
+            if (replacementChild != originalChild) {
+                replacedChild = true;
+            }
+        }
+        if (!replacedChild) {
+            return partitionNode;
+        }
+        return new TilePartitionTreeReader.PartitionNode(
+                partitionNode.position(),
+                partitionNode.size(),
+                partitionNode.partitionType(),
+                children
+        );
     }
 
     /// Creates one reduced still-picture combined-frame assembly with a caller-supplied tile
