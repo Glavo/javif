@@ -43,6 +43,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -485,6 +487,48 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Verifies that two synthetic tile-root arrays can reconstruct into one shared luma plane
+    /// without the later tile overwriting the earlier tile's completed region.
+    @Test
+    void reconstructsSyntheticMultiTileRootsIntoSharedLumaPlaneWithoutCrossTileOverwrite() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leftTileLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(new BlockPosition(0, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 0), size, 64)
+        );
+        TilePartitionTreeReader.LeafNode rightTileLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(new BlockPosition(1, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(1, 0), size, -64)
+        );
+        TilePartitionTreeReader.Node[] tileZeroRoots = new TilePartitionTreeReader.Node[]{leftTileLeaf};
+        TilePartitionTreeReader.Node[] tileOneRoots = new TilePartitionTreeReader.Node[]{rightTileLeaf};
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlane expectedAfterTileZero = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 4, leftTileLeaf)
+        ).lumaPlane();
+        DecodedPlane expectedAfterBothTiles = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 4, leftTileLeaf, rightTileLeaf)
+        ).lumaPlane();
+
+        MutablePlaneBuffer sharedLumaPlane = new MutablePlaneBuffer(8, 4, 8);
+        FrameHeader frameHeader = createFrameHeader(FrameType.KEY, 8, 4);
+
+        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, PixelFormat.I400, frameHeader, tileZeroRoots);
+        DecodedPlane afterTileZero = sharedLumaPlane.toDecodedPlane();
+
+        assertPlanesEqual(expectedAfterTileZero, afterTileZero);
+        assertPlaneBlockFilled(afterTileZero, 4, 0, 4, 4, 0);
+
+        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, PixelFormat.I400, frameHeader, tileOneRoots);
+        DecodedPlane afterBothTiles = sharedLumaPlane.toDecodedPlane();
+
+        assertPlanesEqual(expectedAfterBothTiles, afterBothTiles);
+        assertPlaneRegionEquals(afterTileZero, afterBothTiles, 0, 0, 4, 4);
+    }
+
     /// Verifies that inter blocks still fail fast in the first reconstruction subset.
     @Test
     void rejectsInterBlocks() {
@@ -876,6 +920,40 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Reconstructs one tile-root array into one already allocated shared luma plane.
+    ///
+    /// This helper reflects into the current private node-reconstruction path so tests can model
+    /// multi-tile composition without widening the public reconstruction surface prematurely.
+    ///
+    /// @param sharedLumaPlane the shared luma destination plane
+    /// @param pixelFormat the decoded chroma layout to expose to reconstruction
+    /// @param frameHeader the frame header that owns the active quantization state
+    /// @param roots the top-level roots for one synthetic tile
+    private static void reconstructSyntheticTileRootsIntoSharedLumaPlane(
+            MutablePlaneBuffer sharedLumaPlane,
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            TilePartitionTreeReader.Node[] roots
+    ) {
+        try {
+            Method reconstructNode = FrameReconstructor.class.getDeclaredMethod(
+                    "reconstructNode",
+                    TilePartitionTreeReader.Node.class,
+                    MutablePlaneBuffer.class,
+                    MutablePlaneBuffer.class,
+                    MutablePlaneBuffer.class,
+                    PixelFormat.class,
+                    FrameHeader.class
+            );
+            reconstructNode.setAccessible(true);
+            for (TilePartitionTreeReader.Node root : roots) {
+                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader);
+            }
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Failed to reconstruct synthetic tile roots into one shared plane", exception);
+        }
+    }
+
     /// Asserts that one decoded plane is filled with one constant sample value.
     ///
     /// @param plane the decoded plane to inspect
@@ -888,6 +966,29 @@ final class FrameReconstructorTest {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 assertEquals(expectedSample, plane.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one rectangular block is filled with one constant sample value.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param x the block origin X coordinate
+    /// @param y the block origin Y coordinate
+    /// @param width the block width
+    /// @param height the block height
+    /// @param expectedSample the expected sample value throughout the block
+    private static void assertPlaneBlockFilled(
+            DecodedPlane plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            int expectedSample
+    ) {
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                assertEquals(expectedSample, plane.sample(x + column, y + row));
             }
         }
     }

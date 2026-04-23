@@ -36,10 +36,10 @@ import java.util.Objects;
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
-/// with one tile, `I400` or `I420` chroma layout, non-directional and directional intra
-/// prediction, filter-intra luma prediction, CFL chroma prediction for `I420`, no palette, and a
-/// minimal luma/chroma residual subset including clipped frame-fringe chroma footprints and the
-/// currently supported rectangular `DCT_DCT` transform sizes.
+/// with the current serial tile traversal, `I400` or `I420` chroma layout, non-directional and
+/// directional intra prediction, filter-intra luma prediction, CFL chroma prediction for `I420`,
+/// no palette, and a minimal luma/chroma residual subset including clipped frame-fringe chroma
+/// footprints and the currently supported rectangular `DCT_DCT` transform sizes.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -64,8 +64,10 @@ public final class FrameReconstructor {
         @Nullable MutablePlaneBuffer chromaUPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
         @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
 
-        for (TilePartitionTreeReader.Node root : checkedSyntaxDecodeResult.tileRoots(0)) {
-            reconstructNode(root, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat, frameHeader);
+        for (TilePartitionTreeReader.Node[] tileRoots : checkedSyntaxDecodeResult.tileRoots()) {
+            for (TilePartitionTreeReader.Node root : tileRoots) {
+                reconstructNode(root, lumaPlane, chromaUPlane, chromaVPlane, pixelFormat, frameHeader);
+            }
         }
 
         return new DecodedPlanes(
@@ -110,9 +112,6 @@ public final class FrameReconstructor {
         }
         if (frameHeader.superResolution().enabled()) {
             throw new IllegalStateException("Super-resolution reconstruction is not implemented yet");
-        }
-        if (syntaxDecodeResult.tileCount() != 1) {
-            throw new IllegalStateException("Pixel reconstruction currently supports only single-tile frames");
         }
     }
 

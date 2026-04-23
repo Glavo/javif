@@ -38,6 +38,8 @@ import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
+import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
+import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
@@ -339,6 +341,24 @@ final class FrameReconstructorIntegrationTest {
         assertStillPicturePlanesFilledWith(decodedPlanes, 128);
     }
 
+    /// Verifies that one synthetic two-tile `I420` still-picture result reconstructs both tiles
+    /// into the same output planes through the public frame-syntax decode contract.
+    @Test
+    void reconstructsSyntheticI420StillPictureAcrossTwoTiles() {
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticMultiTileResult(
+                PixelFormat.I420,
+                16,
+                8,
+                new TilePartitionTreeReader.Node[]{createLeaf(new BlockPosition(0, 0), true, true)},
+                new TilePartitionTreeReader.Node[]{createLeaf(new BlockPosition(2, 0), true, true)}
+        );
+
+        assertEquals(2, syntaxDecodeResult.tileCount());
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+
+        assertStillPicturePlanesFilledWith(decodedPlanes, 128, 16, 8);
+    }
+
     /// Verifies that the legacy reduced still-picture combined fixture now survives structural
     /// frame decode and reconstructs successfully through its first directional luma block.
     ///
@@ -411,7 +431,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param hasChroma whether the synthetic leaf should carry chroma
     /// @return one synthetic partition-tree leaf
     private static TilePartitionTreeReader.LeafNode createLeaf(boolean allZeroResidual, boolean hasChroma) {
-        return createLeaf(allZeroResidual, hasChroma, null);
+        return createLeaf(new BlockPosition(0, 0), allZeroResidual, hasChroma, null);
     }
 
     /// Creates one synthetic partition-tree leaf.
@@ -425,7 +445,36 @@ final class FrameReconstructorIntegrationTest {
             boolean hasChroma,
             @Nullable FilterIntraMode filterIntraMode
     ) {
-        BlockPosition position = new BlockPosition(0, 0);
+        return createLeaf(new BlockPosition(0, 0), allZeroResidual, hasChroma, filterIntraMode);
+    }
+
+    /// Creates one synthetic partition-tree leaf at one caller-supplied block position.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param allZeroResidual whether the synthetic residual unit should be all-zero
+    /// @param hasChroma whether the synthetic leaf should carry chroma
+    /// @return one synthetic partition-tree leaf
+    private static TilePartitionTreeReader.LeafNode createLeaf(
+            BlockPosition position,
+            boolean allZeroResidual,
+            boolean hasChroma
+    ) {
+        return createLeaf(position, allZeroResidual, hasChroma, null);
+    }
+
+    /// Creates one synthetic partition-tree leaf at one caller-supplied block position.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param allZeroResidual whether the synthetic residual unit should be all-zero
+    /// @param hasChroma whether the synthetic leaf should carry chroma
+    /// @param filterIntraMode the synthetic filter-intra mode, or `null` when filter intra is disabled
+    /// @return one synthetic partition-tree leaf
+    private static TilePartitionTreeReader.LeafNode createLeaf(
+            BlockPosition position,
+            boolean allZeroResidual,
+            boolean hasChroma,
+            @Nullable FilterIntraMode filterIntraMode
+    ) {
         BlockSize blockSize = BlockSize.SIZE_8X8;
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
                 position,
@@ -474,6 +523,46 @@ final class FrameReconstructorIntegrationTest {
                 new TransformResidualUnit[]{lumaResidualUnit}
         );
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Creates one synthetic structural frame-decode result whose tiles are supplied explicitly in
+    /// frame order.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param tileRoots the top-level roots for every tile in frame order
+    /// @return one synthetic structural frame-decode result with caller-supplied tiles
+    private static FrameSyntaxDecodeResult createSyntheticMultiTileResult(
+            PixelFormat pixelFormat,
+            int width,
+            int height,
+            TilePartitionTreeReader.Node[]... tileRoots
+    ) {
+        if (tileRoots.length == 0) {
+            throw new IllegalArgumentException("tileRoots.length == 0");
+        }
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(pixelFormat, width, height, false);
+        FrameHeader frameHeader = createSyntheticFrameHeader(FrameType.KEY, width, height, tileRoots.length);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        TileBitstream[] tiles = new TileBitstream[tileRoots.length];
+        for (int i = 0; i < tileRoots.length; i++) {
+            tiles[i] = new TileBitstream(i, new byte[0], 0, 0);
+        }
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, tileRoots.length - 1, tileRoots.length),
+                0,
+                0,
+                tiles
+        );
+
+        TileDecodeContext.TemporalMotionField[] temporalMotionFields =
+                new TileDecodeContext.TemporalMotionField[tileRoots.length];
+        for (int i = 0; i < tileRoots.length; i++) {
+            temporalMotionFields[i] = new TileDecodeContext.TemporalMotionField(1, 1);
+        }
+        return new FrameSyntaxDecodeResult(assembly, tileRoots, temporalMotionFields);
     }
 
     /// Creates one synthetic `I420` leaf whose luma stays at its zero-residual baseline while chroma
@@ -1053,7 +1142,24 @@ final class FrameReconstructorIntegrationTest {
     private static FrameSyntaxDecodeResult decodeReducedStillPictureSyntaxResultFromCombinedFrame(
             byte[] tileGroupPayload
     ) throws IOException {
-        return new FrameSyntaxDecoder(null).decode(createReducedStillPictureCombinedAssembly(tileGroupPayload));
+        return decodeReducedStillPictureSyntaxResultFromCombinedFrame(
+                reducedStillPicturePayload(),
+                reducedStillPictureCombinedFramePayload(tileGroupPayload)
+        );
+    }
+
+    /// Parses and structurally decodes one reduced still-picture combined frame fixture using
+    /// caller-supplied sequence-header and combined-frame payloads.
+    ///
+    /// @param sequenceHeaderPayload the reduced still-picture sequence-header payload
+    /// @param combinedPayload the combined `FRAME` payload including the tile-group payload
+    /// @return the structural frame-decode result for the fixture
+    /// @throws IOException if the fixture cannot be parsed
+    private static FrameSyntaxDecodeResult decodeReducedStillPictureSyntaxResultFromCombinedFrame(
+            byte[] sequenceHeaderPayload,
+            byte[] combinedPayload
+    ) throws IOException {
+        return new FrameSyntaxDecoder(null).decode(createReducedStillPictureCombinedAssembly(sequenceHeaderPayload, combinedPayload));
     }
 
     /// Decodes one reduced still-picture syntax result from standalone `FRAME_HEADER` plus
@@ -1169,12 +1275,28 @@ final class FrameReconstructorIntegrationTest {
     /// @param decodedPlanes the reconstructed planes returned by the frame reconstructor
     /// @param expectedSample the expected constant sample value shared by the visible planes
     private static void assertStillPicturePlanesFilledWith(DecodedPlanes decodedPlanes, int expectedSample) {
+        assertStillPicturePlanesFilledWith(decodedPlanes, expectedSample, 64, 64);
+    }
+
+    /// Asserts that one still-picture reconstruction keeps every visible sample at one constant
+    /// value for the supplied frame geometry.
+    ///
+    /// @param decodedPlanes the reconstructed planes returned by the frame reconstructor
+    /// @param expectedSample the expected constant sample value shared by the visible planes
+    /// @param expectedWidth the expected coded and rendered frame width
+    /// @param expectedHeight the expected coded and rendered frame height
+    private static void assertStillPicturePlanesFilledWith(
+            DecodedPlanes decodedPlanes,
+            int expectedSample,
+            int expectedWidth,
+            int expectedHeight
+    ) {
         assertEquals(8, decodedPlanes.bitDepth());
         assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
-        assertEquals(64, decodedPlanes.codedWidth());
-        assertEquals(64, decodedPlanes.codedHeight());
-        assertEquals(64, decodedPlanes.renderWidth());
-        assertEquals(64, decodedPlanes.renderHeight());
+        assertEquals(expectedWidth, decodedPlanes.codedWidth());
+        assertEquals(expectedHeight, decodedPlanes.codedHeight());
+        assertEquals(expectedWidth, decodedPlanes.renderWidth());
+        assertEquals(expectedHeight, decodedPlanes.renderHeight());
         assertPlaneFilledWith(decodedPlanes.lumaPlane(), expectedSample);
         assertPlaneFilledWith(decodedPlanes.chromaUPlane(), expectedSample);
         assertPlaneFilledWith(decodedPlanes.chromaVPlane(), expectedSample);
@@ -1631,23 +1753,39 @@ final class FrameReconstructorIntegrationTest {
     /// @return one complete reduced still-picture frame assembly
     /// @throws IOException if the fixture cannot be parsed
     private static FrameAssembly createReducedStillPictureCombinedAssembly(byte[] tileGroupPayload) throws IOException {
-        SequenceHeader sequenceHeader = parseReducedStillPictureSequenceHeader();
-        byte[] combinedPayload = reducedStillPictureCombinedFramePayload(tileGroupPayload);
+        return createReducedStillPictureCombinedAssembly(
+                reducedStillPicturePayload(),
+                reducedStillPictureCombinedFramePayload(tileGroupPayload)
+        );
+    }
+
+    /// Creates one reduced still-picture combined-frame assembly with caller-supplied sequence-header
+    /// and combined-frame payloads.
+    ///
+    /// @param sequenceHeaderPayload the reduced still-picture sequence-header payload
+    /// @param combinedPayload the combined `FRAME` payload including the tile-group payload
+    /// @return one complete reduced still-picture frame assembly
+    /// @throws IOException if the fixture cannot be parsed
+    private static FrameAssembly createReducedStillPictureCombinedAssembly(
+            byte[] sequenceHeaderPayload,
+            byte[] combinedPayload
+    ) throws IOException {
+        SequenceHeader sequenceHeader = new SequenceHeaderParser().parse(sequenceHeaderObu(sequenceHeaderPayload), false);
         ObuPacket frameObu = frameObu(combinedPayload);
         BitReader reader = new BitReader(combinedPayload);
         FrameHeader frameHeader = new FrameHeaderParser().parseFramePayload(reader, frameObu, sequenceHeader, false);
+        TileGroupHeader tileGroupHeader = new TileGroupHeaderParser().parse(reader, frameObu, frameHeader);
         reader.byteAlign();
         int tileDataOffset = reader.byteOffset();
+        TileBitstream[] tileBitstreams = new TileBitstreamParser().parse(frameObu, frameHeader, tileGroupHeader, tileDataOffset);
 
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, frameObu.streamOffset(), frameObu.obuIndex());
         assembly.addTileGroup(
                 frameObu,
-                new TileGroupHeader(false, 0, 0, 1),
+                tileGroupHeader,
                 tileDataOffset,
                 combinedPayload.length - tileDataOffset,
-                new TileBitstream[]{
-                        new TileBitstream(0, combinedPayload, tileDataOffset, combinedPayload.length - tileDataOffset)
-                }
+                tileBitstreams
         );
         return assembly;
     }
@@ -1663,6 +1801,11 @@ final class FrameReconstructorIntegrationTest {
         ObuPacket frameHeaderObu = frameHeaderObu(reducedStillPictureFrameHeaderPayload());
         FrameHeader frameHeader = new FrameHeaderParser().parse(frameHeaderObu, sequenceHeader, false);
         ObuPacket tileGroupObu = tileGroupObu(tileGroupPayload);
+        BitReader tileGroupReader = new BitReader(tileGroupPayload);
+        TileGroupHeader tileGroupHeader = new TileGroupHeaderParser().parse(tileGroupReader, tileGroupObu, frameHeader);
+        tileGroupReader.byteAlign();
+        int tileDataOffset = tileGroupReader.byteOffset();
+        TileBitstream[] tileBitstreams = new TileBitstreamParser().parse(tileGroupObu, frameHeader, tileGroupHeader, tileDataOffset);
 
         FrameAssembly assembly = new FrameAssembly(
                 sequenceHeader,
@@ -1672,10 +1815,10 @@ final class FrameReconstructorIntegrationTest {
         );
         assembly.addTileGroup(
                 tileGroupObu,
-                new TileGroupHeader(false, 0, 0, 1),
-                0,
-                tileGroupPayload.length,
-                new TileBitstream[]{new TileBitstream(0, tileGroupPayload, 0, tileGroupPayload.length)}
+                tileGroupHeader,
+                tileDataOffset,
+                tileGroupPayload.length - tileDataOffset,
+                tileBitstreams
         );
         return assembly;
     }
@@ -1740,8 +1883,34 @@ final class FrameReconstructorIntegrationTest {
             FrameHeader.TransformMode transformMode,
             boolean filterIntraEnabled
     ) {
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(pixelFormat, codedWidth, codedHeight, filterIntraEnabled);
+        FrameHeader frameHeader = createSyntheticFrameHeader(FrameType.KEY, codedWidth, codedHeight, 1, transformMode);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+        );
+        return assembly;
+    }
+
+    /// Creates one synthetic sequence header for reconstruction integration tests.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
+    /// @return one synthetic sequence header for reconstruction integration tests
+    private static SequenceHeader createSyntheticSequenceHeader(
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int codedHeight,
+            boolean filterIntraEnabled
+    ) {
         boolean monochrome = pixelFormat == PixelFormat.I400;
-        SequenceHeader sequenceHeader = new SequenceHeader(
+        return new SequenceHeader(
                 0,
                 codedWidth,
                 codedHeight,
@@ -1790,14 +1959,51 @@ final class FrameReconstructorIntegrationTest {
                         false
                 )
         );
-        FrameHeader frameHeader = new FrameHeader(
+    }
+
+    /// Creates one synthetic frame header for reconstruction integration tests.
+    ///
+    /// @param frameType the frame type to expose
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param tileColumns the number of horizontal tiles to expose
+    /// @return one synthetic frame header for reconstruction integration tests
+    private static FrameHeader createSyntheticFrameHeader(
+            FrameType frameType,
+            int codedWidth,
+            int codedHeight,
+            int tileColumns
+    ) {
+        return createSyntheticFrameHeader(frameType, codedWidth, codedHeight, tileColumns, FrameHeader.TransformMode.LARGEST);
+    }
+
+    /// Creates one synthetic frame header for reconstruction integration tests.
+    ///
+    /// @param frameType the frame type to expose
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param tileColumns the number of horizontal tiles to expose
+    /// @param transformMode the frame transform mode
+    /// @return one synthetic frame header for reconstruction integration tests
+    private static FrameHeader createSyntheticFrameHeader(
+            FrameType frameType,
+            int codedWidth,
+            int codedHeight,
+            int tileColumns,
+            FrameHeader.TransformMode transformMode
+    ) {
+        int[] columnStarts = new int[tileColumns + 1];
+        for (int i = 0; i <= tileColumns; i++) {
+            columnStarts[i] = i;
+        }
+        return new FrameHeader(
                 0,
                 0,
                 false,
                 0,
                 0,
                 0,
-                FrameType.KEY,
+                frameType,
                 true,
                 false,
                 true,
@@ -1820,16 +2026,16 @@ final class FrameReconstructorIntegrationTest {
                 true,
                 new FrameHeader.TilingInfo(
                         true,
-                        0,
+                        tileColumns > 1 ? 1 : 0,
+                        tileColumns > 1 ? 1 : 0,
+                        tileColumns > 1 ? 1 : 0,
+                        tileColumns > 1 ? 1 : 0,
+                        tileColumns,
                         0,
                         0,
                         0,
                         1,
-                        0,
-                        0,
-                        0,
-                        1,
-                        new int[]{0, 1},
+                        columnStarts,
                         new int[]{0, 1},
                         0
                 ),
@@ -1866,15 +2072,6 @@ final class FrameReconstructorIntegrationTest {
                 false,
                 false
         );
-        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
-        assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
-                new TileGroupHeader(false, 0, 0, 1),
-                0,
-                0,
-                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
-        );
-        return assembly;
     }
 
     /// Finds a small payload whose first residual flags match the requested sequence.
@@ -2044,6 +2241,15 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @return the reduced still-picture sequence header payload
     private static byte[] reducedStillPicturePayload() {
+        return reducedStillPicturePayload(64, 64);
+    }
+
+    /// Creates a reduced still-picture sequence header payload for caller-supplied frame dimensions.
+    ///
+    /// @param width the coded frame width in pixels
+    /// @param height the coded frame height in pixels
+    /// @return the reduced still-picture sequence header payload
+    private static byte[] reducedStillPicturePayload(int width, int height) {
         BitWriter writer = new BitWriter();
         writer.writeBits(0, 3);
         writer.writeFlag(true);
@@ -2052,8 +2258,8 @@ final class FrameReconstructorIntegrationTest {
         writer.writeBits(1, 2);
         writer.writeBits(9, 4);
         writer.writeBits(8, 4);
-        writer.writeBits(63, 10);
-        writer.writeBits(63, 9);
+        writer.writeBits(width - 1L, 10);
+        writer.writeBits(height - 1L, 9);
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);
@@ -2086,8 +2292,18 @@ final class FrameReconstructorIntegrationTest {
     /// @param tileGroupPayload the single-tile payload appended after the frame header
     /// @return the reduced still-picture combined frame payload
     private static byte[] reducedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        return reducedStillPictureCombinedFramePayload(tileGroupPayload, false);
+    }
+
+    /// Creates a reduced still-picture combined frame payload with a caller-supplied tile group and
+    /// optional multi-tile tiling syntax.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the frame header
+    /// @param twoHorizontalTiles whether the frame header should expose two horizontal tiles
+    /// @return the reduced still-picture combined frame payload
+    private static byte[] reducedStillPictureCombinedFramePayload(byte[] tileGroupPayload, boolean twoHorizontalTiles) {
         BitWriter writer = new BitWriter();
-        writeReducedStillPictureFrameHeaderBits(writer);
+        writeReducedStillPictureFrameHeaderBits(writer, twoHorizontalTiles);
         writer.padToByteBoundary();
         writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
@@ -2100,16 +2316,44 @@ final class FrameReconstructorIntegrationTest {
         return new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
     }
 
+    /// Creates one minimal two-tile payload by concatenating a size table for the first tile and
+    /// both raw tile bitstreams after an implicit full-range tile-group header byte.
+    ///
+    /// @param leftTilePayload the raw payload of tile `0`
+    /// @param rightTilePayload the raw payload of tile `1`
+    /// @return the tile-group payload for one implicit full-range two-tile group
+    private static byte[] twoTileGroupPayload(byte[] leftTilePayload, byte[] rightTilePayload) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(0);
+        output.write(leftTilePayload.length - 1);
+        output.writeBytes(leftTilePayload);
+        output.writeBytes(rightTilePayload);
+        return output.toByteArray();
+    }
+
     /// Writes the reduced still-picture key-frame header syntax without standalone trailing bits.
     ///
     /// @param writer the destination bit writer
     private static void writeReducedStillPictureFrameHeaderBits(BitWriter writer) {
+        writeReducedStillPictureFrameHeaderBits(writer, false);
+    }
+
+    /// Writes the reduced still-picture key-frame header syntax without standalone trailing bits.
+    ///
+    /// @param writer the destination bit writer
+    /// @param twoHorizontalTiles whether the frame header should expose two horizontal tiles
+    private static void writeReducedStillPictureFrameHeaderBits(BitWriter writer, boolean twoHorizontalTiles) {
         writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(true);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
+        if (twoHorizontalTiles) {
+            writer.writeFlag(true);
+            writer.writeFlag(false);
+            writer.writeBits(0, 2);
+        } else {
+            writer.writeFlag(false);
+        }
         writer.writeBits(0, 8);
         writer.writeFlag(false);
         writer.writeFlag(false);

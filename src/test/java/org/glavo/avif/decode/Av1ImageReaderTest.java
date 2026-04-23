@@ -19,7 +19,9 @@ import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
@@ -39,6 +41,7 @@ import java.nio.ByteOrder;
 import java.nio.channels.Channels;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -482,6 +485,38 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Verifies that one standalone `show_existing_frame` header can still expose the current
+    /// supported opaque gray still-picture surface when the stored syntax state is widened to a
+    /// synthetic two-tile layout.
+    ///
+    /// The decoded surface itself still comes from the real supported single-tile fixture, so this
+    /// covers the public-reader success path under multi-tile stored state without mutating main
+    /// code.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameReturnsArgbIntFrameForShowExistingFrameBackedBySyntheticMultiTileReferenceSurface() throws Exception {
+        InjectedReferenceState referenceState = createSyntheticMultiTileReferenceStateFromSupportedStillPicture();
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject synthetic multi-tile reference state", exception);
+            }
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertOpaqueGrayStillPictureFrame(decodedFrame, 0);
+            ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
+            int secondTileFirstPixelIndex = frame.width() / referenceState.frameHeader().tiling().columns();
+            assertEquals(OPAQUE_MID_GRAY, frame.pixels()[secondTileFirstPixelIndex]);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertEquals(2, reader.lastFrameSyntaxDecodeResult().tileCount());
+            assertNull(reader.readFrame());
+        });
+    }
+
     /// Verifies that `show_existing_frame` fails with one stable not-implemented boundary when the
     /// referenced slot has syntax state but no reconstructed reference surface yet.
     @Test
@@ -595,6 +630,111 @@ final class Av1ImageReaderTest {
                     surfaceSnapshots[0]
             );
         }
+    }
+
+    /// Creates one synthetic two-tile stored reference slot that reuses the real current supported
+    /// opaque gray still-picture surface.
+    ///
+    /// The widened syntax result keeps the decoded surface unchanged while exercising public-reader
+    /// output against `tileCount == 2`.
+    ///
+    /// @return one synthetic two-tile stored reference slot
+    /// @throws Exception if the real supported fixture cannot be captured
+    private static InjectedReferenceState createSyntheticMultiTileReferenceStateFromSupportedStillPicture() throws Exception {
+        InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
+        ReferenceSurfaceSnapshot baseSurfaceSnapshot =
+                Objects.requireNonNull(baseReferenceState.referenceSurfaceSnapshot(), "base reference surface");
+        FrameHeader multiTileFrameHeader = copyFrameHeaderWithSyntheticTwoColumnTiling(baseReferenceState.frameHeader());
+        FrameSyntaxDecodeResult multiTileSyntaxResult =
+                createSyntheticMultiTileSyntaxResult(baseReferenceState.sequenceHeader(), multiTileFrameHeader);
+        ReferenceSurfaceSnapshot multiTileSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                multiTileFrameHeader,
+                multiTileSyntaxResult,
+                baseSurfaceSnapshot.decodedPlanes()
+        );
+
+        return new InjectedReferenceState(
+                baseReferenceState.sequenceHeader(),
+                multiTileFrameHeader,
+                multiTileSyntaxResult,
+                multiTileSurfaceSnapshot
+        );
+    }
+
+    /// Creates one synthetic two-tile syntax result that reuses the supplied frame metadata.
+    ///
+    /// @param sequenceHeader the sequence header associated with the stored frame
+    /// @param frameHeader the frame header whose tile layout should be exposed
+    /// @return one synthetic structural decode result whose tile count matches the widened layout
+    private static FrameSyntaxDecodeResult createSyntheticMultiTileSyntaxResult(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader
+    ) {
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        int tileCount = assembly.totalTiles();
+        TilePartitionTreeReader.Node[][] tileRoots = new TilePartitionTreeReader.Node[tileCount][];
+        TileDecodeContext.TemporalMotionField[] temporalMotionFields = new TileDecodeContext.TemporalMotionField[tileCount];
+        for (int i = 0; i < tileCount; i++) {
+            tileRoots[i] = new TilePartitionTreeReader.Node[0];
+            temporalMotionFields[i] = new TileDecodeContext.TemporalMotionField(1, 1);
+        }
+        return new FrameSyntaxDecodeResult(assembly, tileRoots, temporalMotionFields);
+    }
+
+    /// Copies one real supported still-picture frame header while widening its stored tile layout
+    /// to two equal columns for public-reader reuse tests.
+    ///
+    /// @param baseFrameHeader the real supported still-picture frame header to copy
+    /// @return one copied frame header whose stored tile layout exposes two columns
+    private static FrameHeader copyFrameHeaderWithSyntheticTwoColumnTiling(FrameHeader baseFrameHeader) {
+        return new FrameHeader(
+                baseFrameHeader.temporalId(),
+                baseFrameHeader.spatialId(),
+                baseFrameHeader.showExistingFrame(),
+                baseFrameHeader.existingFrameIndex(),
+                baseFrameHeader.frameId(),
+                baseFrameHeader.framePresentationDelay(),
+                baseFrameHeader.frameType(),
+                baseFrameHeader.showFrame(),
+                baseFrameHeader.showableFrame(),
+                baseFrameHeader.errorResilientMode(),
+                baseFrameHeader.disableCdfUpdate(),
+                baseFrameHeader.allowScreenContentTools(),
+                baseFrameHeader.forceIntegerMotionVectors(),
+                baseFrameHeader.frameSizeOverride(),
+                baseFrameHeader.primaryRefFrame(),
+                baseFrameHeader.frameOffset(),
+                baseFrameHeader.refreshFrameFlags(),
+                baseFrameHeader.frameSize(),
+                baseFrameHeader.superResolution(),
+                baseFrameHeader.allowIntrabc(),
+                baseFrameHeader.refreshContext(),
+                new FrameHeader.TilingInfo(
+                        true,
+                        1,
+                        1,
+                        1,
+                        1,
+                        2,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1, 2},
+                        new int[]{0, 1},
+                        0
+                ),
+                baseFrameHeader.quantization(),
+                baseFrameHeader.segmentation(),
+                baseFrameHeader.delta(),
+                baseFrameHeader.allLossless(),
+                baseFrameHeader.loopFilter(),
+                baseFrameHeader.cdef(),
+                baseFrameHeader.restoration(),
+                baseFrameHeader.transformMode(),
+                baseFrameHeader.reducedTransformSet(),
+                baseFrameHeader.filmGrain().applyGrain()
+        );
     }
 
     /// Injects one synthetic `show_existing_frame` state into a fresh reader.
