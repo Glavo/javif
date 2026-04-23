@@ -1,7 +1,3 @@
-import com.sun.management.OperatingSystemMXBean
-import java.lang.management.ManagementFactory
-import kotlin.math.max
-
 plugins {
     id("java-library")
     id("jacoco")
@@ -40,11 +36,6 @@ tasks.withType<JavaCompile> {
 tasks.test {
     useJUnitPlatform()
     testLogging.showStandardStreams = true
-
-    // Use more parallelism on large machines
-    if ((ManagementFactory.getOperatingSystemMXBean() as OperatingSystemMXBean).totalMemorySize >= 14L * 1024L * 1024L * 1024L) {
-        maxParallelForks = max(1, Runtime.getRuntime().availableProcessors() / 4)
-    }
 }
 
 tasks.jacocoTestReport {
