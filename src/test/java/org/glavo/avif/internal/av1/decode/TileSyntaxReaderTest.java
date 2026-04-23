@@ -35,6 +35,7 @@ import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -46,6 +47,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `TileSyntaxReader`.
 @NotNullByDefault
 final class TileSyntaxReaderTest {
+    /// Classpath resource that stores precomputed tile-syntax payload fixtures.
+    private static final String TILE_SYNTAX_FIXTURES_RESOURCE = "av1/fixtures/generated/tile-syntax-fixtures.txt";
+
+    /// Fixed payload whose first `use_filter_intra` decision decodes to `true`.
+    private static final byte[] FILTER_INTRA_PAYLOAD = readTileSyntaxFixture("filter-intra");
+
+    /// Fixed payload whose first palette decisions decode to luma and chroma palette syntax.
+    private static final byte[] PALETTE_PAYLOAD = readTileSyntaxFixture("palette");
+
+    /// Fixed payload whose first motion-vector residual changes both motion-vector components.
+    private static final byte[] MOTION_VECTOR_RESIDUAL_PAYLOAD = readTileSyntaxFixture("motion-vector-residual");
+
     /// Verifies that inter-frame skip, intra, and partition symbols use the expected tile-local CDF tables.
     @Test
     void readsInterFrameBlockSyntax() {
@@ -173,7 +186,7 @@ final class TileSyntaxReaderTest {
     /// Verifies that motion-vector residual syntax uses the expected tile-local CDF tables.
     @Test
     void readsMotionVectorResidualSyntax() {
-        byte[] payload = findPayloadForMotionVectorResidual();
+        byte[] payload = MOTION_VECTOR_RESIDUAL_PAYLOAD;
         TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
         MotionVector predictor = new MotionVector(8, -4);
@@ -330,7 +343,7 @@ final class TileSyntaxReaderTest {
     /// Verifies that filter-intra syntax uses the expected tile-local CDF tables.
     @Test
     void readsFilterIntraSyntax() {
-        byte[] payload = findPayloadForFilterIntra();
+        byte[] payload = FILTER_INTRA_PAYLOAD;
         TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
@@ -377,7 +390,7 @@ final class TileSyntaxReaderTest {
     /// Verifies that palette presence and size syntax use the expected tile-local CDF tables.
     @Test
     void readsPaletteSyntax() {
-        byte[] payload = findPayloadForPaletteSyntax();
+        byte[] payload = PALETTE_PAYLOAD;
         TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
@@ -429,62 +442,12 @@ final class TileSyntaxReaderTest {
         return positive ? alpha : -alpha;
     }
 
-    /// Finds a small payload whose first `use_filter_intra` decision decodes to `true`.
+    /// Reads one named precomputed tile-syntax fixture payload.
     ///
-    /// @return a small payload whose first `use_filter_intra` decision decodes to `true`
-    private static byte[] findPayloadForFilterIntra() {
-        for (int value = 0; value < 256; value++) {
-            byte[] payload = new byte[]{(byte) value, 0x00, 0x00, 0x00, 0x00};
-            CdfContext oracleCdf = CdfContext.createDefault();
-            MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-            if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex()))) {
-                return payload;
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced use_filter_intra=true");
-    }
-
-    /// Finds a small payload whose first palette syntax decisions decode to `use_y_pal=true` and `use_uv_pal=true`.
-    ///
-    /// @return a small payload whose first palette syntax decisions decode to `use_y_pal=true` and `use_uv_pal=true`
-    private static byte[] findPayloadForPaletteSyntax() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0))) {
-                    continue;
-                }
-                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced luma and chroma palette syntax");
-    }
-
-    /// Finds a small payload whose first motion-vector residual changes both motion-vector components.
-    ///
-    /// @return a small payload whose first motion-vector residual changes both motion-vector components
-    private static byte[] findPayloadForMotionVectorResidual() {
-        MotionVector predictor = new MotionVector(8, -4);
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    MotionVector decodedMotionVector = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor, false, false);
-                    if (decodedMotionVector.rowQuarterPel() != predictor.rowQuarterPel()
-                            && decodedMotionVector.columnQuarterPel() != predictor.columnQuarterPel()) {
-                        return payload;
-                    }
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced a two-dimensional motion-vector residual");
+    /// @param fixtureName the logical fixture name in `TILE_SYNTAX_FIXTURES_RESOURCE`
+    /// @return the decoded tile-syntax payload bytes
+    private static byte[] readTileSyntaxFixture(String fixtureName) {
+        return HexFixtureResources.readNamedBytes(TILE_SYNTAX_FIXTURES_RESOURCE, fixtureName);
     }
 
     /// Decodes one motion-vector residual with the same syntax as `TileSyntaxReader`.

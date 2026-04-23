@@ -1,0 +1,19 @@
+# Fixed payload fixtures that previously came from runtime brute-force helper searches.
+4x4-all-zero = 7300000000000000
+4x4-dc-only = 0000000000000000
+4x4-single-ac = 0400000000000000
+4x4-multi = 0500000000000000
+8x8-largest-multi = 0200000000000000
+8x8-flag-false-true = 0100000000000000
+i420-minimal-all-zero-isolated = f800000000000000
+i420-minimal-all-zero-fallback = f800000000000000
+i420-minimal-dc-isolated = 4805000000000000
+i420-minimal-dc-fallback = 0000000000000000
+i422-minimal-dc-isolated = ea0a000000000000
+i422-minimal-dc-fallback = 0000000000000000
+i420-minimal-multi-u-isolated = 2500000000000000
+i420-minimal-multi-u-fallback = 0100000000000000
+i420-tx8x8-multi-u-isolated = 2400000000000000
+i420-tx8x8-multi-u-fallback = 0100000000000000
+i422-rtx8x16-multi-u-isolated = 2400000000000000
+i422-rtx8x16-multi-u-fallback = 0100000000000000

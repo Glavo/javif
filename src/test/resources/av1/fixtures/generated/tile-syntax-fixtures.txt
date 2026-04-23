@@ -1,0 +1,4 @@
+# Fixed payload fixtures that previously came from runtime brute-force helper searches.
+filter-intra = 3e00000000
+palette = f8da000000
+motion-vector-residual = 96f800000000

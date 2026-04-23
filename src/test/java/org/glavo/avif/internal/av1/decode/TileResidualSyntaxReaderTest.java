@@ -34,6 +34,7 @@ import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -61,6 +62,10 @@ final class TileResidualSyntaxReaderTest {
 
     /// The padded `levels` grid size used by the mirrored `TX_4X4` chroma oracle.
     private static final int FOUR_BY_FOUR_LEVEL_GRID_SIZE = 6;
+
+    /// The generated named-fixture resource backing deterministic residual payload tests.
+    private static final String TILE_RESIDUAL_FIXTURE_RESOURCE_PATH =
+            "av1/fixtures/generated/tile-residual-fixtures.txt";
 
     /// The `dav1d` low-token context offsets for the mirrored `TX_4X4` chroma oracle.
     private static final int[][] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
@@ -562,170 +567,73 @@ final class TileResidualSyntaxReaderTest {
                 oracleNeighborContext.lumaCoefficientSkipContext(BlockSize.SIZE_8X8, transformUnits[1]));
     }
 
-    /// Finds a small payload whose first residual flags match the requested sequence.
+    /// Returns the fixture-backed payload whose first residual flags match the requested sequence.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
     /// @param expectedFlags the requested prefix of `txb_skip` / all-zero flags
-    /// @return a small payload whose residual flags match the requested prefix
+    /// @return the fixture-backed payload whose residual flags match the requested prefix
     private static byte[] findPayloadForResidualFlags(BlockSize blockSize, boolean[] expectedFlags) {
-        byte[] twoBytePayload = findPayloadForResidualFlags(blockSize, expectedFlags, 2);
-        if (twoBytePayload != null) {
-            return twoBytePayload;
+        Objects.requireNonNull(blockSize, "blockSize");
+        Objects.requireNonNull(expectedFlags, "expectedFlags");
+        if (blockSize == BlockSize.SIZE_4X4 && expectedFlags.length == 1 && expectedFlags[0]) {
+            return readTileResidualFixture("4x4-all-zero");
         }
-        byte[] threeBytePayload = findPayloadForResidualFlags(blockSize, expectedFlags, 3);
-        if (threeBytePayload != null) {
-            return threeBytePayload;
+        if (blockSize == BlockSize.SIZE_8X8 && expectedFlags.length == 2 && !expectedFlags[0] && expectedFlags[1]) {
+            return readTileResidualFixture("8x8-flag-false-true");
         }
-        throw new IllegalStateException("No deterministic payload produced the requested residual flags");
+        throw new IllegalArgumentException("Unsupported residual-flag fixture request for " + blockSize);
     }
 
-    /// Finds a small payload whose first residual unit is supported and DC-only.
+    /// Returns the fixture-backed payload whose first residual unit is supported and DC-only.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
-    /// @return a small payload whose first residual unit is supported and DC-only
+    /// @return the fixture-backed payload whose first residual unit is supported and DC-only
     private static byte[] findPayloadForDcOnlyResidual(BlockSize blockSize) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TileDecodeContext tileContext = createTileContext(payload);
-                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                    TileBlockHeaderReader.BlockHeader header =
-                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-                    if (header.skip()) {
-                        continue;
-                    }
-                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-                    TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
-                    if (!residualUnit.allZero() && residualUnit.endOfBlockIndex() == 0) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported AC paths are skipped while brute-forcing a supported DC-only unit.
-                }
-            }
+        if (blockSize == BlockSize.SIZE_4X4) {
+            return readTileResidualFixture("4x4-dc-only");
         }
-        throw new IllegalStateException("No deterministic payload produced a supported DC-only residual");
+        throw new IllegalArgumentException("Unsupported DC-only residual fixture request for " + blockSize);
     }
 
-    /// Finds a small payload whose first residual unit exposes the first scanned AC coefficient.
+    /// Returns the fixture-backed payload whose first residual unit exposes the first scanned AC coefficient.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
-    /// @return a small payload whose first residual unit exposes the first scanned AC coefficient
+    /// @return the fixture-backed payload whose first residual unit exposes the first scanned AC coefficient
     private static byte[] findPayloadForSingleAcResidual(BlockSize blockSize) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TileDecodeContext tileContext = createTileContext(payload);
-                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                    TileBlockHeaderReader.BlockHeader header =
-                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-                    if (header.skip()) {
-                        continue;
-                    }
-                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-                    TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
-                    if (residualUnit.endOfBlockIndex() == 1) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported residual trees are skipped while brute-forcing a supported first-AC unit.
-                }
-            }
+        if (blockSize == BlockSize.SIZE_4X4) {
+            return readTileResidualFixture("4x4-single-ac");
         }
-        throw new IllegalStateException("No deterministic payload produced a supported first-AC residual");
+        throw new IllegalArgumentException("Unsupported first-AC residual fixture request for " + blockSize);
     }
 
-    /// Finds a small payload whose first residual unit exposes a supported multi-coefficient `TX_4X4` residual.
+    /// Returns the fixture-backed payload whose first residual unit exposes a supported multi-coefficient `TX_4X4`
+    /// residual.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
-    /// @return a small payload whose first residual unit exposes a supported multi-coefficient residual
+    /// @return the fixture-backed payload whose first residual unit exposes a supported multi-coefficient residual
     private static byte[] findPayloadForMultiCoefficientResidual(BlockSize blockSize) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TileDecodeContext tileContext = createTileContext(payload);
-                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                    TileBlockHeaderReader.BlockHeader header =
-                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-                    if (header.skip()) {
-                        continue;
-                    }
-                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-                    TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
-                    if (residualUnit.endOfBlockIndex() > 1 && countNonZeroCoefficients(residualUnit.coefficients()) >= 2) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported residual trees are skipped while brute-forcing a supported multi-coefficient unit.
-                }
-            }
+        if (blockSize == BlockSize.SIZE_4X4) {
+            return readTileResidualFixture("4x4-multi");
         }
-        throw new IllegalStateException("No deterministic payload produced a supported multi-coefficient residual");
+        throw new IllegalArgumentException("Unsupported multi-coefficient residual fixture request for " + blockSize);
     }
 
-    /// Finds a payload whose first residual unit exposes a supported multi-coefficient larger transform.
+    /// Returns the fixture-backed payload whose first residual unit exposes a supported multi-coefficient larger
+    /// transform.
     ///
     /// @param blockSize the coded block size whose largest-transform residual should be decoded
-    /// @return a payload whose first residual unit exposes a supported multi-coefficient larger transform
+    /// @return the fixture-backed payload whose first residual unit exposes a supported multi-coefficient
+    /// larger transform
     private static byte[] findPayloadForLargestTransformMultiCoefficientResidual(BlockSize blockSize) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-
-                TileDecodeContext tileContext = createTileContext(payload, FrameHeader.TransformMode.LARGEST);
-                TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-                BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                TileBlockHeaderReader.BlockHeader header =
-                        blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-                if (header.skip()) {
-                    continue;
-                }
-                TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-                if (transformLayout.lumaUnits().length != 1 || transformLayout.lumaUnits()[0].size() == TransformSize.TX_4X4) {
-                    continue;
-                }
-                TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
-                if (residualUnit.endOfBlockIndex() > 1 && countNonZeroCoefficients(residualUnit.coefficients()) >= 2) {
-                    return payload;
-                }
-            }
+        if (blockSize == BlockSize.SIZE_8X8) {
+            return readTileResidualFixture("8x8-largest-multi");
         }
-        throw new IllegalStateException("No deterministic payload produced a supported larger-transform residual");
+        throw new IllegalArgumentException("Unsupported larger-transform residual fixture request for " + blockSize);
     }
 
-    /// Finds a payload whose minimal `I420` chroma residuals are both all-zero.
+    /// Returns the fixture-backed payload whose minimal `I420` chroma residuals are both all-zero.
     ///
-    /// @return a payload whose minimal `I420` chroma residuals are both all-zero
+    /// @return the fixture-backed payload whose minimal `I420` chroma residuals are both all-zero
     private static byte[] findPayloadForAllZeroMinimalI420ChromaResidual() {
         byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I420, true, true);
         if (isolatedPayload != null) {
@@ -735,12 +643,12 @@ final class TileResidualSyntaxReaderTest {
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
-        throw new IllegalStateException("No deterministic payload produced minimal all-zero I420 chroma residuals");
+        throw new IllegalStateException("No fixture-backed payload produced minimal all-zero I420 chroma residuals");
     }
 
-    /// Finds a payload whose minimal `I420` chroma residuals are both DC-only and non-zero.
+    /// Returns the fixture-backed payload whose minimal `I420` chroma residuals are both DC-only and non-zero.
     ///
-    /// @return a payload whose minimal `I420` chroma residuals are both DC-only and non-zero
+    /// @return the fixture-backed payload whose minimal `I420` chroma residuals are both DC-only and non-zero
     private static byte[] findPayloadForDcOnlyMinimalI420ChromaResidual() {
         byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I420, true, false);
         if (isolatedPayload != null) {
@@ -750,12 +658,12 @@ final class TileResidualSyntaxReaderTest {
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
-        throw new IllegalStateException("No deterministic payload produced minimal non-zero I420 chroma residuals");
+        throw new IllegalStateException("No fixture-backed payload produced minimal non-zero I420 chroma residuals");
     }
 
-    /// Finds a payload whose minimal `I422` chroma residuals are both DC-only and non-zero.
+    /// Returns the fixture-backed payload whose minimal `I422` chroma residuals are both DC-only and non-zero.
     ///
-    /// @return a payload whose minimal `I422` chroma residuals are both DC-only and non-zero
+    /// @return the fixture-backed payload whose minimal `I422` chroma residuals are both DC-only and non-zero
     private static byte[] findPayloadForDcOnlyMinimalI422ChromaResidual() {
         byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I422, true, false);
         if (isolatedPayload != null) {
@@ -765,13 +673,13 @@ final class TileResidualSyntaxReaderTest {
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
-        throw new IllegalStateException("No deterministic payload produced minimal non-zero I422 chroma residuals");
+        throw new IllegalStateException("No fixture-backed payload produced minimal non-zero I422 chroma residuals");
     }
 
-    /// Finds a payload whose minimal `I420` chroma-U residual exposes one supported
+    /// Returns the fixture-backed payload whose minimal `I420` chroma-U residual exposes one supported
     /// multi-coefficient `TX_4X4` unit.
     ///
-    /// @return a payload whose minimal `I420` chroma-U residual exposes one multi-coefficient unit
+    /// @return the fixture-backed payload whose minimal `I420` chroma-U residual exposes one multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientMinimalI420ChromaUResidual() {
         byte[] isolatedPayload = findPayloadForMultiCoefficientMinimalChromaUResidual(PixelFormat.I420, true);
         if (isolatedPayload != null) {
@@ -781,13 +689,14 @@ final class TileResidualSyntaxReaderTest {
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
-        throw new IllegalStateException("No deterministic payload produced a minimal multi-coefficient I420 chroma-U residual");
+        throw new IllegalStateException("No fixture-backed payload produced a minimal multi-coefficient I420 chroma-U residual");
     }
 
-    /// Finds a payload whose larger-transform `I420` chroma-U residual exposes one supported
+    /// Returns the fixture-backed payload whose larger-transform `I420` chroma-U residual exposes one supported
     /// multi-coefficient unit.
     ///
-    /// @return a payload whose larger-transform `I420` chroma-U residual exposes one multi-coefficient unit
+    /// @return the fixture-backed payload whose larger-transform `I420` chroma-U residual exposes one
+    /// multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientLargerTransformI420ChromaUResidual() {
         byte[] isolatedPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
                 PixelFormat.I420,
@@ -809,13 +718,14 @@ final class TileResidualSyntaxReaderTest {
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
-        throw new IllegalStateException("No deterministic payload produced a larger-transform multi-coefficient I420 chroma-U residual");
+        throw new IllegalStateException("No fixture-backed payload produced a larger-transform multi-coefficient I420 chroma-U residual");
     }
 
-    /// Finds a payload whose larger-transform `I422` chroma-U residual exposes one supported
+    /// Returns the fixture-backed payload whose larger-transform `I422` chroma-U residual exposes one supported
     /// multi-coefficient unit.
     ///
-    /// @return a payload whose larger-transform `I422` chroma-U residual exposes one multi-coefficient unit
+    /// @return the fixture-backed payload whose larger-transform `I422` chroma-U residual exposes one
+    /// multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientLargerTransformI422ChromaUResidual() {
         byte[] isolatedPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
                 PixelFormat.I422,
@@ -837,108 +747,60 @@ final class TileResidualSyntaxReaderTest {
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
-        throw new IllegalStateException("No deterministic payload produced a larger-transform multi-coefficient I422 chroma-U residual");
+        throw new IllegalStateException("No fixture-backed payload produced a larger-transform multi-coefficient I422 chroma-U residual");
     }
 
-    /// Finds a payload whose minimal chroma residuals match the requested mode, or `null`.
+    /// Returns the fixture-backed payload whose minimal chroma residuals match the requested mode, or `null`.
     ///
     /// @param pixelFormat the synthetic sequence pixel format
     /// @param requireAllZeroLuma whether the leading luma unit should stay all-zero to isolate chroma
     /// @param requireAllZeroChroma whether both chroma units must be all-zero instead of DC-only
-    /// @return a payload whose minimal chroma residuals match the requested mode, or `null`
+    /// @return the fixture-backed payload whose minimal chroma residuals match the requested mode, or `null`
     private static byte[] findPayloadForMinimalChromaResidual(
             PixelFormat pixelFormat,
             boolean requireAllZeroLuma,
             boolean requireAllZeroChroma
     ) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, pixelFormat);
-                    TransformResidualUnit lumaResidualUnit = expectedResidualLayout.lumaUnits()[0];
-                    TransformResidualUnit chromaUResidualUnit = expectedResidualLayout.chromaUUnits()[0];
-                    TransformResidualUnit chromaVResidualUnit = expectedResidualLayout.chromaVUnits()[0];
-                    if (requireAllZeroLuma && !lumaResidualUnit.allZero()) {
-                        continue;
-                    }
-                    if (requireAllZeroChroma) {
-                        if (chromaUResidualUnit.allZero() && chromaVResidualUnit.allZero()) {
-                            return payload;
-                        }
-                        continue;
-                    }
-                    if (!chromaUResidualUnit.allZero()
-                            && !chromaVResidualUnit.allZero()
-                            && chromaUResidualUnit.endOfBlockIndex() == 0
-                            && chromaVResidualUnit.endOfBlockIndex() == 0) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported larger luma paths or non-minimal chroma paths are skipped while brute-forcing.
-                }
+        Objects.requireNonNull(pixelFormat, "pixelFormat");
+        if (pixelFormat == PixelFormat.I420) {
+            if (requireAllZeroChroma) {
+                return readTileResidualFixture(requireAllZeroLuma
+                        ? "i420-minimal-all-zero-isolated"
+                        : "i420-minimal-all-zero-fallback");
             }
+            return readTileResidualFixture(requireAllZeroLuma
+                    ? "i420-minimal-dc-isolated"
+                    : "i420-minimal-dc-fallback");
+        }
+        if (pixelFormat == PixelFormat.I422 && !requireAllZeroChroma) {
+            return readTileResidualFixture(requireAllZeroLuma
+                    ? "i422-minimal-dc-isolated"
+                    : "i422-minimal-dc-fallback");
         }
         return null;
     }
 
-    /// Finds a payload whose minimal chroma-U residual exposes one supported multi-coefficient
+    /// Returns the fixture-backed payload whose minimal chroma-U residual exposes one supported multi-coefficient
     /// transform unit, or `null`.
     ///
     /// @param pixelFormat the synthetic sequence pixel format
     /// @param requireAllZeroLuma whether the leading luma unit should stay all-zero to isolate chroma
-    /// @return a payload whose minimal chroma-U residual exposes one multi-coefficient unit, or `null`
+    /// @return the fixture-backed payload whose minimal chroma-U residual exposes one multi-coefficient unit,
+    /// or `null`
     private static byte[] findPayloadForMultiCoefficientMinimalChromaUResidual(
             PixelFormat pixelFormat,
             boolean requireAllZeroLuma
     ) {
-        BlockPosition position = new BlockPosition(0, 0);
-        TransformSize expectedChromaTransformSize =
-                Objects.requireNonNull(BlockSize.SIZE_8X8.maxChromaTransformSize(pixelFormat), "expectedChromaTransformSize");
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TileDecodeContext tileContext = createTileContext(payload, pixelFormat, FrameHeader.TransformMode.LARGEST);
-                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                    TileBlockHeaderReader.BlockHeader header =
-                            blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
-                    if (header.skip() || !header.hasChroma()) {
-                        continue;
-                    }
-                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-                    if (transformLayout.chromaTransformSize() != expectedChromaTransformSize) {
-                        continue;
-                    }
-                    ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
-                    if (requireAllZeroLuma && !residualLayout.lumaUnits()[0].allZero()) {
-                        continue;
-                    }
-                    if (residualLayout.chromaUUnits().length == 1
-                            && residualLayout.chromaVUnits().length == 1
-                            && hasMultiCoefficientResidual(residualLayout.chromaUUnits()[0])) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported luma or chroma trees are skipped while brute-forcing one chroma-U unit.
-                }
-            }
+        Objects.requireNonNull(pixelFormat, "pixelFormat");
+        if (pixelFormat == PixelFormat.I420) {
+            return readTileResidualFixture(requireAllZeroLuma
+                    ? "i420-minimal-multi-u-isolated"
+                    : "i420-minimal-multi-u-fallback");
         }
         return null;
     }
 
-    /// Finds a payload whose larger-transform chroma-U residual exposes one supported
+    /// Returns the fixture-backed payload whose larger-transform chroma-U residual exposes one supported
     /// multi-coefficient unit, or `null`.
     ///
     /// @param pixelFormat the synthetic sequence pixel format
@@ -946,7 +808,8 @@ final class TileResidualSyntaxReaderTest {
     /// @param codedWidth the synthetic coded frame width in pixels
     /// @param codedHeight the synthetic coded frame height in pixels
     /// @param requireAllZeroLuma whether the leading luma residual unit should stay all-zero
-    /// @return a payload whose larger-transform chroma-U residual exposes one multi-coefficient unit, or `null`
+    /// @return the fixture-backed payload whose larger-transform chroma-U residual exposes one multi-coefficient
+    /// unit, or `null`
     private static byte[] findPayloadForMultiCoefficientLargerTransformChromaUResidual(
             PixelFormat pixelFormat,
             BlockSize blockSize,
@@ -954,96 +817,30 @@ final class TileResidualSyntaxReaderTest {
             int codedHeight,
             boolean requireAllZeroLuma
     ) {
-        BlockPosition position = new BlockPosition(0, 0);
-        TransformSize expectedChromaTransformSize =
-                Objects.requireNonNull(blockSize.maxChromaTransformSize(pixelFormat), "expectedChromaTransformSize");
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TileDecodeContext tileContext =
-                            createTileContext(payload, pixelFormat, FrameHeader.TransformMode.LARGEST, codedWidth, codedHeight);
-                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                    TileBlockHeaderReader.BlockHeader header =
-                            blockHeaderReader.read(position, blockSize, neighborContext, false);
-                    if (header.skip() || !header.hasChroma()) {
-                        continue;
-                    }
-                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-                    if (transformLayout.chromaTransformSize() != expectedChromaTransformSize) {
-                        continue;
-                    }
-                    ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
-                    if (requireAllZeroLuma && !residualLayout.lumaUnits()[0].allZero()) {
-                        continue;
-                    }
-                    if (hasMultiCoefficientResidual(residualLayout.chromaUUnits()[0])) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported luma or chroma trees are skipped while brute-forcing one larger chroma-U unit.
-                }
-            }
+        Objects.requireNonNull(pixelFormat, "pixelFormat");
+        Objects.requireNonNull(blockSize, "blockSize");
+        if (blockSize != BlockSize.SIZE_16X16 || codedWidth != 16 || codedHeight != 16) {
+            return null;
+        }
+        if (pixelFormat == PixelFormat.I420) {
+            return readTileResidualFixture(requireAllZeroLuma
+                    ? "i420-tx8x8-multi-u-isolated"
+                    : "i420-tx8x8-multi-u-fallback");
+        }
+        if (pixelFormat == PixelFormat.I422) {
+            return readTileResidualFixture(requireAllZeroLuma
+                    ? "i422-rtx8x16-multi-u-isolated"
+                    : "i422-rtx8x16-multi-u-fallback");
         }
         return null;
     }
 
-    /// Finds a payload whose first residual flags match the requested sequence, or `null`.
+    /// Reads one named residual payload fixture from the generated fixture resource.
     ///
-    /// @param blockSize the block size whose residual syntax should be decoded
-    /// @param expectedFlags the requested prefix of `txb_skip` / all-zero flags
-    /// @param searchBytes the number of leading payload bytes to brute force
-    /// @return a payload whose first residual flags match the requested sequence, or `null`
-    private static byte[] findPayloadForResidualFlags(BlockSize blockSize, boolean[] expectedFlags, int searchBytes) {
-        int limit = 1 << (searchBytes << 3);
-        for (int value = 0; value < limit; value++) {
-            byte[] payload = new byte[8];
-            for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-            }
-
-            TileDecodeContext tileContext = createTileContext(payload);
-            TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-            TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-            TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-            BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-            TileBlockHeaderReader.BlockHeader header =
-                    blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-            if (header.skip()) {
-                continue;
-            }
-
-            TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-            ResidualLayout residualLayout;
-            try {
-                residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
-            } catch (IllegalStateException ignored) {
-                continue;
-            }
-            TransformResidualUnit[] residualUnits = residualLayout.lumaUnits();
-            if (residualUnits.length < expectedFlags.length) {
-                continue;
-            }
-
-            boolean matched = true;
-            for (int i = 0; i < expectedFlags.length; i++) {
-                if (residualUnits[i].allZero() != expectedFlags[i]) {
-                    matched = false;
-                    break;
-                }
-            }
-            if (matched) {
-                return payload;
-            }
-        }
-        return null;
+    /// @param fixtureName the logical fixture name inside the generated resource
+    /// @return the decoded payload bytes for the supplied fixture
+    private static byte[] readTileResidualFixture(String fixtureName) {
+        return HexFixtureResources.readNamedBytes(TILE_RESIDUAL_FIXTURE_RESOURCE_PATH, fixtureName);
     }
 
     /// Returns the stored coefficient-context byte expected for one non-zero DC coefficient.

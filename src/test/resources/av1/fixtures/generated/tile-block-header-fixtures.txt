@@ -1,0 +1,19 @@
+# Fixed payload fixtures that previously came from runtime brute-force helper searches.
+intrabc = e800000000
+filter-intra = 091e00000000
+preskip-segment-one = 2bc800000000
+postskip-lossless-segment = 30ef00000000
+temporal-preskip = 8000000000
+temporal-postskip = 7bf400000000
+skipped-postskip-temporal = f984c0000000
+skipped-inter = f7b7000000
+skip-mode-inter = fefeaa0000
+compound-reference = 027970000000
+single-reference = 000000000000
+segment-ref-intra = 000000000000
+segment-ref-inter = 06ba000000
+inter-no-skip-no-intra = 0000000000
+single-inter-mode = 002474000000
+compound-inter-mode = 0296b1000000
+palette = 248b123456789abc
+cdef-delta = 3f66456789abcdef

@@ -1,0 +1,7 @@
+# Fixed payload fixtures that previously came from runtime brute-force helper searches.
+4x4-all-zero = 7300000000000000
+4x4-dc-only = 0000000000000000
+i420-clipped = 0100000000000000
+i422-clipped = 0100000000000000
+i420-fringe = 0200000000000000
+i420-tx8x8 = 0100000000000000

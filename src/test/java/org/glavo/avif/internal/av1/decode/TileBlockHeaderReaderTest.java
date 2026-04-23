@@ -36,6 +36,7 @@ import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
+import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +49,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `TileBlockHeaderReader`.
 @NotNullByDefault
 final class TileBlockHeaderReaderTest {
+    /// Classpath resource containing named entropy payload fixtures for block-header tests.
+    private static final String TILE_BLOCK_HEADER_FIXTURE_RESOURCE =
+            "av1/fixtures/generated/tile-block-header-fixtures.txt";
+
     /// Verifies that a key-frame block header consumes skip and key-frame Y/UV modes with neighbor-aware contexts.
     @Test
     void readsKeyFrameBlockHeader() {
@@ -1285,579 +1290,138 @@ final class TileBlockHeaderReaderTest {
         return packed;
     }
 
-    /// Finds a small payload whose first `intrabc` decision decodes to `true`.
+    /// Reads the fixed payload fixture that decodes `intrabc = true`.
     ///
-    /// @return a small payload whose first `intrabc` decision decodes to `true`
+    /// @return the fixed payload fixture that decodes `intrabc = true`
     private static byte[] findPayloadForIntrabc() {
-        for (int value = 0; value < 256; value++) {
-            byte[] payload = new byte[]{(byte) value, 0x00, 0x00, 0x00, 0x00};
-            CdfContext oracleCdf = CdfContext.createDefault();
-            MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-            oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-            if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntrabcCdf())) {
-                return payload;
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced intrabc=true");
+        return readTileBlockHeaderFixture("intrabc");
     }
 
-    /// Finds a small payload whose first block decodes as `DC + use_filter_intra`.
+    /// Reads the fixed payload fixture that decodes `DC + use_filter_intra`.
     ///
-    /// @return a small payload whose first block decodes as `DC + use_filter_intra`
+    /// @return the fixed payload fixture that decodes `DC + use_filter_intra`
     private static byte[] findPayloadForFilterIntraBlock() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-                LumaIntraPredictionMode yMode = LumaIntraPredictionMode.fromSymbolIndex(
-                        oracleDecoder.decodeSymbolAdapt(
-                                oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
-                                12
-                        )
-                );
-                if (yMode != LumaIntraPredictionMode.DC) {
-                    continue;
-                }
-
-                UvIntraPredictionMode uvMode = UvIntraPredictionMode.fromSymbolIndex(
-                        oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, yMode.symbolIndex()), 13)
-                );
-                if (uvMode == UvIntraPredictionMode.CFL) {
-                    int signSymbol = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCflSignCdf(), 7) + 1;
-                    int signU = signSymbol / 3;
-                    int signV = signSymbol - signU * 3;
-                    if (signU != 0) {
-                        decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signU == 2 ? 3 : 0) + signV, signU == 2);
-                    }
-                    if (signV != 0) {
-                        decodeSignedCflAlpha(oracleDecoder, oracleCdf, (signV == 2 ? 3 : 0) + signU, signV == 2);
-                    }
-                } else if (uvMode.isDirectional()) {
-                    oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(uvMode.angleDeltaContextIndex()), 6);
-                }
-
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableUseFilterIntraCdf(BlockSize.SIZE_8X8.cdfIndex()))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced use_filter_intra=true after block syntax");
+        return readTileBlockHeaderFixture("filter-intra");
     }
 
-    /// Finds a small payload whose first preskip segment-id decode resolves to segment `1`.
+    /// Reads the fixed payload fixture that decodes preskip `seg_id = 1`.
     ///
-    /// @return a small payload whose first preskip segment-id decode resolves to segment `1`
+    /// @return the fixed payload fixture that decodes preskip `seg_id = 1`
     private static byte[] findPayloadForPreskipSegmentOne() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableSegmentIdCdf(0), 7) == 1) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced seg_id=1 for the preskip path");
+        return readTileBlockHeaderFixture("preskip-segment-one");
     }
 
-    /// Finds a small payload whose first postskip segment-id decode resolves to segment `1` and whose
-    /// UV mode would decode as CFL when lossless gating is disabled.
+    /// Reads the fixed payload fixture that decodes postskip `seg_id = 1` with lossless CFL gating coverage.
     ///
-    /// @return a small payload whose first postskip segment-id decode resolves to segment `1`
+    /// @return the fixed payload fixture that decodes postskip `seg_id = 1`
     private static byte[] findPayloadForPostskipLosslessSegment() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                if (oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableSegmentIdCdf(0), 7) != 1) {
-                    continue;
-                }
-                LumaIntraPredictionMode yMode = LumaIntraPredictionMode.fromSymbolIndex(
-                        oracleDecoder.decodeSymbolAdapt(
-                                oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
-                                12
-                        )
-                );
-                if (yMode.isDirectional()) {
-                    oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableAngleDeltaCdf(yMode.angleDeltaContextIndex()), 6);
-                }
-                UvIntraPredictionMode uvMode = UvIntraPredictionMode.fromSymbolIndex(
-                        oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, yMode.symbolIndex()), 13)
-                );
-                if (uvMode == UvIntraPredictionMode.CFL) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced seg_id=1 with CFL-eligible UV mode");
+        return readTileBlockHeaderFixture("postskip-lossless-segment");
     }
 
-    /// Finds a small payload whose first temporal segmentation-prediction flag decodes to `true`.
+    /// Reads the fixed payload fixture that decodes preskip temporal prediction.
     ///
-    /// @return a small payload whose first temporal segmentation-prediction flag decodes to `true`
+    /// @return the fixed payload fixture that decodes preskip temporal prediction
     private static byte[] findPayloadForTemporalPreskipPrediction() {
-        for (int first = 0; first < 256; first++) {
-            byte[] payload = new byte[]{(byte) first, 0x00, 0x00, 0x00, 0x00};
-            CdfContext oracleCdf = CdfContext.createDefault();
-            MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-            if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSegmentPredictionCdf(2))) {
-                return payload;
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced seg_id_predicted=true for the preskip path");
+        return readTileBlockHeaderFixture("temporal-preskip");
     }
 
-    /// Finds a small payload whose first block decodes `skip = false` and `seg_id_predicted = true`.
+    /// Reads the fixed payload fixture that decodes postskip temporal prediction.
     ///
-    /// @return a small payload whose first block decodes `skip = false` and `seg_id_predicted = true`
+    /// @return the fixed payload fixture that decodes postskip temporal prediction
     private static byte[] findPayloadForTemporalPostskipPrediction() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSegmentPredictionCdf(2))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced seg_id_predicted=true for the postskip path");
+        return readTileBlockHeaderFixture("temporal-postskip");
     }
 
-    /// Finds a small payload whose first skipped postskip block would produce a different key-frame
-    /// Y mode if a temporal prediction flag were consumed incorrectly.
+    /// Reads the fixed payload fixture that exposes skipped postskip temporal-prediction short-circuiting.
     ///
-    /// @return a small payload whose first skipped postskip block exposes the temporal prediction bug
+    /// @return the fixed payload fixture that exposes the skipped postskip temporal-prediction bug
     private static byte[] findPayloadForSkippedPostskipTemporalPrediction() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                        continue;
-                    }
-                    LumaIntraPredictionMode expectedYMode = LumaIntraPredictionMode.fromSymbolIndex(
-                            oracleDecoder.decodeSymbolAdapt(
-                                    oracleCdf.mutableKeyFrameYModeCdf(
-                                            LumaIntraPredictionMode.DC.contextIndex(),
-                                            LumaIntraPredictionMode.DC.contextIndex()
-                                    ),
-                                    12
-                            )
-                    );
-
-                    CdfContext shiftedCdf = CdfContext.createDefault();
-                    MsacDecoder shiftedDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    shiftedDecoder.decodeBooleanAdapt(shiftedCdf.mutableSkipCdf(0));
-                    shiftedDecoder.decodeBooleanAdapt(shiftedCdf.mutableSegmentPredictionCdf(2));
-                    LumaIntraPredictionMode shiftedYMode = LumaIntraPredictionMode.fromSymbolIndex(
-                            shiftedDecoder.decodeSymbolAdapt(
-                                    shiftedCdf.mutableKeyFrameYModeCdf(
-                                            LumaIntraPredictionMode.DC.contextIndex(),
-                                            LumaIntraPredictionMode.DC.contextIndex()
-                                    ),
-                                    12
-                            )
-                    );
-                    if (expectedYMode != shiftedYMode) {
-                        return payload;
-                    }
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload exposed the skipped postskip temporal prediction bug");
+        return readTileBlockHeaderFixture("skipped-postskip-temporal");
     }
 
-    /// Finds a small payload whose first inter block decodes `skip = true` and whose skipped
-    /// intra/inter decision would decode to `intra = true` if it were consumed.
+    /// Reads the fixed payload fixture that decodes a skipped inter block.
     ///
-    /// @return a small payload whose first inter block decodes `skip = true`
+    /// @return the fixed payload fixture that decodes a skipped inter block
     private static byte[] findPayloadForSkippedInterBlock() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced skip=true with a skipped intra=true decision");
+        return readTileBlockHeaderFixture("skipped-inter");
     }
 
-    /// Finds a small payload whose first inter block decodes `skip_mode = true`, whose skipped
-    /// skip flag would decode to `false`, and whose skipped intra/inter bit would decode to `true`.
+    /// Reads the fixed payload fixture that exercises skip-mode short-circuiting.
     ///
-    /// @return a small payload whose first inter block exposes skip-mode short-circuiting
+    /// @return the fixed payload fixture that exercises skip-mode short-circuiting
     private static byte[] findPayloadForSkipModeInterBlock() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00};
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipModeCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                        return payload;
-                    }
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced skip_mode=true with skipped skip=false and intra=true");
+        return readTileBlockHeaderFixture("skip-mode-inter");
     }
 
-    /// Finds a small payload whose first inter block decodes `skip = false`, `intra = false`,
-    /// `compound = true`, and a stable compound reference pair.
+    /// Reads the fixed payload fixture that decodes a compound reference pair.
     ///
-    /// @return a small payload whose first inter block decodes a compound reference pair
+    /// @return the fixed payload fixture that decodes a compound reference pair
     private static byte[] findPayloadForCompoundReferenceBlock() {
-        BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
-                FrameType.INTER,
-                false,
-                new byte[]{0x00},
-                false,
-                defaultDisabledSegmentation(),
-                false,
-                true,
-                false,
-                true
-        ));
-        BlockPosition position = new BlockPosition(4, 4);
-        seedInterReferenceNeighbors(neighborContext);
-
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                        continue;
-                    }
-                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(neighborContext.compoundReferenceContext(position)))) {
-                        continue;
-                    }
-                    decodeCompoundReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced a compound-reference inter block");
+        return readTileBlockHeaderFixture("compound-reference");
     }
 
-    /// Finds a small payload whose first inter block decodes `skip = false`, `intra = false`,
-    /// and `compound = false` so single-reference syntax is exercised.
+    /// Reads the fixed payload fixture that decodes a single-reference selection.
     ///
-    /// @return a small payload whose first inter block decodes a single-reference selection
+    /// @return the fixed payload fixture that decodes a single-reference selection
     private static byte[] findPayloadForSingleReferenceBlock() {
-        BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
-                FrameType.INTER,
-                false,
-                new byte[]{0x00},
-                false,
-                defaultDisabledSegmentation(),
-                false,
-                true,
-                false,
-                true
-        ));
-        BlockPosition position = new BlockPosition(4, 4);
-        seedInterReferenceNeighbors(neighborContext);
-
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(neighborContext.compoundReferenceContext(position)))) {
-                        continue;
-                    }
-                    decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced a single-reference inter block");
+        return readTileBlockHeaderFixture("single-reference");
     }
 
-    /// Finds a small payload whose first inter block decodes `skip = false` and whose consumed
-    /// intra/inter decision would decode to `false`.
+    /// Reads the fixed payload fixture that exercises `segment_reference_frame = INTRA_FRAME`.
     ///
-    /// @return a small payload whose first inter block decodes `skip = false`
+    /// @return the fixed payload fixture for the segment-forced intra path
     private static byte[] findPayloadForSegmentReferenceForcedIntra() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced skip=false with a skipped intra=false decision");
+        return readTileBlockHeaderFixture("segment-ref-intra");
     }
 
-    /// Finds a small payload whose first inter block decodes `skip = false` and whose consumed
-    /// intra/inter decision would decode to `true`.
+    /// Reads the fixed payload fixture that exercises `segment_reference_frame != INTRA_FRAME`.
     ///
-    /// @return a small payload whose first inter block decodes `skip = false`
+    /// @return the fixed payload fixture for the segment-forced inter path
     private static byte[] findPayloadForSegmentReferenceForcedInter() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced skip=false with a skipped intra=true decision");
+        return readTileBlockHeaderFixture("segment-ref-inter");
     }
 
-    /// Finds a small payload whose first inter block decodes `skip = false` and `intra = false`.
+    /// Reads the fixed payload fixture that decodes `skip = false` and `intra = false`.
     ///
-    /// @return a small payload whose first inter block decodes `skip = false` and `intra = false`
+    /// @return the fixed payload fixture that decodes `skip = false` and `intra = false`
     private static byte[] findPayloadForInterBlockWithoutSkipOrIntra() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x00, 0x00, 0x00};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced skip=false and intra=false");
+        return readTileBlockHeaderFixture("inter-no-skip-no-intra");
     }
 
-    /// Finds a small payload whose first inter block decodes a `NEWMV` single-reference path with a non-zero residual.
+    /// Reads the fixed payload fixture that decodes a `NEWMV` single-reference path with a non-zero residual.
     ///
-    /// @return a small payload whose first inter block decodes a `NEWMV` single-reference path with a non-zero residual
+    /// @return the fixed payload fixture for the `NEWMV` single-reference path
     private static byte[] findPayloadForSingleInterModeBlock() {
-        BlockPosition position = new BlockPosition(4, 4);
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
-                            FrameType.INTER,
-                            false,
-                            new byte[]{0x00},
-                            false,
-                            defaultDisabledSegmentation(),
-                            false,
-                            true,
-                            false,
-                            true
-                    ));
-                    seedInterReferenceNeighbors(neighborContext);
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2))) {
-                        continue;
-                    }
-                    int referenceFrame0 = decodeSingleReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
-                    BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                            neighborContext.provisionalInterModeContext(position, BlockSize.SIZE_16X16, false, referenceFrame0, -1);
-                    InterModeExpectation expectation =
-                            decodeSingleInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
-                    if (expectation.singleInterMode() != SingleInterPredictionMode.NEWMV || expectation.drlIndex() <= 0) {
-                        continue;
-                    }
-                    MotionVector predictor = provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0().vector();
-                    MotionVector decodedMotionVector = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor, false, false);
-                    if (!decodedMotionVector.equals(predictor)) {
-                        return payload;
-                    }
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced a NEWMV single-reference block with a non-zero residual");
+        return readTileBlockHeaderFixture("single-inter-mode");
     }
 
-    /// Finds a small payload whose first inter block decodes a `NEWMV_NEWMV` compound path with non-zero residuals.
+    /// Reads the fixed payload fixture that decodes a `NEWMV_NEWMV` compound path with non-zero residuals.
     ///
-    /// @return a small payload whose first inter block decodes a `NEWMV_NEWMV` compound path with non-zero residuals
+    /// @return the fixed payload fixture for the `NEWMV_NEWMV` compound path
     private static byte[] findPayloadForCompoundInterModeBlock() {
-        BlockPosition position = new BlockPosition(4, 4);
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                for (int third = 0; third < 256; third++) {
-                    byte[] payload = new byte[]{(byte) first, (byte) second, (byte) third, 0x00, 0x00, 0x00};
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(createTileContext(
-                            FrameType.INTER,
-                            false,
-                            new byte[]{0x00},
-                            false,
-                            defaultDisabledSegmentation(),
-                            false,
-                            true,
-                            false,
-                            true
-                    ));
-                    seedInterReferenceNeighbors(neighborContext);
-                    CdfContext oracleCdf = CdfContext.createDefault();
-                    MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                        continue;
-                    }
-                    if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0))) {
-                        continue;
-                    }
-                    if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2))) {
-                        continue;
-                    }
-                    InterReferenceExpectation references =
-                            decodeCompoundReferenceExpectation(oracleDecoder, oracleCdf, neighborContext, position);
-                    BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                            neighborContext.provisionalInterModeContext(
-                                    position,
-                                    BlockSize.SIZE_16X16,
-                                    true,
-                                    references.referenceFrame0(),
-                                    references.referenceFrame1()
-                            );
-                    InterModeExpectation expectation =
-                            decodeCompoundInterModeExpectation(oracleDecoder, oracleCdf, provisionalContext);
-                    if (expectation.compoundInterMode() != CompoundInterPredictionMode.NEWMV_NEWMV || expectation.drlIndex() <= 0) {
-                        continue;
-                    }
-                    BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
-                            provisionalContext.motionVectorCandidate(expectation.drlIndex());
-                    MotionVector predictor0 = candidate.motionVector0().vector();
-                    @org.jetbrains.annotations.Nullable InterMotionVector predictor1State = candidate.motionVector1();
-                    if (predictor1State == null) {
-                        throw new IllegalStateException("Compound provisional candidate must carry a secondary motion vector");
-                    }
-                    MotionVector predictor1 = predictor1State.vector();
-                    MotionVector decodedMotionVector0 = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor0, false, false);
-                    MotionVector decodedMotionVector1 = decodeMotionVectorResidual(oracleDecoder, oracleCdf, predictor1, false, false);
-                    if (!decodedMotionVector0.equals(predictor0) && !decodedMotionVector1.equals(predictor1)) {
-                        return payload;
-                    }
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced a NEWMV_NEWMV compound block with non-zero residuals");
+        return readTileBlockHeaderFixture("compound-inter-mode");
     }
 
-    /// Finds a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled.
+    /// Reads the fixed payload fixture that decodes a palette-enabled `DC/DC` key block.
     ///
-    /// @return a small payload whose first key-frame block decodes as `DC/DC` with both luma and chroma palette enabled
+    /// @return the fixed payload fixture that decodes a palette-enabled `DC/DC` key block
     private static byte[] findPayloadForPaletteBlock() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{(byte) first, (byte) second, 0x12, 0x34, 0x56, 0x78, (byte) 0x9A, (byte) 0xBC};
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-                LumaIntraPredictionMode yMode = LumaIntraPredictionMode.fromSymbolIndex(
-                        oracleDecoder.decodeSymbolAdapt(
-                                oracleCdf.mutableKeyFrameYModeCdf(LumaIntraPredictionMode.DC.contextIndex(), LumaIntraPredictionMode.DC.contextIndex()),
-                                12
-                        )
-                );
-                if (yMode != LumaIntraPredictionMode.DC) {
-                    continue;
-                }
-                UvIntraPredictionMode uvMode = UvIntraPredictionMode.fromSymbolIndex(
-                        oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableUvModeCdf(true, yMode.symbolIndex()), 13)
-                );
-                if (uvMode != UvIntraPredictionMode.DC) {
-                    continue;
-                }
-                if (!oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableLumaPaletteCdf(0, 0))) {
-                    continue;
-                }
-                int lumaPaletteSize = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutablePaletteSizeCdf(0, 0), 6) + 2;
-                decodePalettePlaneWithoutCache(oracleDecoder, 8, 0, lumaPaletteSize);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableChromaPaletteCdf(1))) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced palette-enabled DC/DC block syntax");
+        return readTileBlockHeaderFixture("palette");
     }
 
-    /// Finds a small payload whose first key-frame block decodes non-zero CDEF and delta-q/delta-lf side syntax.
+    /// Reads the fixed payload fixture that decodes non-zero CDEF and delta side syntax.
     ///
-    /// @return a small payload whose first key-frame block decodes non-zero CDEF and delta-q/delta-lf side syntax
+    /// @return the fixed payload fixture that decodes non-zero CDEF and delta side syntax
     private static byte[] findPayloadForCdefAndDeltaSyntax() {
-        for (int first = 0; first < 256; first++) {
-            for (int second = 0; second < 256; second++) {
-                byte[] payload = new byte[]{
-                        (byte) first,
-                        (byte) second,
-                        0x45,
-                        0x67,
-                        (byte) 0x89,
-                        (byte) 0xAB,
-                        (byte) 0xCD,
-                        (byte) 0xEF
-                };
-                CdfContext oracleCdf = CdfContext.createDefault();
-                MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
-                if (oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0))) {
-                    continue;
-                }
-                int cdefIndex = oracleDecoder.decodeBools(2);
-                int deltaQ = decodeSignedDeltaValue(oracleDecoder, oracleCdf.mutableDeltaQCdf(), 0);
-                int deltaLf = decodeSignedDeltaValue(oracleDecoder, oracleCdf.mutableDeltaLfCdf(0), 0);
-                if (cdefIndex > 0 && deltaQ != 0 && deltaLf != 0) {
-                    return payload;
-                }
-            }
-        }
-        throw new IllegalStateException("No deterministic payload produced non-zero CDEF and delta-q/delta-lf syntax");
+        return readTileBlockHeaderFixture("cdef-delta");
+    }
+
+    /// Reads one named payload fixture used by the deterministic block-header tests.
+    ///
+    /// @param fixtureName the fixture name within `tile-block-header-fixtures.txt`
+    /// @return the decoded payload bytes for the named fixture
+    private static byte[] readTileBlockHeaderFixture(String fixtureName) {
+        return HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE, fixtureName);
     }
 
     /// Decodes one compound-reference expectation with the same contexts as `TileBlockHeaderReader`.

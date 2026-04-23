@@ -91,7 +91,7 @@ Everything else expands from that baseline after correctness is stable.
 - `Track D`: not started
 - `Track E`: complete
 - `Track F`: in progress, minimal public output path exists and `show_existing_frame` now reaches `I422/I444` through both real parsed-stream still pictures and synthetic stored surfaces
-- `Track G`: in progress
+- `Track G`: complete
 
 ## Frozen Interfaces and Constraints
 
@@ -132,7 +132,7 @@ Current status:
 
 Goal: finish all syntax that must exist before reconstruction can begin.
 
-Status: in progress.
+Status: complete.
 
 Scope:
 
@@ -418,6 +418,9 @@ Already complete in this track:
 - reader contract tests for malformed streams and stable error codes
 - first-pixel reader success tests
 - output-layer and reconstruction-layer unit tests
+- generated named-fixture payload resources that replace the remaining runtime brute-force
+  tile-syntax, block-header, residual, and frame-reconstruction payload searches
+- deterministic wider-chroma and palette fixture coverage for reconstruction and public-reader reuse
 
 Write scope:
 

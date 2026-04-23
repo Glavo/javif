@@ -75,6 +75,10 @@ final class FrameReconstructorIntegrationTest {
     private static final byte[] BITSTREAM_DERIVED_PALETTE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
+    /// The generated named-fixture resource backing deterministic frame-reconstructor integration payloads.
+    private static final String FRAME_RECONSTRUCTOR_FIXTURE_RESOURCE_PATH =
+            "av1/fixtures/generated/frame-reconstructor-integration-fixtures.txt";
+
     /// The top-left `8x8` luma block produced by the current legacy directional still-picture fixture.
     private static final int[][] LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8 = {
             {127, 128, 128, 128, 128, 128, 128, 128},
@@ -1511,8 +1515,8 @@ final class FrameReconstructorIntegrationTest {
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
     }
 
-    /// Finds a deterministic payload whose decoded `I420` block carries one non-zero clipped or
-    /// fringe chroma residual under the supplied geometry.
+    /// Returns the fixed fixture payload whose decoded `I420` block carries one non-zero clipped
+    /// or fringe chroma residual under the supplied geometry.
     ///
     /// @param position the block origin to decode
     /// @param blockSize the block size to decode
@@ -1537,8 +1541,8 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
-    /// Finds a deterministic payload whose decoded chroma block carries one non-zero clipped or
-    /// fringe chroma residual under the supplied geometry.
+    /// Returns the fixed fixture payload whose decoded chroma block carries one non-zero clipped
+    /// or fringe chroma residual under the supplied geometry.
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
     /// @param position the block origin to decode
@@ -1555,50 +1559,37 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             FrameHeader.TransformMode transformMode
     ) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TilePartitionTreeReader.LeafNode decodedLeaf = decodeChromaLeafFromPayload(
-                            pixelFormat,
-                            payload,
-                            position,
-                            blockSize,
-                            codedWidth,
-                            codedHeight,
-                            transformMode
-                    );
-                    if (decodedLeaf.header().skip()) {
-                        continue;
-                    }
-                    ResidualLayout residualLayout = decodedLeaf.residualLayout();
-                    if ((hasNonZeroResidual(residualLayout.chromaUUnits()) || hasNonZeroResidual(residualLayout.chromaVUnits()))
-                            && (hasClippedResidualFootprint(residualLayout.chromaUUnits())
-                            || hasClippedResidualFootprint(residualLayout.chromaVUnits()))
-                            && bitstreamDerivedLeafProducesChromaChange(
-                                    decodedLeaf,
-                                    pixelFormat,
-                                    codedWidth,
-                                    codedHeight,
-                                    transformMode
-                            )) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported payloads are skipped while brute-forcing a clipped chroma residual fixture.
-                }
-            }
+        if (pixelFormat == PixelFormat.I420
+                && position.x4() == 0
+                && position.y4() == 0
+                && blockSize == BlockSize.SIZE_8X8
+                && codedWidth == 4
+                && codedHeight == 8
+                && transformMode == FrameHeader.TransformMode.LARGEST) {
+            return readFrameReconstructorFixture("i420-clipped");
         }
-        throw new IllegalStateException(
-                "No deterministic payload produced a clipped bitstream-derived " + pixelFormat + " chroma residual"
-        );
+        if (pixelFormat == PixelFormat.I420
+                && position.x4() == 1
+                && position.y4() == 1
+                && blockSize == BlockSize.SIZE_4X4
+                && codedWidth == 12
+                && codedHeight == 12
+                && transformMode == FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY) {
+            return readFrameReconstructorFixture("i420-fringe");
+        }
+        if (pixelFormat == PixelFormat.I422
+                && position.x4() == 0
+                && position.y4() == 0
+                && blockSize == BlockSize.SIZE_8X8
+                && codedWidth == 7
+                && codedHeight == 5
+                && transformMode == FrameHeader.TransformMode.LARGEST) {
+            return readFrameReconstructorFixture("i422-clipped");
+        }
+        throw new IllegalArgumentException("Unsupported chroma-residual fixture request");
     }
 
-    /// Finds a deterministic payload whose decoded `I420` block carries one non-zero
+    /// Returns the fixed fixture payload whose decoded `I420` block carries one non-zero
     /// larger-transform chroma residual with multiple decoded coefficients.
     ///
     /// @param position the block origin to decode
@@ -1614,48 +1605,15 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             FrameHeader.TransformMode transformMode
     ) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TilePartitionTreeReader.LeafNode decodedLeaf = decodeI420LeafFromPayload(
-                            payload,
-                            position,
-                            blockSize,
-                            codedWidth,
-                            codedHeight,
-                            transformMode
-                    );
-                    if (decodedLeaf.header().skip() || !decodedLeaf.header().hasChroma()) {
-                        continue;
-                    }
-                    if (decodedLeaf.transformLayout().chromaTransformSize() != TransformSize.TX_8X8) {
-                        continue;
-                    }
-                    ResidualLayout residualLayout = decodedLeaf.residualLayout();
-                    if ((hasMultiCoefficientResidual(residualLayout.chromaUUnits())
-                            || hasMultiCoefficientResidual(residualLayout.chromaVUnits()))
-                            && bitstreamDerivedLeafProducesChromaChange(
-                                    decodedLeaf,
-                                    PixelFormat.I420,
-                                    codedWidth,
-                                    codedHeight,
-                                    transformMode
-                            )) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported payloads are skipped while brute-forcing a larger-transform chroma residual fixture.
-                }
-            }
+        if (position.x4() == 0
+                && position.y4() == 0
+                && blockSize == BlockSize.SIZE_16X16
+                && codedWidth == 16
+                && codedHeight == 16
+                && transformMode == FrameHeader.TransformMode.LARGEST) {
+            return readFrameReconstructorFixture("i420-tx8x8");
         }
-        throw new IllegalStateException(
-                "No deterministic payload produced a larger-transform bitstream-derived I420 chroma residual"
-        );
+        throw new IllegalArgumentException("Unsupported larger-transform chroma-residual fixture request");
     }
 
     /// Decodes one `I420` leaf from a caller-supplied tile payload using the current integration
@@ -2975,115 +2933,42 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
-    /// Finds a small payload whose first residual flags match the requested sequence.
+    /// Returns the fixed fixture payload whose first residual flags match the requested sequence.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
     /// @param expectedFlags the requested prefix of `txb_skip` / all-zero flags
     /// @return a small payload whose first residual flags match the requested sequence
     private static byte[] findPayloadForResidualFlags(BlockSize blockSize, boolean[] expectedFlags) {
-        byte[] twoBytePayload = findPayloadForResidualFlags(blockSize, expectedFlags, 2);
-        if (twoBytePayload != null) {
-            return twoBytePayload;
+        if (blockSize == BlockSize.SIZE_4X4 && expectedFlags.length == 1 && expectedFlags[0]) {
+            return readFrameReconstructorFixture("4x4-all-zero");
         }
-        byte[] threeBytePayload = findPayloadForResidualFlags(blockSize, expectedFlags, 3);
-        if (threeBytePayload != null) {
-            return threeBytePayload;
-        }
-        throw new IllegalStateException("No deterministic payload produced the requested residual flags");
+        throw new IllegalArgumentException("Unsupported residual-flag fixture request");
     }
 
-    /// Finds a small payload whose first residual unit is supported and DC-only.
+    /// Returns the fixed fixture payload whose first residual unit is supported and DC-only.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
     /// @return a small payload whose first residual unit is supported and DC-only
     private static byte[] findPayloadForDcOnlyResidual(BlockSize blockSize) {
-        for (int searchBytes = 2; searchBytes <= 3; searchBytes++) {
-            int limit = 1 << (searchBytes << 3);
-            for (int value = 0; value < limit; value++) {
-                byte[] payload = new byte[8];
-                for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                    payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-                }
-                try {
-                    TileDecodeContext tileContext = createTileContext(payload, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY);
-                    TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-                    TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-                    TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-                    BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-                    TileBlockHeaderReader.BlockHeader header =
-                            blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-                    if (header.skip()) {
-                        continue;
-                    }
-                    TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-                    TransformResidualUnit residualUnit = residualSyntaxReader.read(header, transformLayout, neighborContext).lumaUnits()[0];
-                    if (!residualUnit.allZero() && residualUnit.endOfBlockIndex() == 0) {
-                        return payload;
-                    }
-                } catch (IllegalStateException ignored) {
-                    // Unsupported residual trees are skipped while brute-forcing a supported DC-only unit.
-                }
-            }
+        if (blockSize == BlockSize.SIZE_4X4) {
+            return readFrameReconstructorFixture("4x4-dc-only");
         }
-        throw new IllegalStateException("No deterministic payload produced a supported DC-only residual");
+        throw new IllegalArgumentException("Unsupported DC-only residual fixture request");
     }
 
-    /// Finds a payload whose first residual flags match the requested sequence, or `null`.
+    /// Reads one named frame-reconstructor integration fixture payload.
     ///
-    /// @param blockSize the block size whose residual syntax should be decoded
-    /// @param expectedFlags the requested prefix of `txb_skip` / all-zero flags
-    /// @param searchBytes the number of leading payload bytes to brute force
-    /// @return a payload whose first residual flags match the requested sequence, or `null`
-    private static byte[] findPayloadForResidualFlags(BlockSize blockSize, boolean[] expectedFlags, int searchBytes) {
-        int limit = 1 << (searchBytes << 3);
-        for (int value = 0; value < limit; value++) {
-            byte[] payload = new byte[8];
-            for (int byteIndex = 0; byteIndex < searchBytes; byteIndex++) {
-                payload[byteIndex] = (byte) (value >>> (byteIndex << 3));
-            }
-
-            TileDecodeContext tileContext = createTileContext(payload, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY);
-            TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
-            TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
-            TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
-            BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-            TileBlockHeaderReader.BlockHeader header =
-                    blockHeaderReader.read(new BlockPosition(0, 0), blockSize, neighborContext, false);
-            if (header.skip()) {
-                continue;
-            }
-
-            TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
-            ResidualLayout residualLayout;
-            try {
-                residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
-            } catch (IllegalStateException ignored) {
-                continue;
-            }
-            TransformResidualUnit[] residualUnits = residualLayout.lumaUnits();
-            if (residualUnits.length < expectedFlags.length) {
-                continue;
-            }
-
-            boolean matched = true;
-            for (int i = 0; i < expectedFlags.length; i++) {
-                if (residualUnits[i].allZero() != expectedFlags[i]) {
-                    matched = false;
-                    break;
-                }
-            }
-            if (matched) {
-                return payload;
-            }
-        }
-        return null;
+    /// @param fixtureName the logical fixture name in `frame-reconstructor-integration-fixtures.txt`
+    /// @return the decoded frame-reconstructor integration payload bytes
+    private static byte[] readFrameReconstructorFixture(String fixtureName) {
+        return HexFixtureResources.readNamedBytes(FRAME_RECONSTRUCTOR_FIXTURE_RESOURCE_PATH, fixtureName);
     }
 
-    /// Creates one tile-local decode context used by payload search helpers.
+    /// Creates one tile-local decode context used by monochrome residual integration helpers.
     ///
     /// @param payload the collected tile entropy payload
     /// @param transformMode the synthetic frame transform mode
-    /// @return one tile-local decode context used by payload search helpers
+    /// @return one tile-local decode context used by monochrome residual integration helpers
     private static TileDecodeContext createTileContext(byte[] payload, FrameHeader.TransformMode transformMode) {
         return TileDecodeContext.create(createAssembly(PixelFormat.I400, payload, 64, 64, transformMode), 0);
     }
