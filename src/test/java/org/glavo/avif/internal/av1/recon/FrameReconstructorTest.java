@@ -1240,6 +1240,149 @@ final class FrameReconstructorTest {
         });
     }
 
+    /// Verifies that one monochrome single-reference inter block bilinearly samples one
+    /// fractional luma footprint from one stored reference surface when the frame filter is
+    /// `BILINEAR`.
+    @Test
+    void reconstructsSingleReferenceI400InterBlockFromStoredSurfaceWithBilinearSubpelMotionVector() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                new int[][]{
+                        {0, 1, 2, 3, 4, 5, 6, 7},
+                        {10, 11, 12, 13, 14, 15, 16, 17},
+                        {20, 21, 22, 23, 24, 25, 26, 27},
+                        {30, 31, 32, 33, 34, 35, 36, 37},
+                        {40, 41, 42, 43, 44, 45, 46, 47},
+                        {50, 51, 52, 53, 54, 55, 56, 57},
+                        {60, 61, 62, 63, 64, 65, 66, 67},
+                        {70, 71, 72, 73, 74, 75, 76, 77}
+                },
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, new MotionVector(2, 6)),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.BILINEAR,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                new int[][]{
+                        {7, 8, 9, 10},
+                        {17, 18, 19, 20},
+                        {27, 28, 29, 30},
+                        {37, 38, 39, 40}
+                }
+        );
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 8, 0);
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, 0);
+    }
+
+    /// Verifies that one `I420` single-reference inter block bilinearly samples both luma and
+    /// chroma footprints from one stored reference surface when the frame filter is `BILINEAR`.
+    @Test
+    void reconstructsSingleReferenceI420InterBlockFromStoredSurfaceWithBilinearSubpelMotionVector() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                new int[][]{
+                        {0, 1, 2, 3, 4, 5, 6, 7},
+                        {10, 11, 12, 13, 14, 15, 16, 17},
+                        {20, 21, 22, 23, 24, 25, 26, 27},
+                        {30, 31, 32, 33, 34, 35, 36, 37},
+                        {40, 41, 42, 43, 44, 45, 46, 47},
+                        {50, 51, 52, 53, 54, 55, 56, 57},
+                        {60, 61, 62, 63, 64, 65, 66, 67},
+                        {70, 71, 72, 73, 74, 75, 76, 77}
+                },
+                new int[][]{
+                        {100, 101, 102, 103},
+                        {110, 111, 112, 113},
+                        {120, 121, 122, 123},
+                        {130, 131, 132, 133}
+                },
+                new int[][]{
+                        {150, 151, 152, 153},
+                        {160, 161, 162, 163},
+                        {170, 171, 172, 173},
+                        {180, 181, 182, 183}
+                }
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, true, 0, new MotionVector(2, 6)),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I420,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.BILINEAR,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                new int[][]{
+                        {7, 8, 9, 10},
+                        {17, 18, 19, 20},
+                        {27, 28, 29, 30},
+                        {37, 38, 39, 40}
+                }
+        );
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 8, 0);
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, 0);
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                0,
+                0,
+                new int[][]{
+                        {103, 104},
+                        {113, 114}
+                }
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaVPlane()),
+                0,
+                0,
+                new int[][]{
+                        {153, 154},
+                        {163, 164}
+                }
+        );
+        assertPlaneBlockFilled(requirePlane(planes.chromaUPlane()), 2, 0, 2, 4, 0);
+        assertPlaneBlockFilled(requirePlane(planes.chromaUPlane()), 0, 2, 4, 2, 0);
+        assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 2, 0, 2, 4, 0);
+        assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 0, 2, 4, 2, 0);
+    }
+
     /// Verifies that one monochrome inter block still applies supported residuals on top of the
     /// copied reference prediction.
     @Test
@@ -1301,31 +1444,39 @@ final class FrameReconstructorTest {
         assertEquals("Inter reconstruction requires one populated stored reference surface", exception.getMessage());
     }
 
-    /// Verifies that one chroma-bearing inter block still rejects motion vectors that would require
-    /// fractional chroma sampling.
+    /// Verifies that one chroma-bearing inter block still rejects fractional motion vectors when
+    /// the frame-level interpolation filter is not `BILINEAR`.
     @Test
-    void rejectsI420InterBlocksWithFractionalChromaMotionVectors() {
+    void rejectsI420InterBlocksWithFractionalMotionVectorsWithoutBilinearFilter() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
                 PixelFormat.I420,
                 new int[][]{
-                        {10, 11, 12, 13},
-                        {20, 21, 22, 23},
-                        {30, 31, 32, 33},
-                        {40, 41, 42, 43}
+                        {0, 1, 2, 3, 4, 5, 6, 7},
+                        {10, 11, 12, 13, 14, 15, 16, 17},
+                        {20, 21, 22, 23, 24, 25, 26, 27},
+                        {30, 31, 32, 33, 34, 35, 36, 37},
+                        {40, 41, 42, 43, 44, 45, 46, 47},
+                        {50, 51, 52, 53, 54, 55, 56, 57},
+                        {60, 61, 62, 63, 64, 65, 66, 67},
+                        {70, 71, 72, 73, 74, 75, 76, 77}
                 },
                 new int[][]{
-                        {100, 101},
-                        {110, 111}
+                        {100, 101, 102, 103},
+                        {110, 111, 112, 113},
+                        {120, 121, 122, 123},
+                        {130, 131, 132, 133}
                 },
                 new int[][]{
-                        {150, 151},
-                        {160, 161}
+                        {150, 151, 152, 153},
+                        {160, 161, 162, 163},
+                        {170, 171, 172, 173},
+                        {180, 181, 182, 183}
                 }
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createSingleReferenceInterBlockHeader(position, size, true, 0, new MotionVector(0, 4)),
+                createSingleReferenceInterBlockHeader(position, size, true, 0, new MotionVector(2, 6)),
                 createTransformLayout(position, size, PixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
@@ -1333,13 +1484,20 @@ final class FrameReconstructorTest {
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
                 () -> new FrameReconstructor().reconstruct(
-                        createInterFrameSyntaxDecodeResult(PixelFormat.I420, 4, 4, 0, leaf),
+                        createInterFrameSyntaxDecodeResult(
+                                PixelFormat.I420,
+                                8,
+                                8,
+                                0,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                                leaf
+                        ),
                         createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
                 )
         );
 
         assertEquals(
-                "Inter reconstruction currently requires chroma-aligned integer motion vectors for I420",
+                "Inter reconstruction currently supports fractional motion vectors only with BILINEAR filter for I420",
                 exception.getMessage()
         );
     }
@@ -1392,7 +1550,47 @@ final class FrameReconstructorTest {
             TilePartitionTreeReader.Node... roots
     ) {
         SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
-        FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot);
+        FrameHeader frameHeader = createInterFrameHeader(
+                width,
+                height,
+                referenceSlot,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{roots},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one synthetic structural inter frame-decode result for reconstruction tests with one
+    /// caller-supplied frame-level interpolation filter.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param interpolationFilter the frame-level interpolation filter used for inter prediction
+    /// @param roots the top-level tile roots for tile `0`
+    /// @return one synthetic structural inter frame-decode result
+    private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
+            PixelFormat pixelFormat,
+            int width,
+            int height,
+            int referenceSlot,
+            FrameHeader.InterpolationFilter interpolationFilter,
+            TilePartitionTreeReader.Node... roots
+    ) {
+        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
+        FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot, interpolationFilter);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
@@ -1547,6 +1745,28 @@ final class FrameReconstructorTest {
     /// @param referenceSlot the stored reference slot to expose as `LAST_FRAME`
     /// @return one minimal inter frame header
     private static FrameHeader createInterFrameHeader(int width, int height, int referenceSlot) {
+        return createInterFrameHeader(
+                width,
+                height,
+                referenceSlot,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+    }
+
+    /// Creates one minimal inter frame header for reconstruction tests with one caller-supplied
+    /// frame-level interpolation filter.
+    ///
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot to expose as `LAST_FRAME`
+    /// @param interpolationFilter the frame-level interpolation filter
+    /// @return one minimal inter frame header
+    private static FrameHeader createInterFrameHeader(
+            int width,
+            int height,
+            int referenceSlot,
+            FrameHeader.InterpolationFilter interpolationFilter
+    ) {
         return new FrameHeader(
                 0,
                 0,
@@ -1571,7 +1791,7 @@ final class FrameReconstructorTest {
                 new FrameHeader.SuperResolutionInfo(false, width),
                 false,
                 false,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                interpolationFilter,
                 false,
                 false,
                 true,

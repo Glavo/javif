@@ -26,7 +26,9 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
@@ -378,6 +380,121 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(offsetChromaUPlane.sample(15, 15) > baselineChromaUPlane.sample(15, 15));
         assertTrue(offsetChromaVPlane.sample(0, 0) < baselineChromaVPlane.sample(0, 0));
         assertTrue(offsetChromaVPlane.sample(15, 15) < baselineChromaVPlane.sample(15, 15));
+    }
+
+    /// Verifies that the same deterministic real inter tile payload reconstructs through one
+    /// single-reference `BILINEAR` subpel path against one stored `I420` reference surface.
+    @Test
+    void reconstructsBitstreamDerivedI420InterLeafWithBilinearSubpelPredictionFromStoredReferenceSurface() {
+        MotionVector subpelMotionVector = new MotionVector(2, 2);
+        FrameAssembly assembly = createInterAssembly(
+                PixelFormat.I420,
+                BITSTREAM_DERIVED_INTER_PAYLOAD,
+                64,
+                64,
+                0,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
+        TilePartitionTreeReader.LeafNode decodedLeaf = firstLeaf(syntaxDecodeResult.tileRoots(0));
+
+        assertFalse(decodedLeaf.header().skip());
+        assertFalse(decodedLeaf.header().intra());
+        assertFalse(decodedLeaf.header().compoundReference());
+        assertEquals(0, decodedLeaf.header().referenceFrame0());
+        assertEquals(FrameHeader.InterpolationFilter.BILINEAR, syntaxDecodeResult.assembly().frameHeader().subpelFilterMode());
+
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                copyBlockHeaderWithPrimaryMotionVector(decodedLeaf.header(), subpelMotionVector),
+                decodedLeaf.transformLayout(),
+                createResidualLayout(
+                        decodedLeaf.header().position(),
+                        decodedLeaf.header().size(),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().lumaUnits()),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaUUnits()),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaVUnits())
+                )
+        );
+        FrameSyntaxDecodeResult zeroResidualSyntaxDecodeResult = new FrameSyntaxDecodeResult(
+                syntaxDecodeResult.assembly(),
+                new TilePartitionTreeReader.Node[][]{{zeroResidualLeaf}},
+                syntaxDecodeResult.decodedTemporalMotionFields(),
+                syntaxDecodeResult.finalTileCdfContexts()
+        );
+
+        DecodedPlane referenceLumaPlane = createCheckerboardPlane(64, 64, 16, 208);
+        DecodedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
+        DecodedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                64,
+                64,
+                referenceLumaPlane,
+                referenceChromaUPlane,
+                referenceChromaVPlane
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                zeroResidualSyntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        int lumaOriginX = zeroResidualLeaf.header().position().x4() << 2;
+        int lumaOriginY = zeroResidualLeaf.header().position().y4() << 2;
+        int visibleLumaWidth = zeroResidualLeaf.transformLayout().visibleWidthPixels();
+        int visibleLumaHeight = zeroResidualLeaf.transformLayout().visibleHeightPixels();
+        int chromaOriginX = lumaOriginX >> 1;
+        int chromaOriginY = lumaOriginY >> 1;
+        int visibleChromaWidth = visibleLumaWidth >> 1;
+        int visibleChromaHeight = visibleLumaHeight >> 1;
+        DecodedPlane decodedChromaUPlane = requirePlane(decodedPlanes.chromaUPlane());
+        DecodedPlane decodedChromaVPlane = requirePlane(decodedPlanes.chromaVPlane());
+
+        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertTrue(decodedPlanes.hasChroma());
+        assertEquals(subpelMotionVector, requireNonNullInterMotionVector(zeroResidualLeaf.header().motionVector0()).vector());
+        assertPlaneBlockEquals(
+                decodedPlanes.lumaPlane(),
+                lumaOriginX,
+                lumaOriginY,
+                sampleReferencePlaneBlockBilinearly(
+                        referenceLumaPlane,
+                        visibleLumaWidth,
+                        visibleLumaHeight,
+                        lumaOriginX * 4 + subpelMotionVector.columnQuarterPel(),
+                        lumaOriginY * 4 + subpelMotionVector.rowQuarterPel(),
+                        4,
+                        4
+                )
+        );
+        assertPlaneBlockEquals(
+                decodedChromaUPlane,
+                chromaOriginX,
+                chromaOriginY,
+                sampleReferencePlaneBlockBilinearly(
+                        referenceChromaUPlane,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        chromaOriginX * 8 + subpelMotionVector.columnQuarterPel(),
+                        chromaOriginY * 8 + subpelMotionVector.rowQuarterPel(),
+                        8,
+                        8
+                )
+        );
+        assertPlaneBlockEquals(
+                decodedChromaVPlane,
+                chromaOriginX,
+                chromaOriginY,
+                sampleReferencePlaneBlockBilinearly(
+                        referenceChromaVPlane,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        chromaOriginX * 8 + subpelMotionVector.columnQuarterPel(),
+                        chromaOriginY * 8 + subpelMotionVector.rowQuarterPel(),
+                        8,
+                        8
+                )
+        );
     }
 
     /// Verifies that the same deterministic real inter tile payload now keeps its decoded residuals
@@ -2228,6 +2345,15 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
+    /// Returns the supplied inter motion-vector state after asserting that it is present.
+    ///
+    /// @param motionVector the decoded inter motion-vector state, or `null`
+    /// @return the supplied inter motion-vector state after asserting that it is present
+    private static InterMotionVector requireNonNullInterMotionVector(@Nullable InterMotionVector motionVector) {
+        assertNotNull(motionVector);
+        return motionVector;
+    }
+
     /// Asserts that one residual-unit footprint carries at least one visible delta while samples
     /// outside the visible footprint remain unchanged.
     ///
@@ -2796,8 +2922,41 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             int referenceSlot
     ) {
+        return createInterAssembly(
+                pixelFormat,
+                payload,
+                codedWidth,
+                codedHeight,
+                referenceSlot,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+    }
+
+    /// Creates one synthetic single-tile inter frame assembly whose first direct reference points
+    /// at the requested stored slot and whose frame header exposes one requested subpel filter.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param subpelFilterMode the frame-level subpel interpolation filter
+    /// @return one synthetic single-tile inter frame assembly
+    private static FrameAssembly createInterAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot,
+            FrameHeader.InterpolationFilter subpelFilterMode
+    ) {
         SequenceHeader sequenceHeader = createSyntheticSequenceHeader(pixelFormat, codedWidth, codedHeight, false);
-        FrameHeader frameHeader = createSyntheticInterFrameHeader(codedWidth, codedHeight, referenceSlot);
+        FrameHeader frameHeader = createSyntheticInterFrameHeader(
+                codedWidth,
+                codedHeight,
+                referenceSlot,
+                subpelFilterMode
+        );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
@@ -3108,6 +3267,27 @@ final class FrameReconstructorIntegrationTest {
             int codedHeight,
             int referenceSlot
     ) {
+        return createSyntheticInterFrameHeader(
+                codedWidth,
+                codedHeight,
+                referenceSlot,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+    }
+
+    /// Creates one synthetic inter frame header for reference-surface reconstruction tests.
+    ///
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param subpelFilterMode the frame-level subpel interpolation filter
+    /// @return one synthetic inter frame header for reference-surface reconstruction tests
+    private static FrameHeader createSyntheticInterFrameHeader(
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot,
+            FrameHeader.InterpolationFilter subpelFilterMode
+    ) {
         return new FrameHeader(
                 0,
                 0,
@@ -3132,7 +3312,7 @@ final class FrameReconstructorIntegrationTest {
                 new FrameHeader.SuperResolutionInfo(false, codedWidth),
                 false,
                 false,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                subpelFilterMode,
                 false,
                 false,
                 true,
@@ -3513,6 +3693,71 @@ final class FrameReconstructorIntegrationTest {
         return slots;
     }
 
+    /// Returns one decoded inter block header with a replaced resolved primary motion vector.
+    ///
+    /// @param header the decoded inter block header to copy
+    /// @param motionVector the replacement primary motion vector
+    /// @return one decoded inter block header with a replaced resolved primary motion vector
+    private static TileBlockHeaderReader.BlockHeader copyBlockHeaderWithPrimaryMotionVector(
+            TileBlockHeaderReader.BlockHeader header,
+            MotionVector motionVector
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                header.position(),
+                header.size(),
+                header.hasChroma(),
+                header.skip(),
+                header.skipMode(),
+                header.intra(),
+                header.useIntrabc(),
+                header.compoundReference(),
+                header.referenceFrame0(),
+                header.referenceFrame1(),
+                header.singleInterMode(),
+                header.compoundInterMode(),
+                header.drlIndex(),
+                InterMotionVector.resolved(motionVector),
+                header.motionVector1(),
+                header.segmentPredicted(),
+                header.segmentId(),
+                header.cdefIndex(),
+                header.qIndex(),
+                header.deltaLfValues(),
+                header.yMode(),
+                header.uvMode(),
+                header.yPaletteSize(),
+                header.uvPaletteSize(),
+                header.yPaletteColors(),
+                header.uPaletteColors(),
+                header.vPaletteColors(),
+                header.yPaletteIndices(),
+                header.uvPaletteIndices(),
+                header.filterIntraMode(),
+                header.yAngle(),
+                header.uvAngle(),
+                header.cflAlphaU(),
+                header.cflAlphaV()
+        );
+    }
+
+    /// Creates one exact decoded checkerboard plane.
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param evenSample the sample value stored at even `(x + y)` parity
+    /// @param oddSample the sample value stored at odd `(x + y)` parity
+    /// @return one exact decoded checkerboard plane
+    private static DecodedPlane createCheckerboardPlane(int width, int height, int evenSample, int oddSample) {
+        short[] samples = new short[width * height];
+        int nextIndex = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                samples[nextIndex++] = (short) ((((x + y) & 1) == 0) ? evenSample : oddSample);
+            }
+        }
+        return new DecodedPlane(width, height, width, samples);
+    }
+
     /// Creates one exact decoded gradient plane.
     ///
     /// @param width the plane width in samples
@@ -3530,6 +3775,85 @@ final class FrameReconstructorIntegrationTest {
             }
         }
         return new DecodedPlane(width, height, width, samples);
+    }
+
+    /// Samples one rectangular reference-plane block using bilinear interpolation with edge
+    /// extension.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param width the sampled block width in samples
+    /// @param height the sampled block height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @return one sampled reference-plane block in row-major order
+    private static int[][] sampleReferencePlaneBlockBilinearly(
+            DecodedPlane referencePlane,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        int[][] samples = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            int sampleNumeratorY = sourceNumeratorY + y * denominatorY;
+            int sourceY0 = Math.floorDiv(sampleNumeratorY, denominatorY);
+            int fractionY = Math.floorMod(sampleNumeratorY, denominatorY);
+            int clampedSourceY0 = Math.max(0, Math.min(sourceY0, referencePlane.height() - 1));
+            int clampedSourceY1 = Math.max(0, Math.min(sourceY0 + 1, referencePlane.height() - 1));
+            for (int x = 0; x < width; x++) {
+                int sampleNumeratorX = sourceNumeratorX + x * denominatorX;
+                int sourceX0 = Math.floorDiv(sampleNumeratorX, denominatorX);
+                int fractionX = Math.floorMod(sampleNumeratorX, denominatorX);
+                int clampedSourceX0 = Math.max(0, Math.min(sourceX0, referencePlane.width() - 1));
+                int clampedSourceX1 = Math.max(0, Math.min(sourceX0 + 1, referencePlane.width() - 1));
+                samples[y][x] = bilinearInterpolate(
+                        referencePlane.sample(clampedSourceX0, clampedSourceY0),
+                        referencePlane.sample(clampedSourceX1, clampedSourceY0),
+                        referencePlane.sample(clampedSourceX0, clampedSourceY1),
+                        referencePlane.sample(clampedSourceX1, clampedSourceY1),
+                        fractionX,
+                        denominatorX,
+                        fractionY,
+                        denominatorY
+                );
+            }
+        }
+        return samples;
+    }
+
+    /// Returns one bilinearly interpolated unsigned sample.
+    ///
+    /// @param topLeft the top-left source sample
+    /// @param topRight the top-right source sample
+    /// @param bottomLeft the bottom-left source sample
+    /// @param bottomRight the bottom-right source sample
+    /// @param fractionX the horizontal source fraction in `[0, denominatorX)`
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param fractionY the vertical source fraction in `[0, denominatorY)`
+    /// @param denominatorY the vertical interpolation denominator
+    /// @return one bilinearly interpolated unsigned sample
+    private static int bilinearInterpolate(
+            int topLeft,
+            int topRight,
+            int bottomLeft,
+            int bottomRight,
+            int fractionX,
+            int denominatorX,
+            int fractionY,
+            int denominatorY
+    ) {
+        int inverseFractionX = denominatorX - fractionX;
+        int inverseFractionY = denominatorY - fractionY;
+        long denominator = (long) denominatorX * denominatorY;
+        long weightedSum = (long) inverseFractionX * inverseFractionY * topLeft
+                + (long) fractionX * inverseFractionY * topRight
+                + (long) inverseFractionX * fractionY * bottomLeft
+                + (long) fractionX * fractionY * bottomRight;
+        return (int) ((weightedSum + (denominator >> 1)) / denominator);
     }
 
     /// Returns all supplied residual units converted to all-zero units with preserved geometry.
