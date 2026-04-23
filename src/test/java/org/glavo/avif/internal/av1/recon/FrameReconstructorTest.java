@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -1240,6 +1241,62 @@ final class FrameReconstructorTest {
         });
     }
 
+    /// Verifies that one monochrome compound-reference inter block averages two stored reference
+    /// surfaces when both motion vectors stay integer-aligned.
+    @Test
+    void reconstructsCompoundReferenceI400InterBlockFromStoredSurfacesWithIntegerMotionVectors() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                new int[][]{
+                        {0, 2, 4, 6},
+                        {20, 22, 24, 26},
+                        {40, 42, 44, 46},
+                        {60, 62, 64, 66}
+                },
+                null,
+                null
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                new int[][]{
+                        {10, 12, 14, 16},
+                        {30, 32, 34, 36},
+                        {50, 52, 54, 56},
+                        {70, 72, 74, 76}
+                },
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        false,
+                        0,
+                        1,
+                        MotionVector.zero(),
+                        MotionVector.zero()
+                ),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, 1, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneEquals(planes.lumaPlane(), new int[][]{
+                {5, 7, 9, 11},
+                {25, 27, 29, 31},
+                {45, 47, 49, 51},
+                {65, 67, 69, 71}
+        });
+    }
+
     /// Verifies that one monochrome single-reference inter block bilinearly samples one
     /// fractional luma footprint from one stored reference surface when the frame filter is
     /// `BILINEAR`.
@@ -1381,6 +1438,106 @@ final class FrameReconstructorTest {
         assertPlaneBlockFilled(requirePlane(planes.chromaUPlane()), 0, 2, 4, 2, 0);
         assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 2, 0, 2, 4, 0);
         assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 0, 2, 4, 2, 0);
+    }
+
+    /// Verifies that one `I420` compound-reference inter block averages two bilinearly sampled
+    /// reference surfaces on both luma and chroma planes.
+    @Test
+    void reconstructsCompoundReferenceI420InterBlockFromStoredSurfacesWithBilinearSubpelMotionVectors() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(2, 2);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                new int[][]{
+                        {0, 8, 16, 24, 32, 40, 48, 56},
+                        {16, 24, 32, 40, 48, 56, 64, 72},
+                        {32, 40, 48, 56, 64, 72, 80, 88},
+                        {48, 56, 64, 72, 80, 88, 96, 104},
+                        {64, 72, 80, 88, 96, 104, 112, 120},
+                        {80, 88, 96, 104, 112, 120, 128, 136},
+                        {96, 104, 112, 120, 128, 136, 144, 152},
+                        {112, 120, 128, 136, 144, 152, 160, 168}
+                },
+                new int[][]{
+                        {100, 132, 164, 196},
+                        {116, 148, 180, 212},
+                        {132, 164, 196, 228},
+                        {148, 180, 212, 244}
+                },
+                new int[][]{
+                        {80, 112, 144, 176},
+                        {96, 128, 160, 192},
+                        {112, 144, 176, 208},
+                        {128, 160, 192, 224}
+                }
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                new int[][]{
+                        {200, 192, 184, 176, 168, 160, 152, 144},
+                        {184, 176, 168, 160, 152, 144, 136, 128},
+                        {168, 160, 152, 144, 136, 128, 120, 112},
+                        {152, 144, 136, 128, 120, 112, 104, 96},
+                        {136, 128, 120, 112, 104, 96, 88, 80},
+                        {120, 112, 104, 96, 88, 80, 72, 64},
+                        {104, 96, 88, 80, 72, 64, 56, 48},
+                        {88, 80, 72, 64, 56, 48, 40, 32}
+                },
+                new int[][]{
+                        {200, 168, 136, 104},
+                        {184, 152, 120, 88},
+                        {168, 136, 104, 72},
+                        {152, 120, 88, 56}
+                },
+                new int[][]{
+                        {220, 188, 156, 124},
+                        {204, 172, 140, 108},
+                        {188, 156, 124, 92},
+                        {172, 140, 108, 76}
+                }
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        true,
+                        0,
+                        1,
+                        motionVector,
+                        motionVector
+                ),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I420,
+                        8,
+                        8,
+                        0,
+                        1,
+                        FrameHeader.InterpolationFilter.BILINEAR,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertPlaneBlockEquals(planes.lumaPlane(), 0, 0, new int[][]{
+                {100, 100, 100, 100},
+                {100, 100, 100, 100},
+                {100, 100, 100, 100},
+                {100, 100, 100, 100}
+        });
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 0, 0, new int[][]{
+                {150, 150},
+                {150, 150}
+        });
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 0, 0, new int[][]{
+                {150, 150},
+                {150, 150}
+        });
     }
 
     /// Verifies that one monochrome inter block still applies supported residuals on top of the
@@ -1556,6 +1713,72 @@ final class FrameReconstructorTest {
                 referenceSlot,
                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
         );
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{roots},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one synthetic structural compound-inter frame-decode result for reconstruction
+    /// tests with two stored reference slots.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot0 the stored slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored slot exposed as `LAST2_FRAME`
+    /// @param roots the top-level tile roots for tile `0`
+    /// @return one synthetic structural compound-inter frame-decode result
+    private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
+            PixelFormat pixelFormat,
+            int width,
+            int height,
+            int referenceSlot0,
+            int referenceSlot1,
+            TilePartitionTreeReader.Node... roots
+    ) {
+        return createInterFrameSyntaxDecodeResult(
+                pixelFormat,
+                width,
+                height,
+                referenceSlot0,
+                referenceSlot1,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                roots
+        );
+    }
+
+    /// Creates one synthetic structural compound-inter frame-decode result for reconstruction
+    /// tests with two stored reference slots and one caller-supplied interpolation filter.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot0 the stored slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored slot exposed as `LAST2_FRAME`
+    /// @param interpolationFilter the frame-level interpolation filter
+    /// @param roots the top-level tile roots for tile `0`
+    /// @return one synthetic structural compound-inter frame-decode result
+    private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
+            PixelFormat pixelFormat,
+            int width,
+            int height,
+            int referenceSlot0,
+            int referenceSlot1,
+            FrameHeader.InterpolationFilter interpolationFilter,
+            TilePartitionTreeReader.Node... roots
+    ) {
+        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
+        FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot0, referenceSlot1, interpolationFilter);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
@@ -1845,6 +2068,100 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Creates one minimal compound-inter frame header for reconstruction tests with two stored
+    /// reference slots and one caller-supplied interpolation filter.
+    ///
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot0 the stored slot to expose as `LAST_FRAME`
+    /// @param referenceSlot1 the stored slot to expose as `LAST2_FRAME`
+    /// @param interpolationFilter the frame-level interpolation filter
+    /// @return one minimal compound-inter frame header
+    private static FrameHeader createInterFrameHeader(
+            int width,
+            int height,
+            int referenceSlot0,
+            int referenceSlot1,
+            FrameHeader.InterpolationFilter interpolationFilter
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0,
+                false,
+                new int[]{referenceSlot0, referenceSlot1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(width, width, height, width, height),
+                new FrameHeader.SuperResolutionInfo(false, width),
+                false,
+                false,
+                interpolationFilter,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                false,
+                false
+        );
+    }
+
     /// Creates one supported intra block header for reconstruction tests.
     ///
     /// @param position the block origin in 4x4 units
@@ -2064,6 +2381,60 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Creates one compound-reference inter block header for reconstruction tests.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in LAST..ALTREF order
+    /// @param motionVector0 the resolved primary motion vector
+    /// @param motionVector1 the resolved secondary motion vector
+    /// @return one compound-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createCompoundReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector motionVector0,
+            MotionVector motionVector1
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                hasChroma,
+                false,
+                false,
+                false,
+                false,
+                true,
+                referenceFrame0,
+                referenceFrame1,
+                null,
+                CompoundInterPredictionMode.NEARESTMV_NEARESTMV,
+                0,
+                InterMotionVector.resolved(motionVector0),
+                InterMotionVector.resolved(motionVector1),
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
     /// Creates one stored reference surface snapshot for synthetic inter reconstruction tests.
     ///
     /// @param pixelFormat the decoded chroma layout stored by the snapshot
@@ -2108,6 +2479,25 @@ final class FrameReconstructorTest {
     ) {
         ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
         slots[slot] = snapshot;
+        return slots;
+    }
+
+    /// Creates one slot-indexed reference-surface array with two populated entries.
+    ///
+    /// @param slot0 the first zero-based reference slot to populate
+    /// @param snapshot0 the stored reference surface exposed through `slot0`
+    /// @param slot1 the second zero-based reference slot to populate
+    /// @param snapshot1 the stored reference surface exposed through `slot1`
+    /// @return one slot-indexed reference-surface array for compound reconstruction tests
+    private static @Nullable ReferenceSurfaceSnapshot[] createReferenceSurfaceSlots(
+            int slot0,
+            ReferenceSurfaceSnapshot snapshot0,
+            int slot1,
+            ReferenceSurfaceSnapshot snapshot1
+    ) {
+        ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
+        slots[slot0] = snapshot0;
+        slots[slot1] = snapshot1;
         return slots;
     }
 

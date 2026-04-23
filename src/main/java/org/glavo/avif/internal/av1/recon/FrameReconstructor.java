@@ -409,25 +409,41 @@ public final class FrameReconstructor {
             throw new IllegalStateException("Empty transform layout is not reconstructable");
         }
         if (!header.intra()) {
-            if (header.compoundReference()) {
-                throw new IllegalStateException("Compound inter reconstruction is not implemented yet");
-            }
             if (header.motionVector0() == null) {
                 throw new IllegalStateException("Inter reconstruction requires one resolved primary motion vector");
             }
             if (!header.motionVector0().resolved()) {
                 throw new IllegalStateException("Inter reconstruction requires one resolved primary motion vector");
             }
+            if (header.compoundReference()) {
+                if (header.motionVector1() == null) {
+                    throw new IllegalStateException("Compound inter reconstruction requires one resolved secondary motion vector");
+                }
+                if (!header.motionVector1().resolved()) {
+                    throw new IllegalStateException("Compound inter reconstruction requires one resolved secondary motion vector");
+                }
+            }
             if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
                 throw new IllegalStateException("Inter palette reconstruction is not implemented yet");
             }
-            requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, header, pixelFormat);
+            requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame0());
+            if (header.compoundReference()) {
+                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame1());
+            }
             requireSupportedInterMotionVector(
                     header.motionVector0().vector(),
                     pixelFormat,
                     header.hasChroma(),
                     frameHeader.subpelFilterMode()
             );
+            if (header.compoundReference()) {
+                requireSupportedInterMotionVector(
+                        Objects.requireNonNull(header.motionVector1(), "header.motionVector1()").vector(),
+                        pixelFormat,
+                        header.hasChroma(),
+                        frameHeader.subpelFilterMode()
+                );
+            }
         }
         for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
@@ -455,7 +471,7 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Reconstructs the currently supported single-reference inter prediction subset.
+    /// Reconstructs the currently supported inter prediction subset.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -475,8 +491,53 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
+        if (header.compoundReference()) {
+            reconstructCompoundInterPrediction(
+                    lumaPlane,
+                    chromaUPlane,
+                    chromaVPlane,
+                    header,
+                    transformLayout,
+                    pixelFormat,
+                    frameHeader,
+                    referenceSurfaceSnapshots
+            );
+        } else {
+            reconstructSingleReferenceInterPrediction(
+                    lumaPlane,
+                    chromaUPlane,
+                    chromaVPlane,
+                    header,
+                    transformLayout,
+                    pixelFormat,
+                    frameHeader,
+                    referenceSurfaceSnapshots
+            );
+        }
+    }
+
+    /// Reconstructs the currently supported single-reference inter prediction subset.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the inter state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    private static void reconstructSingleReferenceInterPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
+    ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
-                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, header, pixelFormat);
+                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame0());
         DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         int lumaX = header.position().x4() << 2;
@@ -535,6 +596,102 @@ public final class FrameReconstructor {
         );
     }
 
+    /// Reconstructs the currently supported compound-reference inter prediction subset by averaging
+    /// the two predicted reference surfaces after each one has been sampled with the current
+    /// integer-copy or bilinear-subpel path.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the inter state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    private static void reconstructCompoundInterPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
+    ) {
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 =
+                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame0());
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 =
+                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame1());
+        DecodedPlanes referencePlanes0 = referenceSurfaceSnapshot0.decodedPlanes();
+        DecodedPlanes referencePlanes1 = referenceSurfaceSnapshot1.decodedPlanes();
+        MotionVector motionVector0 = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
+        MotionVector motionVector1 = Objects.requireNonNull(header.motionVector1(), "header.motionVector1()").vector();
+        int lumaX = header.position().x4() << 2;
+        int lumaY = header.position().y4() << 2;
+        int visibleLumaWidth = transformLayout.visibleWidthPixels();
+        int visibleLumaHeight = transformLayout.visibleHeightPixels();
+
+        reconstructCompoundInterPlanePrediction(
+                lumaPlane,
+                referencePlanes0.lumaPlane(),
+                referencePlanes1.lumaPlane(),
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                motionVector0.columnQuarterPel(),
+                motionVector0.rowQuarterPel(),
+                motionVector1.columnQuarterPel(),
+                motionVector1.rowQuarterPel(),
+                4,
+                4
+        );
+
+        if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
+            return;
+        }
+
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = lumaX >> chromaSubsamplingX;
+        int chromaY = lumaY >> chromaSubsamplingY;
+        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
+        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaDenominatorX = 4 << chromaSubsamplingX;
+        int chromaDenominatorY = 4 << chromaSubsamplingY;
+
+        reconstructCompoundInterPlanePrediction(
+                chromaUPlane,
+                Objects.requireNonNull(referencePlanes0.chromaUPlane(), "referencePlanes0.chromaUPlane()"),
+                Objects.requireNonNull(referencePlanes1.chromaUPlane(), "referencePlanes1.chromaUPlane()"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                motionVector0.columnQuarterPel(),
+                motionVector0.rowQuarterPel(),
+                motionVector1.columnQuarterPel(),
+                motionVector1.rowQuarterPel(),
+                chromaDenominatorX,
+                chromaDenominatorY
+        );
+        reconstructCompoundInterPlanePrediction(
+                chromaVPlane,
+                Objects.requireNonNull(referencePlanes0.chromaVPlane(), "referencePlanes0.chromaVPlane()"),
+                Objects.requireNonNull(referencePlanes1.chromaVPlane(), "referencePlanes1.chromaVPlane()"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                motionVector0.columnQuarterPel(),
+                motionVector0.rowQuarterPel(),
+                motionVector1.columnQuarterPel(),
+                motionVector1.rowQuarterPel(),
+                chromaDenominatorX,
+                chromaDenominatorY
+        );
+    }
+
     /// Reconstructs one inter-predicted plane using either integer-copy or bilinear subpel
     /// sampling depending on the supplied motion-vector alignment.
     ///
@@ -582,6 +739,98 @@ public final class FrameReconstructor {
                 destinationY,
                 width,
                 height,
+                destinationX * denominatorX + sourceOffsetQuarterPelX,
+                destinationY * denominatorY + sourceOffsetQuarterPelY,
+                denominatorX,
+                denominatorY
+        );
+    }
+
+    /// Reconstructs one compound inter-predicted plane by averaging two independently predicted
+    /// reference planes.
+    ///
+    /// @param destinationPlane the mutable destination plane
+    /// @param referencePlane0 the primary immutable reference plane
+    /// @param referencePlane1 the secondary immutable reference plane
+    /// @param destinationX the zero-based horizontal destination coordinate
+    /// @param destinationY the zero-based vertical destination coordinate
+    /// @param width the copied width in samples
+    /// @param height the copied height in samples
+    /// @param sourceOffsetQuarterPelX0 the primary signed horizontal motion-vector component in luma quarter-pel units
+    /// @param sourceOffsetQuarterPelY0 the primary signed vertical motion-vector component in luma quarter-pel units
+    /// @param sourceOffsetQuarterPelX1 the secondary signed horizontal motion-vector component in luma quarter-pel units
+    /// @param sourceOffsetQuarterPelY1 the secondary signed vertical motion-vector component in luma quarter-pel units
+    /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
+    /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    private static void reconstructCompoundInterPlanePrediction(
+            MutablePlaneBuffer destinationPlane,
+            DecodedPlane referencePlane0,
+            DecodedPlane referencePlane1,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            int sourceOffsetQuarterPelX0,
+            int sourceOffsetQuarterPelY0,
+            int sourceOffsetQuarterPelX1,
+            int sourceOffsetQuarterPelY1,
+            int denominatorX,
+            int denominatorY
+    ) {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int sample0 = sampleInterPlaneValue(
+                        referencePlane0,
+                        destinationX + x,
+                        destinationY + y,
+                        sourceOffsetQuarterPelX0,
+                        sourceOffsetQuarterPelY0,
+                        denominatorX,
+                        denominatorY
+                );
+                int sample1 = sampleInterPlaneValue(
+                        referencePlane1,
+                        destinationX + x,
+                        destinationY + y,
+                        sourceOffsetQuarterPelX1,
+                        sourceOffsetQuarterPelY1,
+                        denominatorX,
+                        denominatorY
+                );
+                destinationPlane.setSample(destinationX + x, destinationY + y, averageCompoundSamples(sample0, sample1));
+            }
+        }
+    }
+
+    /// Returns one inter-predicted plane sample using either integer-copy or bilinear-subpel
+    /// sampling depending on the supplied motion-vector alignment.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param destinationX the zero-based horizontal destination coordinate
+    /// @param destinationY the zero-based vertical destination coordinate
+    /// @param sourceOffsetQuarterPelX the signed horizontal motion-vector component in luma quarter-pel units
+    /// @param sourceOffsetQuarterPelY the signed vertical motion-vector component in luma quarter-pel units
+    /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
+    /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @return one predicted plane sample
+    private static int sampleInterPlaneValue(
+            DecodedPlane referencePlane,
+            int destinationX,
+            int destinationY,
+            int sourceOffsetQuarterPelX,
+            int sourceOffsetQuarterPelY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        if (Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
+                && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
+            return referencePlane.sample(
+                    clamp(destinationX + sourceOffsetQuarterPelX / denominatorX, 0, referencePlane.width() - 1),
+                    clamp(destinationY + sourceOffsetQuarterPelY / denominatorY, 0, referencePlane.height() - 1)
+            );
+        }
+        return bilinearInterpolateAt(
+                referencePlane,
                 destinationX * denominatorX + sourceOffsetQuarterPelX,
                 destinationY * denominatorY + sourceOffsetQuarterPelY,
                 denominatorX,
@@ -649,33 +898,56 @@ public final class FrameReconstructor {
             int denominatorY
     ) {
         for (int y = 0; y < height; y++) {
-            int sampleNumeratorY = sourceNumeratorY + y * denominatorY;
-            int sourceY0 = Math.floorDiv(sampleNumeratorY, denominatorY);
-            int fractionY = Math.floorMod(sampleNumeratorY, denominatorY);
-            int clampedSourceY0 = clamp(sourceY0, 0, referencePlane.height() - 1);
-            int clampedSourceY1 = clamp(sourceY0 + 1, 0, referencePlane.height() - 1);
             for (int x = 0; x < width; x++) {
-                int sampleNumeratorX = sourceNumeratorX + x * denominatorX;
-                int sourceX0 = Math.floorDiv(sampleNumeratorX, denominatorX);
-                int fractionX = Math.floorMod(sampleNumeratorX, denominatorX);
-                int clampedSourceX0 = clamp(sourceX0, 0, referencePlane.width() - 1);
-                int clampedSourceX1 = clamp(sourceX0 + 1, 0, referencePlane.width() - 1);
                 destinationPlane.setSample(
                         destinationX + x,
                         destinationY + y,
-                        bilinearInterpolate(
-                                referencePlane.sample(clampedSourceX0, clampedSourceY0),
-                                referencePlane.sample(clampedSourceX1, clampedSourceY0),
-                                referencePlane.sample(clampedSourceX0, clampedSourceY1),
-                                referencePlane.sample(clampedSourceX1, clampedSourceY1),
-                                fractionX,
+                        bilinearInterpolateAt(
+                                referencePlane,
+                                sourceNumeratorX + x * denominatorX,
+                                sourceNumeratorY + y * denominatorY,
                                 denominatorX,
-                                fractionY,
                                 denominatorY
                         )
                 );
             }
         }
+    }
+
+    /// Returns one bilinearly interpolated unsigned sample at the supplied plane-local source
+    /// numerator coordinates.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
+    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param denominatorY the vertical interpolation denominator
+    /// @return one bilinearly interpolated unsigned sample
+    private static int bilinearInterpolateAt(
+            DecodedPlane referencePlane,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
+        int fractionY = Math.floorMod(sourceNumeratorY, denominatorY);
+        int clampedSourceY0 = clamp(sourceY0, 0, referencePlane.height() - 1);
+        int clampedSourceY1 = clamp(sourceY0 + 1, 0, referencePlane.height() - 1);
+        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
+        int fractionX = Math.floorMod(sourceNumeratorX, denominatorX);
+        int clampedSourceX0 = clamp(sourceX0, 0, referencePlane.width() - 1);
+        int clampedSourceX1 = clamp(sourceX0 + 1, 0, referencePlane.width() - 1);
+        return bilinearInterpolate(
+                referencePlane.sample(clampedSourceX0, clampedSourceY0),
+                referencePlane.sample(clampedSourceX1, clampedSourceY0),
+                referencePlane.sample(clampedSourceX0, clampedSourceY1),
+                referencePlane.sample(clampedSourceX1, clampedSourceY1),
+                fractionX,
+                denominatorX,
+                fractionY,
+                denominatorY
+        );
     }
 
     /// Returns one bilinearly interpolated unsigned sample.
@@ -709,22 +981,31 @@ public final class FrameReconstructor {
         return (int) ((weightedSum + (denominator >> 1)) / denominator);
     }
 
-    /// Returns one compatible stored reference surface for the supplied block.
+    /// Returns the current simple average-compound sample.
+    ///
+    /// @param primarySample the primary predicted sample
+    /// @param secondarySample the secondary predicted sample
+    /// @return the current simple average-compound sample
+    private static int averageCompoundSamples(int primarySample, int secondarySample) {
+        return (primarySample + secondarySample + 1) >> 1;
+    }
+
+    /// Returns one compatible stored reference surface for the supplied internal LAST..ALTREF
+    /// reference position.
     ///
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param frameHeader the frame header that owns the block
-    /// @param header the decoded block header that references the stored surface
     /// @param pixelFormat the active decoded chroma layout
-    /// @return one compatible stored reference surface for the supplied block
+    /// @param referenceFramePosition the internal LAST..ALTREF reference position
+    /// @return one compatible stored reference surface for the supplied reference position
     private static ReferenceSurfaceSnapshot requireReferenceSurfaceSnapshot(
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             FrameHeader frameHeader,
-            TileBlockHeaderReader.BlockHeader header,
-            PixelFormat pixelFormat
+            PixelFormat pixelFormat,
+            int referenceFramePosition
     ) {
-        int referenceFramePosition = header.referenceFrame0();
         if (referenceFramePosition < 0 || referenceFramePosition >= 7) {
-            throw new IllegalStateException("Inter reconstruction requires one valid primary reference-frame position");
+            throw new IllegalStateException("Inter reconstruction requires one valid reference-frame position");
         }
         int referenceSlot = frameHeader.referenceFrameIndex(referenceFramePosition);
         if (referenceSlot < 0 || referenceSlot >= referenceSurfaceSnapshots.length) {

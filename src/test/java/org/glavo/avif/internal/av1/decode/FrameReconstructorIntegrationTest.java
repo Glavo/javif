@@ -23,6 +23,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -548,6 +549,96 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(baselineDecodedPlanes.codedHeight(), residualDecodedPlanes.codedHeight());
         assertEquals(PixelFormat.I420, residualDecodedPlanes.pixelFormat());
         assertTrue(residualDecodedPlanes.hasChroma());
+    }
+
+    /// Verifies that one synthetic monochrome compound-reference inter leaf averages two stored
+    /// reference surfaces through the frame-reconstructor integration path.
+    @Test
+    void reconstructsSyntheticI400CompoundInterLeafFromStoredReferenceSurfaces() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                1,
+                null,
+                CompoundInterPredictionMode.NEARESTMV_NEARESTMV,
+                0,
+                InterMotionVector.resolved(MotionVector.zero()),
+                InterMotionVector.resolved(MotionVector.zero()),
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                1,
+                1,
+                TransformSize.TX_4X4,
+                null,
+                false,
+                new TransformUnit[]{new TransformUnit(position, TransformSize.TX_4X4)}
+        );
+        ResidualLayout residualLayout = createResidualLayout(
+                position,
+                blockSize,
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_4X4)}
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+        FrameAssembly assembly = createInterAssembly(PixelFormat.I400, new byte[0], 4, 4, 0, 1);
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
+
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                4,
+                4,
+                createGradientPlane(4, 4, 0, 10, 20),
+                null,
+                null
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                4,
+                4,
+                createGradientPlane(4, 4, 100, 10, 20),
+                null,
+                null
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertFalse(decodedPlanes.hasChroma());
+        assertPlaneEquals(decodedPlanes.lumaPlane(), new int[][]{
+                {50, 60, 70, 80},
+                {70, 80, 90, 100},
+                {90, 100, 110, 120},
+                {110, 120, 130, 140}
+        });
     }
 
     /// Verifies that one synthetic `I420` leaf with only a chroma-U DC residual changes only the U plane.
@@ -2932,6 +3023,75 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Creates one synthetic single-tile compound-inter frame assembly whose first two direct
+    /// references point at the requested stored slots.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param referenceSlot0 the stored reference slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored reference slot exposed as `LAST2_FRAME`
+    /// @return one synthetic single-tile compound-inter frame assembly
+    private static FrameAssembly createInterAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot0,
+            int referenceSlot1
+    ) {
+        return createInterAssembly(
+                pixelFormat,
+                payload,
+                codedWidth,
+                codedHeight,
+                referenceSlot0,
+                referenceSlot1,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+    }
+
+    /// Creates one synthetic single-tile compound-inter frame assembly whose first two direct
+    /// references point at the requested stored slots and whose frame header exposes one requested
+    /// subpel filter.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param referenceSlot0 the stored reference slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored reference slot exposed as `LAST2_FRAME`
+    /// @param subpelFilterMode the frame-level subpel interpolation filter
+    /// @return one synthetic single-tile compound-inter frame assembly
+    private static FrameAssembly createInterAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot0,
+            int referenceSlot1,
+            FrameHeader.InterpolationFilter subpelFilterMode
+    ) {
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(pixelFormat, codedWidth, codedHeight, false);
+        FrameHeader frameHeader = createSyntheticInterFrameHeader(
+                codedWidth,
+                codedHeight,
+                referenceSlot0,
+                referenceSlot1,
+                subpelFilterMode
+        );
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+        );
+        return assembly;
+    }
+
     /// Creates one synthetic single-tile inter frame assembly whose first direct reference points
     /// at the requested stored slot and whose frame header exposes one requested subpel filter.
     ///
@@ -3366,6 +3526,100 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Creates one synthetic inter frame header for reference-surface reconstruction tests with
+    /// two stored references and one caller-supplied subpel filter.
+    ///
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param referenceSlot0 the stored reference slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored reference slot exposed as `LAST2_FRAME`
+    /// @param subpelFilterMode the frame-level subpel interpolation filter
+    /// @return one synthetic inter frame header for compound-reference reconstruction tests
+    private static FrameHeader createSyntheticInterFrameHeader(
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot0,
+            int referenceSlot1,
+            FrameHeader.InterpolationFilter subpelFilterMode
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0,
+                false,
+                new int[]{referenceSlot0, referenceSlot1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
+                new FrameHeader.SuperResolutionInfo(false, codedWidth),
+                false,
+                false,
+                subpelFilterMode,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                false,
+                false
+        );
+    }
+
     /// Returns the fixed fixture payload whose first residual flags match the requested sequence.
     ///
     /// @param blockSize the block size whose residual syntax should be decoded
@@ -3690,6 +3944,25 @@ final class FrameReconstructorIntegrationTest {
     ) {
         ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
         slots[slot] = referenceSurfaceSnapshot;
+        return slots;
+    }
+
+    /// Creates one slot-indexed stored-reference array with two populated entries.
+    ///
+    /// @param slot0 the first zero-based reference slot to populate
+    /// @param referenceSurfaceSnapshot0 the stored reference surface exposed through `slot0`
+    /// @param slot1 the second zero-based reference slot to populate
+    /// @param referenceSurfaceSnapshot1 the stored reference surface exposed through `slot1`
+    /// @return one slot-indexed stored-reference array for compound reconstruction integration tests
+    private static ReferenceSurfaceSnapshot[] createReferenceSurfaceSlots(
+            int slot0,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot0,
+            int slot1,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot1
+    ) {
+        ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
+        slots[slot0] = referenceSurfaceSnapshot0;
+        slots[slot1] = referenceSurfaceSnapshot1;
         return slots;
     }
 
