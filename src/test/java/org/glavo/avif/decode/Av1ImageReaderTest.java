@@ -443,6 +443,40 @@ final class Av1ImageReaderTest {
         }
     }
 
+    /// Verifies that one standalone `show_existing_frame` header can expose a reconstructed real
+    /// bitstream-derived palette surface through the widened `I422` / `I444` public layouts.
+    ///
+    /// @throws Exception if the real palette fixture cannot be decoded or injected
+    @Test
+    void readFrameReturnsArgbIntFrameForShowExistingFrameBackedByRealBitstreamDerivedPaletteReferenceSurfaceWithAdditionalChromaLayouts()
+            throws Exception {
+        assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
+                PixelFormat.I422,
+                false
+        );
+        assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
+                PixelFormat.I444,
+                false
+        );
+    }
+
+    /// Verifies that one combined `FRAME` `show_existing_frame` OBU can also expose a reconstructed
+    /// real bitstream-derived palette surface through the widened `I422` / `I444` public layouts.
+    ///
+    /// @throws Exception if the real palette fixture cannot be decoded or injected
+    @Test
+    void readFrameReturnsArgbIntFrameForCombinedShowExistingFrameBackedByRealBitstreamDerivedPaletteReferenceSurfaceWithAdditionalChromaLayouts()
+            throws Exception {
+        assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
+                PixelFormat.I422,
+                true
+        );
+        assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
+                PixelFormat.I444,
+                true
+        );
+    }
+
     /// Verifies that tile-group OBUs are rejected when no standalone or combined frame header is active.
     @Test
     void readFrameRejectsTileGroupBeforeFrameHeader() {
@@ -771,7 +805,19 @@ final class Av1ImageReaderTest {
     /// @return one reconstructed reference-slot state derived from the real palette fixture
     /// @throws IOException if the real fixture cannot be structurally decoded or reconstructed
     private static InjectedReferenceState createRealPaletteReferenceStateFromBitstreamFixture() throws IOException {
-        FrameAssembly assembly = createRealPaletteSingleTileAssemblyFromFixture();
+        return createRealPaletteReferenceStateFromBitstreamFixture(PixelFormat.I420);
+    }
+
+    /// Decodes one deterministic real palette tile payload into structural and reconstructed
+    /// reference-slot state for the requested public chroma layout.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @return one reconstructed reference-slot state derived from the real palette fixture
+    /// @throws IOException if the real fixture cannot be structurally decoded or reconstructed
+    private static InjectedReferenceState createRealPaletteReferenceStateFromBitstreamFixture(
+            PixelFormat pixelFormat
+    ) throws IOException {
+        FrameAssembly assembly = createRealPaletteSingleTileAssemblyFromFixture(pixelFormat);
         TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
@@ -788,7 +834,7 @@ final class Av1ImageReaderTest {
                 new ReferenceSurfaceSnapshot(assembly.frameHeader(), syntaxResult, decodedPlanes);
 
         return new InjectedReferenceState(
-                parseFullSequenceHeader(),
+                parseFullSequenceHeader(pixelFormat),
                 assembly.frameHeader(),
                 syntaxResult,
                 referenceSurfaceSnapshot
@@ -799,7 +845,11 @@ final class Av1ImageReaderTest {
     /// real palette fixture used by block-header tests.
     ///
     /// @return one complete single-tile frame assembly whose tile bytes come from the real palette fixture
-    private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture() {
+    private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture(PixelFormat pixelFormat) {
+        if (pixelFormat == PixelFormat.I400) {
+            throw new IllegalArgumentException("Real palette fixture expects I420, I422, or I444: " + pixelFormat);
+        }
+
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -842,10 +892,10 @@ final class Av1ImageReaderTest {
                         2,
                         2,
                         true,
-                        PixelFormat.I420,
+                        pixelFormat,
                         0,
-                        true,
-                        true,
+                        pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422,
+                        pixelFormat == PixelFormat.I420,
                         false
                 )
         );
@@ -1078,6 +1128,37 @@ final class Av1ImageReaderTest {
             assertTrue(firstFrame instanceof ArgbIntFrame);
             assertTrue(reusedFrame instanceof ArgbIntFrame);
             assertArrayEquals(((ArgbIntFrame) firstFrame).pixels(), ((ArgbIntFrame) reusedFrame).pixels());
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Asserts that one real bitstream-derived palette reference surface round-trips through the
+    /// public `show_existing_frame` path in the requested additional chroma layout.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
+    /// @throws Exception if the real palette fixture cannot be decoded or injected
+    private static void assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
+            PixelFormat pixelFormat,
+            boolean combinedShowExisting
+    ) throws Exception {
+        InjectedReferenceState referenceState = createRealPaletteReferenceStateFromBitstreamFixture(pixelFormat);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(
+                referenceState.referenceSurfaceSnapshot(),
+                "reference surface"
+        );
+        byte[] stream = obu(combinedShowExisting ? 6 : 3, showExistingFrameHeaderPayload(0));
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject real " + pixelFormat + " palette reference state", exception);
+            }
+
+            DecodedFrame reusedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(reader.referenceFrameSyntaxResult(0), reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -1349,10 +1430,19 @@ final class Av1ImageReaderTest {
     ///
     /// @return the parsed test-only full sequence header that enables `show_existing_frame`
     private static SequenceHeader parseFullSequenceHeader() throws IOException {
+        return parseFullSequenceHeader(PixelFormat.I420);
+    }
+
+    /// Parses the test-only full sequence header that enables `show_existing_frame` while exposing
+    /// the requested public chroma layout.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @return the parsed test-only full sequence header that enables `show_existing_frame`
+    private static SequenceHeader parseFullSequenceHeader(PixelFormat pixelFormat) throws IOException {
         return new SequenceHeaderParser().parse(
                 new ObuPacket(
                         new ObuHeader(ObuType.SEQUENCE_HEADER, false, true, 0, 0),
-                        fullSequenceHeaderPayload(),
+                        fullSequenceHeaderPayload(pixelFormat),
                         0,
                         0
                 ),

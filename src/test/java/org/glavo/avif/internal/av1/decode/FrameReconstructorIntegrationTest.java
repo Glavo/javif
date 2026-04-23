@@ -72,7 +72,7 @@ final class FrameReconstructorIntegrationTest {
 
     /// One deterministic real tile payload whose first visible `8x8` leaf decodes both luma and
     /// chroma palette syntax.
-    private static final byte[] BITSTREAM_DERIVED_I420_PALETTE_PAYLOAD =
+    private static final byte[] BITSTREAM_DERIVED_PALETTE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
     /// The top-left `8x8` luma block produced by the current legacy directional still-picture fixture.
@@ -277,43 +277,21 @@ final class FrameReconstructorIntegrationTest {
     /// syntax, then reconstructs exactly the palette-mapped samples exposed by the decoded block header.
     @Test
     void reconstructsBitstreamDerivedI420PaletteLeafDuringFrameReconstruction() {
-        TileBlockHeaderReader.BlockHeader header =
-                decodePaletteEnabledI420HeaderFromPayload(BITSTREAM_DERIVED_I420_PALETTE_PAYLOAD);
-        TilePartitionTreeReader.LeafNode paletteLeaf = createI420LeafWithBitstreamDerivedPaletteHeader(header);
+        assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat.I420);
+    }
 
-        assertFalse(header.skip());
-        assertTrue(header.hasChroma());
-        assertEquals(LumaIntraPredictionMode.DC, header.yMode());
-        assertEquals(UvIntraPredictionMode.DC, header.uvMode());
-        assertTrue(header.yPaletteSize() >= 2);
-        assertTrue(header.uvPaletteSize() >= 2);
-        assertTrue(allResidualUnitsZero(paletteLeaf.residualLayout()));
+    /// Verifies that the same deterministic real tile payload also reconstructs exactly under one
+    /// wider-chroma `I422` sequence header.
+    @Test
+    void reconstructsBitstreamDerivedI422PaletteLeafDuringFrameReconstruction() {
+        assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat.I422);
+    }
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
-                createSyntheticResult(
-                        createPaletteEnabledAssembly(
-                                PixelFormat.I420,
-                                BITSTREAM_DERIVED_I420_PALETTE_PAYLOAD,
-                                8,
-                                8,
-                                FrameHeader.TransformMode.LARGEST
-                        ),
-                        paletteLeaf
-                )
-        );
-
-        assertPlaneEquals(
-                decodedPlanes.lumaPlane(),
-                expandPackedPaletteSamples(header.yPaletteColors(), header.yPaletteIndices(), 8, 8, 8)
-        );
-        assertPlaneEquals(
-                requirePlane(decodedPlanes.chromaUPlane()),
-                expandPackedPaletteSamples(header.uPaletteColors(), header.uvPaletteIndices(), 4, 4, 4)
-        );
-        assertPlaneEquals(
-                requirePlane(decodedPlanes.chromaVPlane()),
-                expandPackedPaletteSamples(header.vPaletteColors(), header.uvPaletteIndices(), 4, 4, 4)
-        );
+    /// Verifies that the same deterministic real tile payload also reconstructs exactly under one
+    /// wider-chroma `I444` sequence header.
+    @Test
+    void reconstructsBitstreamDerivedI444PaletteLeafDuringFrameReconstruction() {
+        assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat.I444);
     }
 
     /// Verifies that one synthetic `I420` leaf with only a chroma-U DC residual changes only the U plane.
@@ -1390,16 +1368,110 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
-    /// Decodes one palette-enabled `I420` `8x8` block header from a caller-supplied tile payload.
+    /// Asserts that one deterministic real palette payload reconstructs exactly for the requested
+    /// chroma layout after decoding its block-header palette state under one matching sequence header.
     ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    private static void assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat pixelFormat) {
+        TileBlockHeaderReader.BlockHeader header =
+                decodePaletteEnabledHeaderFromPayload(pixelFormat, BITSTREAM_DERIVED_PALETTE_PAYLOAD);
+        TilePartitionTreeReader.LeafNode paletteLeaf =
+                createLeafWithBitstreamDerivedPaletteHeader(pixelFormat, header);
+        int chromaWidth = bitstreamDerivedPaletteChromaWidth(pixelFormat);
+        int chromaHeight = bitstreamDerivedPaletteChromaHeight(pixelFormat);
+
+        assertFalse(header.skip());
+        assertTrue(header.hasChroma());
+        assertEquals(LumaIntraPredictionMode.DC, header.yMode());
+        assertEquals(UvIntraPredictionMode.DC, header.uvMode());
+        assertTrue(header.yPaletteSize() >= 2);
+        assertTrue(header.uvPaletteSize() >= 2);
+        assertTrue(allResidualUnitsZero(paletteLeaf.residualLayout()));
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                createSyntheticResult(
+                        createPaletteEnabledAssembly(
+                                pixelFormat,
+                                BITSTREAM_DERIVED_PALETTE_PAYLOAD,
+                                8,
+                                8,
+                                FrameHeader.TransformMode.LARGEST
+                        ),
+                        paletteLeaf
+                )
+        );
+
+        assertPlaneEquals(
+                decodedPlanes.lumaPlane(),
+                expandPackedPaletteSamples(header.yPaletteColors(), header.yPaletteIndices(), 8, 8, 8)
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                expandPackedPaletteSamples(
+                        header.uPaletteColors(),
+                        header.uvPaletteIndices(),
+                        chromaWidth,
+                        chromaHeight,
+                        chromaWidth
+                )
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                expandPackedPaletteSamples(
+                        header.vPaletteColors(),
+                        header.uvPaletteIndices(),
+                        chromaWidth,
+                        chromaHeight,
+                        chromaWidth
+                )
+        );
+    }
+
+    /// Returns the exact visible chroma width reconstructed from the deterministic real palette
+    /// fixture for one top-left `8x8` block.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @return the exact visible chroma width reconstructed from the deterministic real palette fixture
+    private static int bitstreamDerivedPaletteChromaWidth(PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I420, I422 -> 4;
+            case I444 -> 8;
+            default -> throw new IllegalArgumentException(
+                    "Bitstream-derived palette helper expects I420, I422, or I444: " + pixelFormat
+            );
+        };
+    }
+
+    /// Returns the exact visible chroma height reconstructed from the deterministic real palette
+    /// fixture for one top-left `8x8` block.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @return the exact visible chroma height reconstructed from the deterministic real palette fixture
+    private static int bitstreamDerivedPaletteChromaHeight(PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I420 -> 4;
+            case I422, I444 -> 8;
+            default -> throw new IllegalArgumentException(
+                    "Bitstream-derived palette helper expects I420, I422, or I444: " + pixelFormat
+            );
+        };
+    }
+
+    /// Decodes one palette-enabled `8x8` block header from a caller-supplied tile payload under
+    /// the requested chroma layout.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
     /// @param payload the tile payload to decode structurally
-    /// @return one palette-enabled `I420` block header decoded from the supplied tile payload
-    private static TileBlockHeaderReader.BlockHeader decodePaletteEnabledI420HeaderFromPayload(byte[] payload) {
+    /// @return one palette-enabled block header decoded from the supplied tile payload
+    private static TileBlockHeaderReader.BlockHeader decodePaletteEnabledHeaderFromPayload(
+            PixelFormat pixelFormat,
+            byte[] payload
+    ) {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_8X8;
         TileDecodeContext tileContext = createPaletteEnabledTileContext(
                 payload,
-                PixelFormat.I420,
+                pixelFormat,
                 8,
                 8,
                 FrameHeader.TransformMode.LARGEST
@@ -1409,12 +1481,14 @@ final class FrameReconstructorIntegrationTest {
         return blockHeaderReader.read(position, blockSize, neighborContext);
     }
 
-    /// Wraps one real bitstream-derived `I420` palette block header in the minimal transform and
-    /// all-zero residual layout needed by the frame reconstructor.
+    /// Wraps one real bitstream-derived palette block header in the minimal transform and all-zero
+    /// residual layout needed by the frame reconstructor.
     ///
+    /// @param pixelFormat the synthetic decoded chroma layout
     /// @param header the real bitstream-derived palette block header
     /// @return one reconstruction-ready leaf that preserves the decoded palette state
-    private static TilePartitionTreeReader.LeafNode createI420LeafWithBitstreamDerivedPaletteHeader(
+    private static TilePartitionTreeReader.LeafNode createLeafWithBitstreamDerivedPaletteHeader(
+            PixelFormat pixelFormat,
             TileBlockHeaderReader.BlockHeader header
     ) {
         BlockPosition position = header.position();
@@ -1425,7 +1499,7 @@ final class FrameReconstructorIntegrationTest {
                 blockSize.width4(),
                 blockSize.height4(),
                 TransformSize.TX_8X8,
-                TransformSize.TX_4X4,
+                requireChromaTransformSize(blockSize, pixelFormat),
                 false,
                 new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
         );
