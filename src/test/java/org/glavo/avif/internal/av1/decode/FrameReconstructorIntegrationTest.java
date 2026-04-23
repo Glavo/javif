@@ -191,6 +191,88 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Verifies that one synthetic `I422` chroma-palette leaf now reconstructs through the
+    /// frame-syntax integration path and populates both full-height chroma planes.
+    @Test
+    void reconstructsSyntheticI422ChromaPaletteLeafDuringFrameReconstruction() {
+        int[] chromaPaletteU = new int[]{48, 176};
+        int[] chromaPaletteV = new int[]{208, 80};
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 0, 1},
+                {1, 0, 1, 0},
+                {0, 1, 1, 0},
+                {1, 0, 0, 1},
+                {0, 0, 1, 1},
+                {1, 1, 0, 0},
+                {0, 1, 0, 1},
+                {1, 0, 1, 0}
+        };
+        TilePartitionTreeReader.LeafNode leafNode = createWideChromaLeafWithChromaPalette(
+                PixelFormat.I422,
+                chromaPaletteU,
+                chromaPaletteV,
+                chromaPaletteIndices
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
+                createPaletteEnabledAssembly(PixelFormat.I422),
+                leafNode
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+
+        assertPlaneFilled(decodedPlanes.lumaPlane(), 8, 8, 128);
+        byte[] packedIndices = packPaletteIndices(chromaPaletteIndices);
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                expandPackedPaletteSamples(chromaPaletteU, packedIndices, 4, 8, 4)
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                expandPackedPaletteSamples(chromaPaletteV, packedIndices, 4, 8, 4)
+        );
+    }
+
+    /// Verifies that one synthetic `I444` chroma-palette leaf now reconstructs through the
+    /// frame-syntax integration path and populates both full-resolution chroma planes.
+    @Test
+    void reconstructsSyntheticI444ChromaPaletteLeafDuringFrameReconstruction() {
+        int[] chromaPaletteU = new int[]{24, 120};
+        int[] chromaPaletteV = new int[]{216, 72};
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 0, 1, 0, 1, 0, 1},
+                {1, 0, 1, 0, 1, 0, 1, 0},
+                {0, 1, 1, 0, 0, 1, 1, 0},
+                {1, 0, 0, 1, 1, 0, 0, 1},
+                {0, 0, 1, 1, 0, 0, 1, 1},
+                {1, 1, 0, 0, 1, 1, 0, 0},
+                {0, 1, 0, 1, 1, 0, 1, 0},
+                {1, 0, 1, 0, 0, 1, 0, 1}
+        };
+        TilePartitionTreeReader.LeafNode leafNode = createWideChromaLeafWithChromaPalette(
+                PixelFormat.I444,
+                chromaPaletteU,
+                chromaPaletteV,
+                chromaPaletteIndices
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
+                createPaletteEnabledAssembly(PixelFormat.I444),
+                leafNode
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+
+        assertPlaneFilled(decodedPlanes.lumaPlane(), 8, 8, 128);
+        byte[] packedIndices = packPaletteIndices(chromaPaletteIndices);
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                expandPackedPaletteSamples(chromaPaletteU, packedIndices, 8, 8, 8)
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                expandPackedPaletteSamples(chromaPaletteV, packedIndices, 8, 8, 8)
+        );
+    }
+
     /// Verifies that one deterministic real tile payload decodes both luma and chroma palette
     /// syntax, then reconstructs exactly the palette-mapped samples exposed by the decoded block header.
     @Test
@@ -790,6 +872,71 @@ final class FrameReconstructorIntegrationTest {
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
     }
 
+    /// Creates one synthetic `I422` or `I444` `8x8` leaf that carries one minimal chroma palette
+    /// color map while leaving luma palette mode disabled.
+    ///
+    /// @param pixelFormat the requested wide-chroma layout
+    /// @param chromaPaletteU the chroma-U palette entries
+    /// @param chromaPaletteV the chroma-V palette entries
+    /// @param chromaPaletteIndices the unpacked chroma palette map in row-major order
+    /// @return one synthetic wide-chroma leaf that carries one chroma palette
+    private static TilePartitionTreeReader.LeafNode createWideChromaLeafWithChromaPalette(
+            PixelFormat pixelFormat,
+            int[] chromaPaletteU,
+            int[] chromaPaletteV,
+            int[][] chromaPaletteIndices
+    ) {
+        if (pixelFormat != PixelFormat.I422 && pixelFormat != PixelFormat.I444) {
+            throw new IllegalArgumentException("Wide-chroma palette helper expects I422 or I444: " + pixelFormat);
+        }
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                chromaPaletteU.length,
+                new int[0],
+                chromaPaletteU,
+                chromaPaletteV,
+                new byte[0],
+                packPaletteIndices(chromaPaletteIndices),
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                2,
+                2,
+                TransformSize.TX_8X8,
+                requireChromaTransformSize(blockSize, pixelFormat),
+                false,
+                new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
+        );
+        ResidualLayout residualLayout = createResidualLayout(
+                position,
+                blockSize,
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_8X8)}
+        );
+        return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
     /// Packs one checkerboard palette color map using the same two-4-bit-indices-per-byte layout
     /// exposed by decoded block headers.
     ///
@@ -811,6 +958,75 @@ final class FrameReconstructorIntegrationTest {
             }
         }
         return packed;
+    }
+
+    /// Packs one unpacked palette-index raster using the same two-4-bit-indices-per-byte layout
+    /// exposed by decoded block headers.
+    ///
+    /// @param indices the unpacked palette-index raster in row-major order
+    /// @return one packed palette-index raster
+    private static byte[] packPaletteIndices(int[][] indices) {
+        if (indices.length == 0) {
+            return new byte[0];
+        }
+        int width = indices[0].length;
+        if (width == 0 || (width & 1) != 0) {
+            throw new IllegalArgumentException("palette index rows must have one non-zero even width");
+        }
+        byte[] packed = new byte[(width * indices.length) >> 1];
+        for (int y = 0; y < indices.length; y++) {
+            if (indices[y].length != width) {
+                throw new IllegalArgumentException("palette index rows must share the same width");
+            }
+            for (int x = 0; x < width; x++) {
+                int sampleIndex = y * width + x;
+                int paletteIndex = indices[y][x];
+                if (paletteIndex < 0 || paletteIndex > 0x0F) {
+                    throw new IllegalArgumentException("palette index out of nibble range: " + paletteIndex);
+                }
+                int byteIndex = sampleIndex >> 1;
+                if ((sampleIndex & 1) == 0) {
+                    packed[byteIndex] = (byte) paletteIndex;
+                } else {
+                    packed[byteIndex] = (byte) (packed[byteIndex] | (paletteIndex << 4));
+                }
+            }
+        }
+        return packed;
+    }
+
+    /// Expands one unpacked palette-index raster into decoded sample values by indexing the
+    /// supplied palette.
+    ///
+    /// @param paletteColors the palette entries addressed by the raster
+    /// @param indices the unpacked palette-index raster in row-major order
+    /// @return one expanded palette sample raster
+    private static int[][] expandPaletteRaster(int[] paletteColors, int[][] indices) {
+        int[][] samples = new int[indices.length][];
+        for (int y = 0; y < indices.length; y++) {
+            samples[y] = new int[indices[y].length];
+            for (int x = 0; x < indices[y].length; x++) {
+                int paletteIndex = indices[y][x];
+                if (paletteIndex < 0 || paletteIndex >= paletteColors.length) {
+                    throw new IllegalArgumentException("palette index out of range: " + paletteIndex);
+                }
+                samples[y][x] = paletteColors[paletteIndex];
+            }
+        }
+        return samples;
+    }
+
+    /// Returns the required synthetic chroma transform size for one wide-chroma palette leaf.
+    ///
+    /// @param blockSize the coded luma block size
+    /// @param pixelFormat the requested chroma layout
+    /// @return the required synthetic chroma transform size
+    private static TransformSize requireChromaTransformSize(BlockSize blockSize, PixelFormat pixelFormat) {
+        @Nullable TransformSize chromaTransformSize = blockSize.maxChromaTransformSize(pixelFormat);
+        if (chromaTransformSize == null) {
+            throw new IllegalArgumentException("No chroma transform size for " + pixelFormat + " " + blockSize);
+        }
+        return chromaTransformSize;
     }
 
     /// Creates one synthetic structural frame-decode result whose tiles are supplied explicitly in

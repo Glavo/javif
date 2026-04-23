@@ -244,6 +244,7 @@ public final class FrameReconstructor {
                         chromaUPlane,
                         chromaVPlane,
                         header,
+                        pixelFormat,
                         visibleChromaWidth,
                         visibleChromaHeight
                 );
@@ -327,9 +328,6 @@ public final class FrameReconstructor {
             if (header.uvPaletteSize() == 0 && header.uvMode() == null) {
                 throw new IllegalStateException("Chroma reconstruction requires uvMode");
             }
-            if (header.uvPaletteSize() != 0 && pixelFormat != PixelFormat.I420) {
-                throw new IllegalStateException("Palette chroma reconstruction currently supports only I420");
-            }
             if (residualLayout.hasChromaUnits() && transformLayout.chromaTransformSize() == null) {
                 throw new IllegalStateException("Chroma residuals require a chroma transform size");
             }
@@ -397,11 +395,11 @@ public final class FrameReconstructor {
         );
     }
 
-    /// Reconstructs one `I420` chroma palette block directly into the destination planes.
+    /// Reconstructs one chroma palette block directly into the destination planes.
     ///
     /// The current reconstruction subset mirrors the packed chroma palette-map geometry exposed by
     /// `TileBlockHeaderReader`, then writes only the exact visible chroma footprint into the output
-    /// planes.
+    /// planes for the current `I420`, `I422`, and `I444` palette paths.
     ///
     /// @param chromaUPlane the mutable chroma U destination plane
     /// @param chromaVPlane the mutable chroma V destination plane
@@ -412,12 +410,19 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaUPlane,
             MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
+            PixelFormat pixelFormat,
             int visibleChromaWidth,
             int visibleChromaHeight
     ) {
-        int chromaX = header.position().x4() << 1;
-        int chromaY = header.position().y4() << 1;
-        int fullChromaWidth = chromaSpan4(header.position().x4(), header.size().width4(), 1) << 2;
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = header.position().x4() << (2 - chromaSubsamplingX);
+        int chromaY = header.position().y4() << (2 - chromaSubsamplingY);
+        int fullChromaWidth = chromaSpan4(
+                header.position().x4(),
+                header.size().width4(),
+                chromaSubsamplingX
+        ) << 2;
         reconstructPalettePlane(
                 chromaUPlane,
                 chromaX,

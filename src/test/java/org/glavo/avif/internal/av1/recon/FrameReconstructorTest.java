@@ -243,6 +243,106 @@ final class FrameReconstructorTest {
         assertPlaneEquals(requirePlane(planes.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
     }
 
+    /// Verifies that one `I422` chroma palette block reconstructs the stored full-height chroma
+    /// palette rasters while leaving the luma prediction plane untouched.
+    @Test
+    void reconstructsSingleTileI422KeyFrameWithChromaPaletteWithoutPerturbingLuma() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] chromaPaletteU = new int[]{24, 144, 220};
+        int[] chromaPaletteV = new int[]{200, 80, 32};
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 2, 0},
+                {1, 2, 0, 1},
+                {2, 0, 1, 2},
+                {0, 2, 1, 0},
+                {1, 0, 2, 1},
+                {2, 1, 0, 2},
+                {0, 1, 0, 2},
+                {2, 0, 2, 1}
+        };
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        chromaPaletteU,
+                        chromaPaletteV,
+                        new byte[0],
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(position, size, PixelFormat.I422),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.KEY, 8, 8, leaf)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneFilled(planes.lumaPlane(), 8, 8, 128);
+        assertPlaneEquals(requirePlane(planes.chromaUPlane()), expandPaletteRaster(chromaPaletteU, chromaPaletteIndices));
+        assertPlaneEquals(requirePlane(planes.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
+    }
+
+    /// Verifies that one `I444` chroma palette block reconstructs the stored full-resolution
+    /// chroma palette rasters while leaving the luma prediction plane untouched.
+    @Test
+    void reconstructsSingleTileI444KeyFrameWithChromaPaletteWithoutPerturbingLuma() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] chromaPaletteU = new int[]{16, 128, 240};
+        int[] chromaPaletteV = new int[]{220, 96, 40};
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 2, 0, 1, 2, 0, 1},
+                {1, 2, 0, 1, 2, 0, 1, 2},
+                {2, 0, 1, 2, 0, 1, 2, 0},
+                {0, 2, 1, 0, 2, 1, 0, 2},
+                {1, 0, 2, 1, 0, 2, 1, 0},
+                {2, 1, 0, 2, 1, 0, 2, 1},
+                {0, 1, 0, 2, 0, 1, 0, 2},
+                {2, 0, 2, 1, 2, 0, 2, 1}
+        };
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        chromaPaletteU,
+                        chromaPaletteV,
+                        new byte[0],
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(position, size, PixelFormat.I444),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.KEY, 8, 8, leaf)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertPlaneFilled(planes.lumaPlane(), 8, 8, 128);
+        assertPlaneEquals(requirePlane(planes.chromaUPlane()), expandPaletteRaster(chromaPaletteU, chromaPaletteIndices));
+        assertPlaneEquals(requirePlane(planes.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
+    }
+
     /// Verifies that one non-zero luma residual is added on top of the reconstructed luma palette
     /// prediction instead of replacing it.
     @Test
