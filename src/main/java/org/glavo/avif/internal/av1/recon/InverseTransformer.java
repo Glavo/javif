@@ -23,8 +23,9 @@ import java.util.Objects;
 /// Minimal inverse-transform helper for the first residual-producing reconstruction path.
 ///
 /// The current implementation assumes the rollout's fixed luma `DCT_DCT` transform type and
-/// supports only square `TX_4X4` and `TX_8X8` blocks. It exposes one method that reconstructs a
-/// residual sample block and one method that adds that block into an already predicted plane.
+/// supports square `TX_4X4`, `TX_8X8`, and `TX_16X16` blocks. It exposes one method that
+/// reconstructs a residual sample block and one method that adds that block into an already
+/// predicted plane.
 @NotNullByDefault
 final class InverseTransformer {
     /// The AV1 inverse-transform cosine precision.
@@ -51,6 +52,36 @@ final class InverseTransformer {
     /// The `cospi[56]` constant at inverse-transform precision `12`.
     private static final int COSPI_56 = 799;
 
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_401 = 401;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_1189 = 1189;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_1567 = 1567;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_1583 = 1583;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_181 = 181;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_1931 = 1931;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_3612 = 3612;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_LITERAL_3920 = 3920;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_DELTA_4076 = 4076 - 4096;
+
+    /// The `dav1d` literal used by the `TX_16X16` odd stages.
+    private static final int COSPI_DELTA_3784 = 3784 - 4096;
+
     /// Prevents instantiation of this utility class.
     private InverseTransformer() {
     }
@@ -74,6 +105,7 @@ final class InverseTransformer {
         return switch (nonNullTransformSize) {
             case TX_4X4 -> reconstructFourByFour(nonNullCoefficients);
             case TX_8X8 -> reconstructEightByEight(nonNullCoefficients);
+            case TX_16X16 -> reconstructSixteenBySixteen(nonNullCoefficients);
             default -> throw unsupportedTransformSize(nonNullTransformSize);
         };
     }
@@ -220,6 +252,42 @@ final class InverseTransformer {
         return output;
     }
 
+    /// Reconstructs one `TX_16X16` `DCT_DCT` residual block.
+    ///
+    /// This follows the same staged integer transform and scaling schedule used by `dav1d` for the
+    /// non-rectangular `16x16` inverse transform: one row pass, one intermediate shift by `2`,
+    /// one column pass, and one final shift by `4`.
+    ///
+    /// @param coefficients the dequantized `TX_16X16` coefficients in natural raster order
+    /// @return one signed `TX_16X16` residual sample block
+    private static int[] reconstructSixteenBySixteen(int[] coefficients) {
+        int[] buffer = new int[256];
+        int[] output = new int[256];
+        int[] scratchIn = new int[16];
+        int[] scratchOut = new int[16];
+        for (int row = 0; row < 16; row++) {
+            int rowOffset = row << 4;
+            for (int column = 0; column < 16; column++) {
+                scratchIn[column] = coefficients[rowOffset + column];
+            }
+            inverseDct16(scratchIn, scratchOut);
+            for (int column = 0; column < 16; column++) {
+                buffer[rowOffset + column] = roundShift(scratchOut[column], 2);
+            }
+        }
+
+        for (int column = 0; column < 16; column++) {
+            for (int row = 0; row < 16; row++) {
+                scratchIn[row] = buffer[(row << 4) + column];
+            }
+            inverseDct16(scratchIn, scratchOut);
+            for (int row = 0; row < 16; row++) {
+                output[(row << 4) + column] = roundShift(scratchOut[row], 4);
+            }
+        }
+        return output;
+    }
+
     /// Reconstructs one one-dimensional `DCT_4` vector.
     ///
     /// @param input the dequantized `DCT_4` input vector
@@ -292,6 +360,85 @@ final class InverseTransformer {
         output[7] = stage4_0 - stage4_7;
     }
 
+    /// Reconstructs one one-dimensional `DCT_16` vector.
+    ///
+    /// The arithmetic matches the `dav1d` `inv_dct16_1d_internal_c(..., tx64 = 0)` path but uses
+    /// saturated Java `int` temporaries instead of the C helper macros.
+    ///
+    /// @param input the dequantized `DCT_16` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseDct16(int[] input, int[] output) {
+        int[] evenInput = new int[8];
+        int[] evenOutput = new int[8];
+        for (int i = 0; i < 8; i++) {
+            evenInput[i] = input[i << 1];
+        }
+        inverseDct8(evenInput, evenOutput);
+
+        int in1 = input[1];
+        int in3 = input[3];
+        int in5 = input[5];
+        int in7 = input[7];
+        int in9 = input[9];
+        int in11 = input[11];
+        int in13 = input[13];
+        int in15 = input[15];
+
+        int t8a = clip((((long) in1 * COSPI_LITERAL_401 - (long) in15 * COSPI_DELTA_4076 + 2048L) >> 12) - in15);
+        int t9a = clip(((long) in9 * COSPI_LITERAL_1583 - (long) in7 * 1299 + 1024L) >> 11);
+        int t10a = clip((((long) in5 * COSPI_LITERAL_1931 - (long) in11 * (COSPI_LITERAL_3612 - 4096) + 2048L) >> 12) - in11);
+        int t11a = clip((((long) in13 * (COSPI_LITERAL_3920 - 4096) - (long) in3 * COSPI_LITERAL_1189 + 2048L) >> 12) + in13);
+        int t12a = clip((((long) in13 * COSPI_LITERAL_1189 + (long) in3 * (COSPI_LITERAL_3920 - 4096) + 2048L) >> 12) + in3);
+        int t13a = clip((((long) in5 * (COSPI_LITERAL_3612 - 4096) + (long) in11 * COSPI_LITERAL_1931 + 2048L) >> 12) + in5);
+        int t14a = clip(((long) in9 * 1299 + (long) in7 * COSPI_LITERAL_1583 + 1024L) >> 11);
+        int t15a = clip((((long) in1 * COSPI_DELTA_4076 + (long) in15 * COSPI_LITERAL_401 + 2048L) >> 12) + in1);
+
+        int t8 = clip((long) t8a + t9a);
+        int t9 = clip((long) t8a - t9a);
+        int t10 = clip((long) t11a - t10a);
+        int t11 = clip((long) t11a + t10a);
+        int t12 = clip((long) t12a + t13a);
+        int t13 = clip((long) t12a - t13a);
+        int t14 = clip((long) t15a - t14a);
+        int t15 = clip((long) t15a + t14a);
+
+        t9a = clip((((long) t14 * COSPI_LITERAL_1567 - (long) t9 * COSPI_DELTA_3784 + 2048L) >> 12) - t9);
+        t14a = clip((((long) t14 * COSPI_DELTA_3784 + (long) t9 * COSPI_LITERAL_1567 + 2048L) >> 12) + t14);
+        t10a = clip(((-(long) t13 * COSPI_DELTA_3784 - (long) t10 * COSPI_LITERAL_1567 + 2048L) >> 12) - t13);
+        t13a = clip((((long) t13 * COSPI_LITERAL_1567 - (long) t10 * COSPI_DELTA_3784 + 2048L) >> 12) - t10);
+
+        t8a = clip((long) t8 + t11);
+        t9 = clip((long) t9a + t10a);
+        t10 = clip((long) t9a - t10a);
+        int t11a2 = clip((long) t8 - t11);
+        int t12a2 = clip((long) t15 - t12);
+        t13 = clip((long) t14a - t13a);
+        t14 = clip((long) t14a + t13a);
+        int t15a2 = clip((long) t15 + t12);
+
+        t10a = clip((((long) (t13 - t10) * COSPI_LITERAL_181) + 128L) >> 8);
+        t13a = clip((((long) (t13 + t10) * COSPI_LITERAL_181) + 128L) >> 8);
+        int t11b = clip((((long) (t12a2 - t11a2) * COSPI_LITERAL_181) + 128L) >> 8);
+        int t12b = clip((((long) (t12a2 + t11a2) * COSPI_LITERAL_181) + 128L) >> 8);
+
+        output[0] = clip((long) evenOutput[0] + t15a2);
+        output[1] = clip((long) evenOutput[1] + t14);
+        output[2] = clip((long) evenOutput[2] + t13a);
+        output[3] = clip((long) evenOutput[3] + t12b);
+        output[4] = clip((long) evenOutput[4] + t11b);
+        output[5] = clip((long) evenOutput[5] + t10a);
+        output[6] = clip((long) evenOutput[6] + t9);
+        output[7] = clip((long) evenOutput[7] + t8a);
+        output[8] = clip((long) evenOutput[7] - t8a);
+        output[9] = clip((long) evenOutput[6] - t9);
+        output[10] = clip((long) evenOutput[5] - t10a);
+        output[11] = clip((long) evenOutput[4] - t11b);
+        output[12] = clip((long) evenOutput[3] - t12b);
+        output[13] = clip((long) evenOutput[2] - t13a);
+        output[14] = clip((long) evenOutput[1] - t14);
+        output[15] = clip((long) evenOutput[0] - t15a2);
+    }
+
     /// Applies one AV1 half-butterfly operation with inverse-transform rounding.
     ///
     /// @param weight0 the first cosine weight
@@ -335,6 +482,14 @@ final class InverseTransformer {
         return (int) value;
     }
 
+    /// Saturates one intermediate transform value into the signed `int` range.
+    ///
+    /// @param value the intermediate transform value
+    /// @return the saturated `int`
+    private static int clip(long value) {
+        return saturatedInt(value);
+    }
+
     /// Returns the checked transform area for the current supported subset.
     ///
     /// @param transformSize the transform size to validate
@@ -343,6 +498,7 @@ final class InverseTransformer {
         return switch (transformSize) {
             case TX_4X4 -> 16;
             case TX_8X8 -> 64;
+            case TX_16X16 -> 256;
             default -> throw unsupportedTransformSize(transformSize);
         };
     }

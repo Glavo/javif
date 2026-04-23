@@ -44,7 +44,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Synthetic `FrameReconstructor` tests for the minimal `I420` chroma residual rollout.
 ///
@@ -328,34 +328,38 @@ final class FrameReconstructorChromaResidualTest {
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
     }
 
-    /// Verifies that unsupported non-zero `I420` chroma transform sizes still fail fast with one
-    /// stable reconstruction-side error.
+    /// Verifies that one full-plane `TX_16X16` chroma-U DC residual updates the entire chroma-U
+    /// plane above the zero-residual `I420` baseline without affecting luma or chroma-V.
     @Test
-    void rejectsUnsupportedNonZeroI420ChromaTransformSize() {
+    void reconstructsSingleTileI420IntraFrameWithPositiveTx16x16ChromaUDcResidual() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_32X32;
         TransformSize chromaTransformSize = requireI420ChromaTransformSize(size);
         assertEquals(TransformSize.TX_16X16, chromaTransformSize);
 
-        TilePartitionTreeReader.LeafNode unsupportedLeaf = createI420Leaf(
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = createI420Leaf(position, size, null, null, null);
+        TilePartitionTreeReader.LeafNode positiveChromaULeaf = createI420Leaf(
                 position,
                 size,
                 null,
-                dcOnlyCoefficients(chromaTransformSize, 1),
+                dcOnlyCoefficients(chromaTransformSize, 32),
                 null
         );
 
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> new FrameReconstructor().reconstruct(
-                        createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 32, 32, unsupportedLeaf)
-                )
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 32, 32, zeroResidualLeaf)
+        );
+        DecodedPlanes residualPlanes = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 32, 32, positiveChromaULeaf)
         );
 
-        assertEquals(
-                "Non-zero residual reconstruction currently supports only TX_4X4/TX_8X8 DCT_DCT chroma units: TX_16X16",
-                exception.getMessage()
+        assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
+        assertPlaneDiffersFromBaselineByUniformPositiveOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residualPlanes.chromaUPlane())
         );
+        assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
     }
 
     /// Creates one synthetic `I420` intra leaf with optional luma/chroma residual coefficients.
@@ -971,6 +975,26 @@ final class FrameReconstructorChromaResidualTest {
     ) {
         assertEquals(baseline.width(), reconstructed.width());
         assertEquals(baseline.height(), reconstructed.height());
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
+                assertEquals(expectedDelta, reconstructed.sample(x, y) - baseline.sample(x, y));
+            }
+        }
+    }
+
+    /// Asserts that one decoded plane differs from the baseline by one exact uniform positive
+    /// offset.
+    ///
+    /// @param baseline the zero-residual baseline plane
+    /// @param reconstructed the residual-applied plane
+    private static void assertPlaneDiffersFromBaselineByUniformPositiveOffset(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed
+    ) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+        int expectedDelta = reconstructed.sample(0, 0) - baseline.sample(0, 0);
+        assertTrue(expectedDelta > 0);
         for (int y = 0; y < baseline.height(); y++) {
             for (int x = 0; x < baseline.width(); x++) {
                 assertEquals(expectedDelta, reconstructed.sample(x, y) - baseline.sample(x, y));

@@ -26,8 +26,8 @@ The repository already has:
 - `8-bit`
 - `I400` and `I420`
 - non-directional and directional intra prediction, filter-intra luma prediction, and `I420` CFL chroma prediction
-- minimal luma `DCT_DCT` residual support for `TX_4X4` and `TX_8X8`
-- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for uniform visible-grid `TX_4X4` / `TX_8X8` U/V paths, including clipped, fringe, and multi-unit footprints
+- minimal luma `DCT_DCT` residual support for `TX_4X4`, `TX_8X8`, and `TX_16X16`
+- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for uniform visible-grid `TX_4X4` / `TX_8X8` U/V paths, including clipped, fringe, and multi-unit footprints, plus reconstruction-side `TX_16X16` support
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -63,7 +63,7 @@ Everything else expands from that baseline after correctness is stable.
 ### Remaining Decode Boundary
 
 - Multi-tile frames are still rejected by the reconstruction/output path.
-- Non-zero reconstruction currently covers only luma `DCT_DCT` `TX_4X4` and `TX_8X8` within the existing key/intra subset.
+- Non-zero reconstruction currently covers luma/chroma `DCT_DCT` `TX_4X4`, `TX_8X8`, and `TX_16X16` within the existing key/intra subset, but does not yet cover the broader transform-type and coefficient space.
 - The public reader now consumes a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid U/V layouts, including clipped, fringe, and multi-unit footprints when the current transform layout exposes smaller chroma units.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Palette, `intrabc`, inter prediction, and motion compensation remain unsupported.
@@ -213,17 +213,18 @@ Completed within this track already:
 - mutable plane storage
 - minimal intra prediction
 - first public first-pixel path for single-tile `8-bit I400/I420` key/intra frames with all-zero residual
-- luma dequantization and inverse transform for `TX_4X4` / `TX_8X8` `DCT_DCT`
+- luma dequantization and inverse transform for `TX_4X4` / `TX_8X8` / `TX_16X16` `DCT_DCT`
 - minimal non-zero luma residual reconstruction inside the current key/intra subset
 - luma filter-intra reconstruction
 - directional intra reconstruction
 - `I420` CFL chroma reconstruction
 - minimal reconstruction-side `I420` chroma residual application for split U/V residual units
 - minimal bitstream-side `I420` chroma residual syntax for uniform visible-grid U/V layouts, including clipped/fringe and multi-unit visible footprints
+- `TX_16X16` non-zero `DCT_DCT` reconstruction for the current luma/chroma key/intra subset
 
 Immediate next steps inside this track:
 
-- richer AC coverage and larger transform support
+- richer AC coverage beyond the current `DCT_DCT` square-transform subset and broader transform-type support
 - fuller chroma transform-layout and coefficient coverage beyond the current uniform visible-grid path
 - palette pixel application
 - inter reconstruction and reference-surface consumption
@@ -493,7 +494,7 @@ Acceptance:
 Status:
 
 - partially achieved now
-- current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-directional-plus-filter-intra/CFL subset, including the minimal non-zero luma residual subset and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints
+- current first-pixel output works for single-tile `8-bit I400/I420` key/intra samples within the current non-directional-plus-directional-plus-filter-intra/CFL subset, including the minimal non-zero `DCT_DCT` luma/chroma residual subset for `TX_4X4` / `TX_8X8` / `TX_16X16` and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints
 - reconstruction-side and integration coverage now both include the current minimal `I420` chroma residual path, but fuller chroma transform/token coverage, palette/inter paths, and a less artificial sample set are still missing
 - milestone is not closed until chroma residuals, palette/inter paths, and a less artificial sample set are covered
 

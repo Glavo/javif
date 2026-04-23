@@ -19,13 +19,25 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /// Tests for minimal inverse-transform reconstruction.
 @NotNullByDefault
 final class InverseTransformerTest {
+    /// The side length in pixels of one `TX_16X16` block.
+    private static final int TX_16X16_SIDE = 16;
+
+    /// The sample count of one `TX_16X16` block.
+    private static final int TX_16X16_AREA = TX_16X16_SIDE * TX_16X16_SIDE;
+
+    /// The stable unsupported-size failure used before `TX_16X16` support lands.
+    private static final String UNSUPPORTED_TX_16X16_MESSAGE = "Unsupported inverse transform size: TX_16X16";
+
     /// Verifies that `TX_4X4` DC-only `DCT_DCT` reconstruction yields one constant residual block.
     @Test
     void reconstructsFourByFourDcOnlyResidualBlock() {
@@ -136,14 +148,117 @@ final class InverseTransformerTest {
         assertEquals(100, plane.sample(3, 3));
     }
 
-    /// Verifies that unsupported transform sizes still fail fast in the current minimal subset.
+    /// Verifies that `TX_16X16` either still reports the current unsupported boundary or, once
+    /// wired, reconstructs one zero residual block for zeroed `DCT_DCT` input.
     @Test
-    void rejectsUnsupportedTransformSizes() {
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> InverseTransformer.reconstructResidualBlock(new int[256], TransformSize.TX_16X16)
-        );
+    void keepsTx16x16SupportBoundaryStable() {
+        int[] coefficients = new int[TX_16X16_AREA];
 
-        assertEquals("Unsupported inverse transform size: TX_16X16", exception.getMessage());
+        try {
+            int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
+            assertArrayEquals(new int[TX_16X16_AREA], residual);
+        } catch (IllegalStateException exception) {
+            assertEquals(UNSUPPORTED_TX_16X16_MESSAGE, exception.getMessage());
+        }
+    }
+
+    /// Verifies that `TX_16X16` DC-only `DCT_DCT` reconstruction yields one constant residual
+    /// block once support is available.
+    @Test
+    void reconstructsSixteenBySixteenDcOnlyResidualBlockWhenSupported() {
+        assumeTx16x16SupportAvailable();
+
+        int[] coefficients = new int[TX_16X16_AREA];
+        coefficients[0] = 512;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
+
+        assertArrayEquals(filledSamples(TX_16X16_AREA, 4), residual);
+    }
+
+    /// Verifies that the first horizontal `TX_16X16` `DCT_DCT` AC basis stays row-constant and
+    /// left-right antisymmetric once support is available.
+    @Test
+    void reconstructsSixteenBySixteenHorizontalAcResidualPatternWhenSupported() {
+        assumeTx16x16SupportAvailable();
+
+        int[] coefficients = new int[TX_16X16_AREA];
+        coefficients[1] = 4096;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
+
+        assertRowsMatchFirstRow(residual, TX_16X16_SIDE);
+        assertHorizontalAntisymmetry(residual, TX_16X16_SIDE);
+        assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
+        assertTrue(residual[TX_16X16_SIDE - 1] < 0, "Mirrored horizontal basis sample should stay negative");
+    }
+
+    /// Skips the calling test until `TX_16X16` inverse-transform support is wired in.
+    private static void assumeTx16x16SupportAvailable() {
+        assumeTrue(
+                supportsTx16x16InverseTransform(),
+                "TX_16X16 DCT_DCT inverse-transform support is not wired into InverseTransformer yet"
+        );
+    }
+
+    /// Returns whether `InverseTransformer` already accepts one zeroed `TX_16X16` block.
+    ///
+    /// @return whether `TX_16X16` reconstruction is available
+    private static boolean supportsTx16x16InverseTransform() {
+        try {
+            InverseTransformer.reconstructResidualBlock(new int[TX_16X16_AREA], TransformSize.TX_16X16);
+            return true;
+        } catch (IllegalStateException exception) {
+            if (UNSUPPORTED_TX_16X16_MESSAGE.equals(exception.getMessage())) {
+                return false;
+            }
+            throw exception;
+        }
+    }
+
+    /// Creates one filled residual block with one repeated sample value.
+    ///
+    /// @param sampleCount the number of samples to create
+    /// @param value the repeated sample value
+    /// @return one filled residual block
+    private static int[] filledSamples(int sampleCount, int value) {
+        int[] samples = new int[sampleCount];
+        Arrays.fill(samples, value);
+        return samples;
+    }
+
+    /// Verifies that every row in one square residual block equals the first row.
+    ///
+    /// @param residual the residual samples in natural raster order
+    /// @param sideLength the square block side length in samples
+    private static void assertRowsMatchFirstRow(int[] residual, int sideLength) {
+        for (int row = 1; row < sideLength; row++) {
+            int rowOffset = row * sideLength;
+            for (int column = 0; column < sideLength; column++) {
+                assertEquals(
+                        residual[column],
+                        residual[rowOffset + column],
+                        "Residual row mismatch at row " + row + ", column " + column
+                );
+            }
+        }
+    }
+
+    /// Verifies that each row in one square residual block is horizontally antisymmetric.
+    ///
+    /// @param residual the residual samples in natural raster order
+    /// @param sideLength the square block side length in samples
+    private static void assertHorizontalAntisymmetry(int[] residual, int sideLength) {
+        for (int row = 0; row < sideLength; row++) {
+            int rowOffset = row * sideLength;
+            for (int column = 0; column < sideLength / 2; column++) {
+                int mirroredColumn = sideLength - 1 - column;
+                assertEquals(
+                        residual[rowOffset + column],
+                        -residual[rowOffset + mirroredColumn],
+                        "Residual row is not horizontally antisymmetric at row " + row
+                );
+            }
+        }
     }
 }
