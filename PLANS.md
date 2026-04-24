@@ -23,7 +23,8 @@ reconstruction core and the real-stream coverage that proves it.
   - current `DCT_DCT` residual space with transform axes up to `64`
   - first parsed chroma residual fixture paths for `I420/I422/I444`
 - current stored-surface `show_existing_frame` path
-- first real bitstream-driven two-tile first-pixel still-picture paths for `I420/I422/I444`
+- real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`,
+  including horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants
 - the first inter/reference subset:
   - single-reference prediction
   - average-compound prediction
@@ -70,8 +71,6 @@ Everything outside that subset must continue to fail explicitly with a stable
   parser metadata, plus richer motion compensation.
 - Super-resolution still needs higher-fidelity AV1 resampling behavior and broader parsed-stream
   inter super-resolution coverage.
-- Multi-tile coverage still needs broader real fixture variants beyond the current
-  `I420/I422/I444` two-tile first-pixel still-picture paths.
 - `I422/I444` still need broader real parsed-stream coverage beyond direct still-picture output and
   stored-surface reuse.
 - The next practical public decode gaps are:
@@ -128,7 +127,6 @@ records execution priority and completion conditions.
 4. Broaden palette and wider-chroma real fixture coverage.
 5. Broaden transform/coefficient coverage beyond the current `DCT_DCT <= 64-axis` subset.
 6. Broaden super-resolution fidelity and parsed-stream coverage.
-7. Broaden real multi-tile fixtures beyond first-pixel coverage.
 
 ### Exit Criteria
 

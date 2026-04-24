@@ -711,32 +711,56 @@ final class Av1ImageReaderTest {
         });
     }
 
-    /// Verifies that real bitstream-driven two-tile still-picture streams reach public output
-    /// and store both decoded tile surfaces through the normal reader path for each public chroma layout.
+    /// Verifies that real bitstream-driven multi-tile still-picture streams reach public output
+    /// and store every decoded tile surface through the normal reader path.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsArgbIntFrameForRealTwoTileFirstPixelCombinedStillPictureStreams() throws IOException {
-        assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(PixelFormat.I420);
-        assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(PixelFormat.I422);
-        assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(PixelFormat.I444);
+    void readFrameReturnsArgbIntFrameForRealMultiTileFirstPixelStillPictureStreams() throws IOException {
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 1, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 1, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 1, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 1, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 1, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 1, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 1, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 1, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 1, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 1, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 1, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 1, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 2, false, true);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 2, false, true);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 2, false, true);
     }
 
-    /// Asserts that one real bitstream-driven two-tile still-picture stream reaches public output
-    /// in the requested public chroma layout.
+    /// Asserts that one real bitstream-driven multi-tile still-picture stream reaches public output
+    /// in the requested public chroma layout and tile arrangement.
     ///
     /// @param pixelFormat the parsed chroma layout to expose
+    /// @param tileColumns the number of tile columns in the frame
+    /// @param tileRows the number of tile rows in the frame
+    /// @param combined whether the frame is carried by one combined `FRAME` OBU
+    /// @param splitTileGroups whether standalone tile data should be split across two explicit groups
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
-    private static void assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(
-            PixelFormat pixelFormat
+    private static void assertRealMultiTileFirstPixelStillPictureRoundTrip(
+            PixelFormat pixelFormat,
+            int tileColumns,
+            int tileRows,
+            boolean combined,
+            boolean splitTileGroups
     ) throws IOException {
-        byte[] stream = concat(
-                obu(1, reducedStillPicturePayload(pixelFormat, 128, 64)),
-                obu(6, reducedStillPictureCombinedFramePayload(
-                        twoTileGroupPayload(SUPPORTED_SINGLE_TILE_PAYLOAD, SUPPORTED_SINGLE_TILE_PAYLOAD),
-                        true
-                ))
-        );
+        int tileCount = tileColumns * tileRows;
+        int codedWidth = tileColumns * 64;
+        int codedHeight = tileRows * 64;
+        byte[] stream = createRealMultiTileStillPictureStream(pixelFormat, tileColumns, tileRows, combined, splitTileGroups);
+        int expectedTileGroupCount = splitTileGroups ? 2 : 1;
 
         assertAcrossBufferedInputs(stream, reader -> {
             DecodedFrame decodedFrame = reader.readFrame();
@@ -745,26 +769,110 @@ final class Av1ImageReaderTest {
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface");
 
-            assertEquals(2, syntaxResult.tileCount());
-            assertEquals(2, syntaxResult.assembly().frameHeader().tiling().columns());
-            assertEquals(1, syntaxResult.assembly().frameHeader().tiling().rows());
+            assertEquals(tileCount, syntaxResult.tileCount());
+            assertEquals(tileCount, syntaxResult.assembly().collectedTileCount());
+            assertEquals(expectedTileGroupCount, syntaxResult.assembly().tileGroupCount());
+            assertEquals(tileColumns, syntaxResult.assembly().frameHeader().tiling().columns());
+            assertEquals(tileRows, syntaxResult.assembly().frameHeader().tiling().rows());
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertDecodedStillPictureFrameMetadata(
                     decodedFrame,
                     8,
-                    128,
-                    64,
+                    codedWidth,
+                    codedHeight,
                     pixelFormat,
                     FrameType.KEY,
                     0
             );
             assertTrue(decodedFrame instanceof ArgbIntFrame);
-            ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
-            assertEquals(OPAQUE_MID_GRAY, frame.pixels()[0]);
-            assertEquals(ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes())[64], frame.pixels()[64]);
+            assertTileFirstPixelsMatchReference((ArgbIntFrame) decodedFrame, referenceSurfaceSnapshot, tileColumns, tileRows);
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         });
+    }
+
+    /// Creates one real bitstream-driven multi-tile still-picture test stream.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @param tileColumns the number of tile columns in the frame
+    /// @param tileRows the number of tile rows in the frame
+    /// @param combined whether the frame is carried by one combined `FRAME` OBU
+    /// @param splitTileGroups whether standalone tile data should be split across two explicit groups
+    /// @return one real bitstream-driven multi-tile still-picture test stream
+    private static byte[] createRealMultiTileStillPictureStream(
+            PixelFormat pixelFormat,
+            int tileColumns,
+            int tileRows,
+            boolean combined,
+            boolean splitTileGroups
+    ) {
+        if (combined && splitTileGroups) {
+            throw new IllegalArgumentException("Combined multi-tile streams must use one tile group");
+        }
+        if (splitTileGroups && tileColumns * tileRows != 4) {
+            throw new IllegalArgumentException("Split tile-group coverage expects one 2x2 tile layout");
+        }
+
+        byte[] sequenceHeader = obu(1, reducedStillPicturePayload(pixelFormat, tileColumns * 64, tileRows * 64));
+        byte[][] tilePayloads = repeatedTilePayloads(tileColumns * tileRows);
+        if (combined) {
+            return concat(
+                    sequenceHeader,
+                    obu(6, reducedStillPictureCombinedFramePayload(
+                            multiTileGroupPayload(tileColumns, tileRows, 0, tilePayloads),
+                            tileColumns,
+                            tileRows
+                    ))
+            );
+        }
+        if (splitTileGroups) {
+            return concat(
+                    sequenceHeader,
+                    obu(3, reducedStillPictureFrameHeaderPayload(tileColumns, tileRows)),
+                    obu(4, multiTileGroupPayload(
+                            tileColumns,
+                            tileRows,
+                            0,
+                            tilePayloads[0],
+                            tilePayloads[1]
+                    )),
+                    obu(4, multiTileGroupPayload(
+                            tileColumns,
+                            tileRows,
+                            2,
+                            tilePayloads[2],
+                            tilePayloads[3]
+                    ))
+            );
+        }
+        return concat(
+                sequenceHeader,
+                obu(3, reducedStillPictureFrameHeaderPayload(tileColumns, tileRows)),
+                obu(4, multiTileGroupPayload(tileColumns, tileRows, 0, tilePayloads))
+        );
+    }
+
+    /// Asserts that the first output pixel of each tile matches the stored reference surface.
+    ///
+    /// @param frame the decoded public ARGB frame
+    /// @param referenceSurfaceSnapshot the stored reference surface created from the same decode
+    /// @param tileColumns the number of tile columns in the frame
+    /// @param tileRows the number of tile rows in the frame
+    private static void assertTileFirstPixelsMatchReference(
+            ArgbIntFrame frame,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot,
+            int tileColumns,
+            int tileRows
+    ) {
+        int[] expectedPixels = ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes());
+        int tileWidth = frame.width() / tileColumns;
+        int tileHeight = frame.height() / tileRows;
+        for (int tileRow = 0; tileRow < tileRows; tileRow++) {
+            for (int tileColumn = 0; tileColumn < tileColumns; tileColumn++) {
+                int pixelIndex = tileRow * tileHeight * frame.width() + tileColumn * tileWidth;
+                assertEquals(expectedPixels[pixelIndex], frame.pixels()[pixelIndex]);
+            }
+        }
     }
 
     /// Verifies that one standalone `show_existing_frame` header can still expose the current
@@ -3372,6 +3480,18 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates a reduced still-picture standalone frame-header payload for the supplied tile layout.
+    ///
+    /// @param tileColumns the number of tile columns in the frame
+    /// @param tileRows the number of tile rows in the frame
+    /// @return the reduced still-picture standalone frame-header payload
+    private static byte[] reducedStillPictureFrameHeaderPayload(int tileColumns, int tileRows) {
+        BitWriter writer = new BitWriter();
+        writeReducedStillPictureFrameHeaderBits(writer, tileColumns, tileRows);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
     /// Creates one non-reduced still-picture-compatible key frame header payload that enables
     /// frame-level screen-content tools so the current deterministic palette fixture can be parsed
     /// directly.
@@ -3433,25 +3553,23 @@ final class Av1ImageReaderTest {
     /// @param tileGroupPayload the tile-group payload appended after the frame header
     /// @return the reduced still-picture combined frame payload
     private static byte[] reducedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
-        return reducedStillPictureCombinedFramePayload(tileGroupPayload, false);
+        return reducedStillPictureCombinedFramePayload(tileGroupPayload, 1, 1);
     }
 
     /// Creates a reduced still-picture combined frame payload with a caller-supplied tile group and
-    /// optional two-column tiling syntax.
+    /// caller-supplied uniform tiling syntax.
     ///
     /// @param tileGroupPayload the tile-group payload appended after the frame header
-    /// @param twoHorizontalTiles whether the frame header should expose two horizontal tiles
+    /// @param tileColumns the number of tile columns in the frame
+    /// @param tileRows the number of tile rows in the frame
     /// @return the reduced still-picture combined frame payload
     private static byte[] reducedStillPictureCombinedFramePayload(
             byte[] tileGroupPayload,
-            boolean twoHorizontalTiles
+            int tileColumns,
+            int tileRows
     ) {
         BitWriter writer = new BitWriter();
-        if (twoHorizontalTiles) {
-            writeReducedStillPictureTwoTileFrameHeaderBits(writer);
-        } else {
-            writeReducedStillPictureFrameHeaderBits(writer);
-        }
+        writeReducedStillPictureFrameHeaderBits(writer, tileColumns, tileRows);
         writer.padToByteBoundary();
         writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
@@ -3521,17 +3639,65 @@ final class Av1ImageReaderTest {
         return new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
     }
 
-    /// Creates one implicit full-range two-tile tile-group payload.
+    /// Creates repeated tile payloads using the deterministic supported first-pixel fixture.
     ///
-    /// @param leftTilePayload the raw payload for tile `0`
-    /// @param rightTilePayload the raw payload for tile `1`
-    /// @return one implicit full-range two-tile tile-group payload
-    private static byte[] twoTileGroupPayload(byte[] leftTilePayload, byte[] rightTilePayload) {
+    /// @param tileCount the number of tile payload copies to create
+    /// @return repeated tile payloads using the deterministic supported first-pixel fixture
+    private static byte[][] repeatedTilePayloads(int tileCount) {
+        byte[][] payloads = new byte[tileCount][];
+        for (int i = 0; i < tileCount; i++) {
+            payloads[i] = SUPPORTED_SINGLE_TILE_PAYLOAD;
+        }
+        return payloads;
+    }
+
+    /// Creates one tile-group payload for the supplied uniform tile layout and tile range.
+    ///
+    /// @param tileColumns the number of tile columns in the frame
+    /// @param tileRows the number of tile rows in the frame
+    /// @param startTileIndex the first tile index covered by this group
+    /// @param tilePayloads the raw tile payloads in frame order for this group
+    /// @return one tile-group payload for the supplied range
+    private static byte[] multiTileGroupPayload(
+            int tileColumns,
+            int tileRows,
+            int startTileIndex,
+            byte[]... tilePayloads
+    ) {
+        int totalTiles = tileColumns * tileRows;
+        if (totalTiles <= 0) {
+            throw new IllegalArgumentException("totalTiles must be positive");
+        }
+        if (tilePayloads.length <= 0) {
+            throw new IllegalArgumentException("tilePayloads must not be empty");
+        }
+        int endTileIndex = startTileIndex + tilePayloads.length - 1;
+        if (startTileIndex < 0 || endTileIndex >= totalTiles) {
+            throw new IllegalArgumentException("tile group range is outside the frame tile count");
+        }
+
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        output.write(0);
-        output.write(leftTilePayload.length - 1);
-        output.writeBytes(leftTilePayload);
-        output.writeBytes(rightTilePayload);
+        if (totalTiles > 1) {
+            boolean explicitTilePositions = startTileIndex != 0 || tilePayloads.length != totalTiles;
+            BitWriter writer = new BitWriter();
+            writer.writeFlag(explicitTilePositions);
+            if (explicitTilePositions) {
+                int indexBitCount = exactLog2(tileColumns) + exactLog2(tileRows);
+                writer.writeBits(startTileIndex, indexBitCount);
+                writer.writeBits(endTileIndex, indexBitCount);
+            }
+            writer.padToByteBoundary();
+            output.writeBytes(writer.toByteArray());
+        }
+        for (int i = 0; i < tilePayloads.length - 1; i++) {
+            byte[] tilePayload = tilePayloads[i];
+            if (tilePayload.length < 1 || tilePayload.length > 256) {
+                throw new IllegalArgumentException("fixture tile payload length is outside the one-byte size table range");
+            }
+            output.write(tilePayload.length - 1);
+            output.writeBytes(tilePayload);
+        }
+        output.writeBytes(tilePayloads[tilePayloads.length - 1]);
         return output.toByteArray();
     }
 
@@ -3555,17 +3721,28 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
     }
 
-    /// Writes the reduced still-picture key frame header syntax for a two-column tile layout.
+    /// Writes the reduced still-picture key frame header syntax for the supplied uniform tile layout.
     ///
     /// @param writer the destination bit writer
-    private static void writeReducedStillPictureTwoTileFrameHeaderBits(BitWriter writer) {
+    /// @param tileColumns the number of tile columns in the frame
+    /// @param tileRows the number of tile rows in the frame
+    private static void writeReducedStillPictureFrameHeaderBits(BitWriter writer, int tileColumns, int tileRows) {
+        int log2TileColumns = exactLog2(tileColumns);
+        int log2TileRows = exactLog2(tileRows);
         writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(true);
-        writer.writeFlag(true);
-        writer.writeFlag(false);
-        writer.writeBits(0, 2);
+        for (int i = 0; i < log2TileColumns; i++) {
+            writer.writeFlag(true);
+        }
+        for (int i = 0; i < log2TileRows; i++) {
+            writer.writeFlag(true);
+        }
+        if (log2TileColumns + log2TileRows > 0) {
+            writer.writeBits(0, log2TileColumns + log2TileRows);
+            writer.writeBits(0, 2);
+        }
         writer.writeBits(0, 8);
         writer.writeFlag(false);
         writer.writeFlag(false);
@@ -3574,6 +3751,19 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+    }
+
+    /// Returns the exact base-2 logarithm for a supported power-of-two tile count.
+    ///
+    /// @param value the positive power-of-two value
+    /// @return the exact base-2 logarithm
+    private static int exactLog2(int value) {
+        if (value <= 0 || (value & (value - 1)) != 0) {
+            throw new IllegalArgumentException("Tile count must be a positive power of two: " + value);
+        }
+        return Integer.numberOfTrailingZeros(value);
     }
 
     /// Writes one inter frame-header syntax block without standalone trailing bits.
