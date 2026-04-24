@@ -742,6 +742,180 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Verifies that one synthetic `I420` inter leaf can sample one stored reference surface that
+    /// already lives in the post-super-resolution domain before the current frame performs its own
+    /// horizontal super-resolution pass.
+    @Test
+    void reconstructsSyntheticI420InterLeafWithSuperResolutionFromPostSuperResolutionStoredReferenceSurface() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(2, 2);
+        TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                SingleInterPredictionMode.NEARESTMV,
+                null,
+                0,
+                InterMotionVector.resolved(motionVector),
+                null,
+                null,
+                null,
+                false,
+                0,
+                0,
+                0,
+                new int[4],
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                header,
+                new TransformLayout(
+                        position,
+                        blockSize,
+                        blockSize.width4(),
+                        blockSize.height4(),
+                        lumaTransformSize,
+                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        false,
+                        new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+                ),
+                createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
+        );
+        FrameAssembly assembly = createSuperResolvedInterAssembly(
+                PixelFormat.I420,
+                4,
+                8,
+                4,
+                0,
+                FrameType.INTER,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
+
+        DecodedPlane referenceLumaPlane = createGradientPlane(8, 4, 19, 23, 11);
+        DecodedPlane referenceChromaUPlane = createGradientPlane(4, 2, 73, 29, 17);
+        DecodedPlane referenceChromaVPlane = createGradientPlane(4, 2, 181, -19, 13);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredSuperResolvedReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                4,
+                8,
+                4,
+                referenceLumaPlane,
+                referenceChromaUPlane,
+                referenceChromaVPlane
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        int[][] codedLuma = expectedGeometryMappedPlaneBilinearly(
+                referenceLumaPlane,
+                4,
+                4,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                4,
+                4
+        );
+        int[][] naiveCodedLuma = InterPredictionOracle.sampleReferencePlaneBlock(
+                referenceLumaPlane,
+                4,
+                4,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                4,
+                4,
+                4,
+                4,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        int[][] codedChromaU = expectedGeometryMappedPlaneBilinearly(
+                referenceChromaUPlane,
+                2,
+                2,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                8,
+                8
+        );
+        int[][] naiveCodedChromaU = InterPredictionOracle.sampleReferencePlaneBlock(
+                referenceChromaUPlane,
+                2,
+                2,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                8,
+                8,
+                2,
+                2,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        int[][] codedChromaV = expectedGeometryMappedPlaneBilinearly(
+                referenceChromaVPlane,
+                2,
+                2,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                8,
+                8
+        );
+        int[][] naiveCodedChromaV = InterPredictionOracle.sampleReferencePlaneBlock(
+                referenceChromaVPlane,
+                2,
+                2,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                8,
+                8,
+                2,
+                2,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+
+        assertTrue(assembly.frameHeader().superResolution().enabled());
+        assertEquals(4, assembly.frameHeader().frameSize().codedWidth());
+        assertEquals(8, assembly.frameHeader().frameSize().upscaledWidth());
+        assertTrue(referenceSurfaceSnapshot.frameHeader().superResolution().enabled());
+        assertEquals(4, referenceSurfaceSnapshot.frameHeader().frameSize().codedWidth());
+        assertEquals(8, referenceSurfaceSnapshot.decodedPlanes().codedWidth());
+        assertTrue(rasterDiffers(codedLuma, naiveCodedLuma));
+        assertTrue(rasterDiffers(codedChromaU, naiveCodedChromaU));
+        assertTrue(rasterDiffers(codedChromaV, naiveCodedChromaV));
+        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertTrue(decodedPlanes.hasChroma());
+        assertEquals(8, decodedPlanes.codedWidth());
+        assertEquals(4, decodedPlanes.codedHeight());
+        assertEquals(8, decodedPlanes.renderWidth());
+        assertEquals(4, decodedPlanes.renderHeight());
+        assertPlaneEquals(decodedPlanes.lumaPlane(), expectedHorizontallyUpscaledBlock(codedLuma, 8));
+        assertPlaneEquals(requirePlane(decodedPlanes.chromaUPlane()), expectedHorizontallyUpscaledBlock(codedChromaU, 4));
+        assertPlaneEquals(requirePlane(decodedPlanes.chromaVPlane()), expectedHorizontallyUpscaledBlock(codedChromaV, 4));
+    }
+
     /// Verifies that the same deterministic real inter tile payload now keeps its decoded residuals
     /// through reconstruction instead of requiring zero-residual normalization.
     @Test
@@ -2911,6 +3085,24 @@ final class FrameReconstructorIntegrationTest {
         return false;
     }
 
+    /// Returns whether two same-shaped integer rasters differ at any sample coordinate.
+    ///
+    /// @param first the first raster in row-major order
+    /// @param second the second raster in row-major order
+    /// @return whether two same-shaped integer rasters differ at any sample coordinate
+    private static boolean rasterDiffers(int[][] first, int[][] second) {
+        assertEquals(first.length, second.length);
+        for (int y = 0; y < first.length; y++) {
+            assertEquals(first[y].length, second[y].length);
+            for (int x = 0; x < first[y].length; x++) {
+                if (first[y][x] != second[y][x]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /// Expands one packed palette map to concrete sample values using the same packed-nibble layout
     /// consumed by the frame reconstructor.
     ///
@@ -3103,6 +3295,20 @@ final class FrameReconstructorIntegrationTest {
                 sourceRow[x] = sourcePlane.sample(x, y);
             }
             expected[y] = expectedHorizontallyUpscaledRow(sourceRow, targetWidth);
+        }
+        return expected;
+    }
+
+    /// Returns the expected horizontally upscaled raster produced by the current linear
+    /// super-resolution helper for one caller-supplied coded-domain block.
+    ///
+    /// @param sourceBlock the coded-domain source block in row-major order
+    /// @param targetWidth the post-upscale row width
+    /// @return the expected horizontally upscaled raster
+    private static int[][] expectedHorizontallyUpscaledBlock(int[][] sourceBlock, int targetWidth) {
+        int[][] expected = new int[sourceBlock.length][targetWidth];
+        for (int y = 0; y < sourceBlock.length; y++) {
+            expected[y] = expectedHorizontallyUpscaledRow(sourceBlock[y], targetWidth);
         }
         return expected;
     }
@@ -5214,6 +5420,54 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Creates one stored reference surface snapshot whose frame metadata records one
+    /// super-resolved coded-to-stored width transition while the stored planes already live in the
+    /// post-super-resolution domain.
+    ///
+    /// @param pixelFormat the decoded chroma layout stored by the snapshot
+    /// @param codedWidth the coded width recorded in the owning frame header
+    /// @param upscaledWidth the stored width after super-resolution
+    /// @param codedHeight the coded height recorded by the owning frame header
+    /// @param lumaPlane the post-super-resolution luma plane stored by the snapshot
+    /// @param chromaUPlane the post-super-resolution chroma-U plane stored by the snapshot, or `null`
+    /// @param chromaVPlane the post-super-resolution chroma-V plane stored by the snapshot, or `null`
+    /// @return one stored reference surface snapshot in the post-super-resolution domain
+    private static ReferenceSurfaceSnapshot createStoredSuperResolvedReferenceSurfaceSnapshot(
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int upscaledWidth,
+            int codedHeight,
+            DecodedPlane lumaPlane,
+            @Nullable DecodedPlane chromaUPlane,
+            @Nullable DecodedPlane chromaVPlane
+    ) {
+        FrameAssembly assembly = createSuperResolvedInterAssembly(
+                pixelFormat,
+                codedWidth,
+                upscaledWidth,
+                codedHeight,
+                0,
+                FrameType.INTER,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, new TilePartitionTreeReader.Node[0]);
+        return new ReferenceSurfaceSnapshot(
+                assembly.frameHeader(),
+                syntaxDecodeResult,
+                new DecodedPlanes(
+                        8,
+                        pixelFormat,
+                        upscaledWidth,
+                        codedHeight,
+                        upscaledWidth,
+                        codedHeight,
+                        lumaPlane,
+                        chromaUPlane,
+                        chromaVPlane
+                )
+        );
+    }
+
     /// Creates one slot-indexed stored-reference array for inter reconstruction integration tests.
     ///
     /// @param slot the zero-based reference slot to populate
@@ -5477,6 +5731,143 @@ final class FrameReconstructorIntegrationTest {
     /// @return the stored coefficient-context byte for one non-zero DC coefficient
     private static int expectedNonZeroCoefficientContextByte(int signedDcCoefficient) {
         return Math.min(Math.abs(signedDcCoefficient), 63) | (signedDcCoefficient > 0 ? 0x80 : 0);
+    }
+
+    /// Returns one coded-domain plane predicted from one stored post-super-resolution reference
+    /// plane using the current endpoint-preserving geometry remap plus bilinear interpolation.
+    ///
+    /// @param referencePlane the stored reference plane in the post-super-resolution domain
+    /// @param destinationWidth the coded-domain destination width
+    /// @param destinationHeight the coded-domain destination height
+    /// @param sourceOffsetQuarterPelX the horizontal motion-vector offset in plane-local units
+    /// @param sourceOffsetQuarterPelY the vertical motion-vector offset in plane-local units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @return one sampled reference-plane block in row-major order
+    private static int[][] sampleMappedReferencePlaneBlockBilinearly(
+            DecodedPlane referencePlane,
+            int destinationWidth,
+            int destinationHeight,
+            int sourceOffsetQuarterPelX,
+            int sourceOffsetQuarterPelY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        int[][] samples = new int[destinationHeight][destinationWidth];
+        for (int y = 0; y < destinationHeight; y++) {
+            int mappedSourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
+                    y,
+                    destinationHeight,
+                    referencePlane.height(),
+                    denominatorY
+            ) + sourceOffsetQuarterPelY;
+            for (int x = 0; x < destinationWidth; x++) {
+                int mappedSourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
+                        x,
+                        destinationWidth,
+                        referencePlane.width(),
+                        denominatorX
+                ) + sourceOffsetQuarterPelX;
+                samples[y][x] = sampleReferencePlaneValueBilinearly(
+                        referencePlane,
+                        mappedSourceNumeratorX,
+                        mappedSourceNumeratorY,
+                        denominatorX,
+                        denominatorY
+                );
+            }
+        }
+        return samples;
+    }
+
+    /// Alias kept for older geometry-mapped super-resolution integration tests.
+    ///
+    /// @param referencePlane the stored reference plane in the post-super-resolution domain
+    /// @param destinationWidth the coded-domain destination width
+    /// @param destinationHeight the coded-domain destination height
+    /// @param sourceOffsetQuarterPelX the horizontal motion-vector offset in plane-local units
+    /// @param sourceOffsetQuarterPelY the vertical motion-vector offset in plane-local units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @return one sampled reference-plane block in row-major order
+    private static int[][] expectedGeometryMappedPlaneBilinearly(
+            DecodedPlane referencePlane,
+            int destinationWidth,
+            int destinationHeight,
+            int sourceOffsetQuarterPelX,
+            int sourceOffsetQuarterPelY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        return sampleMappedReferencePlaneBlockBilinearly(
+                referencePlane,
+                destinationWidth,
+                destinationHeight,
+                sourceOffsetQuarterPelX,
+                sourceOffsetQuarterPelY,
+                denominatorX,
+                denominatorY
+        );
+    }
+
+    /// Samples one reference-plane value bilinearly at one plane-local source numerator.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
+    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param denominatorY the vertical interpolation denominator
+    /// @return one bilinearly interpolated unsigned sample
+    private static int sampleReferencePlaneValueBilinearly(
+            DecodedPlane referencePlane,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
+        int fractionY = Math.floorMod(sourceNumeratorY, denominatorY);
+        int clampedSourceY0 = Math.max(0, Math.min(sourceY0, referencePlane.height() - 1));
+        int clampedSourceY1 = Math.max(0, Math.min(sourceY0 + 1, referencePlane.height() - 1));
+        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
+        int fractionX = Math.floorMod(sourceNumeratorX, denominatorX);
+        int clampedSourceX0 = Math.max(0, Math.min(sourceX0, referencePlane.width() - 1));
+        int clampedSourceX1 = Math.max(0, Math.min(sourceX0 + 1, referencePlane.width() - 1));
+        return bilinearInterpolate(
+                referencePlane.sample(clampedSourceX0, clampedSourceY0),
+                referencePlane.sample(clampedSourceX1, clampedSourceY0),
+                referencePlane.sample(clampedSourceX0, clampedSourceY1),
+                referencePlane.sample(clampedSourceX1, clampedSourceY1),
+                fractionX,
+                denominatorX,
+                fractionY,
+                denominatorY
+        );
+    }
+
+    /// Maps one coded-domain destination coordinate into the stored reference-plane numerator
+    /// domain using the current endpoint-preserving linear transform.
+    ///
+    /// @param destinationCoordinate the zero-based destination-plane coordinate
+    /// @param destinationExtent the destination-plane extent in samples
+    /// @param referenceExtent the reference-plane extent in samples
+    /// @param denominator the plane-local interpolation denominator
+    /// @return the mapped source numerator in plane-local sample units
+    private static int mapDestinationCoordinateToReferenceNumerator(
+            int destinationCoordinate,
+            int destinationExtent,
+            int referenceExtent,
+            int denominator
+    ) {
+        if (destinationExtent == referenceExtent) {
+            return destinationCoordinate * denominator;
+        }
+        if (destinationExtent == 1 || referenceExtent == 1) {
+            return 0;
+        }
+        long numerator = (long) destinationCoordinate * (referenceExtent - 1) * denominator;
+        long divisor = destinationExtent - 1L;
+        return (int) ((numerator + (divisor >> 1)) / divisor);
     }
 
     /// Small MSB-first bit writer used to build AV1 test payloads.

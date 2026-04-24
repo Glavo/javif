@@ -1070,6 +1070,11 @@ public final class FrameReconstructor {
     /// Reconstructs one inter-predicted plane using either integer-copy or the current fixed AV1
     /// subpel filter depending on the supplied motion-vector alignment.
     ///
+    /// When the stored reference plane already lives in a different post-super-resolution domain,
+    /// the current implementation first maps destination-plane sample coordinates into the
+    /// reference-plane domain with one deterministic linear endpoint-preserving transform, then
+    /// applies the existing integer-copy or fixed-filter sampling path.
+    ///
     /// @param destinationPlane the mutable destination plane
     /// @param referencePlane the immutable reference plane
     /// @param destinationX the zero-based horizontal destination coordinate
@@ -1100,7 +1105,9 @@ public final class FrameReconstructor {
             FrameHeader.InterpolationFilter horizontalFilterMode,
             FrameHeader.InterpolationFilter verticalFilterMode
     ) {
-        if (Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
+        if (destinationPlane.width() == referencePlane.width()
+                && destinationPlane.height() == referencePlane.height()
+                && Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
                 && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
             copyReferencePlaneBlock(
                     destinationPlane,
@@ -1115,22 +1122,29 @@ public final class FrameReconstructor {
             return;
         }
 
-        filteredReferencePlaneBlock(
-                destinationPlane,
-                referencePlane,
-                destinationX,
-                destinationY,
-                width,
-                height,
-                destinationX * denominatorX + sourceOffsetQuarterPelX,
-                destinationY * denominatorY + sourceOffsetQuarterPelY,
-                denominatorX,
-                denominatorY,
-                widthForFilterSelection,
-                heightForFilterSelection,
-                horizontalFilterMode,
-                verticalFilterMode
-        );
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                destinationPlane.setSample(
+                        destinationX + x,
+                        destinationY + y,
+                        sampleInterPlaneValue(
+                                referencePlane,
+                                destinationX + x,
+                                destinationY + y,
+                                destinationPlane.width(),
+                                destinationPlane.height(),
+                                sourceOffsetQuarterPelX,
+                                sourceOffsetQuarterPelY,
+                                denominatorX,
+                                denominatorY,
+                                widthForFilterSelection,
+                                heightForFilterSelection,
+                                horizontalFilterMode,
+                                verticalFilterMode
+                        )
+                );
+            }
+        }
     }
 
     /// Reconstructs one compound inter-predicted plane by averaging two independently predicted
@@ -1178,6 +1192,8 @@ public final class FrameReconstructor {
                         referencePlane0,
                         destinationX + x,
                         destinationY + y,
+                        destinationPlane.width(),
+                        destinationPlane.height(),
                         sourceOffsetQuarterPelX0,
                         sourceOffsetQuarterPelY0,
                         denominatorX,
@@ -1191,6 +1207,8 @@ public final class FrameReconstructor {
                         referencePlane1,
                         destinationX + x,
                         destinationY + y,
+                        destinationPlane.width(),
+                        destinationPlane.height(),
                         sourceOffsetQuarterPelX1,
                         sourceOffsetQuarterPelY1,
                         denominatorX,
@@ -1224,6 +1242,8 @@ public final class FrameReconstructor {
             DecodedPlane referencePlane,
             int destinationX,
             int destinationY,
+            int destinationPlaneWidth,
+            int destinationPlaneHeight,
             int sourceOffsetQuarterPelX,
             int sourceOffsetQuarterPelY,
             int denominatorX,
@@ -1233,17 +1253,29 @@ public final class FrameReconstructor {
             FrameHeader.InterpolationFilter horizontalFilterMode,
             FrameHeader.InterpolationFilter verticalFilterMode
     ) {
-        if (Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
-                && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
+        int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
+                destinationX,
+                destinationPlaneWidth,
+                referencePlane.width(),
+                denominatorX
+        ) + sourceOffsetQuarterPelX;
+        int sourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
+                destinationY,
+                destinationPlaneHeight,
+                referencePlane.height(),
+                denominatorY
+        ) + sourceOffsetQuarterPelY;
+        if (Math.floorMod(sourceNumeratorX, denominatorX) == 0
+                && Math.floorMod(sourceNumeratorY, denominatorY) == 0) {
             return referencePlane.sample(
-                    clamp(destinationX + sourceOffsetQuarterPelX / denominatorX, 0, referencePlane.width() - 1),
-                    clamp(destinationY + sourceOffsetQuarterPelY / denominatorY, 0, referencePlane.height() - 1)
+                    clamp(sourceNumeratorX / denominatorX, 0, referencePlane.width() - 1),
+                    clamp(sourceNumeratorY / denominatorY, 0, referencePlane.height() - 1)
             );
         }
         return filteredInterpolateAt(
                 referencePlane,
-                destinationX * denominatorX + sourceOffsetQuarterPelX,
-                destinationY * denominatorY + sourceOffsetQuarterPelY,
+                sourceNumeratorX,
+                sourceNumeratorY,
                 denominatorX,
                 denominatorY,
                 widthForFilterSelection,
@@ -1527,6 +1559,43 @@ public final class FrameReconstructor {
         };
     }
 
+    /// Maps one destination-plane sample coordinate into the current reference-plane numerator
+    /// domain.
+    ///
+    /// The current implementation preserves both plane endpoints and uses one rounded linear map
+    /// between them, which is sufficient for the current minimal inter super-resolution subset.
+    ///
+    /// @param destinationCoordinate the zero-based destination-plane coordinate
+    /// @param destinationExtent the destination-plane extent in samples
+    /// @param referenceExtent the reference-plane extent in samples
+    /// @param denominator the plane-local interpolation denominator
+    /// @return the mapped source numerator in plane-local sample units
+    private static int mapDestinationCoordinateToReferenceNumerator(
+            int destinationCoordinate,
+            int destinationExtent,
+            int referenceExtent,
+            int denominator
+    ) {
+        if (destinationExtent <= 0) {
+            throw new IllegalStateException("Destination plane extent must be positive");
+        }
+        if (referenceExtent <= 0) {
+            throw new IllegalStateException("Reference plane extent must be positive");
+        }
+        if (destinationCoordinate < 0 || destinationCoordinate >= destinationExtent) {
+            throw new IllegalStateException("Destination coordinate lies outside the current plane extent");
+        }
+        if (destinationExtent == referenceExtent) {
+            return destinationCoordinate * denominator;
+        }
+        if (destinationExtent == 1 || referenceExtent == 1) {
+            return 0;
+        }
+        long numerator = (long) destinationCoordinate * (referenceExtent - 1) * denominator;
+        long divisor = destinationExtent - 1L;
+        return (int) ((numerator + (divisor >> 1)) / divisor);
+    }
+
     /// Returns the normalized AV1 subpel phase for the supplied plane-local fraction.
     ///
     /// @param fraction the plane-local source fraction
@@ -1677,10 +1746,6 @@ public final class FrameReconstructor {
             throw new IllegalStateException(
                     "Inter reconstruction currently requires matching reference pixel format: " + pixelFormat
             );
-        }
-        if (referencePlanes.codedWidth() != frameHeader.frameSize().codedWidth()
-                || referencePlanes.codedHeight() != frameHeader.frameSize().height()) {
-            throw new IllegalStateException("Inter reconstruction currently requires matching reference frame dimensions");
         }
         return referenceSurfaceSnapshot;
     }
