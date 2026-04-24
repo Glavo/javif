@@ -38,8 +38,7 @@ import java.util.Objects;
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
 /// plus a first single-reference, average-compound, and same-frame `intrabc` subset with
-/// integer-copy and the current fixed-filter subpel prediction path over the current serial tile
-/// traversal,
+/// the current fixed-filter subpel prediction path over the current serial tile traversal,
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
 /// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, a
@@ -775,8 +774,8 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Reconstructs the current minimal `intrabc` subset by copying already reconstructed samples
-    /// from the current frame with one resolved integer motion vector.
+    /// Reconstructs the current minimal `intrabc` subset by sampling already reconstructed samples
+    /// from the current frame with one resolved motion vector.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -811,8 +810,8 @@ public final class FrameReconstructor {
                 4,
                 visibleLumaWidth,
                 visibleLumaHeight,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                FrameHeader.InterpolationFilter.BILINEAR,
+                FrameHeader.InterpolationFilter.BILINEAR
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -842,8 +841,8 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                FrameHeader.InterpolationFilter.BILINEAR,
+                FrameHeader.InterpolationFilter.BILINEAR
         );
         reconstructInterPlanePrediction(
                 chromaVPlane,
@@ -858,8 +857,8 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
-                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                FrameHeader.InterpolationFilter.BILINEAR,
+                FrameHeader.InterpolationFilter.BILINEAR
         );
     }
 
@@ -1795,8 +1794,8 @@ public final class FrameReconstructor {
 
     /// Validates that one `intrabc` motion vector stays inside the current same-frame copy subset.
     ///
-    /// The current implementation only supports integer-aligned luma/chroma `intrabc` vectors, so
-    /// reconstruction never needs fractional same-frame filtering.
+    /// The current implementation now uses the same-frame `BILINEAR` subset for luma and chroma,
+    /// so any plane-local quarter-pel numerator is accepted as long as the motion vector exists.
     ///
     /// @param motionVector the resolved `intrabc` motion vector chosen for the block
     /// @param pixelFormat the active decoded chroma layout
@@ -1806,23 +1805,7 @@ public final class FrameReconstructor {
             PixelFormat pixelFormat,
             boolean hasChroma
     ) {
-        MotionVector checkedMotionVector = Objects.requireNonNull(motionVector, "motionVector");
-        if ((checkedMotionVector.rowQuarterPel() & 0x03) != 0
-                || (checkedMotionVector.columnQuarterPel() & 0x03) != 0) {
-            throw new IllegalStateException("intrabc reconstruction currently requires integer-aligned luma motion vectors");
-        }
-        if (!hasChroma || pixelFormat == PixelFormat.I400) {
-            return;
-        }
-
-        int chromaHorizontalAlignment = 4 << chromaSubsamplingX(pixelFormat);
-        int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
-        if (Math.floorMod(checkedMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
-                || Math.floorMod(checkedMotionVector.rowQuarterPel(), chromaVerticalAlignment) != 0) {
-            throw new IllegalStateException(
-                    "intrabc reconstruction currently requires integer-aligned chroma motion vectors for " + pixelFormat
-            );
-        }
+        Objects.requireNonNull(motionVector, "motionVector");
     }
 
     /// Reconstructs one luma palette block directly into the destination plane.

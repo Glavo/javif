@@ -85,6 +85,11 @@ final class Av1ImageReaderTest {
     private static final byte[] PALETTE_BLOCK_TILE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
+    /// One deterministic real inter tile payload whose first decoded block uses one stored
+    /// reference surface with a zero motion vector.
+    private static final byte[] INTER_BLOCK_TILE_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+
     /// The expected packed opaque gray pixel produced by the supported still-picture payload.
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
 
@@ -475,6 +480,26 @@ final class Av1ImageReaderTest {
                 PixelFormat.I444,
                 true
         );
+    }
+
+    /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
+    /// once slot `0` already exposes one injected stored reference surface.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForStandaloneRealParsedInterFrameBackedByInjectedStoredReferenceSurface()
+            throws IOException {
+        assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(false);
+    }
+
+    /// Verifies that one combined real parsed inter frame reconstructs through the public reader
+    /// once slot `0` already exposes one injected stored reference surface.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForCombinedRealParsedInterFrameBackedByInjectedStoredReferenceSurface()
+            throws IOException {
+        assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(true);
     }
 
     /// Verifies that tile-group OBUs are rejected when no standalone or combined frame header is active.
@@ -1003,6 +1028,203 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Creates injected reference-slot state for the real parsed inter-frame success path.
+    ///
+    /// Slot `0` carries one populated reconstructed surface while the remaining parser-visible
+    /// slots provide only the order-hint and frame-size metadata needed by the parsed inter frame.
+    ///
+    /// @return injected reference-slot state for the real parsed inter-frame success path
+    private static InjectedReferenceState[] createInterReferenceStatesForRealParsedInterFrame() {
+        SequenceHeader sequenceHeader = createFullInterSequenceHeader();
+        FrameHeader[] referenceFrameHeaders = createInterReferenceFrameHeaders();
+        InjectedReferenceState[] referenceStates = new InjectedReferenceState[referenceFrameHeaders.length];
+        for (int i = 0; i < referenceFrameHeaders.length; i++) {
+            FrameHeader referenceFrameHeader = referenceFrameHeaders[i];
+            FrameSyntaxDecodeResult syntaxResult =
+                    createSyntheticStoredReferenceSyntaxResult(sequenceHeader, referenceFrameHeader);
+            @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot = null;
+            if (i == 0) {
+                referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                        referenceFrameHeader,
+                        syntaxResult,
+                        createGradientInterReferenceDecodedPlanes(referenceFrameHeader)
+                );
+            }
+            referenceStates[i] = new InjectedReferenceState(
+                    sequenceHeader,
+                    referenceFrameHeader,
+                    syntaxResult,
+                    referenceSurfaceSnapshot
+            );
+        }
+        return referenceStates;
+    }
+
+    /// Injects every reference-slot state required by the real parsed inter-frame fixture.
+    ///
+    /// @param reader the fresh reader that should expose the injected reference slots
+    /// @param referenceStates the parser-compatible reference-slot states
+    private static void injectInterReferenceStates(
+            Av1ImageReader reader,
+            InjectedReferenceState[] referenceStates
+    ) {
+        for (int i = 0; i < referenceStates.length; i++) {
+            InjectedReferenceState referenceState = referenceStates[i];
+            reader.injectReferenceStateForTest(
+                    i,
+                    referenceState.sequenceHeader(),
+                    referenceState.frameHeader(),
+                    referenceState.syntaxResult(),
+                    referenceState.referenceSurfaceSnapshot()
+            );
+        }
+    }
+
+    /// Creates one synthetic non-reduced `I420` sequence header compatible with parsed inter-frame
+    /// public-reader coverage.
+    ///
+    /// @return one synthetic non-reduced `I420` sequence header compatible with parsed inter frames
+    private static SequenceHeader createFullInterSequenceHeader() {
+        return new SequenceHeader(
+                0,
+                1024,
+                512,
+                new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
+                new SequenceHeader.OperatingPoint[]{
+                        new SequenceHeader.OperatingPoint(2, 0, 10, 0, false, false, false, null)
+                },
+                false,
+                false,
+                10,
+                9,
+                false,
+                0,
+                0,
+                new SequenceHeader.FeatureConfig(
+                        false,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        4,
+                        true,
+                        false,
+                        false,
+                        false
+                ),
+                new SequenceHeader.ColorConfig(
+                        8,
+                        false,
+                        false,
+                        2,
+                        2,
+                        2,
+                        false,
+                        PixelFormat.I420,
+                        0,
+                        true,
+                        true,
+                        false
+                )
+        );
+    }
+
+    /// Creates parser-visible refreshed reference headers with deterministic `64x64` geometry and
+    /// order hints on both sides of the current parsed inter frame.
+    ///
+    /// @return parser-visible refreshed reference headers for the real parsed inter-frame fixture
+    private static FrameHeader[] createInterReferenceFrameHeaders() {
+        return new FrameHeader[]{
+                createInterReferenceFrameHeader(9),
+                createInterReferenceFrameHeader(8),
+                createInterReferenceFrameHeader(7),
+                createInterReferenceFrameHeader(11),
+                createInterReferenceFrameHeader(12),
+                createInterReferenceFrameHeader(13),
+                createInterReferenceFrameHeader(14)
+        };
+    }
+
+    /// Creates one parser-visible refreshed inter reference header with deterministic `64x64`
+    /// geometry and default inherited syntax state.
+    ///
+    /// @param frameOffset the order hint stored by the refreshed reference frame
+    /// @return one parser-visible refreshed inter reference header
+    private static FrameHeader createInterReferenceFrameHeader(int frameOffset) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                7,
+                frameOffset,
+                0,
+                new FrameHeader.FrameSize(64, 64, 64, 64, 64),
+                new FrameHeader.SuperResolutionInfo(false, 8),
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                false,
+                FrameHeader.FilmGrainParams.disabled()
+        );
+    }
+
     /// Creates one complete single-tile frame assembly whose tile bytes come from the deterministic
     /// real palette fixture used by block-header tests.
     ///
@@ -1453,6 +1675,50 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Asserts that one real parsed inter frame reconstructs through the public reader once the
+    /// required reference-frame parser state and slot `0` surface have been injected ahead of time.
+    ///
+    /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(
+            boolean combined
+    ) throws IOException {
+        InjectedReferenceState[] referenceStates = createInterReferenceStatesForRealParsedInterFrame();
+        InjectedReferenceState primaryReferenceState = referenceStates[0];
+        ReferenceSurfaceSnapshot primaryReferenceSurfaceSnapshot = Objects.requireNonNull(
+                primaryReferenceState.referenceSurfaceSnapshot(),
+                "reference surface"
+        );
+        ReferenceSurfaceSnapshot[] referenceSurfaceSlots = new ReferenceSurfaceSnapshot[8];
+        referenceSurfaceSlots[0] = primaryReferenceSurfaceSnapshot;
+        byte[] stream = combined
+                ? obu(6, combinedInterFramePayload(INTER_BLOCK_TILE_PAYLOAD))
+                : concat(
+                        obu(3, interFrameHeaderPayload()),
+                        obu(4, INTER_BLOCK_TILE_PAYLOAD)
+                );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            injectInterReferenceStates(reader, referenceStates);
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxResult =
+                    Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
+            ReferenceSurfaceSnapshot expectedOutputSnapshot = new ReferenceSurfaceSnapshot(
+                    syntaxResult.assembly().frameHeader(),
+                    syntaxResult,
+                    new FrameReconstructor().reconstruct(syntaxResult, referenceSurfaceSlots)
+            );
+
+            assertFirstDecodedLeafIsInter(syntaxResult);
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 0);
+            assertSame(primaryReferenceState.frameHeader(), reader.referenceFrameHeader(0));
+            assertSame(primaryReferenceState.syntaxResult(), reader.referenceFrameSyntaxResult(0));
+            assertSame(primaryReferenceSurfaceSnapshot, reader.referenceSurfaceSnapshot(0));
+            assertNull(reader.readFrame());
+        });
+    }
+
     /// Asserts that one standalone `show_existing_frame` header exposes the requested synthetic
     /// stored reference surface through every buffered-input adapter.
     ///
@@ -1580,9 +1846,20 @@ final class Av1ImageReaderTest {
         int tileCount = assembly.totalTiles();
         TilePartitionTreeReader.Node[][] tileRoots = new TilePartitionTreeReader.Node[tileCount][];
         TileDecodeContext.TemporalMotionField[] temporalMotionFields = new TileDecodeContext.TemporalMotionField[tileCount];
+        FrameHeader.TilingInfo tiling = frameHeader.tiling();
+        int columns = tiling.columns();
+        int superblockSize = sequenceHeader.features().use128x128Superblocks() ? 128 : 64;
         for (int i = 0; i < tileCount; i++) {
             tileRoots[i] = new TilePartitionTreeReader.Node[0];
-            temporalMotionFields[i] = new TileDecodeContext.TemporalMotionField(1, 1);
+            int tileRow = i / columns;
+            int tileColumn = i % columns;
+            int startX = tiling.columnStartSuperblocks()[tileColumn] * superblockSize;
+            int endX = Math.min(frameHeader.frameSize().codedWidth(), tiling.columnStartSuperblocks()[tileColumn + 1] * superblockSize);
+            int startY = tiling.rowStartSuperblocks()[tileRow] * superblockSize;
+            int endY = Math.min(frameHeader.frameSize().height(), tiling.rowStartSuperblocks()[tileRow + 1] * superblockSize);
+            int width8 = (endX - startX + 7) >> 3;
+            int height8 = (endY - startY + 7) >> 3;
+            temporalMotionFields[i] = new TileDecodeContext.TemporalMotionField(width8, height8);
         }
         return new FrameSyntaxDecodeResult(assembly, tileRoots, temporalMotionFields);
     }
@@ -1743,6 +2020,27 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Creates one exact `I420` gradient surface for the injected stored inter reference slot.
+    ///
+    /// @param frameHeader the frame header whose coded and render dimensions should be used
+    /// @return one exact `I420` gradient surface for the injected stored inter reference slot
+    private static DecodedPlanes createGradientInterReferenceDecodedPlanes(FrameHeader frameHeader) {
+        FrameHeader.FrameSize frameSize = frameHeader.frameSize();
+        int chromaWidth = (frameSize.codedWidth() + 1) / 2;
+        int chromaHeight = (frameSize.height() + 1) / 2;
+        return new DecodedPlanes(
+                8,
+                PixelFormat.I420,
+                frameSize.codedWidth(),
+                frameSize.height(),
+                frameSize.renderWidth(),
+                frameSize.renderHeight(),
+                createGradientPlane(frameSize.codedWidth(), frameSize.height(), 16, 1, 2),
+                createGradientPlane(chromaWidth, chromaHeight, 64, 2, 3),
+                createGradientPlane(chromaWidth, chromaHeight, 160, 1, 2)
+        );
+    }
+
     /// Creates one decoded plane filled with one constant sample value.
     ///
     /// @param width the plane width in samples
@@ -1752,6 +2050,25 @@ final class Av1ImageReaderTest {
     private static DecodedPlane createFilledPlane(int width, int height, int sampleValue) {
         short[] samples = new short[width * height];
         Arrays.fill(samples, (short) sampleValue);
+        return new DecodedPlane(width, height, width, samples);
+    }
+
+    /// Creates one decoded plane filled with one exact integer gradient.
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param baseValue the sample value at `(0, 0)`
+    /// @param xStep the per-column delta
+    /// @param yStep the per-row delta
+    /// @return one decoded plane filled with one exact integer gradient
+    private static DecodedPlane createGradientPlane(int width, int height, int baseValue, int xStep, int yStep) {
+        short[] samples = new short[width * height];
+        int nextIndex = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                samples[nextIndex++] = (short) (baseValue + x * xStep + y * yStep);
+            }
+        }
         return new DecodedPlane(width, height, width, samples);
     }
 
@@ -2223,6 +2540,22 @@ final class Av1ImageReaderTest {
         assertTrue(leaves.get(0).header().intra());
     }
 
+    /// Asserts that the first raster-order decoded leaf is inter-coded against `LAST_FRAME`.
+    ///
+    /// @param syntaxResult the structural decode result produced by the public reader
+    private static void assertFirstDecodedLeafIsInter(
+            @org.jetbrains.annotations.Nullable FrameSyntaxDecodeResult syntaxResult
+    ) {
+        assertNotNull(syntaxResult);
+        List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxResult.tileRoots(0));
+        assertFalse(leaves.isEmpty());
+        TilePartitionTreeReader.LeafNode firstLeaf = leaves.get(0);
+        assertFalse(firstLeaf.header().skip());
+        assertFalse(firstLeaf.header().intra());
+        assertFalse(firstLeaf.header().compoundReference());
+        assertEquals(0, firstLeaf.header().referenceFrame0());
+    }
+
     /// Asserts that every refreshed reference slot stores structural state for the same decoded frame.
     ///
     /// Reference snapshots are allowed to differ in stored CDF state from `lastFrameSyntaxDecodeResult()`,
@@ -2569,6 +2902,30 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one standalone inter frame header payload compatible with the current deterministic
+    /// real inter tile fixture.
+    ///
+    /// @return one standalone inter frame header payload
+    private static byte[] interFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writeInterFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates one combined inter frame payload whose frame-header bits precede the caller-supplied
+    /// single-tile payload.
+    ///
+    /// @param tileGroupPayload the single-tile payload appended after the inter frame header bits
+    /// @return one combined inter frame payload
+    private static byte[] combinedInterFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writeInterFrameHeaderBits(writer);
+        writer.padToByteBoundary();
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
     /// Creates a reduced still-picture combined frame payload with a single tile group.
     ///
     /// @return the reduced still-picture combined frame payload
@@ -2656,6 +3013,50 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeFlag(false);
+    }
+
+    /// Writes one inter frame-header syntax block without standalone trailing bits.
+    ///
+    /// This matches the deterministic standalone inter header used by parser and integration tests
+    /// while keeping the first decoded block compatible with the current real `all-zero-8` tile
+    /// fixture.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeInterFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(false);
+        writer.writeBits(1, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(10, 4);
+        writer.writeBits(7, 3);
+        writer.writeBits(0x12, 8);
+        writer.writeFlag(false);
+        writer.writeBits(0, 3);
+        writer.writeBits(1, 3);
+        writer.writeBits(2, 3);
+        writer.writeBits(3, 3);
+        writer.writeBits(4, 3);
+        writer.writeBits(5, 3);
+        writer.writeBits(6, 3);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
         writer.writeFlag(false);
     }
 

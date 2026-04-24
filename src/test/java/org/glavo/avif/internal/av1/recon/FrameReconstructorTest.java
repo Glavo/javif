@@ -2180,24 +2180,164 @@ final class FrameReconstructorTest {
         assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 2, 0, expectedChromaV);
     }
 
-    /// Verifies that fractional `intrabc` motion vectors are still rejected by the current same-frame copy subset.
+    /// Verifies that the current `intrabc` subset now bilinearly samples previously reconstructed
+    /// monochrome luma when the same-frame motion vector carries fractional luma offsets.
     @Test
-    void rejectsIntrabcBlockWithFractionalMotionVector() {
-        BlockSize size = BlockSize.SIZE_4X4;
-        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createIntrabcBlockHeader(new BlockPosition(0, 0), size, false, new MotionVector(0, -14)),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
-                createResidualLayout(new BlockPosition(0, 0), size, true)
+    void reconstructsIntrabcI400BlockWithFractionalMotionVector() {
+        BlockPosition sourcePosition = new BlockPosition(0, 0);
+        BlockSize sourceSize = BlockSize.SIZE_16X8;
+        int[][] sourcePaletteIndices = new int[][]{
+                {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1},
+                {1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0},
+                {0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1},
+                {1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0},
+                {0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0},
+                {1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1},
+                {0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0},
+                {1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1}
+        };
+        TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        sourcePosition,
+                        sourceSize,
+                        false,
+                        LumaIntraPredictionMode.DC,
+                        null,
+                        null,
+                        0,
+                        0,
+                        new int[]{24, 220},
+                        new int[0],
+                        new int[0],
+                        packPaletteIndices(sourcePaletteIndices),
+                        new byte[0],
+                        0,
+                        0
+                ),
+                createTransformLayout(sourcePosition, sourceSize, PixelFormat.I400),
+                createResidualLayout(sourcePosition, sourceSize, true)
+        );
+        BlockPosition intrabcPosition = new BlockPosition(4, 0);
+        MotionVector motionVector = new MotionVector(0, -62);
+        TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntrabcBlockHeader(intrabcPosition, BlockSize.SIZE_8X8, false, motionVector),
+                createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, PixelFormat.I400),
+                createResidualLayout(intrabcPosition, BlockSize.SIZE_8X8, true)
         );
 
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> new FrameReconstructor().reconstruct(
-                        createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, leaf),
-                        new ReferenceSurfaceSnapshot[0]
-                )
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baselinePlanes = reconstructor.reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 24, 8, 0, sourceLeaf),
+                new ReferenceSurfaceSnapshot[0]
         );
-        assertEquals("intrabc reconstruction currently requires integer-aligned luma motion vectors", exception.getMessage());
+        DecodedPlanes planes = reconstructor.reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 24, 8, 0, sourceLeaf, intrabcLeaf),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        int[][] expectedSourceSamples = expandPaletteRaster(new int[]{24, 220}, sourcePaletteIndices);
+        int[][] expectedCopiedSamples = InterPredictionOracle.sampleReferencePlaneBlock(
+                baselinePlanes.lumaPlane(),
+                8,
+                8,
+                (intrabcPosition.x4() << 4) + motionVector.columnQuarterPel(),
+                (intrabcPosition.y4() << 4) + motionVector.rowQuarterPel(),
+                4,
+                4,
+                8,
+                8,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+
+        assertPlaneBlockEquals(planes.lumaPlane(), 0, 0, expectedSourceSamples);
+        assertPlaneBlockEquals(planes.lumaPlane(), intrabcPosition.x4() << 2, intrabcPosition.y4() << 2, expectedCopiedSamples);
+    }
+
+    /// Verifies that the current `intrabc` subset also bilinearly samples `I420` chroma when the
+    /// same-frame motion vector carries fractional luma and chroma offsets.
+    @Test
+    void reconstructsIntrabcI420BlockWithFractionalMotionVector() {
+        BlockPosition sourcePosition = new BlockPosition(0, 0);
+        BlockSize sourceSize = BlockSize.SIZE_16X8;
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 1, 0, 0, 1, 1, 0},
+                {1, 0, 0, 1, 1, 0, 0, 1},
+                {0, 0, 1, 1, 0, 0, 1, 1},
+                {1, 1, 0, 0, 1, 1, 0, 0}
+        };
+        TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        sourcePosition,
+                        sourceSize,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        new int[]{36, 180},
+                        new int[]{208, 72},
+                        new byte[0],
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(sourcePosition, sourceSize, PixelFormat.I420),
+                createResidualLayout(sourcePosition, sourceSize, true)
+        );
+        BlockPosition intrabcPosition = new BlockPosition(4, 0);
+        MotionVector motionVector = new MotionVector(2, -62);
+        TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntrabcBlockHeader(intrabcPosition, BlockSize.SIZE_8X8, true, motionVector),
+                createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, PixelFormat.I420),
+                createResidualLayout(intrabcPosition, BlockSize.SIZE_8X8, true)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baselinePlanes = reconstructor.reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 24, 8, 0, sourceLeaf),
+                new ReferenceSurfaceSnapshot[0]
+        );
+        DecodedPlanes planes = reconstructor.reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 24, 8, 0, sourceLeaf, intrabcLeaf),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        int[][] expectedSourceChromaU = expandPaletteRaster(new int[]{36, 180}, chromaPaletteIndices);
+        int[][] expectedSourceChromaV = expandPaletteRaster(new int[]{208, 72}, chromaPaletteIndices);
+        int chromaX = intrabcPosition.x4() << 1;
+        int chromaY = intrabcPosition.y4() << 1;
+        int[][] expectedCopiedChromaU = InterPredictionOracle.sampleReferencePlaneBlock(
+                requirePlane(baselinePlanes.chromaUPlane()),
+                4,
+                4,
+                chromaX * 8 + motionVector.columnQuarterPel(),
+                chromaY * 8 + motionVector.rowQuarterPel(),
+                8,
+                8,
+                4,
+                4,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        int[][] expectedCopiedChromaV = InterPredictionOracle.sampleReferencePlaneBlock(
+                requirePlane(baselinePlanes.chromaVPlane()),
+                4,
+                4,
+                chromaX * 8 + motionVector.columnQuarterPel(),
+                chromaY * 8 + motionVector.rowQuarterPel(),
+                8,
+                8,
+                4,
+                4,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+
+        assertPlaneFilled(planes.lumaPlane(), 24, 8, 128);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 0, 0, expectedSourceChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 0, 0, expectedSourceChromaV);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), chromaX, chromaY, expectedCopiedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), chromaX, chromaY, expectedCopiedChromaV);
     }
 
     /// Verifies that one monochrome compound-reference inter block averages two stored reference

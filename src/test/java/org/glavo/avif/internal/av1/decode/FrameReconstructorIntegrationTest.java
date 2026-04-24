@@ -1167,34 +1167,100 @@ final class FrameReconstructorIntegrationTest {
         assertPlaneBlockEquals(requirePlane(decodedPlanes.chromaVPlane()), 4, 0, expectedChromaVSamples);
     }
 
-    /// Verifies that one synthetic `I420` `intrabc` leaf is still rejected when its motion vector
-    /// is luma-aligned but not chroma-aligned for the current same-frame copy subset.
+    /// Verifies that one synthetic `I420` `intrabc` leaf can bilinearly sample half-pel chroma
+    /// from previously reconstructed same-frame palette blocks while luma stays integer-aligned.
     @Test
-    void rejectsSyntheticI420IntrabcLeafWithChromaMisalignedMotionVector() {
-        TilePartitionTreeReader.LeafNode sourceLeaf = createI420LeafWithChromaPalette();
+    void reconstructsSyntheticI420IntrabcLeafWithHalfPelBilinearChromaFromPreviouslyReconstructedSamples() {
+        TilePartitionTreeReader.LeafNode sourceLeaf0 = createI420LeafWithChromaPalette();
+        TilePartitionTreeReader.LeafNode sourceLeaf1 = createI420LeafWithChromaPalette(new BlockPosition(2, 0));
+        MotionVector motionVector = new MotionVector(0, -36);
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
-                new BlockPosition(2, 0),
+                new BlockPosition(4, 0),
                 PixelFormat.I420,
-                new MotionVector(0, -28)
+                motionVector
         );
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I420, new byte[0], 16, 8, 0);
-        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
-                assembly,
-                new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
-        );
-
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
-                () -> new FrameReconstructor().reconstruct(
-                        syntaxDecodeResult,
-                        new ReferenceSurfaceSnapshot[0]
-                )
+        FrameAssembly assembly = createInterAssembly(
+                PixelFormat.I420,
+                new byte[0],
+                24,
+                8,
+                0,
+                FrameHeader.InterpolationFilter.BILINEAR
         );
 
-        assertEquals(
-                "intrabc reconstruction currently requires integer-aligned chroma motion vectors for I420",
-                exception.getMessage()
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baselinePlanes = reconstructor.reconstruct(
+                createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1}),
+                new ReferenceSurfaceSnapshot[0]
         );
+        DecodedPlanes decodedPlanes = reconstructor.reconstruct(
+                createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, intrabcLeaf}),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        int lumaOriginX = intrabcLeaf.header().position().x4() << 2;
+        int lumaOriginY = intrabcLeaf.header().position().y4() << 2;
+        int visibleLumaWidth = intrabcLeaf.transformLayout().visibleWidthPixels();
+        int visibleLumaHeight = intrabcLeaf.transformLayout().visibleHeightPixels();
+        int chromaOriginX = lumaOriginX >> 1;
+        int chromaOriginY = lumaOriginY >> 1;
+        int visibleChromaWidth = visibleLumaWidth >> 1;
+        int visibleChromaHeight = visibleLumaHeight >> 1;
+        DecodedPlane baselineChromaUPlane = requirePlane(baselinePlanes.chromaUPlane());
+        DecodedPlane baselineChromaVPlane = requirePlane(baselinePlanes.chromaVPlane());
+        int[][] expectedLumaSamples = sampleReferencePlaneBlockBilinearly(
+                baselinePlanes.lumaPlane(),
+                visibleLumaWidth,
+                visibleLumaHeight,
+                lumaOriginX * 4 + motionVector.columnQuarterPel(),
+                lumaOriginY * 4 + motionVector.rowQuarterPel(),
+                4,
+                4
+        );
+        int[][] expectedChromaUSamples = sampleReferencePlaneBlockBilinearly(
+                baselineChromaUPlane,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaOriginX * 8 + motionVector.columnQuarterPel(),
+                chromaOriginY * 8 + motionVector.rowQuarterPel(),
+                8,
+                8
+        );
+        int[][] expectedChromaVSamples = sampleReferencePlaneBlockBilinearly(
+                baselineChromaVPlane,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaOriginX * 8 + motionVector.columnQuarterPel(),
+                chromaOriginY * 8 + motionVector.rowQuarterPel(),
+                8,
+                8
+        );
+        int[][] integerAlignedChromaUSamples = sampleReferencePlaneBlockBilinearly(
+                baselineChromaUPlane,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaOriginX * 8 + motionVector.columnQuarterPel() - 4,
+                chromaOriginY * 8 + motionVector.rowQuarterPel(),
+                8,
+                8
+        );
+        int[][] integerAlignedChromaVSamples = sampleReferencePlaneBlockBilinearly(
+                baselineChromaVPlane,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaOriginX * 8 + motionVector.columnQuarterPel() - 4,
+                chromaOriginY * 8 + motionVector.rowQuarterPel(),
+                8,
+                8
+        );
+
+        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertTrue(decodedPlanes.hasChroma());
+        assertTrue(rasterDiffers(expectedChromaUSamples, integerAlignedChromaUSamples));
+        assertTrue(rasterDiffers(expectedChromaVSamples, integerAlignedChromaVSamples));
+        assertPlaneBlockEquals(decodedPlanes.lumaPlane(), lumaOriginX, lumaOriginY, expectedLumaSamples);
+        assertPlaneBlockEquals(requirePlane(decodedPlanes.chromaUPlane()), chromaOriginX, chromaOriginY, expectedChromaUSamples);
+        assertPlaneBlockEquals(requirePlane(decodedPlanes.chromaVPlane()), chromaOriginX, chromaOriginY, expectedChromaVSamples);
     }
 
     /// Verifies that one synthetic monochrome compound-reference inter leaf averages two stored
@@ -2016,7 +2082,15 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @return one synthetic `I420` leaf that carries one chroma palette
     private static TilePartitionTreeReader.LeafNode createI420LeafWithChromaPalette() {
-        BlockPosition position = new BlockPosition(0, 0);
+        return createI420LeafWithChromaPalette(new BlockPosition(0, 0));
+    }
+
+    /// Creates one synthetic positioned `I420` `8x8` leaf that carries one minimal two-entry
+    /// chroma palette color map while leaving luma palette mode disabled.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @return one synthetic positioned `I420` leaf that carries one chroma palette
+    private static TilePartitionTreeReader.LeafNode createI420LeafWithChromaPalette(BlockPosition position) {
         BlockSize blockSize = BlockSize.SIZE_8X8;
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
                 position,
@@ -2130,7 +2204,7 @@ final class FrameReconstructorIntegrationTest {
     }
 
     /// Creates one synthetic `intrabc` leaf that copies one previously reconstructed same-frame
-    /// block through the current integer-aligned subset.
+    /// block through the current same-frame copy subset.
     ///
     /// @param position the block origin in 4x4 units
     /// @param pixelFormat the active decoded chroma layout
