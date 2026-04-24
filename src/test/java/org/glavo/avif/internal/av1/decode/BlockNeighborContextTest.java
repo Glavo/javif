@@ -573,6 +573,36 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(3).motionVector0());
     }
 
+    /// Verifies that compound blocks can reuse a single-reference neighbor that matches only the
+    /// compound block's secondary reference.
+    @Test
+    void provisionalInterModeContextsMatchCompoundSecondReferenceAgainstSingleNeighbor() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        InterMotionVector neighborMotionVector = InterMotionVector.resolved(new MotionVector(18, -6));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_8X8,
+                4,
+                SingleInterPredictionMode.NEWMV,
+                neighborMotionVector
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_8X8, true, 0, 4);
+
+        assertEquals(2, provisionalContext.singleNewMvContext());
+        assertEquals(3, provisionalContext.singleReferenceMvContext());
+        assertEquals(3, provisionalContext.compoundInterModeContext());
+        assertEquals(2, provisionalContext.candidateCount());
+        assertEquals(640, provisionalContext.candidateWeight(0));
+        assertEquals(448, provisionalContext.candidateWeight(1));
+        assertEquals(2, provisionalContext.motionVectorCandidateCount());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(neighborMotionVector, provisionalContext.motionVectorCandidate(0).motionVector1());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector1());
+    }
+
     /// Verifies that temporal motion-field samples feed the provisional motion-vector stack and
     /// global-motion context when reference-frame motion vectors are enabled.
     @Test
@@ -633,6 +663,49 @@ final class BlockNeighborContextTest {
         assertEquals(2, provisionalContext.motionVectorCandidateCount());
         assertEquals(InterMotionVector.resolved(new MotionVector(16, 20)), provisionalContext.motionVectorCandidate(0).motionVector0());
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
+    }
+
+    /// Verifies that small-block temporal fringe probes can append several distinct samples after
+    /// the main temporal footprint has already produced a candidate.
+    @Test
+    void provisionalInterModeContextsIncludeMultipleTemporalFringeCandidates() {
+        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(8, 8);
+        InterMotionVector mainMotionVector = InterMotionVector.resolved(new MotionVector(8, 0));
+        InterMotionVector bottomRightMotionVector = InterMotionVector.resolved(new MotionVector(16, 0));
+        InterMotionVector rightEdgeMotionVector = InterMotionVector.resolved(new MotionVector(24, 0));
+        temporalMotionField.setBlock(
+                0,
+                0,
+                TileDecodeContext.TemporalMotionBlock.singleReference(0, mainMotionVector)
+        );
+        temporalMotionField.setBlock(
+                1,
+                1,
+                TileDecodeContext.TemporalMotionBlock.singleReference(0, bottomRightMotionVector)
+        );
+        temporalMotionField.setBlock(
+                1,
+                0,
+                TileDecodeContext.TemporalMotionBlock.singleReference(0, rightEdgeMotionVector)
+        );
+        BlockNeighborContext context = BlockNeighborContext.create(
+                testTileContext(FrameType.INTER, true, temporalMotionField)
+        );
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(new BlockPosition(0, 0), BlockSize.SIZE_8X8, false, 0, -1);
+
+        assertEquals(1, provisionalContext.singleGlobalMvContext());
+        assertEquals(4, provisionalContext.candidateCount());
+        assertEquals(640, provisionalContext.candidateWeight(0));
+        assertEquals(64, provisionalContext.candidateWeight(1));
+        assertEquals(64, provisionalContext.candidateWeight(2));
+        assertEquals(64, provisionalContext.candidateWeight(3));
+        assertEquals(4, provisionalContext.motionVectorCandidateCount());
+        assertEquals(mainMotionVector, provisionalContext.motionVectorCandidate(0).motionVector0());
+        assertEquals(bottomRightMotionVector, provisionalContext.motionVectorCandidate(1).motionVector0());
+        assertEquals(rightEdgeMotionVector, provisionalContext.motionVectorCandidate(2).motionVector0());
+        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(3).motionVector0());
     }
 
     /// Verifies that decoded inter blocks are projected into the current-frame temporal motion

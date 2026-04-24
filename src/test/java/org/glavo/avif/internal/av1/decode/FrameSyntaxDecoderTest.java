@@ -127,6 +127,35 @@ final class FrameSyntaxDecoderTest {
         assertTrue(cdfOnlySkip);
     }
 
+    /// Verifies that incompatible inherited temporal motion fields are ignored when no CDF
+    /// inheritance is requested.
+    @Test
+    void decodeFrameIgnoresIncompatibleTemporalReferenceWithoutCdfReference() {
+        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 8, 8);
+        FrameAssembly referenceAssembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 16, 16);
+        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(2, 2);
+        temporalMotionField.setBlock(
+                1,
+                1,
+                TileDecodeContext.TemporalMotionBlock.singleReference(
+                        0,
+                        InterMotionVector.resolved(new MotionVector(12, -4))
+                )
+        );
+        FrameSyntaxDecodeResult temporalReferenceResult = new FrameSyntaxDecodeResult(
+                referenceAssembly,
+                new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
+                new TileDecodeContext.TemporalMotionField[]{temporalMotionField}
+        );
+
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null, temporalReferenceResult).decode(assembly);
+
+        TileDecodeContext.TemporalMotionField decodedTemporalMotionField = result.decodedTemporalMotionField(0);
+        assertEquals(1, decodedTemporalMotionField.width8());
+        assertEquals(1, decodedTemporalMotionField.height8());
+        assertNotNull(decodedTemporalMotionField.block(0, 0));
+    }
+
     /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.
     @Test
     void frameSyntaxDecodeResultCanReplaceStoredTileCdfContexts() {

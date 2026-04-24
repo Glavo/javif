@@ -1163,7 +1163,7 @@ public final class BlockNeighborContext {
         int stepX8 = nonNullSize.width4() >= 16 ? 2 : 1;
         int stepY8 = nonNullSize.height4() >= 16 ? 2 : 1;
         TileDecodeContext.TemporalMotionBlock[] visitedBlocks =
-                new TileDecodeContext.TemporalMotionBlock[Math.max(1, (endX8 - startX8) * (endY8 - startY8))];
+                new TileDecodeContext.TemporalMotionBlock[Math.max(1, (endX8 - startX8) * (endY8 - startY8) + 3)];
         int visitedCount = 0;
         boolean nonZeroMotionVectorCandidate = false;
         for (int y8 = startY8; y8 < endY8; y8 += stepY8) {
@@ -2586,12 +2586,19 @@ public final class BlockNeighborContext {
             int neighborReferenceFrame0,
             int neighborReferenceFrame1
     ) {
-        if (referenceFrame0 == neighborReferenceFrame0 || referenceFrame0 == neighborReferenceFrame1) {
+        if (referenceFrame0 == neighborReferenceFrame0) {
             return true;
         }
-        return compoundReference
-                && (referenceFrame1 == neighborReferenceFrame0 || referenceFrame1 == neighborReferenceFrame1)
-                && neighborCompound;
+        if (neighborCompound && referenceFrame0 == neighborReferenceFrame1) {
+            return true;
+        }
+        if (!compoundReference) {
+            return false;
+        }
+        if (referenceFrame1 == neighborReferenceFrame0) {
+            return true;
+        }
+        return neighborCompound && referenceFrame1 == neighborReferenceFrame1;
     }
 
     /// Returns the coarse forward/backward reference direction for one reference-frame index.

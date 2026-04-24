@@ -89,7 +89,11 @@ public final class FrameSyntaxDecoder {
             return TileDecodeContext.create(assembly, tileIndex);
         }
         if (baseCdfContext == null) {
-            return TileDecodeContext.create(assembly, tileIndex, temporalMotionField);
+            try {
+                return TileDecodeContext.create(assembly, tileIndex, temporalMotionField);
+            } catch (IllegalArgumentException ignored) {
+                return TileDecodeContext.create(assembly, tileIndex);
+            }
         }
         if (temporalMotionField == null) {
             return TileDecodeContext.create(assembly, tileIndex, baseCdfContext);
