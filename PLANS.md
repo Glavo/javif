@@ -24,8 +24,8 @@ Supported end-to-end behavior:
   units in `TransformLayout`, including clipped fringe footprints, wider-chroma `I422`,
   unsubsampled `I444`, multi-unit `I420`, and larger-transform chroma token coverage.
 - Stored-surface `show_existing_frame` output and reference-surface reuse.
-- Reference temporal-motion inheritance for compatible tile geometry, with incompatible reference
-  fields ignored instead of failing decode.
+- Reference temporal-motion inheritance with compatible fields reused directly and differently
+  scaled reference fields projected onto the current tile grid with motion-vector scaling.
 - Real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`, including
   horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants.
 - Direct real parsed `I422/I444` public-layout paths for still output, high-bit-depth output,
@@ -34,10 +34,10 @@ Supported end-to-end behavior:
   integer-copy prediction, bit-depth-preserving fixed-filter and block-resolved `SWITCHABLE`
   subpel prediction, parsed candidate-only `NEAREST` / `NEAR` / skip-mode motion vectors promoted
   to final block vectors, `refmvs` direct/secondary/top-right/top-left/temporal candidates with
-  symmetric single/compound reference matching and multi-sample temporal fringe probing, parsed
-  skip-mode compound reconstruction against two stored reference surfaces, and normative
-  horizontal super-resolution for key/intra, public still-picture, synthetic inter, and
-  bitstream-derived inter reconstruction paths.
+  symmetric single/compound reference matching, multi-sample temporal fringe probing, and
+  projected/scaled previous-frame temporal motion fields, parsed skip-mode compound reconstruction
+  against two stored reference surfaces, and normative horizontal super-resolution for key/intra,
+  public still-picture, synthetic inter, and bitstream-derived inter reconstruction paths.
 - Self-contained parsed-stream inter public-reader paths for standalone and combined `FRAME`
   inputs across `I420/I422/I444`, backed by a preceding parsed reference frame rather than injected
   parser metadata.
@@ -51,11 +51,11 @@ Supported end-to-end behavior:
 
 ## Remaining Decode Boundary
 
-- Motion-compensation coverage still needs the remaining richer inter/reference features beyond
-  the current bit-depth-preserving single-reference, average-compound, skip-mode compound,
-  fixed-filter, switchable-filter, `refmvs` candidate stack, and super-resolution subset, including
-  full previous-frame `refmvs` projection/scaling, warped motion, inter-intra, masked compound,
-  OBMC, and broader real parsed compound streams.
+- Motion-compensation coverage still needs warped motion.
+- Motion-compensation coverage still needs inter-intra prediction.
+- Motion-compensation coverage still needs masked compound prediction.
+- Motion-compensation coverage still needs OBMC.
+- Motion-compensation coverage still needs broader real parsed compound streams.
 - Active loop-filter and loop-restoration pixel filtering still need full block-edge masks,
   restoration-unit syntax, and coefficient-driven filtering before those frame features can decode
   instead of failing at the stable `NOT_IMPLEMENTED` boundary.
@@ -67,7 +67,7 @@ The following contracts are stable and should be preserved:
 - `DecodedPlanes`: reconstructed Y/U/V planes before ARGB conversion.
 - `TransformLayout`: luma units plus shared U/V chroma transform units in bitstream order.
 - `ReferenceSurfaceSnapshot`: frame header, syntax result, decoded planes, final tile CDF snapshots,
-  and compatible temporal-motion state for reference reuse.
+  and projected temporal-motion state for reference reuse.
 - `ResidualLayout`: luma and chroma residual units with explicit transform types.
 - `FilmGrainParams`: normalized film grain parameters inside `FrameHeader`.
 

@@ -127,20 +127,18 @@ final class FrameSyntaxDecoderTest {
         assertTrue(cdfOnlySkip);
     }
 
-    /// Verifies that incompatible inherited temporal motion fields are ignored when no CDF
-    /// inheritance is requested.
+    /// Verifies that inherited temporal motion fields are projected to the current tile geometry
+    /// when the reference frame used a different tile scale.
     @Test
-    void decodeFrameIgnoresIncompatibleTemporalReferenceWithoutCdfReference() {
+    void decodeFrameProjectsScaledTemporalReferenceWithoutCdfReference() {
         FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 8, 8);
         FrameAssembly referenceAssembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 16, 16);
         TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(2, 2);
+        InterMotionVector referenceMotionVector = InterMotionVector.resolved(new MotionVector(12, -4));
         temporalMotionField.setBlock(
                 1,
                 1,
-                TileDecodeContext.TemporalMotionBlock.singleReference(
-                        0,
-                        InterMotionVector.resolved(new MotionVector(12, -4))
-                )
+                TileDecodeContext.TemporalMotionBlock.singleReference(0, referenceMotionVector)
         );
         FrameSyntaxDecodeResult temporalReferenceResult = new FrameSyntaxDecodeResult(
                 referenceAssembly,
@@ -153,7 +151,10 @@ final class FrameSyntaxDecoderTest {
         TileDecodeContext.TemporalMotionField decodedTemporalMotionField = result.decodedTemporalMotionField(0);
         assertEquals(1, decodedTemporalMotionField.width8());
         assertEquals(1, decodedTemporalMotionField.height8());
-        assertNotNull(decodedTemporalMotionField.block(0, 0));
+        TileDecodeContext.TemporalMotionBlock decodedTemporalBlock = decodedTemporalMotionField.block(0, 0);
+        assertNotNull(decodedTemporalBlock);
+        assertEquals(InterMotionVector.resolved(new MotionVector(6, -2)), firstLeaf(result.tileRoots(0)).header().motionVector0());
+        assertEquals(InterMotionVector.resolved(new MotionVector(6, -2)), decodedTemporalBlock.motionVector0());
     }
 
     /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.
