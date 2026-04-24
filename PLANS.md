@@ -46,7 +46,7 @@ Everything else expands from that baseline after correctness is stable.
 - Stable real bitstream-driven multi-tile first-pixel fixtures are still missing, so multi-tile coverage is currently strongest at the synthetic frame-syntax/runtime level rather than the fixture corpus.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Minimal synthetic palette reconstruction now covers the current `I400` / `I420` / `I422` / `I444` subset, and the first deterministic real bitstream-driven palette fixture now also covers `I422` / `I444` at the reconstruction/integration layer plus stored-surface public reuse; broader palette edge cases, direct parsed wider-chroma palette streams, and wider-chroma real fixture variety are still missing.
-- `intrabc` reconstruction now covers a first synthetic same-frame `BILINEAR` subset for `I400/I420/I422/I444`, plus a first generated-header real syntax path with a synthetic resolved-MV reconstruction bridge; broader parsed-stream `intrabc` streams and any richer same-frame clipping/compound behavior are still unsupported.
+- `intrabc` reconstruction now covers a first synthetic same-frame `BILINEAR` subset for `I400/I420/I422/I444`, plus a first generated-header real syntax-and-reconstruction integration path; broader parsed-stream `intrabc` streams and any richer same-frame clipping/compound behavior are still unsupported.
 - Inter/reference reconstruction has now started at a narrow single-reference plus average-compound subset with integer-copy plus the current fixed-filter and block-resolved `SWITCHABLE` subpel prediction path (`BILINEAR` plus fixed `EIGHT_TAP_*` modes), and the current real inter fixture no longer needs zero-residual normalization just to cross the reconstruction boundary; the current minimal subset now also accepts stored post-super-resolution reference surfaces through one endpoint-preserving geometry-remap path, and the public reader now has a first real parsed-stream inter success path backed by injected stored references, but broader parsed-stream inter sample support and richer motion compensation still remain incomplete.
 - Direct parsed-stream first-pixel output now covers the current `8-bit I400/I420/I422/I444 -> ArgbIntFrame` still-picture subset, while broader `I422/I444` feature coverage still remains incomplete.
 - `show_existing_frame` now reuses one stored reconstructed reference surface for the current minimal output path when the referenced slot has a `ReferenceSurfaceSnapshot` and grain is not required, including the first real parsed-stream `I422/I444` still-picture round-trips and the earlier synthetic wider-chroma stored-surface coverage.
@@ -61,7 +61,7 @@ Everything else expands from that baseline after correctness is stable.
 
 - `Track A`: complete
 - `Track B`: complete
-- `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset with larger `32/64`-axis residual support, the first real inter residual integration coverage, a first single-reference plus average-compound fixed-filter plus block-resolved `SWITCHABLE` inter path, a first key/intra plus inter horizontal super-resolution subset including geometry-remapped stored reference surfaces, a first synthetic same-frame plus generated-header-bridged `intrabc` subset, and a first direct public-reader parsed inter success path backed by injected stored references
+- `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset with larger `32/64`-axis residual support, the first real inter residual integration coverage, a first single-reference plus average-compound fixed-filter plus block-resolved `SWITCHABLE` inter path, a first key/intra plus inter horizontal super-resolution subset including geometry-remapped stored reference surfaces, a first synthetic same-frame plus generated-header `intrabc` subset, and a first direct public-reader parsed inter success path backed by injected stored references
 - `Track D`: complete for the current supported subset
 - `Track E`: complete
 - `Track F`: complete
@@ -169,7 +169,7 @@ Write scope:
 
 Goal: create decoded planes from block syntax and residuals.
 
-Status: in progress. First-pixel baseline, broader `32/64`-axis `DCT_DCT` residual support, the first real inter residual integration path, the first block-resolved `SWITCHABLE` inter path, the first key/intra plus inter horizontal super-resolution subset with geometry-remapped stored references, the first synthetic same-frame plus generated-header-bridged `intrabc` subset, and the first direct public-reader parsed inter success path backed by injected stored references are in place.
+Status: in progress. First-pixel baseline, broader `32/64`-axis `DCT_DCT` residual support, the first real inter residual integration path, the first block-resolved `SWITCHABLE` inter path, the first key/intra plus inter horizontal super-resolution subset with geometry-remapped stored references, the first synthetic same-frame plus generated-header `intrabc` subset, and the first direct public-reader parsed inter success path backed by injected stored references are in place.
 
 Scope:
 
@@ -178,7 +178,7 @@ Scope:
 - Implement dequantization and inverse transforms.
 - Implement intra prediction.
 - Implement inter prediction and motion compensation.
-- Expand `intrabc` beyond the current synthetic same-frame plus generated-header-bridged subset, richer palette coverage and real palette fixtures, richer intra prediction, and inter pixel application.
+- Expand `intrabc` beyond the current synthetic same-frame plus generated-header subset, richer palette coverage and real palette fixtures, richer intra prediction, and inter pixel application.
 - Expand super-resolution upscaling beyond the current minimal horizontal key/intra plus inter subset.
 - Implement reference-surface refresh and reuse.
 
@@ -206,7 +206,7 @@ Completed within this track already:
 - current wider-chroma key/intra first-pixel subset, including direct parsed-stream `I422/I444` still-picture output
 - the first inter/reference subset: single-reference and average-compound prediction with integer-copy, fixed-filter and block-resolved `SWITCHABLE` subpel sampling, one larger-residual real inter integration path, the first parsed-stream fixed-filter integration coverage, and a first public-reader parsed inter success path backed by injected stored references
 - the first key/intra plus inter horizontal super-resolution subset, including geometry-remapped stored reference surfaces
-- the first synthetic same-frame `intrabc` bilinear subset for `I400/I420/I422/I444`, plus a first generated-header real syntax path with a synthetic resolved-MV bridge
+- the first synthetic same-frame `intrabc` bilinear subset for `I400/I420/I422/I444`, plus a first generated-header real syntax-and-reconstruction integration path
 
 Immediate next steps inside this track:
 
@@ -214,7 +214,7 @@ Immediate next steps inside this track:
 - fuller chroma transform-layout and coefficient coverage beyond the current `I420/I422` uniform visible-grid path
 - broader real bitstream-driven palette coverage and palette edge-case coverage beyond the current single wider-chroma palette fixture, including one dedicated direct parsed wider-chroma palette stream
 - broader inter motion compensation beyond the current single-reference plus average-compound integer-copy and fixed-filter/block-resolved-switchable subpel subset, including richer motion compensation and broader direct public-stream coverage for real parsed inter fixtures
-- broader `intrabc` coverage beyond the current synthetic same-frame plus generated-header-bridged subset, including dedicated parsed-stream fixtures and any richer clipping/filtering behavior required by real streams
+- broader `intrabc` coverage beyond the current synthetic same-frame plus generated-header subset, including dedicated parsed-stream fixtures and any richer clipping/filtering behavior required by real streams
 - broader super-resolution support beyond the current minimal horizontal key/intra plus geometry-remapped inter subset, especially richer parsed-stream inter super-resolution and higher-fidelity AV1 resampling behavior
 - stable real bitstream multi-tile first-pixel fixtures, so the widened serial multi-tile path is covered by deterministic corpus samples instead of only synthetic runtime state
 - broader real parsed-stream `I422/I444` fixtures, including richer residual and non-gray paths, so the widened wider-chroma subset is covered by deterministic corpus samples instead of only the current minimal still-picture/runtime state
@@ -516,7 +516,7 @@ Status:
 - in progress
 - stored-surface reuse is already stable for the current minimal path
 - a real inter baseline now exists, but broader parsed-stream inter output still stops at richer motion-compensation gaps
-- `intrabc` is no longer absent, but it is still limited to the current synthetic bilinear plus generated-header-bridged subset
+- `intrabc` is no longer absent, but it is still limited to the current synthetic bilinear plus generated-header subset
 
 ### M4: Full Presentation Pipeline
 

@@ -47,6 +47,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `TileSyntaxReader`.
 @NotNullByDefault
 final class TileSyntaxReaderTest {
+    /// Classpath resource containing named entropy payload fixtures for block-header syntax tests.
+    private static final String TILE_BLOCK_HEADER_FIXTURE_RESOURCE =
+            "av1/fixtures/generated/tile-block-header-fixtures.txt";
+
     /// Classpath resource that stores precomputed tile-syntax payload fixtures.
     private static final String TILE_SYNTAX_FIXTURES_RESOURCE = "av1/fixtures/generated/tile-syntax-fixtures.txt";
 
@@ -239,6 +243,34 @@ final class TileSyntaxReaderTest {
         assertArrayEquals(oracleCdf.mutableMotionVectorClassCdf(1), tileContext.cdfContext().mutableMotionVectorClassCdf(1));
         assertArrayEquals(oracleCdf.mutableMotionVectorSignCdf(0), tileContext.cdfContext().mutableMotionVectorSignCdf(0));
         assertArrayEquals(oracleCdf.mutableMotionVectorSignCdf(1), tileContext.cdfContext().mutableMotionVectorSignCdf(1));
+    }
+
+    /// Verifies that `intrabc`-enabled key frames can consume one same-frame motion-vector
+    /// residual with the current tile-local motion-vector syntax tables.
+    @Test
+    void readsIntrabcMotionVectorResidualSyntax() {
+        byte[] payload = HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE, "intrabc");
+        TileDecodeContext tileContext = createTileContext(FrameType.KEY, true, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+        MotionVector predictor = MotionVector.zero();
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
+        boolean expectedUseIntrabc = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntrabcCdf());
+        MotionVector expectedMotionVector = decodeMotionVectorResidual(
+                oracleDecoder,
+                oracleCdf,
+                predictor,
+                tileContext.frameHeader().allowHighPrecisionMotionVectors(),
+                tileContext.frameHeader().forceIntegerMotionVectors()
+        );
+
+        assertEquals(expectedSkip, reader.readSkipFlag(0));
+        assertEquals(expectedUseIntrabc, reader.readUseIntrabcFlag());
+        assertEquals(expectedMotionVector, reader.readMotionVectorResidual(predictor));
+        assertArrayEquals(oracleCdf.mutableSkipCdf(0), tileContext.cdfContext().mutableSkipCdf(0));
+        assertArrayEquals(oracleCdf.mutableMotionVectorJointCdf(), tileContext.cdfContext().mutableMotionVectorJointCdf());
     }
 
     /// Verifies that key-frame intra decisions do not consume entropy-coded bits and that Y/UV modes use the expected CDFs.

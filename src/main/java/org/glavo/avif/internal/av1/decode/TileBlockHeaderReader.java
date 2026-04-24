@@ -261,6 +261,7 @@ public final class TileBlockHeaderReader {
         int cflAlphaU = 0;
         int cflAlphaV = 0;
         if (useIntrabc) {
+            motionVector0 = InterMotionVector.resolved(syntaxReader.readMotionVectorResidual(MotionVector.zero()));
             yMode = LumaIntraPredictionMode.DC;
             if (hasChroma) {
                 uvMode = UvIntraPredictionMode.DC;

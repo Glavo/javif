@@ -659,6 +659,13 @@ final class TileBlockHeaderReaderTest {
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
         boolean expectedUseIntrabc = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntrabcCdf());
+        MotionVector expectedMotionVector = decodeMotionVectorResidual(
+                oracleDecoder,
+                oracleCdf,
+                MotionVector.zero(),
+                tileContext.frameHeader().allowHighPrecisionMotionVectors(),
+                tileContext.frameHeader().forceIntegerMotionVectors()
+        );
 
         assertTrue(expectedUseIntrabc);
         TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
@@ -666,6 +673,8 @@ final class TileBlockHeaderReaderTest {
         assertEquals(expectedSkip, header.skip());
         assertFalse(header.intra());
         assertTrue(header.useIntrabc());
+        assertEquals(InterMotionVector.resolved(expectedMotionVector), header.motionVector0());
+        assertNull(header.motionVector1());
         assertEquals(LumaIntraPredictionMode.DC, header.yMode());
         assertEquals(UvIntraPredictionMode.DC, header.uvMode());
         assertNull(header.filterIntraMode());

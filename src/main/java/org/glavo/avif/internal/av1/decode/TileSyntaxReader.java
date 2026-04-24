@@ -405,18 +405,23 @@ public final class TileSyntaxReader {
         return readSignedDeltaValue(cdfContext.mutableDeltaLfCdf(context), resolutionLog2);
     }
 
-    /// Decodes one `NEWMV` residual around the supplied predictor.
+    /// Decodes one motion-vector residual around the supplied predictor.
     ///
-    /// The active frame header supplies the motion-vector precision mode. The returned vector is
-    /// the fully decoded motion vector in quarter-pel units.
+    /// The active frame header supplies the motion-vector precision mode. This syntax is available
+    /// for inter/switch frames and for key/intra frames when `allow_intrabc` is enabled. The
+    /// returned vector is the fully decoded motion vector in quarter-pel units.
     ///
     /// @param referenceMotionVector the predictor that the residual is added to
     /// @return the fully decoded motion vector in quarter-pel units
     public MotionVector readMotionVectorResidual(MotionVector referenceMotionVector) {
         MotionVector nonNullReferenceMotionVector = Objects.requireNonNull(referenceMotionVector, "referenceMotionVector");
         FrameType frameType = tileContext.frameHeader().frameType();
-        if (frameType != FrameType.INTER && frameType != FrameType.SWITCH) {
-            throw new IllegalStateException("Motion-vector residuals are only available in inter and switch frames");
+        if (frameType != FrameType.INTER
+                && frameType != FrameType.SWITCH
+                && !tileContext.frameHeader().allowIntrabc()) {
+            throw new IllegalStateException(
+                    "Motion-vector residuals are only available in inter/switch frames or intrabc-enabled intra frames"
+            );
         }
 
         int motionVectorPrecision = (tileContext.frameHeader().allowHighPrecisionMotionVectors() ? 1 : 0)

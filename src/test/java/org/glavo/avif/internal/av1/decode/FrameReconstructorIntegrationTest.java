@@ -1325,13 +1325,8 @@ final class FrameReconstructorIntegrationTest {
             assertEquals(UvIntraPredictionMode.DC, decodedLeaf.header().uvMode());
         }
 
-        MotionVector motionVector = new MotionVector(0, -36);
-        TilePartitionTreeReader.LeafNode bridgedLeaf = new TilePartitionTreeReader.LeafNode(
-                copyBlockHeaderWithPrimaryMotionVector(decodedLeaf.header(), motionVector),
-                decodedLeaf.transformLayout(),
-                decodedLeaf.residualLayout()
-        );
-        TilePartitionTreeReader.LeafNode zeroResidualLeaf = clearDecodedLeafResiduals(bridgedLeaf);
+        MotionVector motionVector = requireNonNullInterMotionVector(decodedLeaf.header().motionVector0()).vector();
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = clearDecodedLeafResiduals(decodedLeaf);
         FrameAssembly assembly = createIntrabcEnabledAssembly(
                 pixelFormat,
                 new byte[0],
@@ -1402,7 +1397,7 @@ final class FrameReconstructorIntegrationTest {
         }
 
         DecodedPlanes decodedPlanes = reconstructor.reconstruct(
-                createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, bridgedLeaf}),
+                createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, decodedLeaf}),
                 new ReferenceSurfaceSnapshot[0]
         );
 
