@@ -199,7 +199,8 @@ final class IntraPredictor {
     /// Reconstructs one luma filter-intra block directly into the destination plane.
     ///
     /// The current implementation supports the AV1 recursive 4x2 filter-intra algorithm for the
-    /// full syntax-legal size range up to `32x32`.
+    /// full syntax-legal size range up to `32x32`, including visible right and bottom edge
+    /// clipping that leaves the final 4x2 prediction unit partially written.
     ///
     /// @param plane the mutable destination plane
     /// @param x the zero-based horizontal sample coordinate
@@ -221,22 +222,18 @@ final class IntraPredictor {
         if (height <= 0) {
             throw new IllegalArgumentException("height <= 0: " + height);
         }
-        if ((width & 3) != 0) {
-            throw new IllegalStateException("filter_intra requires width aligned to 4 samples: " + width);
-        }
-        if ((height & 1) != 0) {
-            throw new IllegalStateException("filter_intra requires height aligned to 2 samples: " + height);
-        }
         if (width > 32 || height > 32) {
             throw new IllegalStateException("filter_intra currently supports sizes up to 32x32: " + width + "x" + height);
         }
 
         int defaultSample = 1 << (plane.bitDepth() - 1);
         int[][] taps = FILTER_INTRA_TAPS[mode.symbolIndex()];
-        for (int stripeY = 0; stripeY < height; stripeY += 2) {
+        int predictionWidth = (width + 3) & ~3;
+        int predictionHeight = (height + 1) & ~1;
+        for (int stripeY = 0; stripeY < predictionHeight; stripeY += 2) {
             int topReferenceY = y + stripeY - 1;
             int currentY = y + stripeY;
-            for (int blockX = 0; blockX < width; blockX += 4) {
+            for (int blockX = 0; blockX < predictionWidth; blockX += 4) {
                 int currentX = x + blockX;
                 int leftReferenceX = currentX - 1;
                 int p0 = plane.sampleOrFallback(leftReferenceX, topReferenceY, defaultSample);
@@ -257,7 +254,9 @@ final class IntraPredictor {
                                 + tap[5] * p5
                                 + tap[6] * p6
                                 + 8) >> 4;
-                        plane.setSample(currentX + xx, currentY + yy, predicted);
+                        if (blockX + xx < width && stripeY + yy < height) {
+                            plane.setSample(currentX + xx, currentY + yy, predicted);
+                        }
                     }
                 }
             }

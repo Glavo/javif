@@ -166,6 +166,33 @@ final class IntraPredictorTest {
         );
     }
 
+    /// Verifies that filter-intra prediction accepts a visible edge footprint that does not align
+    /// to the internal recursive 4x2 prediction unit.
+    @Test
+    void filterIntraPredictionClipsRightAndBottomEdges() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(0, 0, 50);
+        plane.setSample(1, 0, 10);
+        plane.setSample(2, 0, 20);
+        plane.setSample(3, 0, 30);
+        plane.setSample(0, 1, 60);
+        plane.setSample(0, 2, 70);
+        plane.setSample(0, 3, 80);
+
+        IntraPredictor.predictFilterIntraLuma(plane, 1, 1, 3, 3, FilterIntraMode.DC);
+
+        assertBlockEquals(
+                plane,
+                1,
+                1,
+                new int[][]{
+                        {61, 61, 118},
+                        {26, 36, 80},
+                        {109, 123, 147}
+                }
+        );
+    }
+
     /// Verifies that `I420` CFL prediction derives signed AC from reconstructed luma and applies alpha.
     @Test
     void chromaCflPredictionUsesDownsampledLumaAc() {
