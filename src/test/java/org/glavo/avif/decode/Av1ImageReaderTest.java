@@ -329,13 +329,32 @@ final class Av1ImageReaderTest {
     }
 
     /// Verifies that the current still-picture first-pixel path also succeeds for parsed
-    /// `10-bit I420` and `12-bit I444` combined streams and returns `ArgbLongFrame`.
+    /// `10-bit` and `12-bit` combined streams across all supported public chroma layouts and
+    /// returns `ArgbLongFrame`.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsArgbLongFrameForSupportedCombinedHighBitDepthStillPictureStreams() throws IOException {
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 10);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 12);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 10, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 12, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 10, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 12, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 10, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 12, true);
+    }
+
+    /// Verifies that the high-bit-depth still-picture first-pixel path also succeeds through
+    /// standalone frame assembly across all supported public chroma layouts.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbLongFrameForSupportedStandaloneHighBitDepthStillPictureStreams() throws IOException {
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 10, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 12, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 10, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 12, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 10, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 12, false);
     }
 
     /// Verifies that `readAllFrames()` preserves the current supported first-pixel combined
@@ -409,6 +428,32 @@ final class Av1ImageReaderTest {
             throws IOException {
         assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, true);
         assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, true);
+    }
+
+    /// Verifies that real parsed high-bit-depth `I422` and `I444` still-picture decodes refresh
+    /// reference slots that can be reused by standalone `show_existing_frame` headers.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbLongFrameForShowExistingFrameBackedByRealParsedHighBitDepthStillPicturesWithAdditionalChromaLayouts()
+            throws IOException {
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 10, false);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 12, false);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 10, false);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 12, false);
+    }
+
+    /// Verifies that real parsed high-bit-depth `I422` and `I444` still-picture decodes refresh
+    /// reference slots that can be reused by combined `FRAME` `show_existing_frame` OBUs.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbLongFrameForCombinedShowExistingFrameBackedByRealParsedHighBitDepthStillPicturesWithAdditionalChromaLayouts()
+            throws IOException {
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 10, true);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 12, true);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 10, true);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 12, true);
     }
 
     /// Verifies that one standalone `show_existing_frame` header can expose a reconstructed palette
@@ -1884,12 +1929,19 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertSupportedHighBitDepthStillPictureRoundTrip(
             PixelFormat pixelFormat,
-            int bitDepth
+            int bitDepth,
+            boolean combined
     ) throws IOException {
-        byte[] stream = concat(
-                obu(1, fullSequenceHeaderPayload(pixelFormat, bitDepth)),
-                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
-        );
+        byte[] stream = combined
+                ? concat(
+                        obu(1, fullSequenceHeaderPayload(pixelFormat, bitDepth)),
+                        obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+                )
+                : concat(
+                        obu(1, fullSequenceHeaderPayload(pixelFormat, bitDepth)),
+                        obu(3, fullStillPictureFrameHeaderPayload()),
+                        obu(4, SUPPORTED_SINGLE_TILE_PAYLOAD)
+                );
 
         assertAcrossBufferedInputs(stream, reader -> {
             DecodedFrame decodedFrame = reader.readFrame();
@@ -1904,6 +1956,49 @@ final class Av1ImageReaderTest {
             );
             assertFirstDecodedLeafIsIntra(syntaxDecodeResult);
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Asserts that one real parsed high-bit-depth still-picture decode in the requested additional
+    /// chroma layout immediately refreshes a reference slot and then round-trips through
+    /// `show_existing_frame`.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @param bitDepth the parsed decoded bit depth to expose
+    /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(
+            PixelFormat pixelFormat,
+            int bitDepth,
+            boolean combinedShowExisting
+    ) throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload(pixelFormat, bitDepth)),
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                obu(combinedShowExisting ? 6 : 3, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame firstFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxDecodeResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(syntaxDecodeResult);
+            assertOpaqueGrayStillPictureLongFrame(
+                    firstFrame,
+                    syntaxDecodeResult.assembly().frameHeader(),
+                    bitDepth,
+                    pixelFormat,
+                    0
+            );
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+
+            DecodedFrame reusedFrame = reader.readFrame();
+            assertDecodedStillPictureFrameMetadata(reusedFrame, bitDepth, pixelFormat, FrameType.KEY, 1);
+            assertNotNull(firstFrame);
+            assertNotNull(reusedFrame);
+            assertTrue(firstFrame instanceof ArgbLongFrame);
+            assertTrue(reusedFrame instanceof ArgbLongFrame);
+            assertArrayEquals(((ArgbLongFrame) firstFrame).pixels(), ((ArgbLongFrame) reusedFrame).pixels());
             assertNull(reader.readFrame());
         });
     }

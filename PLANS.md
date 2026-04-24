@@ -11,9 +11,9 @@ reconstruction core and the real-stream coverage that proves it.
 - serial execution
 - visible `KEY` / `INTRA` still-picture paths
 - `8-bit I400/I420/I422/I444 -> ArgbIntFrame`
-- first direct high-bit-depth still-picture subset:
-  - `10-bit I420 -> ArgbLongFrame`
-  - `12-bit I444 -> ArgbLongFrame`
+- high-bit-depth still-picture paths:
+  - `10-bit/12-bit I420/I422/I444 -> ArgbLongFrame`
+  - combined-frame and standalone frame-assembly coverage
 - current key/intra reconstruction subset:
   - directional and non-directional intra
   - smooth intra with clipped right/bottom visible footprints
@@ -23,6 +23,8 @@ reconstruction core and the real-stream coverage that proves it.
   - current `DCT_DCT` residual space with transform axes up to `64`
   - first parsed chroma residual fixture paths for `I420/I422/I444`
 - current stored-surface `show_existing_frame` path
+- real parsed `I422/I444` public-layout paths now cover direct still-picture output, high-bit-depth
+  output, stored-surface reuse, multi-tile first-pixel streams, and the current hybrid inter subset
 - real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`,
   including horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants
 - the first inter/reference subset:
@@ -71,8 +73,6 @@ Everything outside that subset must continue to fail explicitly with a stable
   parser metadata, plus richer motion compensation.
 - Super-resolution still needs higher-fidelity AV1 resampling behavior and broader parsed-stream
   inter super-resolution coverage.
-- `I422/I444` still need broader real parsed-stream coverage beyond direct still-picture output and
-  stored-surface reuse.
 - The next practical public decode gaps are:
   - parsed-stream inter without injected parser metadata
   - richer motion compensation
