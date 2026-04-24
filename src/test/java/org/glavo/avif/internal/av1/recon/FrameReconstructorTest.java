@@ -2808,6 +2808,72 @@ final class FrameReconstructorTest {
         assertPlaneBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, 0);
     }
 
+    /// Verifies that fixed-filter inter prediction preserves `10-bit` samples instead of clipping
+    /// the subpel result to the `8-bit` range.
+    @Test
+    void reconstructsTenBitSingleReferenceI400InterBlockWithRegularEightTapSubpelMotionVector() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(3, 1);
+        int[][] lumaSamples = {
+                {320, 344, 368, 392, 416, 440, 464, 488},
+                {376, 400, 424, 448, 472, 496, 520, 544},
+                {432, 456, 480, 504, 528, 552, 576, 600},
+                {488, 512, 536, 560, 584, 608, 632, 656},
+                {544, 568, 592, 616, 640, 664, 688, 712},
+                {600, 624, 648, 672, 696, 720, 744, 768},
+                {656, 680, 704, 728, 752, 776, 800, 824},
+                {712, 736, 760, 784, 808, 832, 856, 880}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                10,
+                lumaSamples,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createHighBitInterFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        10,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertEquals(10, planes.bitDepth());
+        assertFalse(planes.hasChroma());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        createDecodedPlane(lumaSamples),
+                        4,
+                        4,
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        4,
+                        4,
+                        4,
+                        4,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                        1023
+                )
+        );
+        assertTrue(planes.lumaPlane().sample(0, 0) > 255);
+    }
+
     /// Verifies that one `I420` single-reference inter block samples both luma and chroma
     /// footprints through the current fixed `EIGHT_TAP_SMOOTH` subpel path.
     @Test
@@ -3207,6 +3273,205 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Verifies that fixed-filter compound inter prediction preserves `12-bit` luma and chroma
+    /// samples while averaging two independently sampled reference surfaces.
+    @Test
+    void reconstructsTwelveBitCompoundReferenceI420InterBlockWithSharpEightTapSubpelMotionVectors() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector0 = new MotionVector(3, 1);
+        MotionVector motionVector1 = new MotionVector(1, 3);
+        int[][] lumaSamples0 = {
+                {1024, 1056, 1088, 1120, 1152, 1184, 1216, 1248},
+                {1088, 1120, 1152, 1184, 1216, 1248, 1280, 1312},
+                {1152, 1184, 1216, 1248, 1280, 1312, 1344, 1376},
+                {1216, 1248, 1280, 1312, 1344, 1376, 1408, 1440},
+                {1280, 1312, 1344, 1376, 1408, 1440, 1472, 1504},
+                {1344, 1376, 1408, 1440, 1472, 1504, 1536, 1568},
+                {1408, 1440, 1472, 1504, 1536, 1568, 1600, 1632},
+                {1472, 1504, 1536, 1568, 1600, 1632, 1664, 1696}
+        };
+        int[][] chromaUSamples0 = {
+                {1200, 1232, 1264, 1296},
+                {1248, 1280, 1312, 1344},
+                {1296, 1328, 1360, 1392},
+                {1344, 1376, 1408, 1440}
+        };
+        int[][] chromaVSamples0 = {
+                {1500, 1532, 1564, 1596},
+                {1548, 1580, 1612, 1644},
+                {1596, 1628, 1660, 1692},
+                {1644, 1676, 1708, 1740}
+        };
+        int[][] lumaSamples1 = {
+                {2500, 2468, 2436, 2404, 2372, 2340, 2308, 2276},
+                {2436, 2404, 2372, 2340, 2308, 2276, 2244, 2212},
+                {2372, 2340, 2308, 2276, 2244, 2212, 2180, 2148},
+                {2308, 2276, 2244, 2212, 2180, 2148, 2116, 2084},
+                {2244, 2212, 2180, 2148, 2116, 2084, 2052, 2020},
+                {2180, 2148, 2116, 2084, 2052, 2020, 1988, 1956},
+                {2116, 2084, 2052, 2020, 1988, 1956, 1924, 1892},
+                {2052, 2020, 1988, 1956, 1924, 1892, 1860, 1828}
+        };
+        int[][] chromaUSamples1 = {
+                {2200, 2168, 2136, 2104},
+                {2152, 2120, 2088, 2056},
+                {2104, 2072, 2040, 2008},
+                {2056, 2024, 1992, 1960}
+        };
+        int[][] chromaVSamples1 = {
+                {2600, 2568, 2536, 2504},
+                {2552, 2520, 2488, 2456},
+                {2504, 2472, 2440, 2408},
+                {2456, 2424, 2392, 2360}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                12,
+                lumaSamples0,
+                chromaUSamples0,
+                chromaVSamples0
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                12,
+                lumaSamples1,
+                chromaUSamples1,
+                chromaVSamples1
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        true,
+                        0,
+                        1,
+                        motionVector0,
+                        motionVector1
+                ),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I420,
+                        12,
+                        8,
+                        8,
+                        0,
+                        1,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertEquals(12, planes.bitDepth());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(lumaSamples0),
+                                4,
+                                4,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                4,
+                                4,
+                                4,
+                                4,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                                4095
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(lumaSamples1),
+                                4,
+                                4,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                4,
+                                4,
+                                4,
+                                4,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                                4095
+                        )
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaUSamples0),
+                                2,
+                                2,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                                4095
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaUSamples1),
+                                2,
+                                2,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                                4095
+                        )
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaVPlane()),
+                0,
+                0,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaVSamples0),
+                                2,
+                                2,
+                                motionVector0.columnQuarterPel(),
+                                motionVector0.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                                4095
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                createDecodedPlane(chromaVSamples1),
+                                2,
+                                2,
+                                motionVector1.columnQuarterPel(),
+                                motionVector1.rowQuarterPel(),
+                                8,
+                                8,
+                                2,
+                                2,
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                                4095
+                        )
+                )
+        );
+        assertTrue(planes.lumaPlane().sample(0, 0) > 255);
+        assertTrue(requirePlane(planes.chromaUPlane()).sample(0, 0) > 255);
+        assertTrue(requirePlane(planes.chromaVPlane()).sample(0, 0) > 255);
+    }
+
     /// Verifies that one monochrome inter block still applies supported residuals on top of the
     /// copied reference prediction.
     @Test
@@ -3493,6 +3758,82 @@ final class FrameReconstructorTest {
     ) {
         SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
         FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot, interpolationFilter);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{roots},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one synthetic structural inter frame-decode result with an explicit decoded bit
+    /// depth and caller-supplied frame-level interpolation filter.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param bitDepth the decoded sample bit depth
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param interpolationFilter the frame-level interpolation filter used for inter prediction
+    /// @param roots the top-level tile roots for tile `0`
+    /// @return one synthetic structural inter frame-decode result
+    private static FrameSyntaxDecodeResult createHighBitInterFrameSyntaxDecodeResult(
+            PixelFormat pixelFormat,
+            int bitDepth,
+            int width,
+            int height,
+            int referenceSlot,
+            FrameHeader.InterpolationFilter interpolationFilter,
+            TilePartitionTreeReader.Node... roots
+    ) {
+        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, bitDepth, width, height);
+        FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot, interpolationFilter);
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{roots},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one synthetic structural compound-inter frame-decode result with an explicit
+    /// decoded bit depth and two stored reference slots.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param bitDepth the decoded sample bit depth
+    /// @param width the coded and rendered frame width
+    /// @param height the coded and rendered frame height
+    /// @param referenceSlot0 the stored slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored slot exposed as `LAST2_FRAME`
+    /// @param interpolationFilter the frame-level interpolation filter
+    /// @param roots the top-level tile roots for tile `0`
+    /// @return one synthetic structural compound-inter frame-decode result
+    private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
+            PixelFormat pixelFormat,
+            int bitDepth,
+            int width,
+            int height,
+            int referenceSlot0,
+            int referenceSlot1,
+            FrameHeader.InterpolationFilter interpolationFilter,
+            TilePartitionTreeReader.Node... roots
+    ) {
+        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, bitDepth, width, height);
+        FrameHeader frameHeader = createInterFrameHeader(width, height, referenceSlot0, referenceSlot1, interpolationFilter);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
@@ -4453,14 +4794,35 @@ final class FrameReconstructorTest {
             @Nullable int[][] chromaUSamples,
             @Nullable int[][] chromaVSamples
     ) {
+        return createReferenceSurfaceSnapshot(pixelFormat, 8, lumaSamples, chromaUSamples, chromaVSamples);
+    }
+
+    /// Creates one stored reference surface snapshot for synthetic inter reconstruction tests with
+    /// an explicit decoded bit depth.
+    ///
+    /// @param pixelFormat the decoded chroma layout stored by the snapshot
+    /// @param bitDepth the decoded sample bit depth stored by the snapshot
+    /// @param lumaSamples the luma sample raster
+    /// @param chromaUSamples the chroma-U sample raster, or `null`
+    /// @param chromaVSamples the chroma-V sample raster, or `null`
+    /// @return one stored reference surface snapshot for synthetic inter reconstruction tests
+    private static ReferenceSurfaceSnapshot createReferenceSurfaceSnapshot(
+            PixelFormat pixelFormat,
+            int bitDepth,
+            int[][] lumaSamples,
+            @Nullable int[][] chromaUSamples,
+            @Nullable int[][] chromaVSamples
+    ) {
         int width = lumaSamples[0].length;
         int height = lumaSamples.length;
-        FrameSyntaxDecodeResult syntaxDecodeResult = createFrameSyntaxDecodeResult(pixelFormat, FrameType.KEY, width, height);
+        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, bitDepth, width, height);
+        FrameHeader frameHeader = createFrameHeader(FrameType.KEY, width, height);
+        FrameSyntaxDecodeResult syntaxDecodeResult = createFrameSyntaxDecodeResult(sequenceHeader, frameHeader);
         return new ReferenceSurfaceSnapshot(
                 syntaxDecodeResult.assembly().frameHeader(),
                 syntaxDecodeResult,
                 new DecodedPlanes(
-                        8,
+                        bitDepth,
                         pixelFormat,
                         width,
                         height,

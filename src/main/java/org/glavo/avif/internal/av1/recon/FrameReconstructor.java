@@ -45,7 +45,8 @@ import java.util.Objects;
 /// normative horizontal super-resolution upscaling path for key/intra frames plus the current
 /// inter/reference prediction subset, and a minimal luma/chroma residual subset including clipped
 /// frame-fringe chroma footprints and the currently supported square and rectangular `DCT_DCT`
-/// transform sizes whose axes stay within `64` samples.
+/// transform sizes whose axes stay within `64` samples, and bit-depth preserving inter subpel
+/// filtering for stored reference surfaces.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// The number of coefficients in one 8-tap interpolation kernel.
@@ -1293,7 +1294,8 @@ public final class FrameReconstructor {
                                 widthForFilterSelection,
                                 heightForFilterSelection,
                                 horizontalFilterMode,
-                                verticalFilterMode
+                                verticalFilterMode,
+                                destinationPlane.maxSampleValue()
                         )
                 );
             }
@@ -1354,7 +1356,8 @@ public final class FrameReconstructor {
                         widthForFilterSelection,
                         heightForFilterSelection,
                         horizontalFilterMode,
-                        verticalFilterMode
+                        verticalFilterMode,
+                        destinationPlane.maxSampleValue()
                 );
                 int sample1 = sampleInterPlaneValue(
                         referencePlane1,
@@ -1369,7 +1372,8 @@ public final class FrameReconstructor {
                         widthForFilterSelection,
                         heightForFilterSelection,
                         horizontalFilterMode,
-                        verticalFilterMode
+                        verticalFilterMode,
+                        destinationPlane.maxSampleValue()
                 );
                 destinationPlane.setSample(destinationX + x, destinationY + y, averageCompoundSamples(sample0, sample1));
             }
@@ -1390,6 +1394,7 @@ public final class FrameReconstructor {
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter mode
     /// @param verticalFilterMode the effective vertical interpolation filter mode
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one predicted plane sample
     private static int sampleInterPlaneValue(
             DecodedPlane referencePlane,
@@ -1404,7 +1409,8 @@ public final class FrameReconstructor {
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
-            FrameHeader.InterpolationFilter verticalFilterMode
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
     ) {
         int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
                 destinationX,
@@ -1434,7 +1440,8 @@ public final class FrameReconstructor {
                 widthForFilterSelection,
                 heightForFilterSelection,
                 horizontalFilterMode,
-                verticalFilterMode
+                verticalFilterMode,
+                maximumSampleValue
         );
     }
 
@@ -1489,6 +1496,7 @@ public final class FrameReconstructor {
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter mode
     /// @param verticalFilterMode the effective vertical interpolation filter mode
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     private static void filteredReferencePlaneBlock(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
@@ -1503,7 +1511,8 @@ public final class FrameReconstructor {
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
-            FrameHeader.InterpolationFilter verticalFilterMode
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
     ) {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -1519,7 +1528,8 @@ public final class FrameReconstructor {
                                 widthForFilterSelection,
                                 heightForFilterSelection,
                                 horizontalFilterMode,
-                                verticalFilterMode
+                                verticalFilterMode,
+                                maximumSampleValue
                         )
                 );
             }
@@ -1538,6 +1548,7 @@ public final class FrameReconstructor {
     /// @param heightForFilterSelection the sampled block height in pixels
     /// @param horizontalFilterMode the effective horizontal interpolation filter
     /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one fixed-filter interpolated unsigned sample
     private static int filteredInterpolateAt(
             DecodedPlane referencePlane,
@@ -1548,7 +1559,8 @@ public final class FrameReconstructor {
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
-            FrameHeader.InterpolationFilter verticalFilterMode
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
     ) {
         if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
                 && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
@@ -1585,7 +1597,7 @@ public final class FrameReconstructor {
                     sourceY0,
                     Objects.requireNonNull(horizontalFilter, "horizontalFilter")
             );
-            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, 255);
+            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, maximumSampleValue);
         }
         if (horizontalFilter == null) {
             long filtered = verticalInterpolate(
@@ -1594,7 +1606,7 @@ public final class FrameReconstructor {
                     sourceY0,
                     Objects.requireNonNull(verticalFilter, "verticalFilter")
             );
-            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, 255);
+            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, maximumSampleValue);
         }
 
         long[] horizontallyFilteredRows = new long[INTER_FILTER_TAP_COUNT];
@@ -1607,7 +1619,7 @@ public final class FrameReconstructor {
         for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
             combined += (long) Objects.requireNonNull(verticalFilter, "verticalFilter")[tapIndex] * horizontallyFilteredRows[tapIndex];
         }
-        return clamp(roundShiftSigned(combined, INTER_FILTER_BITS * 2), 0, 255);
+        return clamp(roundShiftSigned(combined, INTER_FILTER_BITS * 2), 0, maximumSampleValue);
     }
 
     /// Returns one bilinearly interpolated unsigned sample at the supplied plane-local source

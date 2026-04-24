@@ -8,7 +8,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 ///
 /// The implementation intentionally mirrors the current production contract without calling package-
 /// private reconstruction helpers, so unit and integration tests can assert exact pixel values for
-/// integer-copy, `BILINEAR`, and fixed `EIGHT_TAP_*` subpel prediction.
+/// integer-copy, `BILINEAR`, and fixed `EIGHT_TAP_*` subpel prediction, including bit-depth-aware
+/// fixed-filter clipping.
 @NotNullByDefault
 public final class InterPredictionOracle {
 
@@ -164,6 +165,50 @@ public final class InterPredictionOracle {
         );
     }
 
+    /// Samples one rectangular reference-plane footprint using the current supported inter filter
+    /// subset and a caller-supplied output clipping range.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param width the sampled block width in samples
+    /// @param height the sampled block height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param filterMode the interpolation filter used for both directions
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
+    /// @return one sampled reference-plane block in row-major order
+    public static int[][] sampleReferencePlaneBlock(
+            DecodedPlane referencePlane,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter filterMode,
+            int maximumSampleValue
+    ) {
+        return sampleReferencePlaneBlock(
+                referencePlane,
+                width,
+                height,
+                sourceNumeratorX,
+                sourceNumeratorY,
+                denominatorX,
+                denominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                filterMode,
+                filterMode,
+                maximumSampleValue
+        );
+    }
+
     /// Samples one rectangular reference-plane footprint using the supplied directional inter
     /// filters.
     ///
@@ -192,6 +237,52 @@ public final class InterPredictionOracle {
             FrameHeader.InterpolationFilter horizontalFilterMode,
             FrameHeader.InterpolationFilter verticalFilterMode
     ) {
+        return sampleReferencePlaneBlock(
+                referencePlane,
+                width,
+                height,
+                sourceNumeratorX,
+                sourceNumeratorY,
+                denominatorX,
+                denominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                horizontalFilterMode,
+                verticalFilterMode,
+                255
+        );
+    }
+
+    /// Samples one rectangular reference-plane footprint using directional inter filters and a
+    /// caller-supplied output clipping range.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param width the sampled block width in samples
+    /// @param height the sampled block height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
+    /// @return one sampled reference-plane block in row-major order
+    public static int[][] sampleReferencePlaneBlock(
+            DecodedPlane referencePlane,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
+    ) {
         int[][] samples = new int[height][width];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -204,7 +295,8 @@ public final class InterPredictionOracle {
                         widthForFilterSelection,
                         heightForFilterSelection,
                         horizontalFilterMode,
-                        verticalFilterMode
+                        verticalFilterMode,
+                        maximumSampleValue
                 );
             }
         }
@@ -239,6 +331,7 @@ public final class InterPredictionOracle {
     /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter
     /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one sampled inter value
     private static int sampleInterPlaneValue(
             DecodedPlane referencePlane,
@@ -249,7 +342,8 @@ public final class InterPredictionOracle {
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
-            FrameHeader.InterpolationFilter verticalFilterMode
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
     ) {
         if (Math.floorMod(sourceNumeratorX, denominatorX) == 0 && Math.floorMod(sourceNumeratorY, denominatorY) == 0) {
             return referencePlane.sample(
@@ -289,11 +383,11 @@ public final class InterPredictionOracle {
 
         if (verticalFilter == null) {
             long filtered = horizontalInterpolate(referencePlane, sourceX0, sourceY0, horizontalFilter);
-            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, 255);
+            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, maximumSampleValue);
         }
         if (horizontalFilter == null) {
             long filtered = verticalInterpolate(referencePlane, sourceX0, sourceY0, verticalFilter);
-            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, 255);
+            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, maximumSampleValue);
         }
 
         long[] horizontallyFilteredRows = new long[INTER_FILTER_TAP_COUNT];
@@ -305,7 +399,7 @@ public final class InterPredictionOracle {
         for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
             combined += (long) verticalFilter[tapIndex] * horizontallyFilteredRows[tapIndex];
         }
-        return clamp(roundShiftSigned(combined, INTER_FILTER_BITS * 2), 0, 255);
+        return clamp(roundShiftSigned(combined, INTER_FILTER_BITS * 2), 0, maximumSampleValue);
     }
 
     /// Applies one horizontal AV1 fixed filter at one source location.

@@ -27,9 +27,9 @@ Supported end-to-end behavior:
 - Direct real parsed `I422/I444` public-layout paths for still output, high-bit-depth output,
   stored-surface reuse, multi-tile first-pixel streams, and the current self-contained inter subset.
 - First inter/reference subset: single-reference prediction, average-compound prediction,
-  integer-copy prediction, fixed-filter and block-resolved `SWITCHABLE` subpel prediction, and
-  normative horizontal super-resolution for key/intra, public still-picture, synthetic inter, and
-  bitstream-derived inter reconstruction paths.
+  integer-copy prediction, bit-depth-preserving fixed-filter and block-resolved `SWITCHABLE`
+  subpel prediction, and normative horizontal super-resolution for key/intra, public
+  still-picture, synthetic inter, and bitstream-derived inter reconstruction paths.
 - Self-contained parsed-stream inter public-reader paths for standalone and combined `FRAME`
   inputs across `I420/I422/I444`, backed by a preceding parsed reference frame rather than injected
   parser metadata.
@@ -40,7 +40,8 @@ Supported end-to-end behavior:
   the current `DCT_DCT <= 64-axis` subset.
 - `intrabc` coverage still needs broader parsed-stream syntax and reconstruction fixtures.
 - Motion-compensation coverage still needs richer inter/reference features beyond the current
-  single-reference, average-compound, fixed-filter, switchable-filter, and super-resolution subset.
+  bit-depth-preserving single-reference, average-compound, fixed-filter, switchable-filter, and
+  super-resolution subset.
 - Postfilter behavior still needs higher-fidelity in-loop and presentation-path coverage.
 
 ## Stable Contracts
