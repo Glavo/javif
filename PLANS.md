@@ -131,33 +131,10 @@ This is now the only major unfinished area.
 Finish the reconstruction core until the decoder can handle a substantially broader set of real AV1
 streams without falling back to `NOT_IMPLEMENTED`.
 
-The currently implemented reconstruction scope is summarized in `Implemented` and
-`Remaining Decode Boundary` above. The remaining work below is the part that still blocks this area
-from being considered complete.
+The concrete missing behavior is listed in `Remaining Decode Boundary` above. This section only
+records execution priority and completion conditions.
 
-### Remaining Gaps
-
-- richer AC coverage beyond the current `64`-axis `DCT_DCT` subset
-- broader transform-type support
-- fuller chroma transform-layout and coefficient coverage beyond the current `I420/I422` uniform
-  visible-grid path
-- broader real bitstream-driven palette coverage and palette edge-case coverage
-- one dedicated direct parsed wider-chroma palette stream
-- broader inter motion compensation beyond the current:
-  - single-reference
-  - average-compound
-  - integer-copy
-  - fixed-filter / block-resolved-`SWITCHABLE`
-  subpel subset
-- broader self-contained public-stream coverage for real parsed inter fixtures without injected
-  parser metadata
-- broader `intrabc` coverage beyond the current synthetic and generated-header subset
-- broader super-resolution support beyond the current minimal horizontal subset
-- stable real bitstream multi-tile first-pixel fixtures
-- broader real parsed-stream `I422/I444` fixtures with richer residual and non-gray paths
-- broader direct parsed high-bit-depth fixtures beyond the current still-picture subset
-
-### Execution Order From Here
+### Priority Order
 
 1. Broaden real parsed-stream inter coverage without injected parser metadata.
 2. Broaden motion compensation fidelity and feature coverage.
