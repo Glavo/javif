@@ -663,9 +663,6 @@ public final class FrameReconstructor {
             if (residualLayout.hasChromaUnits() && transformLayout.chromaTransformSize() == null) {
                 throw new IllegalStateException("Chroma residuals require a chroma transform size");
             }
-            if (header.uvPaletteSize() != 0 && residualLayout.hasChromaUnits()) {
-                throw new IllegalStateException("Palette chroma reconstruction currently expects no chroma residual units");
-            }
         }
         if (transformLayout.visibleWidth4() <= 0 || transformLayout.visibleHeight4() <= 0) {
             throw new IllegalStateException("Empty transform layout is not reconstructable");

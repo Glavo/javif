@@ -1113,6 +1113,47 @@ final class FrameReconstructorTest {
         assertPlaneEquals(requirePlane(planes.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
     }
 
+    /// Verifies that chroma palette prediction accepts a following chroma residual overlay for all
+    /// currently supported non-monochrome public layouts.
+    @Test
+    void reconstructsSingleTileWiderChromaKeyFramesWithChromaPaletteAndResidualOverlay() {
+        assertChromaPaletteResidualOverlay(
+                PixelFormat.I420,
+                new int[][]{
+                        {0, 1, 2, 0},
+                        {1, 2, 0, 1},
+                        {2, 0, 1, 2},
+                        {0, 2, 1, 0}
+                }
+        );
+        assertChromaPaletteResidualOverlay(
+                PixelFormat.I422,
+                new int[][]{
+                        {0, 1, 2, 0},
+                        {1, 2, 0, 1},
+                        {2, 0, 1, 2},
+                        {0, 2, 1, 0},
+                        {1, 0, 2, 1},
+                        {2, 1, 0, 2},
+                        {0, 1, 0, 2},
+                        {2, 0, 2, 1}
+                }
+        );
+        assertChromaPaletteResidualOverlay(
+                PixelFormat.I444,
+                new int[][]{
+                        {0, 1, 2, 0, 1, 2, 0, 1},
+                        {1, 2, 0, 1, 2, 0, 1, 2},
+                        {2, 0, 1, 2, 0, 1, 2, 0},
+                        {0, 2, 1, 0, 2, 1, 0, 2},
+                        {1, 0, 2, 1, 0, 2, 1, 0},
+                        {2, 1, 0, 2, 1, 0, 2, 1},
+                        {0, 1, 0, 2, 0, 1, 0, 2},
+                        {2, 0, 2, 1, 2, 0, 2, 1}
+                }
+        );
+    }
+
     /// Verifies that one non-zero luma residual is added on top of the reconstructed luma palette
     /// prediction instead of replacing it.
     @Test
@@ -4595,6 +4636,67 @@ final class FrameReconstructorTest {
                 visibleWidthPixels,
                 visibleHeightPixels,
                 coefficientContextByte
+        );
+    }
+
+    /// Asserts that one chroma palette block can be reconstructed first, then shifted by chroma
+    /// residual units without changing luma or crossing U/V planes.
+    ///
+    /// @param pixelFormat the non-monochrome decoded chroma layout to test
+    /// @param chromaPaletteIndices the unpacked chroma palette index raster for the tested layout
+    private static void assertChromaPaletteResidualOverlay(PixelFormat pixelFormat, int[][] chromaPaletteIndices) {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] chromaPaletteU = new int[]{48, 144, 216};
+        int[] chromaPaletteV = new int[]{208, 104, 32};
+        TileBlockHeaderReader.BlockHeader header = createIntraBlockHeader(
+                position,
+                size,
+                true,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                null,
+                0,
+                0,
+                new int[0],
+                chromaPaletteU,
+                chromaPaletteV,
+                new byte[0],
+                packPaletteIndices(chromaPaletteIndices),
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode baselineLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, pixelFormat),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                createTransformLayout(position, size, pixelFormat),
+                createChromaDcResidualLayout(position, size, pixelFormat, 64, -64)
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(pixelFormat, FrameType.KEY, 8, 8, baselineLeaf)
+        );
+        DecodedPlanes residual = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(pixelFormat, FrameType.KEY, 8, 8, residualLeaf)
+        );
+
+        assertPlanesEqual(baseline.lumaPlane(), residual.lumaPlane());
+        assertPlaneEquals(requirePlane(baseline.chromaUPlane()), expandPaletteRaster(chromaPaletteU, chromaPaletteIndices));
+        assertPlaneEquals(requirePlane(baseline.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                requirePlane(baseline.chromaUPlane()),
+                requirePlane(residual.chromaUPlane()),
+                1
+        );
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                requirePlane(baseline.chromaVPlane()),
+                requirePlane(residual.chromaVPlane()),
+                -1
         );
     }
 

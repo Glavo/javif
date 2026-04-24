@@ -66,9 +66,10 @@ Everything outside that subset must continue to fail explicitly with a stable
 - Stable real bitstream-driven multi-tile first-pixel fixtures are still missing. Multi-tile
   support is stronger at the synthetic frame-syntax/runtime level than in the real fixture corpus.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
-- Palette reconstruction now covers the current synthetic `I400/I420/I422/I444` subset plus the
-  first deterministic real wider-chroma palette fixture, but direct parsed wider-chroma palette
-  still-picture streams and broader edge cases are still missing.
+- Palette reconstruction now covers the current synthetic `I400/I420/I422/I444` subset, chroma
+  palette plus chroma residual overlays for `I420/I422/I444`, and the first deterministic real
+  wider-chroma palette fixture, but direct parsed wider-chroma palette still-picture streams and
+  broader edge cases are still missing.
 - `intrabc` reconstruction now covers:
   - a first synthetic same-frame `BILINEAR` subset
   - a first generated-header real syntax-and-reconstruction integration path
