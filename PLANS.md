@@ -1,95 +1,56 @@
 # AV1 Remaining Work Plan
 
-## Current Baseline
+## Status
 
-The public decode path produces real frames for a bounded AV1 subset. Unsupported syntax must keep
-failing explicitly with a stable `NOT_IMPLEMENTED` boundary instead of producing approximate output.
+The public decoder supports a bounded real AV1 subset and must fail unsupported syntax with a
+stable `NOT_IMPLEMENTED` boundary rather than producing approximate output.
 
-Supported end-to-end behavior:
+Current supported areas:
 
-- Raw AV1 OBU input with serial execution.
-- Visible `KEY` / `INTRA` still-picture paths.
-- `8-bit I400/I420/I422/I444 -> ArgbIntFrame`.
-- `10-bit/12-bit I420/I422/I444 -> ArgbLongFrame`, including standalone and combined frame
-  assembly coverage.
-- Key/intra reconstruction for directional, non-directional, smooth, filter-intra, and CFL
-  prediction.
-- Luma/chroma palette reconstruction for synthetic fixtures and direct parsed `I420/I422/I444`
-  still-picture streams, including standalone frame-header/tile-group input, combined-frame input,
-  chroma palette output, chroma residual overlays, and clipped right/bottom frame-edge footprints.
-- Explicit transform-type residual reconstruction for modeled residual units, including `DCT_DCT`,
-  `ADST`, `FLIPADST`, `IDTX`, and horizontal/vertical one-dimensional transform classes across
-  the supported transform sizes whose axes stay within `64` samples.
-- Parsed chroma residual fixture paths for `I420/I422/I444`, backed by explicit chroma transform
-  units in `TransformLayout`, including clipped fringe footprints, wider-chroma `I422`,
-  unsubsampled `I444`, multi-unit `I420`, and larger-transform chroma token coverage.
-- Stored-surface `show_existing_frame` output and reference-surface reuse, with stored syntax
-  preserving postfilter structural metadata such as restoration-unit map dimensions.
-- Reference temporal-motion inheritance with compatible fields reused directly and differently
-  scaled reference fields projected onto the current tile grid with motion-vector scaling.
-- Real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`, including
-  horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants.
-- Direct real parsed `I422/I444` public-layout paths for still output, high-bit-depth output,
-  stored-surface reuse, multi-tile first-pixel streams, and the current self-contained inter subset.
-- First inter/reference subset: single-reference prediction, inter-intra blend and wedge
-  prediction, average, weighted, wedge-masked, and segment-masked compound prediction,
-  OBMC causal-neighbor blending, local warped single-reference affine prediction from causal
-  same-reference motion samples, integer-copy prediction, bit-depth-preserving fixed-filter and
-  block-resolved `SWITCHABLE` subpel prediction, parsed candidate-only `NEAREST` / `NEAR` /
-  skip-mode motion vectors promoted to final block vectors, `refmvs`
-  direct/secondary/top-right/top-left/temporal candidates with symmetric single/compound reference
-  matching, multi-sample temporal fringe probing, and projected/scaled previous-frame temporal
-  motion fields, parsed skip-mode compound reconstruction against two stored reference surfaces,
-  generated real `NEWMV_NEWMV` compound-inter payloads reconstructed against parsed dual motion
-  vectors, and normative horizontal super-resolution for key/intra, public still-picture,
-  synthetic inter, and bitstream-derived inter reconstruction paths.
-- Self-contained parsed-stream inter public-reader paths for standalone and combined `FRAME`
-  inputs across `I420/I422/I444`, backed by a preceding parsed reference frame rather than injected
-  parser metadata.
-- Parsed-stream `intrabc` public-reader paths for standalone frame-header/tile-group input and
-  combined `FRAME` input, including `allow_intrabc` frame-header parsing, decoded same-frame-copy
-  leaf coverage, and luma/chroma copy validation against a pre-copy same-frame oracle.
-- Postfilter ordering now runs reconstruction -> loop filter -> CDEF -> restoration -> stored
-  reference surface, with inactive loop filtering/restoration preserved exactly, active loop
-  filtering applied from decoded block and transform edges, block-indexed CDEF applied from decoded
-  `cdefIndex` syntax and frame strengths, active loop-restoration unit syntax decoded per
-  superblock into `RestorationUnitMap`, coefficient-driven WIENER/SGRPROJ restoration applied per
-  decoded unit, and film grain kept as presentation-only output synthesis.
+- OBU input, visible `KEY` / `INTRA` still-picture output, `I400/I420/I422/I444` layouts, and
+  `8-bit -> ArgbIntFrame` plus `10/12-bit -> ArgbLongFrame` output.
+- Key/intra reconstruction, palette paths, transform-type residuals, chroma residuals, clipped
+  frame edges, multi-tile still-picture fixtures, and horizontal super-resolution.
+- Stored-surface `show_existing_frame`, reference refresh/reuse, reference syntax metadata
+  preservation, temporal-motion inheritance/projection, and the current bounded inter subset.
+- Self-contained public-reader fixtures for parsed still, inter, `intrabc`, high-bit-depth,
+  multi-tile, super-resolution, and reference-reuse paths.
+- Postfilter order is reconstruction -> loop filter -> CDEF -> restoration -> reference surface;
+  active loop filtering, CDEF, decoded loop-restoration units, WIENER/SGRPROJ restoration, and
+  presentation-only film grain are covered.
 
-## Remaining Decode Boundary
+## Decode Boundary
 
-- No active decode boundary is currently listed here. New unsupported syntax should be added here
-  only when it is an intentional stable `NOT_IMPLEMENTED` boundary rather than a transient bug.
+No active decode boundary is currently listed. Add entries here only for intentional stable
+`NOT_IMPLEMENTED` boundaries, not transient bugs.
 
-## Stable Contracts
-
-The following contracts are stable and should be preserved:
+## Contracts To Preserve
 
 - `DecodedPlanes`: reconstructed Y/U/V planes before ARGB conversion.
 - `TransformLayout`: luma units plus shared U/V chroma transform units in bitstream order.
-- `ReferenceSurfaceSnapshot`: frame header, syntax result, decoded planes, final tile CDF snapshots,
-  and projected temporal-motion state for reference reuse.
 - `ResidualLayout`: luma and chroma residual units with explicit transform types.
 - `RestorationUnitMap`: decoded per-plane loop-restoration units and coefficients.
+- `ReferenceSurfaceSnapshot`: frame header, syntax result, decoded planes, final tile CDF snapshots,
+  and projected temporal-motion state for reference reuse.
 - `FilmGrainParams`: normalized film grain parameters inside `FrameHeader`.
 
-## Main Work Priority
+## Remaining Work
 
-1. Broaden decoded real-stream coverage around the completed inter/reference and postfilter subsets.
-2. Add public-reader exact-oracle fixtures for real streams that exercise active loop filter, CDEF,
-   restoration, super-resolution, and reference refresh together.
+1. Broaden public-reader exact-oracle fixtures around the completed inter/reference and postfilter
+   subsets.
+2. Add combined real-stream fixtures that exercise active loop filter, CDEF, restoration,
+   super-resolution, reference refresh, and `show_existing_frame` reuse together.
+3. Keep unsupported syntax explicit and update this file only when a stable boundary or major
+   supported area changes.
 
-## Exit Criteria
+## Completion Criteria
 
-This remaining work is complete when decoded frames produce stable `DecodedPlanes` across a
-materially broader real-stream subset and reference surfaces refresh and reuse correctly across
-that subset.
+The remaining work is complete when a materially broader real-stream subset produces stable
+`DecodedPlanes`, refreshes/reuses reference surfaces correctly, and never silently approximates
+unsupported syntax.
 
-## Validation And Maintenance
+## Validation
 
-Every new decoder capability must ship with the narrowest stable test that proves it: exact-oracle
-unit tests when possible, synthetic integration tests when isolation is required, and real
-parsed-stream fixtures whenever the capability is intended to work from public input.
-
-Keep this file short and status-oriented. It should describe what works, what remains blocked, and
-the next highest-value work; it should not become a changelog or speculative design document.
+Every decoder capability needs the narrowest stable test that proves it: exact-oracle unit tests
+when possible, synthetic integration tests when isolation is required, and real public-reader
+fixtures when the feature is intended to work from public input.
