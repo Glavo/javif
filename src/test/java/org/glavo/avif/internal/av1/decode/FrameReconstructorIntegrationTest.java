@@ -385,6 +385,21 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(offsetChromaVPlane.sample(15, 15) < baselineChromaVPlane.sample(15, 15));
     }
 
+    /// Verifies that one synthetic `I420` inter leaf first reconstructs in the coded domain and
+    /// then reuses the current horizontal super-resolution helper to expose one post-upscale
+    /// output surface.
+    @Test
+    void reconstructsSyntheticI420InterLeafWithSuperResolutionFromStoredReferenceSurface() {
+        assertSyntheticI420InterSuperResolution(FrameType.INTER);
+    }
+
+    /// Verifies that the same minimal synthetic inter super-resolution subset also applies to one
+    /// `SWITCH` frame.
+    @Test
+    void reconstructsSyntheticI420SwitchLeafWithSuperResolutionFromStoredReferenceSurface() {
+        assertSyntheticI420InterSuperResolution(FrameType.SWITCH);
+    }
+
     /// Verifies that the same deterministic real inter tile payload reconstructs through one
     /// single-reference `BILINEAR` subpel path against one stored `I420` reference surface.
     @Test
@@ -564,6 +579,166 @@ final class FrameReconstructorIntegrationTest {
                         horizontalInterpolationFilter,
                         verticalInterpolationFilter
                 )
+        );
+    }
+
+    /// Verifies that one synthetic `I420` single-reference inter leaf can reconstruct in the coded
+    /// domain and then horizontally upscale into the stored super-resolution domain.
+    @Test
+    void reconstructsSyntheticI420SingleReferenceInterLeafWithSuperResolution() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(2, 2);
+        TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                SingleInterPredictionMode.NEARESTMV,
+                null,
+                0,
+                InterMotionVector.resolved(motionVector),
+                null,
+                null,
+                null,
+                false,
+                0,
+                0,
+                0,
+                new int[4],
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                header,
+                new TransformLayout(
+                        position,
+                        blockSize,
+                        blockSize.width4(),
+                        blockSize.height4(),
+                        lumaTransformSize,
+                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        false,
+                        new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+                ),
+                createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
+        );
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(PixelFormat.I420, 4, 4, false);
+        FrameHeader frameHeader = createSyntheticSuperResolvedInterFrameHeader(
+                4,
+                8,
+                4,
+                0,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
+
+        DecodedPlane referenceLumaPlane = createGradientPlane(4, 4, 10, 30, 20);
+        DecodedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 20, 40);
+        DecodedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -20, -40);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                4,
+                4,
+                referenceLumaPlane,
+                referenceChromaUPlane,
+                referenceChromaVPlane
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        int[][] codedLuma = InterPredictionOracle.sampleReferencePlaneBlock(
+                referenceLumaPlane,
+                4,
+                4,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                4,
+                4,
+                4,
+                4,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        int[][] codedChromaU = InterPredictionOracle.sampleReferencePlaneBlock(
+                referenceChromaUPlane,
+                2,
+                2,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                8,
+                8,
+                2,
+                2,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+        int[][] codedChromaV = InterPredictionOracle.sampleReferencePlaneBlock(
+                referenceChromaVPlane,
+                2,
+                2,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                8,
+                8,
+                2,
+                2,
+                FrameHeader.InterpolationFilter.BILINEAR
+        );
+
+        assertEquals(8, decodedPlanes.codedWidth());
+        assertEquals(8, decodedPlanes.renderWidth());
+        assertEquals(4, decodedPlanes.codedHeight());
+        assertPlaneEquals(
+                decodedPlanes.lumaPlane(),
+                new int[][]{
+                        expectedHorizontallyUpscaledRow(codedLuma[0], 8),
+                        expectedHorizontallyUpscaledRow(codedLuma[1], 8),
+                        expectedHorizontallyUpscaledRow(codedLuma[2], 8),
+                        expectedHorizontallyUpscaledRow(codedLuma[3], 8)
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                new int[][]{
+                        expectedHorizontallyUpscaledRow(codedChromaU[0], 4),
+                        expectedHorizontallyUpscaledRow(codedChromaU[1], 4)
+                }
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                new int[][]{
+                        expectedHorizontallyUpscaledRow(codedChromaV[0], 4),
+                        expectedHorizontallyUpscaledRow(codedChromaV[1], 4)
+                }
         );
     }
 
@@ -2914,6 +3089,53 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
+    /// Returns the expected horizontally upscaled raster produced by the current linear
+    /// super-resolution helper for one decoded plane.
+    ///
+    /// @param sourcePlane the coded-domain source plane
+    /// @param targetWidth the post-upscale plane width
+    /// @return the expected horizontally upscaled raster
+    private static int[][] expectedHorizontallyUpscaledPlane(DecodedPlane sourcePlane, int targetWidth) {
+        int[][] expected = new int[sourcePlane.height()][targetWidth];
+        for (int y = 0; y < sourcePlane.height(); y++) {
+            int[] sourceRow = new int[sourcePlane.width()];
+            for (int x = 0; x < sourcePlane.width(); x++) {
+                sourceRow[x] = sourcePlane.sample(x, y);
+            }
+            expected[y] = expectedHorizontallyUpscaledRow(sourceRow, targetWidth);
+        }
+        return expected;
+    }
+
+    /// Returns the expected horizontally upscaled row produced by the current linear
+    /// super-resolution helper.
+    ///
+    /// @param sourceRow the coded-domain source row
+    /// @param targetWidth the post-upscale row width
+    /// @return the expected horizontally upscaled row
+    private static int[] expectedHorizontallyUpscaledRow(int[] sourceRow, int targetWidth) {
+        if (sourceRow.length == 0) {
+            throw new IllegalArgumentException("sourceRow must not be empty");
+        }
+        int[] upscaledRow = new int[targetWidth];
+        if (sourceRow.length == 1) {
+            for (int x = 0; x < targetWidth; x++) {
+                upscaledRow[x] = sourceRow[0];
+            }
+            return upscaledRow;
+        }
+        for (int x = 0; x < targetWidth; x++) {
+            long sourcePositionFixed = ((long) x * (sourceRow.length - 1) << 12) / (targetWidth - 1);
+            int sourceIndex0 = (int) (sourcePositionFixed >> 12);
+            int sourceIndex1 = Math.min(sourceIndex0 + 1, sourceRow.length - 1);
+            int fraction = (int) (sourcePositionFixed & 0x0FFF);
+            upscaledRow[x] =
+                    ((sourceRow[sourceIndex0] * (0x1000 - fraction)) + (sourceRow[sourceIndex1] * fraction) + 0x0800)
+                            >> 12;
+        }
+        return upscaledRow;
+    }
+
     /// Asserts one rectangular plane block is filled with one constant sample value.
     ///
     /// @param plane the decoded plane to inspect
@@ -3713,6 +3935,119 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Asserts that the current minimal inter super-resolution subset reconstructs one coded-domain
+    /// `I420` inter block and then horizontally upsamples it to the stored/output domain.
+    ///
+    /// @param frameType the inter-like frame type to expose
+    private static void assertSyntheticI420InterSuperResolution(FrameType frameType) {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(0, 0);
+        TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                SingleInterPredictionMode.NEARESTMV,
+                null,
+                0,
+                InterMotionVector.resolved(motionVector),
+                null,
+                null,
+                null,
+                false,
+                0,
+                0,
+                0,
+                new int[4],
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                header,
+                new TransformLayout(
+                        position,
+                        blockSize,
+                        blockSize.width4(),
+                        blockSize.height4(),
+                        lumaTransformSize,
+                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        false,
+                        new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+                ),
+                createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
+        );
+        FrameAssembly assembly = createSuperResolvedInterAssembly(
+                PixelFormat.I420,
+                4,
+                8,
+                4,
+                0,
+                frameType,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
+
+        DecodedPlane referenceLumaPlane = createGradientPlane(4, 4, 24, 32, 11);
+        DecodedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 28, 17);
+        DecodedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -24, -13);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                4,
+                4,
+                referenceLumaPlane,
+                referenceChromaUPlane,
+                referenceChromaVPlane
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertEquals(frameType, assembly.frameHeader().frameType());
+        assertTrue(assembly.frameHeader().superResolution().enabled());
+        assertEquals(4, assembly.frameHeader().frameSize().codedWidth());
+        assertEquals(8, assembly.frameHeader().frameSize().upscaledWidth());
+        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertTrue(decodedPlanes.hasChroma());
+        assertEquals(8, decodedPlanes.codedWidth());
+        assertEquals(4, decodedPlanes.codedHeight());
+        assertEquals(8, decodedPlanes.renderWidth());
+        assertEquals(4, decodedPlanes.renderHeight());
+        assertPlaneEquals(
+                decodedPlanes.lumaPlane(),
+                expectedHorizontallyUpscaledPlane(referenceLumaPlane, 8)
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaUPlane()),
+                expectedHorizontallyUpscaledPlane(referenceChromaUPlane, 4)
+        );
+        assertPlaneEquals(
+                requirePlane(decodedPlanes.chromaVPlane()),
+                expectedHorizontallyUpscaledPlane(referenceChromaVPlane, 4)
+        );
+    }
+
     /// Creates one synthetic single-tile inter frame assembly whose first direct reference points
     /// at the requested stored slot.
     ///
@@ -3804,6 +4139,46 @@ final class FrameReconstructorIntegrationTest {
                 0,
                 0,
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+        );
+        return assembly;
+    }
+
+    /// Creates one synthetic single-tile inter or switch frame assembly whose frame header enables
+    /// horizontal super-resolution.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param codedWidth the coded frame width before upscaling
+    /// @param upscaledWidth the stored/output width after super-resolution
+    /// @param codedHeight the coded frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param frameType the inter-like frame type to expose
+    /// @param subpelFilterMode the frame-level subpel interpolation filter
+    /// @return one synthetic single-tile inter or switch frame assembly with super-resolution enabled
+    private static FrameAssembly createSuperResolvedInterAssembly(
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int upscaledWidth,
+            int codedHeight,
+            int referenceSlot,
+            FrameType frameType,
+            FrameHeader.InterpolationFilter subpelFilterMode
+    ) {
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(pixelFormat, upscaledWidth, codedHeight, false);
+        FrameHeader frameHeader = createSyntheticInterFrameHeader(
+                codedWidth,
+                upscaledWidth,
+                codedHeight,
+                referenceSlot,
+                frameType,
+                subpelFilterMode
+        );
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
         );
         return assembly;
     }
@@ -4151,6 +4526,102 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Creates one synthetic inter or switch frame header for super-resolution reconstruction
+    /// tests.
+    ///
+    /// @param codedWidth the coded frame width after super-resolution downscaling
+    /// @param upscaledWidth the stored/output frame width after super-resolution upscaling
+    /// @param codedHeight the coded and rendered frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param frameType the inter-like frame type to expose
+    /// @param subpelFilterMode the frame-level subpel interpolation filter
+    /// @return one synthetic inter or switch frame header with super-resolution enabled
+    private static FrameHeader createSyntheticInterFrameHeader(
+            int codedWidth,
+            int upscaledWidth,
+            int codedHeight,
+            int referenceSlot,
+            FrameType frameType,
+            FrameHeader.InterpolationFilter subpelFilterMode
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                frameType,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0,
+                false,
+                new int[]{referenceSlot, -1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(codedWidth, upscaledWidth, codedHeight, upscaledWidth, codedHeight),
+                new FrameHeader.SuperResolutionInfo(true, 9),
+                false,
+                false,
+                subpelFilterMode,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                false,
+                false
+        );
+    }
+
     /// Creates one synthetic inter frame header for reference-surface reconstruction tests.
     ///
     /// @param codedWidth the coded and rendered frame width
@@ -4186,6 +4657,100 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{referenceSlot, -1, -1, -1, -1, -1, -1},
                 new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
                 new FrameHeader.SuperResolutionInfo(false, codedWidth),
+                false,
+                false,
+                subpelFilterMode,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false,
+                false,
+                new int[]{-1, -1},
+                false,
+                false,
+                false
+        );
+    }
+
+    /// Creates one synthetic single-reference inter frame header whose stored output width is
+    /// widened by horizontal super-resolution.
+    ///
+    /// @param codedWidth the coded frame width before upscaling
+    /// @param upscaledWidth the stored width after super-resolution upscaling
+    /// @param codedHeight the coded frame height
+    /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
+    /// @param subpelFilterMode the frame-level subpel interpolation filter
+    /// @return one synthetic super-resolved single-reference inter frame header
+    private static FrameHeader createSyntheticSuperResolvedInterFrameHeader(
+            int codedWidth,
+            int upscaledWidth,
+            int codedHeight,
+            int referenceSlot,
+            FrameHeader.InterpolationFilter subpelFilterMode
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0,
+                false,
+                new int[]{referenceSlot, -1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(codedWidth, upscaledWidth, codedHeight, upscaledWidth, codedHeight),
+                new FrameHeader.SuperResolutionInfo(true, 9),
                 false,
                 false,
                 subpelFilterMode,

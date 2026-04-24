@@ -684,6 +684,26 @@ final class Av1ImageReaderTest {
         assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(PixelFormat.I444);
     }
 
+    /// Verifies that one standalone `show_existing_frame` header can expose one synthetic stored
+    /// inter reference surface whose frame header keeps super-resolution enabled while the stored
+    /// surface already lives in the post-upscale domain.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameReturnsStoredInterSuperResolvedReferenceSurfaceForStandaloneShowExistingFrame() throws Exception {
+        assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(FrameType.INTER, false);
+    }
+
+    /// Verifies that one combined `FRAME` `show_existing_frame` OBU can expose one synthetic stored
+    /// switch-frame reference surface whose frame header keeps super-resolution enabled while the
+    /// stored surface already lives in the post-upscale domain.
+    ///
+    /// @throws Exception if synthetic reference-state injection fails
+    @Test
+    void readFrameReturnsStoredSwitchSuperResolvedReferenceSurfaceForCombinedShowExistingFrame() throws Exception {
+        assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(FrameType.SWITCH, true);
+    }
+
     /// Verifies that disabling film grain synthesis still exposes one stored reconstructed
     /// reference surface through `show_existing_frame` when the referenced frame carries film grain.
     ///
@@ -1273,6 +1293,45 @@ final class Av1ImageReaderTest {
         );
     }
 
+    /// Creates one synthetic stored reference slot whose frame header exposes one inter-like frame
+    /// with super-resolution enabled while the stored surface remains in the post-upscale domain.
+    ///
+    /// @param frameType the inter-like frame type to expose
+    /// @return one synthetic stored reference slot for inter super-resolution public reuse tests
+    /// @throws Exception if the base still-picture metadata cannot be captured
+    private static InjectedReferenceState createSyntheticStoredReferenceStateWithInterSuperResolution(
+            FrameType frameType
+    ) throws Exception {
+        if (frameType != FrameType.INTER && frameType != FrameType.SWITCH) {
+            throw new IllegalArgumentException("Inter super-resolution helper expects INTER or SWITCH: " + frameType);
+        }
+        InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
+        ReferenceSurfaceSnapshot baseSurfaceSnapshot =
+                Objects.requireNonNull(baseReferenceState.referenceSurfaceSnapshot(), "base reference surface");
+        FrameHeader superResolvedFrameHeader = copyFrameHeaderWithFrameTypeAndSuperResolution(
+                baseReferenceState.frameHeader(),
+                frameType,
+                32,
+                64,
+                64
+        );
+        FrameSyntaxDecodeResult syntaxResult = createSyntheticStoredReferenceSyntaxResult(
+                baseReferenceState.sequenceHeader(),
+                superResolvedFrameHeader
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                superResolvedFrameHeader,
+                syntaxResult,
+                baseSurfaceSnapshot.decodedPlanes()
+        );
+        return new InjectedReferenceState(
+                baseReferenceState.sequenceHeader(),
+                superResolvedFrameHeader,
+                syntaxResult,
+                referenceSurfaceSnapshot
+        );
+    }
+
     /// Creates one synthetic stored reference slot whose frame header carries minimal explicit film
     /// grain while reusing the current supported still-picture surface.
     ///
@@ -1446,6 +1505,54 @@ final class Av1ImageReaderTest {
             assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         }
+    }
+
+    /// Asserts that one synthetic stored inter or switch reference surface with super-resolution
+    /// enabled round-trips through the public `show_existing_frame` path.
+    ///
+    /// @param frameType the inter-like frame type exposed by the stored frame header
+    /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
+    /// @throws Exception if synthetic reference-state injection fails
+    private static void assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(
+            FrameType frameType,
+            boolean combinedShowExisting
+    ) throws Exception {
+        InjectedReferenceState referenceState = createSyntheticStoredReferenceStateWithInterSuperResolution(frameType);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
+        byte[] stream = obu(combinedShowExisting ? 6 : 3, showExistingFrameHeaderPayload(0));
+
+        assertTrue(referenceState.frameHeader().superResolution().enabled());
+        assertEquals(32, referenceState.frameHeader().frameSize().codedWidth());
+        assertEquals(64, referenceState.frameHeader().frameSize().upscaledWidth());
+        assertEquals(64, referenceSurfaceSnapshot.decodedPlanes().codedWidth());
+
+        if (combinedShowExisting) {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+            )) {
+                injectShowExistingReferenceState(reader, referenceState);
+
+                DecodedFrame decodedFrame = reader.readFrame();
+                assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+                assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+                assertNull(reader.readFrame());
+            }
+            return;
+        }
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            try {
+                injectShowExistingReferenceState(reader, referenceState);
+            } catch (Exception exception) {
+                throw new IOException("Failed to inject synthetic inter super-resolution reference state", exception);
+            }
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
+        });
     }
 
     /// Creates one synthetic two-tile syntax result that reuses the supplied frame metadata.
@@ -1782,6 +1889,58 @@ final class Av1ImageReaderTest {
                 refreshFrameFlags,
                 baseFrameHeader.frameSize(),
                 baseFrameHeader.superResolution(),
+                baseFrameHeader.allowIntrabc(),
+                baseFrameHeader.refreshContext(),
+                baseFrameHeader.tiling(),
+                baseFrameHeader.quantization(),
+                baseFrameHeader.segmentation(),
+                baseFrameHeader.delta(),
+                baseFrameHeader.allLossless(),
+                baseFrameHeader.loopFilter(),
+                baseFrameHeader.cdef(),
+                baseFrameHeader.restoration(),
+                baseFrameHeader.transformMode(),
+                baseFrameHeader.reducedTransformSet(),
+                baseFrameHeader.filmGrain()
+        );
+    }
+
+    /// Copies one real supported still-picture frame header while replacing its frame type and
+    /// normalized super-resolution geometry.
+    ///
+    /// @param baseFrameHeader the real supported still-picture frame header to copy
+    /// @param frameType the replacement inter-like frame type
+    /// @param codedWidth the coded width before horizontal super-resolution
+    /// @param upscaledWidth the stored/output width after horizontal super-resolution
+    /// @param height the coded and rendered frame height
+    /// @return one copied frame header whose frame type and super-resolution state match the request
+    private static FrameHeader copyFrameHeaderWithFrameTypeAndSuperResolution(
+            FrameHeader baseFrameHeader,
+            FrameType frameType,
+            int codedWidth,
+            int upscaledWidth,
+            int height
+    ) {
+        return new FrameHeader(
+                baseFrameHeader.temporalId(),
+                baseFrameHeader.spatialId(),
+                baseFrameHeader.showExistingFrame(),
+                baseFrameHeader.existingFrameIndex(),
+                baseFrameHeader.frameId(),
+                baseFrameHeader.framePresentationDelay(),
+                frameType,
+                baseFrameHeader.showFrame(),
+                baseFrameHeader.showableFrame(),
+                baseFrameHeader.errorResilientMode(),
+                baseFrameHeader.disableCdfUpdate(),
+                baseFrameHeader.allowScreenContentTools(),
+                baseFrameHeader.forceIntegerMotionVectors(),
+                baseFrameHeader.frameSizeOverride(),
+                baseFrameHeader.primaryRefFrame(),
+                baseFrameHeader.frameOffset(),
+                baseFrameHeader.refreshFrameFlags(),
+                new FrameHeader.FrameSize(codedWidth, upscaledWidth, height, upscaledWidth, height),
+                new FrameHeader.SuperResolutionInfo(true, 9),
                 baseFrameHeader.allowIntrabc(),
                 baseFrameHeader.refreshContext(),
                 baseFrameHeader.tiling(),

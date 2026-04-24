@@ -43,10 +43,10 @@ import java.util.Objects;
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
 /// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, a
-/// minimal horizontal super-resolution upscaling subset for key/intra frames, and a minimal
-/// luma/chroma residual subset including clipped frame-fringe chroma footprints and the currently
-/// supported square and rectangular `DCT_DCT` transform sizes whose axes stay within `64`
-/// samples.
+/// minimal horizontal super-resolution upscaling subset for key/intra frames plus the current
+/// inter/reference prediction subset, and a minimal luma/chroma residual subset including clipped
+/// frame-fringe chroma footprints and the currently supported square and rectangular `DCT_DCT`
+/// transform sizes whose axes stay within `64` samples.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// The number of coefficients in one 8-tap interpolation kernel.
@@ -273,11 +273,6 @@ public final class FrameReconstructor {
                             + frameHeader.frameType()
             );
         }
-        if (frameHeader.superResolution().enabled()
-                && frameHeader.frameType() != FrameType.KEY
-                && frameHeader.frameType() != FrameType.INTRA) {
-            throw new IllegalStateException("Inter super-resolution reconstruction is not implemented yet");
-        }
     }
 
     /// Creates one mutable chroma plane for the current supported pixel format, or `null`.
@@ -314,9 +309,10 @@ public final class FrameReconstructor {
     /// Applies the current minimal horizontal super-resolution subset to one reconstructed frame.
     ///
     /// The current implementation performs a deterministic horizontal linear resampling pass from
-    /// the coded frame width to the upscaled width for key/intra frames only. The resulting stored
-    /// planes already match the post-super-resolution reference-surface domain, so the returned
-    /// `DecodedPlanes` expose the upscaled plane widths as their coded dimensions.
+    /// the coded frame width to the upscaled width after reconstruction has already populated the
+    /// coded-domain planes. The resulting stored planes already match the post-super-resolution
+    /// reference-surface domain, so the returned `DecodedPlanes` expose the upscaled plane widths
+    /// as their coded dimensions.
     ///
     /// @param bitDepth the decoded sample bit depth
     /// @param pixelFormat the active decoded chroma layout
