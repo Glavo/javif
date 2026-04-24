@@ -30,6 +30,7 @@ import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
@@ -2211,6 +2212,123 @@ final class FrameReconstructorTest {
                 {150, 151},
                 {160, 161}
         });
+    }
+
+    /// Verifies that one monochrome single-reference inter block blends the sampled inter predictor
+    /// with the secondary intra predictor when inter-intra smooth blending is active.
+    @Test
+    void reconstructsSingleReferenceI400InterIntraBlendBlock() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[][] referenceLuma = new int[][]{
+                {0, 8, 16, 24, 32, 40, 48, 56},
+                {10, 18, 26, 34, 42, 50, 58, 66},
+                {20, 28, 36, 44, 52, 60, 68, 76},
+                {30, 38, 46, 54, 62, 70, 78, 86},
+                {40, 48, 56, 64, 72, 80, 88, 96},
+                {50, 58, 66, 74, 82, 90, 98, 106},
+                {60, 68, 76, 84, 92, 100, 108, 116},
+                {70, 78, 86, 94, 102, 110, 118, 126}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                referenceLuma,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterIntraBlockHeader(
+                        position,
+                        size,
+                        false,
+                        0,
+                        MotionVector.zero(),
+                        InterIntraPredictionMode.VERTICAL,
+                        false,
+                        -1
+                ),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                expectedInterIntraBlend(referenceLuma, InterIntraPredictionMode.VERTICAL, false, -1, size, 0, 0)
+        );
+    }
+
+    /// Verifies that one `I420` single-reference inter-intra block applies wedge blending to luma
+    /// and chroma planes with the AV1 chroma-subsampled mask.
+    @Test
+    void reconstructsSingleReferenceI420InterIntraWedgeBlock() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[][] referenceLuma = new int[][]{
+                {20, 25, 30, 35, 40, 45, 50, 55},
+                {28, 33, 38, 43, 48, 53, 58, 63},
+                {36, 41, 46, 51, 56, 61, 66, 71},
+                {44, 49, 54, 59, 64, 69, 74, 79},
+                {52, 57, 62, 67, 72, 77, 82, 87},
+                {60, 65, 70, 75, 80, 85, 90, 95},
+                {68, 73, 78, 83, 88, 93, 98, 103},
+                {76, 81, 86, 91, 96, 101, 106, 111}
+        };
+        int[][] referenceChromaU = new int[][]{
+                {90, 100, 110, 120},
+                {94, 104, 114, 124},
+                {98, 108, 118, 128},
+                {102, 112, 122, 132}
+        };
+        int[][] referenceChromaV = new int[][]{
+                {160, 150, 140, 130},
+                {156, 146, 136, 126},
+                {152, 142, 132, 122},
+                {148, 138, 128, 118}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                referenceLuma,
+                referenceChromaU,
+                referenceChromaV
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        0,
+                        MotionVector.zero(),
+                        InterIntraPredictionMode.DC,
+                        true,
+                        0
+                ),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 8, 8, 0, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                expectedInterIntraBlend(referenceLuma, InterIntraPredictionMode.DC, true, 0, size, 0, 0)
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaUPlane()),
+                expectedInterIntraBlend(referenceChromaU, InterIntraPredictionMode.DC, true, 0, size, 1, 1)
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaVPlane()),
+                expectedInterIntraBlend(referenceChromaV, InterIntraPredictionMode.DC, true, 0, size, 1, 1)
+        );
     }
 
     /// Verifies that the current minimal `intrabc` subset copies already reconstructed luma
@@ -4727,6 +4845,71 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Creates one single-reference inter-intra block header for reconstruction tests.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param motionVector the resolved primary motion vector
+    /// @param interIntraMode the decoded inter-intra prediction mode
+    /// @param interIntraWedge whether the block uses an inter-intra wedge mask
+    /// @param interIntraWedgeIndex the decoded wedge index, or `-1`
+    /// @return one single-reference inter-intra block header
+    private static TileBlockHeaderReader.BlockHeader createSingleReferenceInterIntraBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            MotionVector motionVector,
+            InterIntraPredictionMode interIntraMode,
+            boolean interIntraWedge,
+            int interIntraWedgeIndex
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                hasChroma,
+                false,
+                false,
+                false,
+                false,
+                false,
+                referenceFrame0,
+                -1,
+                SingleInterPredictionMode.NEARESTMV,
+                null,
+                0,
+                InterMotionVector.resolved(motionVector),
+                null,
+                null,
+                null,
+                true,
+                interIntraMode,
+                interIntraWedge,
+                interIntraWedgeIndex,
+                false,
+                0,
+                -1,
+                0,
+                new int[4],
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
     /// Creates one `intrabc` block header for reconstruction tests.
     ///
     /// @param position the block origin in 4x4 units
@@ -4977,6 +5160,40 @@ final class FrameReconstructorTest {
             }
         }
         return new DecodedPlane(width, height, width, storage);
+    }
+
+    /// Computes the expected inter-intra blend against the default edge-derived intra predictor.
+    ///
+    /// @param interSamples the inter predictor samples
+    /// @param mode the decoded inter-intra prediction mode
+    /// @param wedge whether the mask is a wedge mask
+    /// @param wedgeIndex the decoded wedge index, or `-1`
+    /// @param size the luma block size that owns the prediction
+    /// @param subsamplingX the horizontal chroma subsampling shift for the plane
+    /// @param subsamplingY the vertical chroma subsampling shift for the plane
+    /// @return the expected blended sample raster
+    private static int[][] expectedInterIntraBlend(
+            int[][] interSamples,
+            InterIntraPredictionMode mode,
+            boolean wedge,
+            int wedgeIndex,
+            BlockSize size,
+            int subsamplingX,
+            int subsamplingY
+    ) {
+        int height = interSamples.length;
+        int width = interSamples[0].length;
+        int[][] expected = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            if (interSamples[y].length != width) {
+                throw new IllegalArgumentException("inter sample rows must share the same width");
+            }
+            for (int x = 0; x < width; x++) {
+                int mask = InterIntraMasks.maskValue(mode, wedge, wedgeIndex, size, x, y, subsamplingX, subsamplingY);
+                expected[y][x] = (interSamples[y][x] * (64 - mask) + 128 * mask + 32) >> 6;
+            }
+        }
+        return expected;
     }
 
     /// Creates one transform layout that exactly covers one leaf block with one transform unit.

@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.PartitionType;
@@ -36,7 +37,7 @@ import java.util.Objects;
 ///
 /// This reader is intentionally small and currently covers only syntax elements already backed by
 /// `CdfContext`: partitioning, skip, skip mode, intra/inter, compound and single-reference
-/// selection, inter prediction-mode symbols, `intrabc`, Y/UV intra prediction modes, palette
+/// selection, inter prediction-mode symbols, inter-intra syntax, `intrabc`, Y/UV intra prediction modes, palette
 /// presence and size signaling, CDEF and delta-q/delta-lf side syntax, motion-vector residuals,
 /// filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
@@ -197,6 +198,39 @@ public final class TileSyntaxReader {
     public CompoundInterPredictionMode readCompoundInterMode(int context) {
         int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCompoundInterModeCdf(context), 7);
         return CompoundInterPredictionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one inter-intra enable flag from the supplied context index.
+    ///
+    /// @param context the zero-based inter-intra context index in `[0, 4)`
+    /// @return whether the current single-reference inter block uses inter-intra prediction
+    public boolean readUseInterIntra(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableInterIntraCdf(context));
+    }
+
+    /// Decodes one inter-intra prediction mode from the supplied context index.
+    ///
+    /// @param context the zero-based inter-intra mode context index in `[0, 4)`
+    /// @return the decoded inter-intra prediction mode
+    public InterIntraPredictionMode readInterIntraMode(int context) {
+        int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableInterIntraModeCdf(context), 3);
+        return InterIntraPredictionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one inter-intra wedge enable flag from the supplied context index.
+    ///
+    /// @param context the zero-based wedge context index in `[0, 7)`
+    /// @return whether the current inter-intra block uses a wedge mask
+    public boolean readUseInterIntraWedge(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableInterIntraWedgeCdf(context));
+    }
+
+    /// Decodes one inter-intra wedge index from the supplied context index.
+    ///
+    /// @param context the zero-based wedge context index in `[0, 9)`
+    /// @return the decoded wedge index in `[0, 16)`
+    public int readWedgeIndex(int context) {
+        return msacDecoder.decodeSymbolAdapt(cdfContext.mutableWedgeIndexCdf(context), 15);
     }
 
     /// Decodes one switchable interpolation-filter symbol for the supplied direction and context.

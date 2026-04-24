@@ -141,6 +141,46 @@ public final class CdfContext {
             {13046, 23214, 24505, 25942, 27435, 28442, 29330}
     });
 
+    /// The transformed default inter-intra enable CDFs.
+    private static final int[][] DEFAULT_INTER_INTRA_CDFS = inverse2d(new int[][]{
+            {16384},
+            {26887},
+            {27597},
+            {30237}
+    });
+
+    /// The transformed default inter-intra prediction-mode CDFs.
+    private static final int[][] DEFAULT_INTER_INTRA_MODE_CDFS = inverse2d(new int[][]{
+            {8192, 16384, 24576},
+            {1875, 11082, 27332},
+            {2473, 9996, 26388},
+            {4238, 11537, 25926}
+    });
+
+    /// The transformed default inter-intra wedge enable CDFs.
+    private static final int[][] DEFAULT_INTER_INTRA_WEDGE_CDFS = inverse2d(new int[][]{
+            {20036},
+            {24957},
+            {26704},
+            {27530},
+            {29564},
+            {29444},
+            {26872}
+    });
+
+    /// The transformed default wedge-index CDFs.
+    private static final int[][] DEFAULT_WEDGE_INDEX_CDFS = inverse2d(new int[][]{
+            {2438, 4440, 6599, 8663, 11005, 12874, 15751, 18094, 20359, 22362, 24127, 25702, 27752, 29450, 31171},
+            {806, 3266, 6005, 6738, 7218, 7367, 7771, 14588, 16323, 17367, 18452, 19422, 22839, 26127, 29629},
+            {2779, 3738, 4683, 7213, 7775, 8017, 8655, 14357, 17939, 21332, 24520, 27470, 29456, 30529, 31656},
+            {1684, 3625, 5675, 7108, 9302, 11274, 14429, 17144, 19163, 20961, 22884, 24471, 26719, 28714, 30877},
+            {1142, 3491, 6277, 7314, 8089, 8355, 9023, 13624, 15369, 16730, 18114, 19313, 22521, 26012, 29550},
+            {2742, 4195, 5727, 8035, 8980, 9336, 10146, 14124, 17270, 20533, 23434, 25972, 27944, 29570, 31416},
+            {1727, 3948, 6101, 7796, 9841, 12344, 15766, 18944, 20638, 22038, 23963, 25311, 26988, 28766, 31012},
+            {154, 987, 1925, 2051, 2088, 2111, 2151, 23033, 23703, 24284, 24985, 25684, 27259, 28883, 30911},
+            {1135, 1322, 1493, 2635, 2696, 2737, 2770, 21016, 22935, 25057, 27251, 29173, 30089, 30960, 31933}
+    });
+
     /// The transformed default switchable interpolation-filter CDFs.
     private static final int[][][] DEFAULT_INTERPOLATION_FILTER_CDFS = inverse3d(new int[][][]{
             {
@@ -1050,6 +1090,18 @@ public final class CdfContext {
     /// The mutable compound inter-mode CDFs.
     private final int[][] compoundInterModeCdfs;
 
+    /// The mutable inter-intra enable CDFs.
+    private final int[][] interIntraCdfs;
+
+    /// The mutable inter-intra prediction-mode CDFs.
+    private final int[][] interIntraModeCdfs;
+
+    /// The mutable inter-intra wedge enable CDFs.
+    private final int[][] interIntraWedgeCdfs;
+
+    /// The mutable wedge-index CDFs.
+    private final int[][] wedgeIndexCdfs;
+
     /// The mutable switchable interpolation-filter CDFs.
     private final int[][][] interpolationFilterCdfs;
 
@@ -1186,6 +1238,10 @@ public final class CdfContext {
     /// @param singleInterReferenceMvCdfs the mutable single-reference reference-motion-vector CDFs
     /// @param drlCdfs the mutable dynamic-reference-list selection CDFs
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
+    /// @param interIntraCdfs the mutable inter-intra enable CDFs
+    /// @param interIntraModeCdfs the mutable inter-intra prediction-mode CDFs
+    /// @param interIntraWedgeCdfs the mutable inter-intra wedge enable CDFs
+    /// @param wedgeIndexCdfs the mutable wedge-index CDFs
     /// @param interpolationFilterCdfs the mutable switchable interpolation-filter CDFs
     /// @param transformSizeCdfs the mutable transform-size CDFs
     /// @param transformPartitionCdfs the mutable inter transform-partition CDFs
@@ -1241,6 +1297,10 @@ public final class CdfContext {
             int[][] singleInterReferenceMvCdfs,
             int[][] drlCdfs,
             int[][] compoundInterModeCdfs,
+            int[][] interIntraCdfs,
+            int[][] interIntraModeCdfs,
+            int[][] interIntraWedgeCdfs,
+            int[][] wedgeIndexCdfs,
             int[][][] interpolationFilterCdfs,
             int[][][] transformSizeCdfs,
             int[][] transformPartitionCdfs,
@@ -1296,6 +1356,10 @@ public final class CdfContext {
         this.singleInterReferenceMvCdfs = Objects.requireNonNull(singleInterReferenceMvCdfs, "singleInterReferenceMvCdfs");
         this.drlCdfs = Objects.requireNonNull(drlCdfs, "drlCdfs");
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
+        this.interIntraCdfs = Objects.requireNonNull(interIntraCdfs, "interIntraCdfs");
+        this.interIntraModeCdfs = Objects.requireNonNull(interIntraModeCdfs, "interIntraModeCdfs");
+        this.interIntraWedgeCdfs = Objects.requireNonNull(interIntraWedgeCdfs, "interIntraWedgeCdfs");
+        this.wedgeIndexCdfs = Objects.requireNonNull(wedgeIndexCdfs, "wedgeIndexCdfs");
         this.interpolationFilterCdfs = Objects.requireNonNull(interpolationFilterCdfs, "interpolationFilterCdfs");
         this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
         this.transformPartitionCdfs = Objects.requireNonNull(transformPartitionCdfs, "transformPartitionCdfs");
@@ -1360,6 +1424,10 @@ public final class CdfContext {
                 deepCopy(DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS),
                 deepCopy(DEFAULT_DRL_CDFS),
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
+                deepCopy(DEFAULT_INTER_INTRA_CDFS),
+                deepCopy(DEFAULT_INTER_INTRA_MODE_CDFS),
+                deepCopy(DEFAULT_INTER_INTRA_WEDGE_CDFS),
+                deepCopy(DEFAULT_WEDGE_INDEX_CDFS),
                 deepCopy(DEFAULT_INTERPOLATION_FILTER_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_PARTITION_CDFS),
@@ -1422,6 +1490,10 @@ public final class CdfContext {
                 deepCopy(singleInterReferenceMvCdfs),
                 deepCopy(drlCdfs),
                 deepCopy(compoundInterModeCdfs),
+                deepCopy(interIntraCdfs),
+                deepCopy(interIntraModeCdfs),
+                deepCopy(interIntraWedgeCdfs),
+                deepCopy(wedgeIndexCdfs),
                 deepCopy(interpolationFilterCdfs),
                 deepCopy(transformSizeCdfs),
                 deepCopy(transformPartitionCdfs),
@@ -1583,6 +1655,38 @@ public final class CdfContext {
     /// @return the live mutable compound inter-mode CDF for the supplied context index
     public int[] mutableCompoundInterModeCdf(int context) {
         return compoundInterModeCdfs[Objects.checkIndex(context, compoundInterModeCdfs.length)];
+    }
+
+    /// Returns the live mutable inter-intra enable CDF for the supplied context index.
+    ///
+    /// @param context the zero-based inter-intra context index in `[0, 4)`
+    /// @return the live mutable inter-intra enable CDF for the supplied context index
+    public int[] mutableInterIntraCdf(int context) {
+        return interIntraCdfs[Objects.checkIndex(context, interIntraCdfs.length)];
+    }
+
+    /// Returns the live mutable inter-intra prediction-mode CDF for the supplied context index.
+    ///
+    /// @param context the zero-based inter-intra mode context index in `[0, 4)`
+    /// @return the live mutable inter-intra prediction-mode CDF for the supplied context index
+    public int[] mutableInterIntraModeCdf(int context) {
+        return interIntraModeCdfs[Objects.checkIndex(context, interIntraModeCdfs.length)];
+    }
+
+    /// Returns the live mutable inter-intra wedge enable CDF for the supplied context index.
+    ///
+    /// @param context the zero-based wedge context index in `[0, 7)`
+    /// @return the live mutable inter-intra wedge enable CDF for the supplied context index
+    public int[] mutableInterIntraWedgeCdf(int context) {
+        return interIntraWedgeCdfs[Objects.checkIndex(context, interIntraWedgeCdfs.length)];
+    }
+
+    /// Returns the live mutable wedge-index CDF for the supplied context index.
+    ///
+    /// @param context the zero-based wedge context index in `[0, 9)`
+    /// @return the live mutable wedge-index CDF for the supplied context index
+    public int[] mutableWedgeIndexCdf(int context) {
+        return wedgeIndexCdfs[Objects.checkIndex(context, wedgeIndexCdfs.length)];
     }
 
     /// Returns the live mutable switchable interpolation-filter CDF for the supplied direction and context.

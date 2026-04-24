@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
@@ -37,8 +38,8 @@ import java.util.Objects;
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
 /// The current implementation is intentionally narrow. It reconstructs only the current `8-bit`,
-/// `10-bit`, and `12-bit` key/intra subset plus a first single-reference, average-compound, and same-frame `intrabc` subset with
-/// the current fixed-filter subpel prediction path over the current serial tile traversal,
+/// `10-bit`, and `12-bit` key/intra subset plus a first single-reference, inter-intra, average-compound, and same-frame
+/// `intrabc` subset with the current fixed-filter subpel prediction path over the current serial tile traversal,
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
 /// `I420` / `I422` / `I444` CFL chroma subset, parsed and synthetic luma/chroma palette paths, a
@@ -807,6 +808,9 @@ public final class FrameReconstructor {
             if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
                 throw new IllegalStateException("Inter palette reconstruction is not implemented yet");
             }
+            if (header.interIntra() && !InterIntraMasks.supportsInterIntra(header.size())) {
+                throw new IllegalStateException("Inter-intra reconstruction encountered an unsupported block size");
+            }
             requireReferenceSurfaceSnapshot(
                     referenceSurfaceSnapshots,
                     frameHeader,
@@ -908,6 +912,9 @@ public final class FrameReconstructor {
                     frameHeader,
                     referenceSurfaceSnapshots
             );
+            if (header.interIntra()) {
+                applyInterIntraPrediction(lumaPlane, chromaUPlane, chromaVPlane, header, transformLayout, pixelFormat);
+            }
         }
     }
 
@@ -1097,6 +1104,156 @@ public final class FrameReconstructor {
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter
         );
+    }
+
+    /// Applies AV1 inter-intra blending to the already built single-reference inter predictor.
+    ///
+    /// @param lumaPlane the mutable luma destination plane containing the inter predictor
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the inter-intra state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    private static void applyInterIntraPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            PixelFormat pixelFormat
+    ) {
+        InterIntraPredictionMode mode = Objects.requireNonNull(header.interIntraMode(), "header.interIntraMode()");
+        int lumaX = header.position().x4() << 2;
+        int lumaY = header.position().y4() << 2;
+        int visibleLumaWidth = transformLayout.visibleWidthPixels();
+        int visibleLumaHeight = transformLayout.visibleHeightPixels();
+
+        MutablePlaneBuffer lumaIntraPlane = lumaPlane.copy();
+        IntraPredictor.predictLuma(
+                lumaIntraPlane,
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                mode.toLumaPredictionMode(),
+                0
+        );
+        blendInterIntraPlane(
+                lumaPlane,
+                lumaIntraPlane,
+                header,
+                mode,
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                0,
+                0
+        );
+
+        if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
+            return;
+        }
+
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = lumaX >> chromaSubsamplingX;
+        int chromaY = lumaY >> chromaSubsamplingY;
+        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
+        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+
+        MutablePlaneBuffer chromaUIntraPlane = chromaUPlane.copy();
+        IntraPredictor.predictChroma(
+                chromaUIntraPlane,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                mode.toUvPredictionMode(),
+                0
+        );
+        blendInterIntraPlane(
+                chromaUPlane,
+                chromaUIntraPlane,
+                header,
+                mode,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY
+        );
+
+        MutablePlaneBuffer chromaVIntraPlane = chromaVPlane.copy();
+        IntraPredictor.predictChroma(
+                chromaVIntraPlane,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                mode.toUvPredictionMode(),
+                0
+        );
+        blendInterIntraPlane(
+                chromaVPlane,
+                chromaVIntraPlane,
+                header,
+                mode,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY
+        );
+    }
+
+    /// Blends one inter predictor plane with its intra predictor using an AV1 inter-intra mask.
+    ///
+    /// @param destinationPlane the mutable destination plane containing the inter predictor
+    /// @param intraPlane the mutable intra predictor plane
+    /// @param header the decoded block header that owns the inter-intra state
+    /// @param mode the decoded inter-intra prediction mode
+    /// @param originX the destination-plane block origin X
+    /// @param originY the destination-plane block origin Y
+    /// @param width the visible block width in destination-plane samples
+    /// @param height the visible block height in destination-plane samples
+    /// @param subsamplingX the horizontal chroma subsampling shift for this plane
+    /// @param subsamplingY the vertical chroma subsampling shift for this plane
+    private static void blendInterIntraPlane(
+            MutablePlaneBuffer destinationPlane,
+            MutablePlaneBuffer intraPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            InterIntraPredictionMode mode,
+            int originX,
+            int originY,
+            int width,
+            int height,
+            int subsamplingX,
+            int subsamplingY
+    ) {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int mask = InterIntraMasks.maskValue(
+                        mode,
+                        header.interIntraWedge(),
+                        header.interIntraWedgeIndex(),
+                        header.size(),
+                        x,
+                        y,
+                        subsamplingX,
+                        subsamplingY
+                );
+                int interSample = destinationPlane.sample(originX + x, originY + y);
+                int intraSample = intraPlane.sample(originX + x, originY + y);
+                destinationPlane.setSample(
+                        originX + x,
+                        originY + y,
+                        (interSample * (64 - mask) + intraSample * mask + 32) >> 6
+                );
+            }
+        }
     }
 
     /// Reconstructs the currently supported compound-reference inter prediction subset by averaging

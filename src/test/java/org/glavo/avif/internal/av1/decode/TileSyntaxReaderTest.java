@@ -27,6 +27,7 @@ import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.PartitionType;
@@ -185,6 +186,32 @@ final class TileSyntaxReaderTest {
         TileDecodeContext singleModeTileContext = createTileContext(FrameType.INTER, false, payload);
         TileSyntaxReader singleModeReader = new TileSyntaxReader(singleModeTileContext);
         assertEquals(expectedSingleInterMode, singleModeReader.readSingleInterMode(4, 1, 3, false, false));
+    }
+
+    /// Verifies that inter-intra syntax uses the expected tile-local CDF tables.
+    @Test
+    void readsInterIntraSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedUseInterIntra = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableInterIntraCdf(2));
+        InterIntraPredictionMode expectedMode = InterIntraPredictionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableInterIntraModeCdf(2), 3)
+        );
+        boolean expectedUseWedge = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableInterIntraWedgeCdf(4));
+        int expectedWedgeIndex = oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableWedgeIndexCdf(4), 15);
+
+        assertEquals(expectedUseInterIntra, reader.readUseInterIntra(2));
+        assertArrayEquals(oracleCdf.mutableInterIntraCdf(2), tileContext.cdfContext().mutableInterIntraCdf(2));
+        assertEquals(expectedMode, reader.readInterIntraMode(2));
+        assertArrayEquals(oracleCdf.mutableInterIntraModeCdf(2), tileContext.cdfContext().mutableInterIntraModeCdf(2));
+        assertEquals(expectedUseWedge, reader.readUseInterIntraWedge(4));
+        assertArrayEquals(oracleCdf.mutableInterIntraWedgeCdf(4), tileContext.cdfContext().mutableInterIntraWedgeCdf(4));
+        assertEquals(expectedWedgeIndex, reader.readWedgeIndex(4));
+        assertArrayEquals(oracleCdf.mutableWedgeIndexCdf(4), tileContext.cdfContext().mutableWedgeIndexCdf(4));
     }
 
     /// Verifies that switchable interpolation-filter syntax uses the expected tile-local CDF tables.

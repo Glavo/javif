@@ -138,6 +138,15 @@ final class MutablePlaneBuffer {
         return new DecodedPlane(width, height, width, samples);
     }
 
+    /// Creates an independent mutable copy of this plane buffer.
+    ///
+    /// @return an independent mutable copy of this plane buffer
+    MutablePlaneBuffer copy() {
+        MutablePlaneBuffer copy = new MutablePlaneBuffer(width, height, bitDepth);
+        System.arraycopy(samples, 0, copy.samples, 0, samples.length);
+        return copy;
+    }
+
     /// Clips one sample value into the legal bit-depth range.
     ///
     /// @param value the sample value to clip

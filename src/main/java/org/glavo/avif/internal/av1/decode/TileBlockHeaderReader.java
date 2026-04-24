@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
@@ -37,8 +38,8 @@ import java.util.Objects;
 ///
 /// This implementation intentionally covers only the syntax elements already backed by
 /// `TileSyntaxReader`, including skip mode, CDEF and delta-q/delta-lf side syntax, provisional
-/// inter prediction modes, palette size signaling, `intrabc`, directional angle deltas, and
-/// block-size-aware CFL gating.
+/// inter prediction modes, inter-intra syntax, palette size signaling, `intrabc`, directional angle
+/// deltas, and block-size-aware CFL gating.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
     /// Sentinel used when a block does not carry an inter reference frame.
@@ -190,6 +191,10 @@ public final class TileBlockHeaderReader {
         @Nullable InterMotionVector motionVector1 = null;
         @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter = null;
         @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter = null;
+        boolean interIntra = false;
+        @Nullable InterIntraPredictionMode interIntraMode = null;
+        boolean interIntraWedge = false;
+        int interIntraWedgeIndex = -1;
         if (!intra && !useIntrabc) {
             InterReferenceSelection selection = readInterReferenceSelection(
                     nonNullPosition,
@@ -231,6 +236,16 @@ public final class TileBlockHeaderReader {
                 drlIndex = interModeSelection.drlIndex();
                 motionVector0 = interModeSelection.motionVector0();
                 motionVector1 = interModeSelection.motionVector1();
+            }
+            if (canDecodeInterIntra(nonNullSize, compoundReference)
+                    && syntaxReader.readUseInterIntra(nonNullSize.yModeSizeContext())) {
+                interIntra = true;
+                interIntraMode = syntaxReader.readInterIntraMode(nonNullSize.yModeSizeContext());
+                int wedgeContext = interIntraWedgeContext(nonNullSize);
+                interIntraWedge = syntaxReader.readUseInterIntraWedge(wedgeContext);
+                if (interIntraWedge) {
+                    interIntraWedgeIndex = syntaxReader.readWedgeIndex(wedgeContext);
+                }
             }
             InterpolationFilterSelection interpolationFilterSelection = readInterpolationFilterSelection(
                     nonNullPosition,
@@ -336,6 +351,10 @@ public final class TileBlockHeaderReader {
                 motionVector1,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
+                interIntra,
+                interIntraMode,
+                interIntraWedge,
+                interIntraWedgeIndex,
                 segmentPredicted,
                 segmentId,
                 cdefIndex,
@@ -546,6 +565,54 @@ public final class TileBlockHeaderReader {
                 && nonNullSegmentData.referenceFrame() < 0
                 && !nonNullSegmentData.globalMotion()
                 && !nonNullSegmentData.skip();
+    }
+
+    /// Returns whether inter-intra syntax is available for the supplied inter block state.
+    ///
+    /// @param size the block size to test
+    /// @param compoundReference whether the current block uses compound references
+    /// @return whether inter-intra syntax is available for the supplied inter block state
+    private boolean canDecodeInterIntra(
+            BlockSize size,
+            boolean compoundReference
+    ) {
+        return tileContext.sequenceHeader().features().interIntra()
+                && !compoundReference
+                && supportsInterIntra(size);
+    }
+
+    /// Returns whether the supplied block size can signal inter-intra prediction.
+    ///
+    /// @param size the block size to test
+    /// @return whether the supplied block size can signal inter-intra prediction
+    private static boolean supportsInterIntra(BlockSize size) {
+        return switch (Objects.requireNonNull(size, "size")) {
+            case SIZE_32X32,
+                    SIZE_32X16,
+                    SIZE_16X32,
+                    SIZE_16X16,
+                    SIZE_16X8,
+                    SIZE_8X16,
+                    SIZE_8X8 -> true;
+            default -> false;
+        };
+    }
+
+    /// Returns the inter-intra wedge entropy context for the supplied block size.
+    ///
+    /// @param size the block size to inspect
+    /// @return the inter-intra wedge entropy context for the supplied block size
+    private static int interIntraWedgeContext(BlockSize size) {
+        return switch (Objects.requireNonNull(size, "size")) {
+            case SIZE_8X8 -> 0;
+            case SIZE_8X16 -> 1;
+            case SIZE_16X8 -> 2;
+            case SIZE_16X16 -> 3;
+            case SIZE_16X32 -> 4;
+            case SIZE_32X16 -> 5;
+            case SIZE_32X32 -> 6;
+            default -> throw new IllegalArgumentException("Block size does not have an inter-intra wedge context: " + size);
+        };
     }
 
     /// Returns whether skip-mode syntax is available for the supplied block and segment state.
@@ -1605,6 +1672,18 @@ public final class TileBlockHeaderReader {
         /// The decoded vertical switchable interpolation filter, or `null` when not available.
         private final @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter;
 
+        /// Whether the block uses inter-intra prediction.
+        private final boolean interIntra;
+
+        /// The decoded inter-intra prediction mode, or `null` when not available.
+        private final @Nullable InterIntraPredictionMode interIntraMode;
+
+        /// Whether the inter-intra block uses a wedge mask.
+        private final boolean interIntraWedge;
+
+        /// The decoded inter-intra wedge index, or `-1` when not available.
+        private final int interIntraWedgeIndex;
+
         /// Whether the block used temporal segmentation prediction.
         private final boolean segmentPredicted;
 
@@ -1681,6 +1760,10 @@ public final class TileBlockHeaderReader {
         /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
         /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
         /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
+        /// @param interIntra whether the block uses inter-intra prediction
+        /// @param interIntraMode the decoded inter-intra prediction mode, or `null`
+        /// @param interIntraWedge whether the inter-intra block uses a wedge mask
+        /// @param interIntraWedgeIndex the decoded inter-intra wedge index, or `-1`
         /// @param segmentPredicted whether the block used temporal segmentation prediction
         /// @param segmentId the decoded segment identifier for the block
         /// @param cdefIndex the decoded CDEF index for the current superblock quadrant, or `-1`
@@ -1718,6 +1801,10 @@ public final class TileBlockHeaderReader {
                 @Nullable InterMotionVector motionVector1,
                 @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
                 @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter,
+                boolean interIntra,
+                @Nullable InterIntraPredictionMode interIntraMode,
+                boolean interIntraWedge,
+                int interIntraWedgeIndex,
                 boolean segmentPredicted,
                 int segmentId,
                 int cdefIndex,
@@ -1755,6 +1842,10 @@ public final class TileBlockHeaderReader {
             this.motionVector1 = motionVector1;
             this.horizontalInterpolationFilter = horizontalInterpolationFilter;
             this.verticalInterpolationFilter = verticalInterpolationFilter;
+            this.interIntra = interIntra;
+            this.interIntraMode = interIntraMode;
+            this.interIntraWedge = interIntraWedge;
+            this.interIntraWedgeIndex = interIntraWedgeIndex;
             this.segmentPredicted = segmentPredicted;
             this.segmentId = segmentId;
             this.cdefIndex = cdefIndex;
@@ -1821,6 +1912,25 @@ public final class TileBlockHeaderReader {
             if ((horizontalInterpolationFilter == null) != (verticalInterpolationFilter == null)) {
                 throw new IllegalArgumentException("Switchable interpolation filters must be both present or both absent");
             }
+            if ((intra || useIntrabc || compoundReference) && interIntra) {
+                throw new IllegalArgumentException("Only single-reference inter blocks may carry inter-intra state");
+            }
+            if (interIntra && !supportsInterIntra(this.size)) {
+                throw new IllegalArgumentException("Block size does not support inter-intra prediction: " + this.size);
+            }
+            if (interIntra != (interIntraMode != null)) {
+                throw new IllegalArgumentException("interIntra and interIntraMode availability must match");
+            }
+            if (interIntraWedge && !interIntra) {
+                throw new IllegalArgumentException("Wedge inter-intra state requires inter-intra prediction");
+            }
+            if (interIntraWedge) {
+                if (interIntraWedgeIndex < 0 || interIntraWedgeIndex >= 16) {
+                    throw new IllegalArgumentException("interIntraWedgeIndex out of range: " + interIntraWedgeIndex);
+                }
+            } else if (interIntraWedgeIndex != -1) {
+                throw new IllegalArgumentException("interIntraWedgeIndex must be -1 when wedge inter-intra is disabled");
+            }
             if (!intra && !useIntrabc) {
                 if (referenceFrame0 == NO_REFERENCE_FRAME) {
                     throw new IllegalArgumentException("Inter blocks must carry a primary reference");
@@ -1851,6 +1961,126 @@ public final class TileBlockHeaderReader {
                     throw new IllegalArgumentException("Blocks without a secondary reference must not carry a secondary motion vector");
                 }
             }
+        }
+
+        /// Creates one decoded leaf block header with inter-intra state defaulted to unavailable.
+        ///
+        /// @param position the local tile-relative block origin
+        /// @param size the decoded block size
+        /// @param hasChroma whether the block has chroma samples in the active frame layout
+        /// @param skip the decoded skip flag
+        /// @param skipMode the decoded skip-mode flag
+        /// @param intra whether the block is intra-coded
+        /// @param useIntrabc whether the block uses `intrabc`
+        /// @param compoundReference whether the block uses compound inter references
+        /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+        /// @param singleInterMode the decoded single-reference inter mode, or `null`
+        /// @param compoundInterMode the decoded compound inter mode, or `null`
+        /// @param drlIndex the decoded dynamic-reference-list index, or `-1`
+        /// @param motionVector0 the primary motion vector chosen for the block, or `null`
+        /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
+        /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
+        /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
+        /// @param segmentPredicted whether the block used temporal segmentation prediction
+        /// @param segmentId the decoded segment identifier for the block
+        /// @param cdefIndex the decoded CDEF index for the current superblock quadrant, or `-1`
+        /// @param qIndex the current luma AC quantizer index after any superblock-level delta-q update
+        /// @param deltaLfValues the current delta-lf runtime slots after any superblock-level updates
+        /// @param yMode the decoded luma intra prediction mode, or `null`
+        /// @param uvMode the decoded chroma intra prediction mode, or `null`
+        /// @param yPaletteSize the decoded luma palette size in `[0, 8]`, or `0`
+        /// @param uvPaletteSize the decoded chroma palette size in `[0, 8]`, or `0`
+        /// @param yPaletteColors the decoded luma palette entries, or an empty array
+        /// @param uPaletteColors the decoded U chroma palette entries, or an empty array
+        /// @param vPaletteColors the decoded V chroma palette entries, or an empty array
+        /// @param yPaletteIndices the packed luma palette indices, or an empty array
+        /// @param uvPaletteIndices the packed chroma palette indices, or an empty array
+        /// @param filterIntraMode the decoded filter-intra mode, or `null`
+        /// @param yAngle the decoded signed luma angle delta in `[-3, 3]`
+        /// @param uvAngle the decoded signed chroma angle delta in `[-3, 3]`
+        /// @param cflAlphaU the decoded signed CFL alpha for chroma U
+        /// @param cflAlphaV the decoded signed CFL alpha for chroma V
+        public BlockHeader(
+                BlockPosition position,
+                BlockSize size,
+                boolean hasChroma,
+                boolean skip,
+                boolean skipMode,
+                boolean intra,
+                boolean useIntrabc,
+                boolean compoundReference,
+                int referenceFrame0,
+                int referenceFrame1,
+                @Nullable SingleInterPredictionMode singleInterMode,
+                @Nullable CompoundInterPredictionMode compoundInterMode,
+                int drlIndex,
+                @Nullable InterMotionVector motionVector0,
+                @Nullable InterMotionVector motionVector1,
+                @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+                @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter,
+                boolean segmentPredicted,
+                int segmentId,
+                int cdefIndex,
+                int qIndex,
+                int[] deltaLfValues,
+                @Nullable LumaIntraPredictionMode yMode,
+                @Nullable UvIntraPredictionMode uvMode,
+                int yPaletteSize,
+                int uvPaletteSize,
+                int[] yPaletteColors,
+                int[] uPaletteColors,
+                int[] vPaletteColors,
+                byte[] yPaletteIndices,
+                byte[] uvPaletteIndices,
+                @Nullable FilterIntraMode filterIntraMode,
+                int yAngle,
+                int uvAngle,
+                int cflAlphaU,
+                int cflAlphaV
+        ) {
+            this(
+                    position,
+                    size,
+                    hasChroma,
+                    skip,
+                    skipMode,
+                    intra,
+                    useIntrabc,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    singleInterMode,
+                    compoundInterMode,
+                    drlIndex,
+                    motionVector0,
+                    motionVector1,
+                    horizontalInterpolationFilter,
+                    verticalInterpolationFilter,
+                    false,
+                    null,
+                    false,
+                    -1,
+                    segmentPredicted,
+                    segmentId,
+                    cdefIndex,
+                    qIndex,
+                    deltaLfValues,
+                    yMode,
+                    uvMode,
+                    yPaletteSize,
+                    uvPaletteSize,
+                    yPaletteColors,
+                    uPaletteColors,
+                    vPaletteColors,
+                    yPaletteIndices,
+                    uvPaletteIndices,
+                    filterIntraMode,
+                    yAngle,
+                    uvAngle,
+                    cflAlphaU,
+                    cflAlphaV
+            );
         }
 
         /// Creates one decoded leaf block header with switchable interpolation-filter state defaulted to unavailable.
@@ -2280,6 +2510,34 @@ public final class TileBlockHeaderReader {
         /// @return the decoded vertical switchable interpolation filter, or `null` when not available
         public @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter() {
             return verticalInterpolationFilter;
+        }
+
+        /// Returns whether the block uses inter-intra prediction.
+        ///
+        /// @return whether the block uses inter-intra prediction
+        public boolean interIntra() {
+            return interIntra;
+        }
+
+        /// Returns the decoded inter-intra prediction mode, or `null` when not available.
+        ///
+        /// @return the decoded inter-intra prediction mode, or `null`
+        public @Nullable InterIntraPredictionMode interIntraMode() {
+            return interIntraMode;
+        }
+
+        /// Returns whether the inter-intra block uses a wedge mask.
+        ///
+        /// @return whether the inter-intra block uses a wedge mask
+        public boolean interIntraWedge() {
+            return interIntraWedge;
+        }
+
+        /// Returns the decoded inter-intra wedge index, or `-1` when not available.
+        ///
+        /// @return the decoded inter-intra wedge index, or `-1`
+        public int interIntraWedgeIndex() {
+            return interIntraWedgeIndex;
         }
 
         /// Returns whether the block used temporal segmentation prediction.
