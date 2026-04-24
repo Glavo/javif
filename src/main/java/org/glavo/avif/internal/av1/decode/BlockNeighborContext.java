@@ -1949,6 +1949,40 @@ public final class BlockNeighborContext {
         };
     }
 
+    /// Returns whether the current block has an already-decoded inter neighbor usable by OBMC.
+    ///
+    /// This follows AV1's 8x8-granularity neighbor scan against the causal above and left edges.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the current block size
+    /// @return whether at least one above or left neighbor can provide an OBMC predictor
+    public boolean hasOverlappableCandidates(BlockPosition position, BlockSize size) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        int startX4 = nonNullPosition.x4();
+        int startY4 = nonNullPosition.y4();
+        int endX4 = Math.min(tileWidth4, startX4 + nonNullSize.width4());
+        int endY4 = Math.min(tileHeight4, startY4 + nonNullSize.height4());
+
+        if (startY4 > 0) {
+            for (int x4 = startX4; x4 < endX4; x4 += 2) {
+                int sampleX4 = Math.min(aboveIntra.length - 1, x4 | 1);
+                if (aboveIntra[sampleX4] == 0 && aboveReferenceFrame0[sampleX4] >= 0) {
+                    return true;
+                }
+            }
+        }
+        if (startX4 > 0) {
+            for (int y4 = startY4; y4 < endY4; y4 += 2) {
+                int sampleY4 = Math.min(leftIntra.length - 1, y4 | 1);
+                if (leftIntra[sampleY4] == 0 && leftReferenceFrame0[sampleY4] >= 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /// Updates the neighbor state after decoding one block header.
     ///
     /// @param header the decoded block header that should become the new above/left edge state

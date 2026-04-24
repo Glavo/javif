@@ -29,6 +29,7 @@ import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
@@ -167,6 +168,10 @@ final class TileSyntaxReaderTest {
         CompoundInterPredictionMode expectedCompoundInterMode = CompoundInterPredictionMode.fromSymbolIndex(
                 oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableCompoundInterModeCdf(5), 7)
         );
+        MotionMode expectedMotionMode = MotionMode.fromSymbolIndex(
+                oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableMotionModeCdf(BlockSize.SIZE_16X16.cdfIndex()), 2)
+        );
+        boolean expectedObmc = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableObmcCdf(BlockSize.SIZE_16X16.cdfIndex()));
         SingleInterPredictionMode expectedSingleInterMode = expectedNewMv
                 ? (!expectedGlobalMv ? SingleInterPredictionMode.GLOBALMV
                 : expectedReferenceMv ? SingleInterPredictionMode.NEARMV : SingleInterPredictionMode.NEARESTMV)
@@ -182,6 +187,16 @@ final class TileSyntaxReaderTest {
         assertArrayEquals(oracleCdf.mutableDrlCdf(2), tileContext.cdfContext().mutableDrlCdf(2));
         assertEquals(expectedCompoundInterMode, reader.readCompoundInterMode(5));
         assertArrayEquals(oracleCdf.mutableCompoundInterModeCdf(5), tileContext.cdfContext().mutableCompoundInterModeCdf(5));
+        assertEquals(expectedMotionMode, reader.readMotionMode(BlockSize.SIZE_16X16.cdfIndex()));
+        assertArrayEquals(
+                oracleCdf.mutableMotionModeCdf(BlockSize.SIZE_16X16.cdfIndex()),
+                tileContext.cdfContext().mutableMotionModeCdf(BlockSize.SIZE_16X16.cdfIndex())
+        );
+        assertEquals(expectedObmc, reader.readUseObmc(BlockSize.SIZE_16X16.cdfIndex()));
+        assertArrayEquals(
+                oracleCdf.mutableObmcCdf(BlockSize.SIZE_16X16.cdfIndex()),
+                tileContext.cdfContext().mutableObmcCdf(BlockSize.SIZE_16X16.cdfIndex())
+        );
 
         TileDecodeContext singleModeTileContext = createTileContext(FrameType.INTER, false, payload);
         TileSyntaxReader singleModeReader = new TileSyntaxReader(singleModeTileContext);

@@ -35,6 +35,7 @@ import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
+import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
@@ -2986,6 +2987,134 @@ final class FrameReconstructorTest {
         assertPlaneBlockFilled(requirePlane(planes.chromaVPlane()), 0, 2, 4, 2, 0);
     }
 
+    /// Verifies that one monochrome OBMC block blends its top edge against an already decoded
+    /// above inter neighbor.
+    @Test
+    void reconstructsI400ObmcBlockFromAboveNeighbor() {
+        BlockSize size = BlockSize.SIZE_16X16;
+        int[][] lumaSamples = rampSamples(16, 32, 0, 1, 5);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                lumaSamples,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode aboveLeaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(
+                        new BlockPosition(0, 0),
+                        size,
+                        false,
+                        0,
+                        new MotionVector(-16, 0)
+                ),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 0), size, true)
+        );
+        TilePartitionTreeReader.LeafNode obmcLeaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(
+                        new BlockPosition(0, 4),
+                        size,
+                        false,
+                        0,
+                        MotionVector.zero(),
+                        MotionMode.OBMC
+                ),
+                createTransformLayout(new BlockPosition(0, 4), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 4), size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 16, 32, 0, aboveLeaf, obmcLeaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                16,
+                expectedObmcAboveBlend(
+                        cropSamples(lumaSamples, 0, 16, 16, 16),
+                        cropSamples(lumaSamples, 0, 12, 16, 8),
+                        8
+                )
+        );
+    }
+
+    /// Verifies that one chroma-bearing OBMC block blends luma and chroma left edges against an
+    /// already decoded left inter neighbor.
+    @Test
+    void reconstructsI420ObmcBlockFromLeftNeighbor() {
+        BlockSize size = BlockSize.SIZE_16X16;
+        int[][] lumaSamples = rampSamples(32, 16, 0, 1, 5);
+        int[][] chromaUSamples = rampSamples(16, 8, 40, 3, 7);
+        int[][] chromaVSamples = rampSamples(16, 8, 200, -2, -5);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                lumaSamples,
+                chromaUSamples,
+                chromaVSamples
+        );
+        TilePartitionTreeReader.LeafNode leftLeaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(
+                        new BlockPosition(0, 0),
+                        size,
+                        true,
+                        0,
+                        new MotionVector(0, -16)
+                ),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I420),
+                createResidualLayout(new BlockPosition(0, 0), size, true)
+        );
+        TilePartitionTreeReader.LeafNode obmcLeaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(
+                        new BlockPosition(4, 0),
+                        size,
+                        true,
+                        0,
+                        MotionVector.zero(),
+                        MotionMode.OBMC
+                ),
+                createTransformLayout(new BlockPosition(4, 0), size, PixelFormat.I420),
+                createResidualLayout(new BlockPosition(4, 0), size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 32, 16, 0, leftLeaf, obmcLeaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                16,
+                0,
+                expectedObmcLeftBlend(
+                        cropSamples(lumaSamples, 16, 0, 16, 16),
+                        cropSamples(lumaSamples, 12, 0, 8, 16),
+                        8
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                8,
+                0,
+                expectedObmcLeftBlend(
+                        cropSamples(chromaUSamples, 8, 0, 8, 8),
+                        cropSamples(chromaUSamples, 6, 0, 4, 8),
+                        4
+                )
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaVPlane()),
+                8,
+                0,
+                expectedObmcLeftBlend(
+                        cropSamples(chromaVSamples, 8, 0, 8, 8),
+                        cropSamples(chromaVSamples, 6, 0, 4, 8),
+                        4
+                )
+        );
+    }
+
     /// Verifies that one monochrome single-reference inter block samples one stored reference
     /// surface through the current fixed `EIGHT_TAP_REGULAR` subpel path.
     @Test
@@ -4885,6 +5014,33 @@ final class FrameReconstructorTest {
             int referenceFrame0,
             MotionVector motionVector
     ) {
+        return createSingleReferenceInterBlockHeader(
+                position,
+                size,
+                hasChroma,
+                referenceFrame0,
+                motionVector,
+                MotionMode.SIMPLE
+        );
+    }
+
+    /// Creates one single-reference inter block header with an explicit motion mode.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param motionVector the resolved primary motion vector
+    /// @param motionMode the decoded inter motion-compensation mode
+    /// @return one single-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createSingleReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            MotionVector motionVector,
+            MotionMode motionMode
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 size,
@@ -4901,8 +5057,21 @@ final class FrameReconstructorTest {
                 0,
                 InterMotionVector.resolved(motionVector),
                 null,
+                motionMode,
+                null,
+                null,
+                null,
+                false,
+                -1,
+                false,
+                null,
+                false,
+                -1,
                 false,
                 0,
+                -1,
+                0,
+                new int[4],
                 null,
                 null,
                 0,
@@ -4957,6 +5126,7 @@ final class FrameReconstructorTest {
                 0,
                 InterMotionVector.resolved(motionVector),
                 null,
+                MotionMode.SIMPLE,
                 null,
                 null,
                 null,
@@ -5110,6 +5280,7 @@ final class FrameReconstructorTest {
                 0,
                 InterMotionVector.resolved(motionVector0),
                 InterMotionVector.resolved(motionVector1),
+                MotionMode.SIMPLE,
                 null,
                 null,
                 compoundPredictionType,
@@ -5307,6 +5478,91 @@ final class FrameReconstructorTest {
             }
         }
         return samples;
+    }
+
+    /// Returns one rectangular crop from a larger sample raster.
+    ///
+    /// @param samples the source sample raster
+    /// @param x the source crop origin X coordinate
+    /// @param y the source crop origin Y coordinate
+    /// @param width the crop width in samples
+    /// @param height the crop height in samples
+    /// @return one rectangular crop from the source raster
+    private static int[][] cropSamples(int[][] samples, int x, int y, int width, int height) {
+        int[][] cropped = new int[height][width];
+        for (int row = 0; row < height; row++) {
+            System.arraycopy(samples[y + row], x, cropped[row], 0, width);
+        }
+        return cropped;
+    }
+
+    /// Computes the expected OBMC blend for an above-neighbor overlap.
+    ///
+    /// @param currentPredictor the already written current-block predictor
+    /// @param neighborPredictor the above-neighbor predictor covering the overlap rows
+    /// @param overlap the overlap height in samples
+    /// @return the expected OBMC-blended current-block predictor
+    private static int[][] expectedObmcAboveBlend(int[][] currentPredictor, int[][] neighborPredictor, int overlap) {
+        int[][] expected = copySamples(currentPredictor);
+        int[] mask = obmcMask(overlap);
+        for (int y = 0; y < overlap; y++) {
+            for (int x = 0; x < expected[y].length; x++) {
+                expected[y][x] = blendObmcSamples(neighborPredictor[y][x], currentPredictor[y][x], mask[y]);
+            }
+        }
+        return expected;
+    }
+
+    /// Computes the expected OBMC blend for a left-neighbor overlap.
+    ///
+    /// @param currentPredictor the already written current-block predictor
+    /// @param neighborPredictor the left-neighbor predictor covering the overlap columns
+    /// @param overlap the overlap width in samples
+    /// @return the expected OBMC-blended current-block predictor
+    private static int[][] expectedObmcLeftBlend(int[][] currentPredictor, int[][] neighborPredictor, int overlap) {
+        int[][] expected = copySamples(currentPredictor);
+        int[] mask = obmcMask(overlap);
+        for (int y = 0; y < expected.length; y++) {
+            for (int x = 0; x < overlap; x++) {
+                expected[y][x] = blendObmcSamples(neighborPredictor[y][x], currentPredictor[y][x], mask[x]);
+            }
+        }
+        return expected;
+    }
+
+    /// Returns a deep copy of one sample raster.
+    ///
+    /// @param samples the source sample raster
+    /// @return a deep copy of the supplied sample raster
+    private static int[][] copySamples(int[][] samples) {
+        int[][] copy = new int[samples.length][];
+        for (int y = 0; y < samples.length; y++) {
+            copy[y] = new int[samples[y].length];
+            System.arraycopy(samples[y], 0, copy[y], 0, samples[y].length);
+        }
+        return copy;
+    }
+
+    /// Returns one OBMC masked blend sample with the current predictor as the secondary source.
+    ///
+    /// @param neighborSample the neighbor predictor sample
+    /// @param currentSample the current predictor sample
+    /// @param currentWeight the current predictor weight in `[0, 64]`
+    /// @return one OBMC masked blend sample
+    private static int blendObmcSamples(int neighborSample, int currentSample, int currentWeight) {
+        return (neighborSample * (64 - currentWeight) + currentSample * currentWeight + 32) >> 6;
+    }
+
+    /// Returns the AV1 OBMC mask used by the tested overlap length.
+    ///
+    /// @param overlap the overlap length in samples
+    /// @return the AV1 OBMC mask used by the tested overlap length
+    private static int[] obmcMask(int overlap) {
+        return switch (overlap) {
+            case 4 -> new int[]{39, 50, 59, 64};
+            case 8 -> new int[]{36, 42, 48, 53, 57, 61, 64, 64};
+            default -> throw new IllegalArgumentException("Unsupported test OBMC overlap: " + overlap);
+        };
     }
 
     /// Computes the expected compound wedge blend for two direct predictors.

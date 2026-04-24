@@ -25,6 +25,7 @@ import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
+import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformSize;
@@ -198,6 +199,23 @@ public final class TileSyntaxReader {
     public CompoundInterPredictionMode readCompoundInterMode(int context) {
         int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableCompoundInterModeCdf(context), 7);
         return CompoundInterPredictionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one block motion mode from the supplied block-size context index.
+    ///
+    /// @param context the zero-based block-size context index in `[0, 22)`
+    /// @return the decoded block motion mode
+    public MotionMode readMotionMode(int context) {
+        int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionModeCdf(context), 2);
+        return MotionMode.fromSymbolIndex(symbol);
+    }
+
+    /// Decodes one OBMC enable flag from the supplied block-size context index.
+    ///
+    /// @param context the zero-based block-size context index in `[0, 22)`
+    /// @return whether the current block uses OBMC instead of simple prediction
+    public boolean readUseObmc(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableObmcCdf(context));
     }
 
     /// Decodes one masked-compound enable flag from the supplied context index.

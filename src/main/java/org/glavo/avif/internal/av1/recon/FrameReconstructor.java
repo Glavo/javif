@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
+import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
@@ -93,6 +94,25 @@ public final class FrameReconstructor {
 
     /// The signed source-sample offset of the first normative super-resolution tap.
     private static final int SUPERRES_FILTER_START_OFFSET = SUPERRES_FILTER_TAP_COUNT / 2 - 1;
+
+    /// The AV1 OBMC blend masks indexed by overlap length `1, 2, 4, 8, 16, 32, 64`.
+    private static final int[][] OBMC_MASKS = {
+            {64},
+            {45, 64},
+            {39, 50, 59, 64},
+            {36, 42, 48, 53, 57, 61, 64, 64},
+            {34, 37, 40, 43, 46, 49, 52, 54, 56, 58, 60, 61, 64, 64, 64, 64},
+            {
+                    33, 35, 36, 38, 40, 41, 43, 44, 45, 47, 48, 50, 51, 52, 53, 55,
+                    56, 57, 58, 59, 60, 60, 61, 62, 64, 64, 64, 64, 64, 64, 64, 64
+            },
+            {
+                    33, 34, 35, 35, 36, 37, 38, 39, 40, 40, 41, 42, 43, 44, 44, 44,
+                    45, 46, 47, 47, 48, 49, 50, 51, 51, 51, 52, 52, 53, 54, 55, 56,
+                    56, 56, 57, 57, 58, 58, 59, 60, 60, 60, 60, 60, 61, 62, 62, 62,
+                    62, 62, 63, 63, 63, 63, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64
+            }
+    };
 
     /// The default AV1 regular 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
     private static final int[][] REGULAR_SUBPEL_FILTERS = {
@@ -296,7 +316,9 @@ public final class FrameReconstructor {
         @Nullable MutablePlaneBuffer chromaUPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
         @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
 
-        for (TilePartitionTreeReader.Node[] tileRoots : checkedSyntaxDecodeResult.tileRoots()) {
+        TilePartitionTreeReader.Node[][] tileRootsByTile = checkedSyntaxDecodeResult.tileRoots();
+        DecodedBlockMap decodedBlockMap = DecodedBlockMap.create(tileRootsByTile, frameSize.codedWidth(), frameSize.height());
+        for (TilePartitionTreeReader.Node[] tileRoots : tileRootsByTile) {
             for (TilePartitionTreeReader.Node root : tileRoots) {
                 reconstructNode(
                         root,
@@ -306,7 +328,8 @@ public final class FrameReconstructor {
                         pixelFormat,
                         frameHeader,
                         sequenceHeader.features().orderHintBits(),
-                        checkedReferenceSurfaceSnapshots
+                        checkedReferenceSurfaceSnapshots,
+                        decodedBlockMap
                 );
             }
         }
@@ -463,6 +486,104 @@ public final class FrameReconstructor {
         };
     }
 
+    /// Chroma plane selector used when reusing the shared OBMC prediction path.
+    private enum ChromaPlane {
+        /// Chroma U plane.
+        U,
+        /// Chroma V plane.
+        V
+    }
+
+    /// Frame-local leaf lookup table indexed in 4x4 units.
+    @NotNullByDefault
+    private static final class DecodedBlockMap {
+        /// The frame width rounded up to 4x4 units.
+        private final int width4;
+
+        /// The frame height rounded up to 4x4 units.
+        private final int height4;
+
+        /// The leaf nodes indexed by 4x4 position.
+        private final TilePartitionTreeReader.LeafNode[] leaves;
+
+        /// Creates one decoded block map.
+        ///
+        /// @param width4 the frame width rounded up to 4x4 units
+        /// @param height4 the frame height rounded up to 4x4 units
+        private DecodedBlockMap(int width4, int height4) {
+            if (width4 <= 0) {
+                throw new IllegalArgumentException("width4 <= 0: " + width4);
+            }
+            if (height4 <= 0) {
+                throw new IllegalArgumentException("height4 <= 0: " + height4);
+            }
+            this.width4 = width4;
+            this.height4 = height4;
+            this.leaves = new TilePartitionTreeReader.LeafNode[Math.multiplyExact(width4, height4)];
+        }
+
+        /// Creates one decoded block map from decoded tile partition roots.
+        ///
+        /// @param tileRootsByTile the decoded partition roots grouped by tile
+        /// @param frameWidth the coded frame width in pixels
+        /// @param frameHeight the coded frame height in pixels
+        /// @return one decoded block map from decoded tile partition roots
+        public static DecodedBlockMap create(
+                TilePartitionTreeReader.Node[][] tileRootsByTile,
+                int frameWidth,
+                int frameHeight
+        ) {
+            DecodedBlockMap map = new DecodedBlockMap((frameWidth + 3) >> 2, (frameHeight + 3) >> 2);
+            for (TilePartitionTreeReader.Node[] tileRoots : Objects.requireNonNull(tileRootsByTile, "tileRootsByTile")) {
+                for (TilePartitionTreeReader.Node root : tileRoots) {
+                    map.addNode(root);
+                }
+            }
+            return map;
+        }
+
+        /// Adds one decoded partition node and all descendant leaves to this map.
+        ///
+        /// @param node the decoded partition node
+        private void addNode(TilePartitionTreeReader.Node node) {
+            TilePartitionTreeReader.Node nonNullNode = Objects.requireNonNull(node, "node");
+            if (nonNullNode instanceof TilePartitionTreeReader.LeafNode leafNode) {
+                addLeaf(leafNode);
+                return;
+            }
+            TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) nonNullNode;
+            for (TilePartitionTreeReader.Node child : partitionNode.children()) {
+                addNode(child);
+            }
+        }
+
+        /// Adds one decoded leaf to every 4x4 position it covers.
+        ///
+        /// @param leafNode the decoded partition leaf
+        private void addLeaf(TilePartitionTreeReader.LeafNode leafNode) {
+            TileBlockHeaderReader.BlockHeader header = Objects.requireNonNull(leafNode, "leafNode").header();
+            int endX4 = Math.min(width4, header.position().x4() + header.size().width4());
+            int endY4 = Math.min(height4, header.position().y4() + header.size().height4());
+            for (int y4 = Math.max(0, header.position().y4()); y4 < endY4; y4++) {
+                for (int x4 = Math.max(0, header.position().x4()); x4 < endX4; x4++) {
+                    leaves[y4 * width4 + x4] = leafNode;
+                }
+            }
+        }
+
+        /// Returns the decoded leaf that covers one 4x4 position.
+        ///
+        /// @param x4 the horizontal 4x4 coordinate
+        /// @param y4 the vertical 4x4 coordinate
+        /// @return the decoded leaf that covers the position, or `null`
+        public @Nullable TilePartitionTreeReader.LeafNode leafAt(int x4, int y4) {
+            if (x4 < 0 || y4 < 0 || x4 >= width4 || y4 >= height4) {
+                return null;
+            }
+            return leaves[y4 * width4 + x4];
+        }
+    }
+
     /// Upscales one decoded plane horizontally with the normative AV1 super-resolution filter.
     ///
     /// @param plane the decoded plane to upscale
@@ -553,7 +674,9 @@ public final class FrameReconstructor {
     /// @param chromaUPlane the mutable chroma U plane, or `null`
     /// @param chromaVPlane the mutable chroma V plane, or `null`
     /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     private static void reconstructNode(
             TilePartitionTreeReader.Node node,
             MutablePlaneBuffer lumaPlane,
@@ -564,6 +687,41 @@ public final class FrameReconstructor {
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
+        reconstructNode(
+                node,
+                lumaPlane,
+                chromaUPlane,
+                chromaVPlane,
+                pixelFormat,
+                frameHeader,
+                orderHintBits,
+                referenceSurfaceSnapshots,
+                DecodedBlockMap.create(new TilePartitionTreeReader.Node[][]{{node}}, lumaPlane.width(), lumaPlane.height())
+        );
+    }
+
+    /// Recursively reconstructs one partition-tree node using the supplied decoded-block map.
+    ///
+    /// @param node the partition-tree node to reconstruct
+    /// @param lumaPlane the mutable luma plane
+    /// @param chromaUPlane the mutable chroma U plane, or `null`
+    /// @param chromaVPlane the mutable chroma V plane, or `null`
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
+    private static void reconstructNode(
+            TilePartitionTreeReader.Node node,
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            int orderHintBits,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
+    ) {
         if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
             reconstructLeaf(
                     leafNode,
@@ -573,7 +731,8 @@ public final class FrameReconstructor {
                     pixelFormat,
                     frameHeader,
                     orderHintBits,
-                    referenceSurfaceSnapshots
+                    referenceSurfaceSnapshots,
+                    decodedBlockMap
             );
             return;
         }
@@ -588,7 +747,8 @@ public final class FrameReconstructor {
                     pixelFormat,
                     frameHeader,
                     orderHintBits,
-                    referenceSurfaceSnapshots
+                    referenceSurfaceSnapshots,
+                    decodedBlockMap
             );
         }
     }
@@ -601,6 +761,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V plane, or `null`
     /// @param pixelFormat the active decoded chroma layout
     /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
     private static void reconstructLeaf(
             TilePartitionTreeReader.LeafNode leafNode,
             MutablePlaneBuffer lumaPlane,
@@ -609,7 +770,8 @@ public final class FrameReconstructor {
             PixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
-            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
     ) {
         TileBlockHeaderReader.BlockHeader header = leafNode.header();
         TransformLayout transformLayout = leafNode.transformLayout();
@@ -678,7 +840,8 @@ public final class FrameReconstructor {
                     pixelFormat,
                     frameHeader,
                     orderHintBits,
-                    referenceSurfaceSnapshots
+                    referenceSurfaceSnapshots,
+                    decodedBlockMap
             );
         }
 
@@ -818,6 +981,9 @@ public final class FrameReconstructor {
             if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
                 throw new IllegalStateException("Inter palette reconstruction is not implemented yet");
             }
+            if (header.motionMode() == MotionMode.LOCAL_WARPED) {
+                throw new IllegalStateException("Local warped motion reconstruction is not implemented yet");
+            }
             if (header.interIntra() && !InterIntraMasks.supportsInterIntra(header.size())) {
                 throw new IllegalStateException("Inter-intra reconstruction encountered an unsupported block size");
             }
@@ -891,6 +1057,7 @@ public final class FrameReconstructor {
     /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
     private static void reconstructInterPrediction(
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
@@ -900,7 +1067,8 @@ public final class FrameReconstructor {
             PixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
-            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
     ) {
         if (header.compoundReference()) {
             reconstructCompoundInterPrediction(
@@ -928,7 +1096,434 @@ public final class FrameReconstructor {
             if (header.interIntra()) {
                 applyInterIntraPrediction(lumaPlane, chromaUPlane, chromaVPlane, header, transformLayout, pixelFormat);
             }
+            if (header.motionMode() == MotionMode.OBMC) {
+                applyObmcPrediction(
+                        lumaPlane,
+                        chromaUPlane,
+                        chromaVPlane,
+                        header,
+                        transformLayout,
+                        pixelFormat,
+                        frameHeader,
+                        referenceSurfaceSnapshots,
+                        decodedBlockMap
+                );
+            } else if (header.motionMode() == MotionMode.LOCAL_WARPED) {
+                throw new IllegalStateException("Local warped motion reconstruction is not implemented yet");
+            }
         }
+    }
+
+    /// Applies OBMC blending to a single-reference inter predictor already stored in the output planes.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the OBMC state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
+    private static void applyObmcPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        int lumaX = header.position().x4() << 2;
+        int lumaY = header.position().y4() << 2;
+        int visibleLumaWidth = transformLayout.visibleWidthPixels();
+        int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        applyObmcAboveNeighbors(
+                lumaPlane,
+                null,
+                header,
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                0,
+                0,
+                frameHeader,
+                pixelFormat,
+                referenceSurfaceSnapshots,
+                decodedBlockMap
+        );
+        applyObmcLeftNeighbors(
+                lumaPlane,
+                null,
+                header,
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                0,
+                0,
+                frameHeader,
+                pixelFormat,
+                referenceSurfaceSnapshots,
+                decodedBlockMap
+        );
+
+        if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
+            return;
+        }
+
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = lumaX >> chromaSubsamplingX;
+        int chromaY = lumaY >> chromaSubsamplingY;
+        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
+        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        applyObmcAboveNeighbors(
+                chromaUPlane,
+                ChromaPlane.U,
+                header,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                frameHeader,
+                pixelFormat,
+                referenceSurfaceSnapshots,
+                decodedBlockMap
+        );
+        applyObmcLeftNeighbors(
+                chromaUPlane,
+                ChromaPlane.U,
+                header,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                frameHeader,
+                pixelFormat,
+                referenceSurfaceSnapshots,
+                decodedBlockMap
+        );
+        applyObmcAboveNeighbors(
+                chromaVPlane,
+                ChromaPlane.V,
+                header,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                frameHeader,
+                pixelFormat,
+                referenceSurfaceSnapshots,
+                decodedBlockMap
+        );
+        applyObmcLeftNeighbors(
+                chromaVPlane,
+                ChromaPlane.V,
+                header,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                frameHeader,
+                pixelFormat,
+                referenceSurfaceSnapshots,
+                decodedBlockMap
+        );
+    }
+
+    /// Applies OBMC blending from already-decoded above neighbors.
+    ///
+    /// @param destinationPlane the mutable destination plane containing the current predictor
+    /// @param chromaPlane the chroma plane selector, or `null` for luma
+    /// @param header the decoded block header that owns the OBMC state
+    /// @param destinationX the plane-local block origin X
+    /// @param destinationY the plane-local block origin Y
+    /// @param visibleWidth the visible block width in plane samples
+    /// @param visibleHeight the visible block height in plane samples
+    /// @param subsamplingX the horizontal chroma subsampling shift for this plane
+    /// @param subsamplingY the vertical chroma subsampling shift for this plane
+    /// @param frameHeader the frame header that owns the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
+    private static void applyObmcAboveNeighbors(
+            MutablePlaneBuffer destinationPlane,
+            @Nullable ChromaPlane chromaPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            int destinationX,
+            int destinationY,
+            int visibleWidth,
+            int visibleHeight,
+            int subsamplingX,
+            int subsamplingY,
+            FrameHeader frameHeader,
+            PixelFormat pixelFormat,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        int blockX4 = header.position().x4();
+        int blockY4 = header.position().y4();
+        if (blockY4 <= 0 || visibleWidth <= 0 || visibleHeight <= 0) {
+            return;
+        }
+        int lumaOverlap = Math.min(header.size().heightPixels(), 64) >> 1;
+        int fullOverlap = Math.max(1, lumaOverlap >> subsamplingY);
+        int overlap = Math.min(visibleHeight, fullOverlap);
+        int[] mask = obmcMask(fullOverlap);
+        int maxNeighbors = maximumObmcNeighbors(header.size().width4());
+        int processed = 0;
+        int endX4 = blockX4 + header.size().width4();
+        int scanX4 = blockX4;
+        while (scanX4 < endX4 && processed < maxNeighbors) {
+            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(scanX4, blockY4 - 1);
+            if (neighbor == null) {
+                scanX4 += 2;
+                continue;
+            }
+            TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
+            int nextX4 = Math.min(endX4, neighborHeader.position().x4() + neighborHeader.size().width4());
+            if (isObmcNeighbor(neighborHeader)) {
+                int relativeLumaX = Math.max(0, scanX4 - blockX4) << 2;
+                int planeRelativeX = relativeLumaX >> subsamplingX;
+                int planeWidth = Math.min(visibleWidth - planeRelativeX, Math.max(1, ((nextX4 - scanX4) << 2) >> subsamplingX));
+                if (planeWidth > 0) {
+                    blendObmcRegion(
+                            destinationPlane,
+                            chromaPlane,
+                            neighborHeader,
+                            destinationX + planeRelativeX,
+                            destinationY,
+                            planeWidth,
+                            overlap,
+                            mask,
+                            true,
+                            frameHeader,
+                            pixelFormat,
+                            referenceSurfaceSnapshots
+                    );
+                    processed++;
+                }
+            }
+            scanX4 = Math.max(scanX4 + 1, nextX4);
+        }
+    }
+
+    /// Applies OBMC blending from already-decoded left neighbors.
+    ///
+    /// @param destinationPlane the mutable destination plane containing the current predictor
+    /// @param chromaPlane the chroma plane selector, or `null` for luma
+    /// @param header the decoded block header that owns the OBMC state
+    /// @param destinationX the plane-local block origin X
+    /// @param destinationY the plane-local block origin Y
+    /// @param visibleWidth the visible block width in plane samples
+    /// @param visibleHeight the visible block height in plane samples
+    /// @param subsamplingX the horizontal chroma subsampling shift for this plane
+    /// @param subsamplingY the vertical chroma subsampling shift for this plane
+    /// @param frameHeader the frame header that owns the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
+    private static void applyObmcLeftNeighbors(
+            MutablePlaneBuffer destinationPlane,
+            @Nullable ChromaPlane chromaPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            int destinationX,
+            int destinationY,
+            int visibleWidth,
+            int visibleHeight,
+            int subsamplingX,
+            int subsamplingY,
+            FrameHeader frameHeader,
+            PixelFormat pixelFormat,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        int blockX4 = header.position().x4();
+        int blockY4 = header.position().y4();
+        if (blockX4 <= 0 || visibleWidth <= 0 || visibleHeight <= 0) {
+            return;
+        }
+        int lumaOverlap = Math.min(header.size().widthPixels(), 64) >> 1;
+        int fullOverlap = Math.max(1, lumaOverlap >> subsamplingX);
+        int overlap = Math.min(visibleWidth, fullOverlap);
+        int[] mask = obmcMask(fullOverlap);
+        int maxNeighbors = maximumObmcNeighbors(header.size().height4());
+        int processed = 0;
+        int endY4 = blockY4 + header.size().height4();
+        int scanY4 = blockY4;
+        while (scanY4 < endY4 && processed < maxNeighbors) {
+            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(blockX4 - 1, scanY4);
+            if (neighbor == null) {
+                scanY4 += 2;
+                continue;
+            }
+            TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
+            int nextY4 = Math.min(endY4, neighborHeader.position().y4() + neighborHeader.size().height4());
+            if (isObmcNeighbor(neighborHeader)) {
+                int relativeLumaY = Math.max(0, scanY4 - blockY4) << 2;
+                int planeRelativeY = relativeLumaY >> subsamplingY;
+                int planeHeight = Math.min(visibleHeight - planeRelativeY, Math.max(1, ((nextY4 - scanY4) << 2) >> subsamplingY));
+                if (planeHeight > 0) {
+                    blendObmcRegion(
+                            destinationPlane,
+                            chromaPlane,
+                            neighborHeader,
+                            destinationX,
+                            destinationY + planeRelativeY,
+                            overlap,
+                            planeHeight,
+                            mask,
+                            false,
+                            frameHeader,
+                            pixelFormat,
+                            referenceSurfaceSnapshots
+                    );
+                    processed++;
+                }
+            }
+            scanY4 = Math.max(scanY4 + 1, nextY4);
+        }
+    }
+
+    /// Blends one OBMC neighbor predictor into a destination region.
+    ///
+    /// @param destinationPlane the mutable destination plane containing the current predictor
+    /// @param chromaPlane the chroma plane selector, or `null` for luma
+    /// @param neighborHeader the decoded neighbor block header supplying the primary predictor
+    /// @param destinationX the plane-local region origin X
+    /// @param destinationY the plane-local region origin Y
+    /// @param width the region width in plane samples
+    /// @param height the region height in plane samples
+    /// @param mask the OBMC mask for the varying axis
+    /// @param above whether the region is blended from an above neighbor
+    /// @param frameHeader the frame header that owns the current block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    private static void blendObmcRegion(
+            MutablePlaneBuffer destinationPlane,
+            @Nullable ChromaPlane chromaPlane,
+            TileBlockHeaderReader.BlockHeader neighborHeader,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            int[] mask,
+            boolean above,
+            FrameHeader frameHeader,
+            PixelFormat pixelFormat,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
+    ) {
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
+                referenceSurfaceSnapshots,
+                frameHeader,
+                pixelFormat,
+                destinationPlane.bitDepth(),
+                neighborHeader.referenceFrame0()
+        );
+        DecodedPlane referencePlane;
+        if (chromaPlane == null) {
+            referencePlane = referenceSurfaceSnapshot.decodedPlanes().lumaPlane();
+        } else if (chromaPlane == ChromaPlane.U) {
+            referencePlane = Objects.requireNonNull(
+                    referenceSurfaceSnapshot.decodedPlanes().chromaUPlane(),
+                    "referencePlanes.chromaUPlane()"
+            );
+        } else {
+            referencePlane = Objects.requireNonNull(
+                    referenceSurfaceSnapshot.decodedPlanes().chromaVPlane(),
+                    "referencePlanes.chromaVPlane()"
+            );
+        }
+        MotionVector motionVector = Objects.requireNonNull(neighborHeader.motionVector0(), "neighborHeader.motionVector0()").vector();
+        int denominatorX = chromaPlane == null ? 4 : 4 << chromaSubsamplingX(pixelFormat);
+        int denominatorY = chromaPlane == null ? 4 : 4 << chromaSubsamplingY(pixelFormat);
+        FrameHeader.InterpolationFilter horizontalFilter = resolveHorizontalInterpolationFilter(neighborHeader, frameHeader);
+        FrameHeader.InterpolationFilter verticalFilter = resolveVerticalInterpolationFilter(neighborHeader, frameHeader);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int predictor = sampleInterPlaneValue(
+                        referencePlane,
+                        destinationX + x,
+                        destinationY + y,
+                        destinationPlane.width(),
+                        destinationPlane.height(),
+                        motionVector.columnQuarterPel(),
+                        motionVector.rowQuarterPel(),
+                        denominatorX,
+                        denominatorY,
+                        width,
+                        height,
+                        horizontalFilter,
+                        verticalFilter,
+                        destinationPlane.maxSampleValue()
+                );
+                int current = destinationPlane.sample(destinationX + x, destinationY + y);
+                int currentWeight = mask[above ? y : x];
+                destinationPlane.setSample(
+                        destinationX + x,
+                        destinationY + y,
+                        blendMaskedCompoundSamples(predictor, current, currentWeight)
+                );
+            }
+        }
+    }
+
+    /// Returns whether one decoded neighbor can provide an OBMC predictor.
+    ///
+    /// @param header the decoded neighbor block header
+    /// @return whether the neighbor can provide an OBMC predictor
+    private static boolean isObmcNeighbor(TileBlockHeaderReader.BlockHeader header) {
+        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
+        return !nonNullHeader.intra()
+                && !nonNullHeader.useIntrabc()
+                && nonNullHeader.referenceFrame0() >= 0
+                && nonNullHeader.motionVector0() != null;
+    }
+
+    /// Returns the AV1 OBMC neighbor limit for one axis measured in 4x4 units.
+    ///
+    /// @param size4 the current block axis size in 4x4 units
+    /// @return the maximum number of causal neighbors to blend on that axis
+    private static int maximumObmcNeighbors(int size4) {
+        if (size4 <= 2) {
+            return 1;
+        }
+        if (size4 <= 4) {
+            return 2;
+        }
+        if (size4 <= 8) {
+            return 3;
+        }
+        return 4;
+    }
+
+    /// Returns the AV1 OBMC mask for the supplied overlap length.
+    ///
+    /// @param length the overlap length in samples
+    /// @return the AV1 OBMC mask for the supplied overlap length
+    private static int[] obmcMask(int length) {
+        return switch (length) {
+            case 1 -> OBMC_MASKS[0];
+            case 2 -> OBMC_MASKS[1];
+            case 4 -> OBMC_MASKS[2];
+            case 8 -> OBMC_MASKS[3];
+            case 16 -> OBMC_MASKS[4];
+            case 32 -> OBMC_MASKS[5];
+            case 64 -> OBMC_MASKS[6];
+            default -> throw new IllegalStateException("Unsupported OBMC overlap length: " + length);
+        };
     }
 
     /// Reconstructs the current minimal `intrabc` subset by sampling already reconstructed samples

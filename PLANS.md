@@ -32,7 +32,7 @@ Supported end-to-end behavior:
   stored-surface reuse, multi-tile first-pixel streams, and the current self-contained inter subset.
 - First inter/reference subset: single-reference prediction, inter-intra blend and wedge
   prediction, average, weighted, wedge-masked, and segment-masked compound prediction,
-  integer-copy prediction, bit-depth-preserving
+  OBMC causal-neighbor blending, integer-copy prediction, bit-depth-preserving
   fixed-filter and block-resolved `SWITCHABLE` subpel prediction, parsed candidate-only `NEAREST` /
   `NEAR` / skip-mode motion vectors promoted to final block vectors, `refmvs`
   direct/secondary/top-right/top-left/temporal candidates with symmetric single/compound reference
@@ -55,7 +55,6 @@ Supported end-to-end behavior:
 ## Remaining Decode Boundary
 
 - Motion-compensation coverage still needs warped motion.
-- Motion-compensation coverage still needs OBMC.
 - Active loop-filter and loop-restoration pixel filtering still need full block-edge masks,
   restoration-unit syntax, and coefficient-driven filtering before those frame features can decode
   instead of failing at the stable `NOT_IMPLEMENTED` boundary.

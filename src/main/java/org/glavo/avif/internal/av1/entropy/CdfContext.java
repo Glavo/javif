@@ -141,6 +141,58 @@ public final class CdfContext {
             {13046, 23214, 24505, 25942, 27435, 28442, 29330}
     });
 
+    /// The transformed default motion-mode CDFs.
+    private static final int[][] DEFAULT_MOTION_MODE_CDFS = inverse2d(new int[][]{
+            {10923, 21845},
+            {10923, 21845},
+            {10923, 21845},
+            {7651, 24760},
+            {4738, 24765},
+            {5391, 25528},
+            {19419, 26810},
+            {5123, 23606},
+            {11606, 24308},
+            {26260, 29116},
+            {20360, 28062},
+            {21679, 26830},
+            {29516, 30701},
+            {28898, 30397},
+            {30878, 31335},
+            {32507, 32558},
+            {10923, 21845},
+            {10923, 21845},
+            {28799, 31390},
+            {26431, 30774},
+            {28973, 31594},
+            {29742, 31203}
+    });
+
+    /// The transformed default OBMC selection CDFs.
+    private static final int[][] DEFAULT_OBMC_CDFS = inverse2d(new int[][]{
+            {16384},
+            {16384},
+            {16384},
+            {10437},
+            {9371},
+            {9301},
+            {17432},
+            {14423},
+            {15142},
+            {25817},
+            {22823},
+            {22083},
+            {30128},
+            {31014},
+            {31560},
+            {32638},
+            {16384},
+            {16384},
+            {23664},
+            {20901},
+            {24008},
+            {26879}
+    });
+
     /// The transformed default joint-compound selection CDFs.
     private static final int[][] DEFAULT_JOINT_COMPOUND_CDFS = inverse2d(new int[][]{
             {18244},
@@ -1123,6 +1175,12 @@ public final class CdfContext {
     /// The mutable compound inter-mode CDFs.
     private final int[][] compoundInterModeCdfs;
 
+    /// The mutable motion-mode CDFs.
+    private final int[][] motionModeCdfs;
+
+    /// The mutable OBMC selection CDFs.
+    private final int[][] obmcCdfs;
+
     /// The mutable joint-compound selection CDFs.
     private final int[][] jointCompoundCdfs;
 
@@ -1280,6 +1338,8 @@ public final class CdfContext {
     /// @param singleInterReferenceMvCdfs the mutable single-reference reference-motion-vector CDFs
     /// @param drlCdfs the mutable dynamic-reference-list selection CDFs
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
+    /// @param motionModeCdfs the mutable motion-mode CDFs
+    /// @param obmcCdfs the mutable OBMC selection CDFs
     /// @param jointCompoundCdfs the mutable joint-compound selection CDFs
     /// @param maskCompoundCdfs the mutable masked-compound selection CDFs
     /// @param wedgeCompoundCdfs the mutable wedge-vs-segment compound CDFs
@@ -1342,6 +1402,8 @@ public final class CdfContext {
             int[][] singleInterReferenceMvCdfs,
             int[][] drlCdfs,
             int[][] compoundInterModeCdfs,
+            int[][] motionModeCdfs,
+            int[][] obmcCdfs,
             int[][] jointCompoundCdfs,
             int[][] maskCompoundCdfs,
             int[][] wedgeCompoundCdfs,
@@ -1404,6 +1466,8 @@ public final class CdfContext {
         this.singleInterReferenceMvCdfs = Objects.requireNonNull(singleInterReferenceMvCdfs, "singleInterReferenceMvCdfs");
         this.drlCdfs = Objects.requireNonNull(drlCdfs, "drlCdfs");
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
+        this.motionModeCdfs = Objects.requireNonNull(motionModeCdfs, "motionModeCdfs");
+        this.obmcCdfs = Objects.requireNonNull(obmcCdfs, "obmcCdfs");
         this.jointCompoundCdfs = Objects.requireNonNull(jointCompoundCdfs, "jointCompoundCdfs");
         this.maskCompoundCdfs = Objects.requireNonNull(maskCompoundCdfs, "maskCompoundCdfs");
         this.wedgeCompoundCdfs = Objects.requireNonNull(wedgeCompoundCdfs, "wedgeCompoundCdfs");
@@ -1475,6 +1539,8 @@ public final class CdfContext {
                 deepCopy(DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS),
                 deepCopy(DEFAULT_DRL_CDFS),
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
+                deepCopy(DEFAULT_MOTION_MODE_CDFS),
+                deepCopy(DEFAULT_OBMC_CDFS),
                 deepCopy(DEFAULT_JOINT_COMPOUND_CDFS),
                 deepCopy(DEFAULT_MASK_COMPOUND_CDFS),
                 deepCopy(DEFAULT_WEDGE_COMPOUND_CDFS),
@@ -1544,6 +1610,8 @@ public final class CdfContext {
                 deepCopy(singleInterReferenceMvCdfs),
                 deepCopy(drlCdfs),
                 deepCopy(compoundInterModeCdfs),
+                deepCopy(motionModeCdfs),
+                deepCopy(obmcCdfs),
                 deepCopy(jointCompoundCdfs),
                 deepCopy(maskCompoundCdfs),
                 deepCopy(wedgeCompoundCdfs),
@@ -1712,6 +1780,22 @@ public final class CdfContext {
     /// @return the live mutable compound inter-mode CDF for the supplied context index
     public int[] mutableCompoundInterModeCdf(int context) {
         return compoundInterModeCdfs[Objects.checkIndex(context, compoundInterModeCdfs.length)];
+    }
+
+    /// Returns the live mutable motion-mode CDF for the supplied block-size context index.
+    ///
+    /// @param context the zero-based block-size context index in `[0, 22)`
+    /// @return the live mutable motion-mode CDF for the supplied context index
+    public int[] mutableMotionModeCdf(int context) {
+        return motionModeCdfs[Objects.checkIndex(context, motionModeCdfs.length)];
+    }
+
+    /// Returns the live mutable OBMC selection CDF for the supplied block-size context index.
+    ///
+    /// @param context the zero-based block-size context index in `[0, 22)`
+    /// @return the live mutable OBMC selection CDF for the supplied context index
+    public int[] mutableObmcCdf(int context) {
+        return obmcCdfs[Objects.checkIndex(context, obmcCdfs.length)];
     }
 
     /// Returns the live mutable joint-compound selection CDF for the supplied context index.

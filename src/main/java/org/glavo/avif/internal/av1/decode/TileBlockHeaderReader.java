@@ -27,6 +27,7 @@ import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
+import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -190,6 +191,7 @@ public final class TileBlockHeaderReader {
         int drlIndex = -1;
         @Nullable InterMotionVector motionVector0 = null;
         @Nullable InterMotionVector motionVector1 = null;
+        MotionMode motionMode = MotionMode.SIMPLE;
         @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter = null;
         @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter = null;
         @Nullable CompoundPredictionType compoundPredictionType = null;
@@ -241,6 +243,16 @@ public final class TileBlockHeaderReader {
                 motionVector0 = interModeSelection.motionVector0();
                 motionVector1 = interModeSelection.motionVector1();
             }
+            motionMode = readMotionMode(
+                    nonNullPosition,
+                    nonNullSize,
+                    nonNullNeighborContext,
+                    segmentData,
+                    skipMode,
+                    compoundReference,
+                    singleInterMode,
+                    compoundInterMode
+            );
             if (compoundReference) {
                 CompoundPredictionSelection compoundPredictionSelection = readCompoundPredictionSelection(
                         nonNullPosition,
@@ -365,6 +377,7 @@ public final class TileBlockHeaderReader {
                 drlIndex,
                 motionVector0,
                 motionVector1,
+                motionMode,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
                 compoundPredictionType,
@@ -813,6 +826,53 @@ public final class TileBlockHeaderReader {
             motionVector0 = decodeNewMotionVectorResidual(motionVector0);
         }
         return new InterModeSelection(singleInterMode, null, drlIndex, motionVector0, null);
+    }
+
+    /// Decodes the block-level inter motion-compensation mode.
+    ///
+    /// The current decoder implements OBMC when the frame cannot signal local warped motion.
+    /// Frames that may signal local warped motion keep failing at the remaining warped-motion
+    /// boundary rather than risking arithmetic-decoder desynchronization.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param neighborContext the mutable neighbor context used for OBMC candidate availability
+    /// @param segmentData the decoded segment feature state
+    /// @param skipMode whether skip-mode syntax selected this block
+    /// @param compoundReference whether the block uses compound references
+    /// @param singleInterMode the decoded single-reference inter mode, or `null`
+    /// @param compoundInterMode the decoded compound inter mode, or `null`
+    /// @return the decoded motion-compensation mode
+    private MotionMode readMotionMode(
+            BlockPosition position,
+            BlockSize size,
+            BlockNeighborContext neighborContext,
+            FrameHeader.SegmentData segmentData,
+            boolean skipMode,
+            boolean compoundReference,
+            @Nullable SingleInterPredictionMode singleInterMode,
+            @Nullable CompoundInterPredictionMode compoundInterMode
+    ) {
+        FrameHeader frameHeader = tileContext.frameHeader();
+        if (skipMode
+                || segmentData.skip()
+                || !frameHeader.switchableMotionMode()
+                || Math.min(size.widthPixels(), size.heightPixels()) < 8
+                || compoundReference
+                || !neighborContext.hasOverlappableCandidates(position, size)) {
+            return MotionMode.SIMPLE;
+        }
+
+        if (compoundInterMode != null) {
+            return MotionMode.SIMPLE;
+        }
+        if (singleInterMode == SingleInterPredictionMode.GLOBALMV && !frameHeader.forceIntegerMotionVectors()) {
+            return MotionMode.SIMPLE;
+        }
+        if (frameHeader.warpedMotion() && !frameHeader.forceIntegerMotionVectors()) {
+            throw new IllegalStateException("Local warped motion is not implemented yet");
+        }
+        return syntaxReader.readUseObmc(size.cdfIndex()) ? MotionMode.OBMC : MotionMode.SIMPLE;
     }
 
     /// Decodes the compound prediction blend type for one compound-reference block.
@@ -1797,6 +1857,9 @@ public final class TileBlockHeaderReader {
         /// The secondary motion vector chosen for the block, or `null` when not available.
         private final @Nullable InterMotionVector motionVector1;
 
+        /// The decoded inter motion-compensation mode.
+        private final MotionMode motionMode;
+
         /// The decoded horizontal switchable interpolation filter, or `null` when not available.
         private final @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter;
 
@@ -1898,6 +1961,7 @@ public final class TileBlockHeaderReader {
         /// @param drlIndex the decoded dynamic-reference-list index, or `-1`
         /// @param motionVector0 the primary motion vector chosen for the block, or `null`
         /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
+        /// @param motionMode the decoded inter motion-compensation mode
         /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
         /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
         /// @param compoundPredictionType the decoded compound prediction blend type, or `null`
@@ -1942,6 +2006,7 @@ public final class TileBlockHeaderReader {
                 int drlIndex,
                 @Nullable InterMotionVector motionVector0,
                 @Nullable InterMotionVector motionVector1,
+                MotionMode motionMode,
                 @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
                 @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter,
                 @Nullable CompoundPredictionType compoundPredictionType,
@@ -1986,6 +2051,7 @@ public final class TileBlockHeaderReader {
             this.drlIndex = drlIndex;
             this.motionVector0 = motionVector0;
             this.motionVector1 = motionVector1;
+            this.motionMode = Objects.requireNonNull(motionMode, "motionMode");
             this.horizontalInterpolationFilter = horizontalInterpolationFilter;
             this.verticalInterpolationFilter = verticalInterpolationFilter;
             this.compoundPredictionType = compoundPredictionType;
@@ -2057,6 +2123,12 @@ public final class TileBlockHeaderReader {
             if ((intra || useIntrabc)
                     && (horizontalInterpolationFilter != null || verticalInterpolationFilter != null)) {
                 throw new IllegalArgumentException("Intra and intrabc blocks must not carry switchable interpolation filters");
+            }
+            if ((intra || useIntrabc || compoundReference) && this.motionMode != MotionMode.SIMPLE) {
+                throw new IllegalArgumentException("Only single-reference inter blocks may carry non-simple motion modes");
+            }
+            if (this.motionMode != MotionMode.SIMPLE && Math.min(this.size.widthPixels(), this.size.heightPixels()) < 8) {
+                throw new IllegalArgumentException("Non-simple motion modes require at least 8x8 luma samples");
             }
             if ((horizontalInterpolationFilter == null) != (verticalInterpolationFilter == null)) {
                 throw new IllegalArgumentException("Switchable interpolation filters must be both present or both absent");
@@ -2222,6 +2294,7 @@ public final class TileBlockHeaderReader {
                     drlIndex,
                     motionVector0,
                     motionVector1,
+                    MotionMode.SIMPLE,
                     horizontalInterpolationFilter,
                     verticalInterpolationFilter,
                     compoundReference ? CompoundPredictionType.AVERAGE : null,
@@ -2666,6 +2739,13 @@ public final class TileBlockHeaderReader {
         /// @return the secondary motion vector chosen for the block, or `null`
         public @Nullable InterMotionVector motionVector1() {
             return motionVector1;
+        }
+
+        /// Returns the decoded inter motion-compensation mode.
+        ///
+        /// @return the decoded inter motion-compensation mode
+        public MotionMode motionMode() {
+            return motionMode;
         }
 
         /// Returns the decoded horizontal switchable interpolation filter, or `null` when not available.

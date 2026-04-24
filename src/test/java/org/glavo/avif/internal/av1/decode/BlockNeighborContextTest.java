@@ -28,6 +28,7 @@ import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
+import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TileBitstream;
@@ -39,6 +40,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -779,6 +781,66 @@ final class BlockNeighborContextTest {
         assertTrue(context.hasLeftNeighbor(new BlockPosition(4, 4)));
     }
 
+    /// Verifies that OBMC candidate detection only accepts decoded causal inter neighbors.
+    @Test
+    void detectsOverlappableCandidatesFromCausalInterEdges() {
+        BlockPosition currentPosition = new BlockPosition(4, 4);
+        BlockSize currentSize = BlockSize.SIZE_16X16;
+
+        BlockNeighborContext contextWithAbove = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        assertFalse(contextWithAbove.hasOverlappableCandidates(currentPosition, currentSize));
+        contextWithAbove.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(8, -4))
+        ));
+        assertTrue(contextWithAbove.hasOverlappableCandidates(currentPosition, currentSize));
+
+        BlockNeighborContext contextWithLeft = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        assertFalse(contextWithLeft.hasOverlappableCandidates(currentPosition, currentSize));
+        contextWithLeft.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(12, 4))
+        ));
+        assertTrue(contextWithLeft.hasOverlappableCandidates(currentPosition, currentSize));
+
+        BlockNeighborContext contextWithIntra = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        contextWithIntra.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                true,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                true,
+                0,
+                LumaIntraPredictionMode.DC,
+                UvIntraPredictionMode.DC,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+        assertFalse(contextWithIntra.hasOverlappableCandidates(currentPosition, currentSize));
+    }
+
     /// Creates a simple tile context used by neighbor-context tests.
     ///
     /// @param frameType the synthetic frame type
@@ -1169,6 +1231,7 @@ final class BlockNeighborContextTest {
                 -1,
                 motionVector0,
                 motionVector1,
+                MotionMode.SIMPLE,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
                 compoundPredictionType,
