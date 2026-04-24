@@ -114,6 +114,79 @@ final class TileTransformLayoutReaderTest {
         assertEquals(TransformSize.TX_4X4, layout.uniformLumaTransformSize());
         assertEquals(TransformSize.TX_4X4, layout.chromaTransformSize());
         assertEquals(16, layout.lumaUnits().length);
+        assertEquals(4, layout.chromaUnits().length);
+        assertEquals(0, layout.chromaUnits()[0].position().x4());
+        assertEquals(0, layout.chromaUnits()[0].position().y4());
+        assertEquals(2, layout.chromaUnits()[3].position().x4());
+        assertEquals(2, layout.chromaUnits()[3].position().y4());
+        assertEquals(TransformSize.TX_4X4, layout.chromaUnits()[3].size());
+    }
+
+    /// Verifies that clipped `I422` layouts expose exact chroma transform units on the wider
+    /// chroma plane.
+    @Test
+    void buildsClippedI422ChromaTransformUnits() {
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.KEY,
+                PixelFormat.I422,
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                new byte[8],
+                7,
+                5
+        );
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout layout = transformLayoutReader.read(header, neighborContext);
+        TransformUnit[] chromaUnits = layout.chromaUnits();
+
+        assertEquals(2, layout.visibleWidth4());
+        assertEquals(2, layout.visibleHeight4());
+        assertEquals(7, layout.visibleWidthPixels());
+        assertEquals(5, layout.visibleHeightPixels());
+        assertEquals(TransformSize.RTX_4X8, layout.chromaTransformSize());
+        assertEquals(1, chromaUnits.length);
+        assertEquals(0, chromaUnits[0].position().x4());
+        assertEquals(0, chromaUnits[0].position().y4());
+        assertEquals(TransformSize.RTX_4X8, chromaUnits[0].size());
+    }
+
+    /// Verifies that a smaller lossless `I444` chroma transform layout tiles the unsubsampled
+    /// chroma plane in raster order.
+    @Test
+    void buildsLosslessI444ChromaTransformUnitsInRasterOrder() {
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.KEY,
+                PixelFormat.I444,
+                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                true,
+                new byte[8],
+                8,
+                8
+        );
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TileBlockHeaderReader.BlockHeader header =
+                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout layout = transformLayoutReader.read(header, neighborContext);
+        TransformUnit[] chromaUnits = layout.chromaUnits();
+
+        assertEquals(TransformSize.TX_4X4, layout.chromaTransformSize());
+        assertEquals(4, chromaUnits.length);
+        assertEquals(0, chromaUnits[0].position().x4());
+        assertEquals(0, chromaUnits[0].position().y4());
+        assertEquals(1, chromaUnits[1].position().x4());
+        assertEquals(0, chromaUnits[1].position().y4());
+        assertEquals(0, chromaUnits[2].position().x4());
+        assertEquals(1, chromaUnits[2].position().y4());
+        assertEquals(1, chromaUnits[3].position().x4());
+        assertEquals(1, chromaUnits[3].position().y4());
     }
 
     /// Verifies that switchable inter var-tx can split an 8x8 block into repeated 4x4 luma units.

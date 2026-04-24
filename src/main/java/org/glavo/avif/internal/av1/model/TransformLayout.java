@@ -21,7 +21,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// One decoded block-level transform layout produced before coefficient syntax is read.
+/// One decoded block-level luma and chroma transform layout produced before coefficient syntax is read.
 @NotNullByDefault
 public final class TransformLayout {
     /// The local tile-relative luma-grid origin of the owning block.
@@ -54,6 +54,9 @@ public final class TransformLayout {
     /// The luma transform units in bitstream order.
     private final TransformUnit[] lumaUnits;
 
+    /// The shared chroma transform units for the U and V planes in bitstream order.
+    private final TransformUnit[] chromaUnits;
+
     /// Creates one decoded block-level transform layout.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
@@ -66,6 +69,7 @@ public final class TransformLayout {
     /// @param chromaTransformSize the largest chroma transform size allowed by the current block and frame layout, or `null`
     /// @param variableLumaTransformTree whether this layout came from a variable luma transform tree
     /// @param lumaUnits the luma transform units in bitstream order
+    /// @param chromaUnits the shared chroma transform units for the U and V planes in bitstream order
     public TransformLayout(
             BlockPosition position,
             BlockSize blockSize,
@@ -76,7 +80,8 @@ public final class TransformLayout {
             TransformSize maxLumaTransformSize,
             @Nullable TransformSize chromaTransformSize,
             boolean variableLumaTransformTree,
-            TransformUnit[] lumaUnits
+            TransformUnit[] lumaUnits,
+            TransformUnit[] chromaUnits
     ) {
         this.position = Objects.requireNonNull(position, "position");
         this.blockSize = Objects.requireNonNull(blockSize, "blockSize");
@@ -109,6 +114,57 @@ public final class TransformLayout {
         if (this.lumaUnits.length == 0) {
             throw new IllegalArgumentException("lumaUnits must not be empty");
         }
+        this.chromaUnits = Arrays.copyOf(Objects.requireNonNull(chromaUnits, "chromaUnits"), chromaUnits.length);
+        if (chromaTransformSize == null && this.chromaUnits.length != 0) {
+            throw new IllegalArgumentException("chromaUnits must be empty when chromaTransformSize is null");
+        }
+        if (chromaTransformSize != null && this.chromaUnits.length == 0) {
+            throw new IllegalArgumentException("chromaUnits must not be empty when chromaTransformSize is present");
+        }
+        for (TransformUnit chromaUnit : this.chromaUnits) {
+            if (chromaUnit.size() != chromaTransformSize) {
+                throw new IllegalArgumentException("chroma unit size does not match chromaTransformSize");
+            }
+        }
+    }
+
+    /// Creates one decoded block-level transform layout.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param blockSize the coded block size that owns this transform layout
+    /// @param visibleWidth4 the visible block width in 4x4 units after clipping against tile bounds
+    /// @param visibleHeight4 the visible block height in 4x4 units after clipping against tile bounds
+    /// @param visibleWidthPixels the exact visible block width in pixels after clipping against tile bounds
+    /// @param visibleHeightPixels the exact visible block height in pixels after clipping against tile bounds
+    /// @param maxLumaTransformSize the largest luma transform size allowed by the current block and frame layout
+    /// @param chromaTransformSize the largest chroma transform size allowed by the current block and frame layout, or `null`
+    /// @param variableLumaTransformTree whether this layout came from a variable luma transform tree
+    /// @param lumaUnits the luma transform units in bitstream order
+    public TransformLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            int visibleWidth4,
+            int visibleHeight4,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            TransformSize maxLumaTransformSize,
+            @Nullable TransformSize chromaTransformSize,
+            boolean variableLumaTransformTree,
+            TransformUnit[] lumaUnits
+    ) {
+        this(
+                position,
+                blockSize,
+                visibleWidth4,
+                visibleHeight4,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                maxLumaTransformSize,
+                chromaTransformSize,
+                variableLumaTransformTree,
+                lumaUnits,
+                defaultChromaUnits(position, chromaTransformSize)
+        );
     }
 
     /// Creates one decoded block-level transform layout whose exact visible pixel dimensions match
@@ -145,7 +201,8 @@ public final class TransformLayout {
                 maxLumaTransformSize,
                 chromaTransformSize,
                 variableLumaTransformTree,
-                lumaUnits
+                lumaUnits,
+                defaultChromaUnits(position, chromaTransformSize)
         );
     }
 
@@ -219,6 +276,13 @@ public final class TransformLayout {
         return Arrays.copyOf(lumaUnits, lumaUnits.length);
     }
 
+    /// Returns the shared chroma transform units for the U and V planes in bitstream order.
+    ///
+    /// @return the shared chroma transform units for the U and V planes in bitstream order
+    public TransformUnit[] chromaUnits() {
+        return Arrays.copyOf(chromaUnits, chromaUnits.length);
+    }
+
     /// Returns the uniform luma transform size, or `null` when the layout mixes sizes.
     ///
     /// @return the uniform luma transform size, or `null` when the layout mixes sizes
@@ -230,5 +294,21 @@ public final class TransformLayout {
             }
         }
         return uniformSize;
+    }
+
+    /// Returns one legacy single-unit chroma layout for callers that have not yet supplied explicit
+    /// chroma units.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param chromaTransformSize the chroma transform size, or `null`
+    /// @return one legacy single-unit chroma layout
+    private static TransformUnit[] defaultChromaUnits(
+            BlockPosition position,
+            @Nullable TransformSize chromaTransformSize
+    ) {
+        if (chromaTransformSize == null) {
+            return new TransformUnit[0];
+        }
+        return new TransformUnit[]{new TransformUnit(position, chromaTransformSize)};
     }
 }

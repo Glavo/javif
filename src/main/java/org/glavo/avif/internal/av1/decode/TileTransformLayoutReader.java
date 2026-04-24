@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -31,8 +32,9 @@ import java.util.Objects;
 /// Reader for block-level transform layouts that sit between block headers and coefficient syntax.
 ///
 /// The current implementation supports the uniform intra-like transform-size path, including
-/// switchable transform-depth symbols and lossless 4x4 tiling, and it also covers switchable inter
-/// var-tx trees. Coefficient syntax is still out of scope.
+/// switchable transform-depth symbols, explicit chroma transform-unit tiling, and lossless 4x4
+/// tiling, and it also covers switchable inter var-tx trees. Coefficient syntax is still out of
+/// scope.
 @NotNullByDefault
 public final class TileTransformLayoutReader {
     /// The tile-local decode state that owns the active frame and sequence headers.
@@ -81,6 +83,15 @@ public final class TileTransformLayoutReader {
         if (lossless) {
             chromaTransformSize = TransformSize.TX_4X4;
         }
+        TransformUnit[] chromaUnits = chromaTransformSize != null
+                ? tileChromaUnits(
+                        position,
+                        visibleWidthPixels,
+                        visibleHeightPixels,
+                        chromaTransformSize,
+                        tileContext.sequenceHeader().colorConfig().pixelFormat()
+                )
+                : new TransformUnit[0];
 
         TransformUnit[] lumaUnits;
         boolean variableLumaTransformTree;
@@ -116,7 +127,8 @@ public final class TileTransformLayoutReader {
                 effectiveMaxLumaTransformSize,
                 chromaTransformSize,
                 variableLumaTransformTree,
-                lumaUnits
+                lumaUnits,
+                chromaUnits
         );
     }
 
@@ -320,6 +332,73 @@ public final class TileTransformLayoutReader {
             }
         }
         return units.toArray(new TransformUnit[0]);
+    }
+
+    /// Tiles one visible block span with chroma transform units in chroma bitstream order.
+    ///
+    /// The returned unit positions are widened back into the shared luma-grid `BlockPosition`
+    /// coordinate space so downstream contexts and reconstruction can keep using one position type.
+    ///
+    /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param visibleWidthPixels the exact visible luma width in pixels
+    /// @param visibleHeightPixels the exact visible luma height in pixels
+    /// @param transformSize the repeated chroma transform size
+    /// @param pixelFormat the active decoded chroma layout
+    /// @return the repeated chroma transform units covering the visible chroma span
+    private static TransformUnit[] tileChromaUnits(
+            BlockPosition position,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            TransformSize transformSize,
+            PixelFormat pixelFormat
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int subsamplingX = chromaSubsamplingX(pixelFormat);
+        int subsamplingY = chromaSubsamplingY(pixelFormat);
+        int visibleChromaWidthPixels = chromaDimension(visibleWidthPixels, subsamplingX);
+        int visibleChromaHeightPixels = chromaDimension(visibleHeightPixels, subsamplingY);
+        List<TransformUnit> units = new ArrayList<>();
+        for (int y = 0; y < visibleChromaHeightPixels; y += nonNullTransformSize.heightPixels()) {
+            for (int x = 0; x < visibleChromaWidthPixels; x += nonNullTransformSize.widthPixels()) {
+                units.add(new TransformUnit(
+                        nonNullPosition.offset((x >> 2) << subsamplingX, (y >> 2) << subsamplingY),
+                        nonNullTransformSize
+                ));
+            }
+        }
+        return units.toArray(new TransformUnit[0]);
+    }
+
+    /// Returns the chroma-plane dimension corresponding to one visible luma span.
+    ///
+    /// @param lumaDimension the visible luma span in pixels
+    /// @param subsamplingShift the chroma subsampling shift for the axis
+    /// @return the corresponding chroma-plane dimension
+    private static int chromaDimension(int lumaDimension, int subsamplingShift) {
+        return (lumaDimension + (1 << subsamplingShift) - 1) >> subsamplingShift;
+    }
+
+    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the active decoded chroma layout
+    /// @return the horizontal chroma subsampling shift
+    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+        return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
+            case I400, I444 -> 0;
+            case I420, I422 -> 1;
+        };
+    }
+
+    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the active decoded chroma layout
+    /// @return the vertical chroma subsampling shift
+    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+        return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
+            case I400, I422, I444 -> 0;
+            case I420 -> 1;
+        };
     }
 
     /// One decoded inter-like transform result.

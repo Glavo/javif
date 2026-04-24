@@ -18,7 +18,9 @@ Supported end-to-end behavior:
   still-picture streams, including standalone frame-header/tile-group input, combined-frame input,
   chroma palette output, chroma residual overlays, and clipped right/bottom frame-edge footprints.
 - Current `DCT_DCT` residual reconstruction with transform axes up to `64` samples.
-- Initial parsed chroma residual fixture paths for `I420/I422/I444`.
+- Parsed chroma residual fixture paths for `I420/I422/I444`, backed by explicit chroma transform
+  units in `TransformLayout`, including clipped fringe footprints, wider-chroma `I422`,
+  unsubsampled `I444`, multi-unit `I420`, and larger-transform chroma token coverage.
 - Stored-surface `show_existing_frame` output and reference-surface reuse.
 - Real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`, including
   horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants.
@@ -35,8 +37,6 @@ Supported end-to-end behavior:
 
 - Transform/coefficient coverage still needs broader transform types and coefficient patterns beyond
   the current `DCT_DCT <= 64-axis` subset.
-- Chroma residual coverage still needs full chroma transform-layout modeling and broader real parsed
-  chroma token coverage.
 - `intrabc` coverage still needs broader parsed-stream syntax and reconstruction fixtures.
 - Inter/reference coverage still needs self-contained parsed-stream inter support without injected
   parser metadata, plus richer motion compensation.
@@ -47,6 +47,7 @@ Supported end-to-end behavior:
 The following contracts are stable and should be preserved:
 
 - `DecodedPlanes`: reconstructed Y/U/V planes before ARGB conversion.
+- `TransformLayout`: luma units plus shared U/V chroma transform units in bitstream order.
 - `ReferenceSurfaceSnapshot`: frame header, syntax result, decoded planes, final tile CDF snapshots,
   and temporal-motion state for reference reuse.
 - `ResidualLayout`: luma and chroma residual units.
@@ -60,9 +61,8 @@ transform/coefficient support.
 1. Broaden real parsed-stream inter coverage without injected parser metadata.
 2. Broaden motion compensation fidelity and feature coverage.
 3. Broaden parsed-stream `intrabc`.
-4. Broaden parsed chroma residual/token coverage.
-5. Broaden transform/coefficient coverage beyond the current `DCT_DCT <= 64-axis` subset.
-6. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
+4. Broaden transform/coefficient coverage beyond the current `DCT_DCT <= 64-axis` subset.
+5. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
 
 ## Exit Criteria
 

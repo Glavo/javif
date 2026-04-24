@@ -19,27 +19,27 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// One luma transform unit inside a decoded block-level transform layout.
+/// One transform unit inside a decoded block-level transform layout.
 @NotNullByDefault
 public final class TransformUnit {
-    /// The tile-relative luma-grid origin of this transform unit.
+    /// The tile-relative shared luma-grid origin of this transform unit.
     private final BlockPosition position;
 
     /// The transform size used by this transform unit.
     private final TransformSize size;
 
-    /// Creates one luma transform unit.
+    /// Creates one transform unit.
     ///
-    /// @param position the tile-relative luma-grid origin of this transform unit
+    /// @param position the tile-relative shared luma-grid origin of this transform unit
     /// @param size the transform size used by this transform unit
     public TransformUnit(BlockPosition position, TransformSize size) {
         this.position = Objects.requireNonNull(position, "position");
         this.size = Objects.requireNonNull(size, "size");
     }
 
-    /// Returns the tile-relative luma-grid origin of this transform unit.
+    /// Returns the tile-relative shared luma-grid origin of this transform unit.
     ///
-    /// @return the tile-relative luma-grid origin of this transform unit
+    /// @return the tile-relative shared luma-grid origin of this transform unit
     public BlockPosition position() {
         return position;
     }

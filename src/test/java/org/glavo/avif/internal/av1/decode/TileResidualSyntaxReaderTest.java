@@ -1616,8 +1616,44 @@ final class TileResidualSyntaxReaderTest {
                 lumaTransformSize,
                 chromaTransformSize,
                 false,
-                new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+                new TransformUnit[]{new TransformUnit(position, lumaTransformSize)},
+                createSyntheticI420ChromaUnits(position, visibleWidthPixels, visibleHeightPixels, chromaTransformSize)
         );
+    }
+
+    /// Creates synthetic `I420` chroma transform units for one visible luma footprint.
+    ///
+    /// @param position the block origin in luma 4x4 units
+    /// @param visibleWidthPixels the exact visible luma width in pixels
+    /// @param visibleHeightPixels the exact visible luma height in pixels
+    /// @param chromaTransformSize the synthetic chroma transform size
+    /// @return synthetic `I420` chroma transform units in bitstream order
+    private static TransformUnit[] createSyntheticI420ChromaUnits(
+            BlockPosition position,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            TransformSize chromaTransformSize
+    ) {
+        int visibleChromaWidthPixels = (visibleWidthPixels + 1) >> 1;
+        int visibleChromaHeightPixels = (visibleHeightPixels + 1) >> 1;
+        int unitsWide = (visibleChromaWidthPixels + chromaTransformSize.widthPixels() - 1)
+                / chromaTransformSize.widthPixels();
+        int unitsHigh = (visibleChromaHeightPixels + chromaTransformSize.heightPixels() - 1)
+                / chromaTransformSize.heightPixels();
+        TransformUnit[] units = new TransformUnit[unitsWide * unitsHigh];
+        int nextIndex = 0;
+        for (int unitY = 0; unitY < unitsHigh; unitY++) {
+            for (int unitX = 0; unitX < unitsWide; unitX++) {
+                units[nextIndex++] = new TransformUnit(
+                        position.offset(
+                                (unitX * chromaTransformSize.width4()) << 1,
+                                (unitY * chromaTransformSize.height4()) << 1
+                        ),
+                        chromaTransformSize
+                );
+            }
+        }
+        return units;
     }
 
     /// Asserts that two residual layouts are equal across luma and chroma transform units.
