@@ -85,6 +85,11 @@ final class Av1ImageReaderTest {
     private static final byte[] PALETTE_BLOCK_TILE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
+    /// One deterministic real tile payload whose direct parsed top-left `16x16` key-frame leaf
+    /// uses both luma and chroma palettes.
+    private static final byte[] DIRECT_PALETTE_TILE_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/direct-palette-tile.hex");
+
     /// One deterministic real inter tile payload whose first decoded block uses one stored
     /// reference surface with a zero motion vector.
     private static final byte[] INTER_BLOCK_TILE_PAYLOAD =
@@ -559,6 +564,28 @@ final class Av1ImageReaderTest {
                 PixelFormat.I444,
                 true
         );
+    }
+
+    /// Verifies that direct parsed standalone palette still pictures reach public `ArgbIntFrame`
+    /// output without injected reference state for every supported non-monochrome layout.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForDirectParsedStandalonePaletteStillPictures() throws IOException {
+        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I420, false);
+        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I422, false);
+        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I444, false);
+    }
+
+    /// Verifies that direct parsed combined-frame palette still pictures reach public `ArgbIntFrame`
+    /// output without injected reference state for every supported non-monochrome layout.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForDirectParsedCombinedPaletteStillPictures() throws IOException {
+        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I420, true);
+        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I422, true);
+        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I444, true);
     }
 
     /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
@@ -1563,14 +1590,31 @@ final class Av1ImageReaderTest {
     ///
     /// @return one complete single-tile frame assembly whose tile bytes come from the real palette fixture
     private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture(PixelFormat pixelFormat) {
+        return createRealPaletteSingleTileAssemblyFromFixture(pixelFormat, PALETTE_BLOCK_TILE_PAYLOAD, 64, 64);
+    }
+
+    /// Creates one complete single-tile frame assembly whose tile bytes come from the supplied
+    /// palette fixture candidate.
+    ///
+    /// @param pixelFormat the decoded public chroma layout
+    /// @param tilePayload the entropy-coded single-tile payload
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @return one complete single-tile frame assembly whose tile bytes come from the supplied fixture
+    private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture(
+            PixelFormat pixelFormat,
+            byte[] tilePayload,
+            int codedWidth,
+            int codedHeight
+    ) {
         if (pixelFormat == PixelFormat.I400) {
             throw new IllegalArgumentException("Real palette fixture expects I420, I422, or I444: " + pixelFormat);
         }
 
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
-                64,
-                64,
+                codedWidth,
+                codedHeight,
                 new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
                 new SequenceHeader.OperatingPoint[]{
                         new SequenceHeader.OperatingPoint(2, 0, 10, 0, false, false, false, null)
@@ -1636,7 +1680,7 @@ final class Av1ImageReaderTest {
                 0xFF,
                 false,
                 new int[]{-1, -1, -1, -1, -1, -1, -1},
-                new FrameHeader.FrameSize(64, 64, 64, 64, 64),
+                new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
                 new FrameHeader.SuperResolutionInfo(false, 8),
                 false,
                 false,
@@ -1695,11 +1739,11 @@ final class Av1ImageReaderTest {
 
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
-                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), PALETTE_BLOCK_TILE_PAYLOAD, 0, 0),
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), tilePayload, 0, 0),
                 new TileGroupHeader(false, 0, 0, 1),
                 0,
-                PALETTE_BLOCK_TILE_PAYLOAD.length,
-                new TileBitstream[]{new TileBitstream(0, PALETTE_BLOCK_TILE_PAYLOAD, 0, PALETTE_BLOCK_TILE_PAYLOAD.length)}
+                tilePayload.length,
+                new TileBitstream[]{new TileBitstream(0, tilePayload, 0, tilePayload.length)}
         );
         return assembly;
     }
@@ -2120,6 +2164,43 @@ final class Av1ImageReaderTest {
             DecodedFrame reusedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 0);
             assertSame(reader.referenceFrameSyntaxResult(0), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Asserts that one direct parsed palette still picture round-trips through public reader output
+    /// and stores the decoded palette surface for later reuse.
+    ///
+    /// @param pixelFormat the parsed non-monochrome public chroma layout
+    /// @param combined whether the frame is carried by one combined `FRAME` OBU
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertDirectParsedPaletteStillPictureRoundTrip(
+            PixelFormat pixelFormat,
+            boolean combined
+    ) throws IOException {
+        int codedWidth = 16;
+        int codedHeight = 16;
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload(pixelFormat, codedWidth, codedHeight)),
+                combined
+                        ? obu(6, fullPaletteStillPictureCombinedFramePayload(DIRECT_PALETTE_TILE_PAYLOAD))
+                        : concat(
+                                obu(3, fullPaletteStillPictureFrameHeaderPayload()),
+                                obu(4, DIRECT_PALETTE_TILE_PAYLOAD)
+                        )
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(syntaxResult);
+            requireFirstPaletteLeaf(syntaxResult);
+            assertDecodedStillPictureFrameMetadata(decodedFrame, 8, codedWidth, codedHeight, pixelFormat, FrameType.KEY, 0);
+            assertStillPictureFrameMatchesReferenceSurface(
+                    decodedFrame,
+                    Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface"),
+                    0
+            );
             assertNull(reader.readFrame());
         });
     }

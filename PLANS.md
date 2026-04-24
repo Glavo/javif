@@ -1,160 +1,81 @@
 # AV1 Remaining Work Plan
 
-## Summary
+## Current Baseline
 
-Most of the decoder foundation is already complete. The remaining work is concentrated in the
-reconstruction core and the real-stream coverage that proves it.
+The public decode path produces real frames for a bounded AV1 subset. Unsupported syntax must keep
+failing explicitly with a stable `NOT_IMPLEMENTED` boundary instead of producing approximate output.
 
-`Av1ImageReader.readFrame()` already returns real frames for a narrow supported subset:
+Supported end-to-end behavior:
 
-- raw AV1 OBU input
-- serial execution
-- visible `KEY` / `INTRA` still-picture paths
-- `8-bit I400/I420/I422/I444 -> ArgbIntFrame`
-- high-bit-depth still-picture paths:
-  - `10-bit/12-bit I420/I422/I444 -> ArgbLongFrame`
-  - combined-frame and standalone frame-assembly coverage
-- current key/intra reconstruction subset:
-  - directional and non-directional intra
-  - smooth intra with clipped right/bottom visible footprints
-  - filter intra, including clipped right/bottom visible footprints
-  - CFL
-  - minimal palette, including chroma palette plus chroma residual overlays
-  - current `DCT_DCT` residual space with transform axes up to `64`
-  - first parsed chroma residual fixture paths for `I420/I422/I444`
-- current stored-surface `show_existing_frame` path
-- real parsed `I422/I444` public-layout paths now cover direct still-picture output, high-bit-depth
-  output, stored-surface reuse, multi-tile first-pixel streams, and the current hybrid inter subset
-- real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`,
-  including horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants
-- the first inter/reference subset:
-  - single-reference prediction
-  - average-compound prediction
-  - integer-copy prediction
-  - fixed-filter and block-resolved `SWITCHABLE` subpel prediction
-  - normative horizontal super-resolution for key/intra, public still-picture, synthetic inter, and
-    bitstream-derived inter reconstruction paths
-  - first hybrid parsed-stream inter success path with `I420/I422/I444` public-layout coverage that
-    still relies on injected parser metadata for the broader fixture
-
-Everything outside that subset must continue to fail explicitly with a stable
-`NOT_IMPLEMENTED` boundary rather than silently producing incorrect output.
-
-## Implemented
-
-- `BufferedInput`, public reader/config/error/result types, and the raw OBU pipeline
-- frame-level and tile/block-level syntax decoding, including stored CDF and temporal-motion
-  snapshots
-- stable reconstruction/output contracts:
-  - `DecodedPlane`
-  - `DecodedPlanes`
-  - `ReferenceSurfaceSnapshot`
-- a real reconstruction path through:
-  - `FrameReconstructor`
-  - `IntraPredictor`
-  - dequantization
-  - inverse transform
-- public output wiring through:
-  - `ArgbOutput`
-  - `ArgbIntFrame`
-  - `ArgbLongFrame`
-  - stored-surface reuse
-  - film-grain-aware presentation ordering
+- Raw AV1 OBU input with serial execution.
+- Visible `KEY` / `INTRA` still-picture paths.
+- `8-bit I400/I420/I422/I444 -> ArgbIntFrame`.
+- `10-bit/12-bit I420/I422/I444 -> ArgbLongFrame`, including standalone and combined frame
+  assembly coverage.
+- Key/intra reconstruction for directional, non-directional, smooth, filter-intra, and CFL
+  prediction.
+- Luma/chroma palette reconstruction for synthetic fixtures and direct parsed `I420/I422/I444`
+  still-picture streams, including standalone frame-header/tile-group input, combined-frame input,
+  chroma palette output, chroma residual overlays, and clipped right/bottom frame-edge footprints.
+- Current `DCT_DCT` residual reconstruction with transform axes up to `64` samples.
+- Initial parsed chroma residual fixture paths for `I420/I422/I444`.
+- Stored-surface `show_existing_frame` output and reference-surface reuse.
+- Real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`, including
+  horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants.
+- Direct real parsed `I422/I444` public-layout paths for still output, high-bit-depth output,
+  stored-surface reuse, multi-tile first-pixel streams, and the current hybrid inter subset.
+- First inter/reference subset: single-reference prediction, average-compound prediction,
+  integer-copy prediction, fixed-filter and block-resolved `SWITCHABLE` subpel prediction, and
+  normative horizontal super-resolution for key/intra, public still-picture, synthetic inter, and
+  bitstream-derived inter reconstruction paths.
+- First hybrid parsed-stream inter success path with `I420/I422/I444` public-layout coverage that
+  still relies on injected parser metadata for the broader fixture.
 
 ## Remaining Decode Boundary
 
 - Transform/coefficient coverage still needs broader transform types and coefficient patterns beyond
-  the current `DCT_DCT <= 64-axis` reconstruction subset.
-- Chroma residual coverage still needs full chroma transform-layout modeling and broader real
-  parsed chroma token coverage beyond the current minimal `I420/I422/I444` fixture paths.
-- Palette coverage still needs direct parsed wider-chroma palette still-picture streams and broader
-  palette edge cases.
+  the current `DCT_DCT <= 64-axis` subset.
+- Chroma residual coverage still needs full chroma transform-layout modeling and broader real parsed
+  chroma token coverage.
 - `intrabc` coverage still needs broader parsed-stream syntax and reconstruction fixtures.
 - Inter/reference coverage still needs self-contained parsed-stream inter support without injected
   parser metadata, plus richer motion compensation.
-- The next practical public decode gaps are:
-  - parsed-stream inter without injected parser metadata
-  - richer motion compensation
-  - broader parsed-stream `intrabc`
-  - direct parsed wider-chroma palette streams
-  - broader parsed chroma residual/token coverage
-  - higher-fidelity postfilter behavior
+- Postfilter behavior still needs higher-fidelity in-loop and presentation-path coverage.
 
-## Frozen Internal Contracts
+## Stable Contracts
 
-The following contracts are already stable and should be preserved:
+The following contracts are stable and should be preserved:
 
-- `DecodedPlanes`
-  - Y/U/V planes after reconstruction and in-loop/post-filter ordering, before ARGB conversion
-- `ReferenceSurfaceSnapshot`
-  - `FrameHeader`
-  - `FrameSyntaxDecodeResult`
-  - decoded planes
-  - final tile CDF snapshots
-  - temporal-motion state for reference reuse
-- `ResidualLayout`
-  - carries luma and chroma residual units
-- `FilmGrainParams`
-  - normalized inside `FrameHeader`
+- `DecodedPlanes`: reconstructed Y/U/V planes before ARGB conversion.
+- `ReferenceSurfaceSnapshot`: frame header, syntax result, decoded planes, final tile CDF snapshots,
+  and temporal-motion state for reference reuse.
+- `ResidualLayout`: luma and chroma residual units.
+- `FilmGrainParams`: normalized film grain parameters inside `FrameHeader`.
 
-The following contract still needs broader semantic coverage, but its shape should remain stable:
+The `TransformResidualUnit` shape is stable, but its semantic coverage still needs broader
+transform/coefficient support.
 
-- `TransformResidualUnit`
-  - transform size
-  - transform type
-  - end-of-block index
-  - dense coefficient storage
-  - context bytes needed by later stages
-
-## Remaining Main Work Area: Reconstruction Core
-
-This is now the only major unfinished area.
-
-### Goal
-
-Finish the reconstruction core until the decoder can handle a substantially broader set of real AV1
-streams without falling back to `NOT_IMPLEMENTED`.
-
-The concrete missing behavior is listed in `Remaining Decode Boundary` above. This section only
-records execution priority and completion conditions.
-
-### Priority Order
+## Main Work Priority
 
 1. Broaden real parsed-stream inter coverage without injected parser metadata.
 2. Broaden motion compensation fidelity and feature coverage.
 3. Broaden parsed-stream `intrabc`.
-4. Broaden palette and wider-chroma real fixture coverage.
+4. Broaden parsed chroma residual/token coverage.
 5. Broaden transform/coefficient coverage beyond the current `DCT_DCT <= 64-axis` subset.
+6. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
 
-### Exit Criteria
+## Exit Criteria
 
-This remaining work area is complete when:
+This remaining work is complete when decoded frames produce stable `DecodedPlanes` across a
+materially broader real-stream subset, reference surfaces refresh and reuse correctly across that
+subset, and the public reader no longer depends on injected parser metadata for the current real
+parsed inter fixtures.
 
-- decoded frames produce stable `DecodedPlanes` across a materially broader real-stream subset
-- reference surfaces can be refreshed and reused across that broader subset
-- the public reader no longer depends on injected parser metadata for the current real parsed inter
-  fixtures
-- the remaining `NOT_IMPLEMENTED` boundary has moved past the current reconstruction-core gaps into
-  clearly narrower, non-core feature gaps
+## Validation And Maintenance
 
-## Validation Policy
+Every new decoder capability must ship with the narrowest stable test that proves it: exact-oracle
+unit tests when possible, synthetic integration tests when isolation is required, and real
+parsed-stream fixtures whenever the capability is intended to work from public input.
 
-Every new decoder capability must ship with the narrowest stable test that proves it:
-
-- exact-oracle unit test when possible
-- synthetic integration when unit isolation is required
-- real parsed-stream fixture whenever the capability is supposed to work from public input
-
-If a real bug is fixed, add a fixture-backed regression immediately.
-
-## Maintenance Rule
-
-This file should stay short and status-oriented.
-
-It should describe:
-
-- what already works
-- what is still blocked
-- what the next highest-value work is
-
-It should not drift into a changelog or speculative redesign document.
+Keep this file short and status-oriented. It should describe what works, what remains blocked, and
+the next highest-value work; it should not become a changelog or speculative design document.

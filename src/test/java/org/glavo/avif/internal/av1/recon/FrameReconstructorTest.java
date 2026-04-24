@@ -1123,6 +1123,81 @@ final class FrameReconstructorTest {
         assertPlaneEquals(requirePlane(planes.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
     }
 
+    /// Verifies that luma and chroma palette reconstruction only writes each visible right/bottom
+    /// footprint when the coded block is clipped by the frame edge.
+    @Test
+    void reconstructsClippedKeyFramesWithLumaAndChromaPalettePredictionForAllChromaLayouts() {
+        assertClippedPalettePrediction(PixelFormat.I420);
+        assertClippedPalettePrediction(PixelFormat.I422);
+        assertClippedPalettePrediction(PixelFormat.I444);
+    }
+
+    /// Asserts clipped luma and chroma palette reconstruction for one non-monochrome layout.
+    ///
+    /// @param pixelFormat the decoded chroma layout to test
+    private static void assertClippedPalettePrediction(PixelFormat pixelFormat) {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[] lumaPaletteColors = new int[]{24, 128, 232};
+        int[] chromaPaletteU = new int[]{40, 184};
+        int[] chromaPaletteV = new int[]{208, 72};
+        int frameWidth = 6;
+        int frameHeight = 6;
+        int[][] lumaPaletteIndices =
+                repeatingPaletteIndices(size.widthPixels(), size.heightPixels(), lumaPaletteColors.length);
+        int[][] chromaPaletteIndices = repeatingPaletteIndices(
+                chromaSampleWidth(size.widthPixels(), pixelFormat),
+                chromaSampleHeight(size.heightPixels(), pixelFormat),
+                chromaPaletteU.length
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        lumaPaletteColors,
+                        chromaPaletteU,
+                        chromaPaletteV,
+                        packPaletteIndices(lumaPaletteIndices),
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(position, size, pixelFormat),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(pixelFormat, FrameType.KEY, frameWidth, frameHeight, leaf)
+        );
+
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                cropRaster(expandPaletteRaster(lumaPaletteColors, lumaPaletteIndices), frameWidth, frameHeight)
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaUPlane()),
+                cropRaster(
+                        expandPaletteRaster(chromaPaletteU, chromaPaletteIndices),
+                        chromaSampleWidth(frameWidth, pixelFormat),
+                        chromaSampleHeight(frameHeight, pixelFormat)
+                )
+        );
+        assertPlaneEquals(
+                requirePlane(planes.chromaVPlane()),
+                cropRaster(
+                        expandPaletteRaster(chromaPaletteV, chromaPaletteIndices),
+                        chromaSampleWidth(frameWidth, pixelFormat),
+                        chromaSampleHeight(frameHeight, pixelFormat)
+                )
+        );
+    }
+
     /// Verifies that chroma palette prediction accepts a following chroma residual overlay for all
     /// currently supported non-monochrome public layouts.
     @Test
@@ -4756,6 +4831,62 @@ final class FrameReconstructorTest {
             }
         }
         return samples;
+    }
+
+    /// Creates one deterministic palette-index raster with all entries in range.
+    ///
+    /// @param width the raster width in samples
+    /// @param height the raster height in samples
+    /// @param paletteSize the number of available palette entries
+    /// @return one deterministic palette-index raster
+    private static int[][] repeatingPaletteIndices(int width, int height, int paletteSize) {
+        int[][] indices = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                indices[y][x] = (x + y + (x >> 1)) % paletteSize;
+            }
+        }
+        return indices;
+    }
+
+    /// Returns the top-left visible crop of one expected sample raster.
+    ///
+    /// @param samples the full expected sample raster
+    /// @param width the visible crop width
+    /// @param height the visible crop height
+    /// @return the top-left visible crop of the supplied sample raster
+    private static int[][] cropRaster(int[][] samples, int width, int height) {
+        int[][] cropped = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            System.arraycopy(samples[y], 0, cropped[y], 0, width);
+        }
+        return cropped;
+    }
+
+    /// Returns the chroma width corresponding to one luma width in the supplied layout.
+    ///
+    /// @param lumaWidth the luma width in samples
+    /// @param pixelFormat the decoded chroma layout
+    /// @return the corresponding chroma width in samples
+    private static int chromaSampleWidth(int lumaWidth, PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400 -> throw new AssertionError("Expected chroma pixel format");
+            case I420, I422 -> (lumaWidth + 1) >> 1;
+            case I444 -> lumaWidth;
+        };
+    }
+
+    /// Returns the chroma height corresponding to one luma height in the supplied layout.
+    ///
+    /// @param lumaHeight the luma height in samples
+    /// @param pixelFormat the decoded chroma layout
+    /// @return the corresponding chroma height in samples
+    private static int chromaSampleHeight(int lumaHeight, PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400 -> throw new AssertionError("Expected chroma pixel format");
+            case I420 -> (lumaHeight + 1) >> 1;
+            case I422, I444 -> lumaHeight;
+        };
     }
 
     /// Validates one packed-palette nibble value.

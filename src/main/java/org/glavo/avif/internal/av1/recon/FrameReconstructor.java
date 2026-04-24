@@ -41,7 +41,7 @@ import java.util.Objects;
 /// the current fixed-filter subpel prediction path over the current serial tile traversal,
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
-/// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, a
+/// `I420` / `I422` / `I444` CFL chroma subset, parsed and synthetic luma/chroma palette paths, a
 /// normative horizontal super-resolution upscaling path for key/intra frames plus the current
 /// inter/reference prediction subset, and a minimal luma/chroma residual subset including clipped
 /// frame-fringe chroma footprints and the currently supported square and rectangular `DCT_DCT`
@@ -2052,8 +2052,8 @@ public final class FrameReconstructor {
     /// @param plane the mutable destination plane
     /// @param startX the zero-based horizontal destination coordinate
     /// @param startY the zero-based vertical destination coordinate
-    /// @param visibleWidth the exact visible width in pixels
-    /// @param visibleHeight the exact visible height in pixels
+    /// @param visibleWidth the visible block width in pixels before destination-frame clipping
+    /// @param visibleHeight the visible block height in pixels before destination-frame clipping
     /// @param packedFullWidth the coded palette-map width in pixels used to compute the packed stride
     /// @param paletteColors the decoded palette entries for the destination plane
     /// @param packedIndices the packed palette indices with one 4-bit entry per sample
@@ -2077,9 +2077,15 @@ public final class FrameReconstructor {
             throw new IllegalStateException("Packed palette index map is shorter than the visible footprint");
         }
 
-        for (int y = 0; y < visibleHeight; y++) {
+        int clippedVisibleWidth = Math.min(visibleWidth, plane.width() - startX);
+        int clippedVisibleHeight = Math.min(visibleHeight, plane.height() - startY);
+        if (clippedVisibleWidth <= 0 || clippedVisibleHeight <= 0) {
+            return;
+        }
+
+        for (int y = 0; y < clippedVisibleHeight; y++) {
             int packedRow = y * packedStride;
-            for (int x = 0; x < visibleWidth; x++) {
+            for (int x = 0; x < clippedVisibleWidth; x++) {
                 int paletteIndex = paletteIndexAt(nonNullPackedIndices, packedRow, x);
                 if (paletteIndex < 0 || paletteIndex >= nonNullPaletteColors.length) {
                     throw new IllegalStateException("Palette index out of range: " + paletteIndex);
