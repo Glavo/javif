@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -122,6 +123,12 @@ public final class BlockNeighborContext {
 
     /// The left-edge compound-reference flags indexed in 4x4 units.
     private final byte[] leftCompoundReference;
+
+    /// The above-edge compound-prediction type context values indexed in 4x4 units.
+    private final byte[] aboveCompoundPredictionType;
+
+    /// The left-edge compound-prediction type context values indexed in 4x4 units.
+    private final byte[] leftCompoundPredictionType;
 
     /// The above-edge primary reference-frame indices indexed in 4x4 units.
     private final byte[] aboveReferenceFrame0;
@@ -249,6 +256,8 @@ public final class BlockNeighborContext {
     /// @param leftSkipMode the left-edge skip-mode flags indexed in 4x4 units
     /// @param aboveCompoundReference the above-edge compound-reference flags indexed in 4x4 units
     /// @param leftCompoundReference the left-edge compound-reference flags indexed in 4x4 units
+    /// @param aboveCompoundPredictionType the above-edge compound-prediction type context values indexed in 4x4 units
+    /// @param leftCompoundPredictionType the left-edge compound-prediction type context values indexed in 4x4 units
     /// @param aboveReferenceFrame0 the above-edge primary reference-frame indices indexed in 4x4 units
     /// @param leftReferenceFrame0 the left-edge primary reference-frame indices indexed in 4x4 units
     /// @param aboveReferenceFrame1 the above-edge secondary reference-frame indices indexed in 4x4 units
@@ -302,6 +311,8 @@ public final class BlockNeighborContext {
             byte[] leftSkipMode,
             byte[] aboveCompoundReference,
             byte[] leftCompoundReference,
+            byte[] aboveCompoundPredictionType,
+            byte[] leftCompoundPredictionType,
             byte[] aboveReferenceFrame0,
             byte[] leftReferenceFrame0,
             byte[] aboveReferenceFrame1,
@@ -355,6 +366,14 @@ public final class BlockNeighborContext {
         this.leftSkipMode = Objects.requireNonNull(leftSkipMode, "leftSkipMode");
         this.aboveCompoundReference = Objects.requireNonNull(aboveCompoundReference, "aboveCompoundReference");
         this.leftCompoundReference = Objects.requireNonNull(leftCompoundReference, "leftCompoundReference");
+        this.aboveCompoundPredictionType = Objects.requireNonNull(
+                aboveCompoundPredictionType,
+                "aboveCompoundPredictionType"
+        );
+        this.leftCompoundPredictionType = Objects.requireNonNull(
+                leftCompoundPredictionType,
+                "leftCompoundPredictionType"
+        );
         this.aboveReferenceFrame0 = Objects.requireNonNull(aboveReferenceFrame0, "aboveReferenceFrame0");
         this.leftReferenceFrame0 = Objects.requireNonNull(leftReferenceFrame0, "leftReferenceFrame0");
         this.aboveReferenceFrame1 = Objects.requireNonNull(aboveReferenceFrame1, "aboveReferenceFrame1");
@@ -504,6 +523,8 @@ public final class BlockNeighborContext {
                 new StoredBlock[tileWidth4 * tileHeight4],
                 aboveIntra,
                 leftIntra,
+                new byte[tileWidth4],
+                new byte[tileHeight4],
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 new byte[tileWidth4],
@@ -761,6 +782,50 @@ public final class BlockNeighborContext {
             return hasUnidirectionalCompoundReference(useLeft, off) ? 4 : 0;
         }
         return 2;
+    }
+
+    /// Returns the masked-compound context for the supplied block position.
+    ///
+    /// @param position the current block position
+    /// @return the masked-compound context for the supplied block position
+    public int maskedCompoundContext(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int context = 0;
+        if (hasTopNeighbor(nonNullPosition)) {
+            context += maskedCompoundNeighborContext(false, nonNullPosition.x4());
+        }
+        if (hasLeftNeighbor(nonNullPosition)) {
+            context += maskedCompoundNeighborContext(true, nonNullPosition.y4());
+        }
+        return Math.min(context, 5);
+    }
+
+    /// Returns the joint-compound context for the supplied block and reference pair.
+    ///
+    /// @param position the current block position
+    /// @param currentFrameOffset the current frame order hint
+    /// @param referenceFrameOffset0 the primary reference frame order hint
+    /// @param referenceFrameOffset1 the secondary reference frame order hint
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @return the joint-compound context for the supplied block and reference pair
+    public int jointCompoundContext(
+            BlockPosition position,
+            int currentFrameOffset,
+            int referenceFrameOffset0,
+            int referenceFrameOffset1,
+            int orderHintBits
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int distance0 = Math.abs(orderHintDifference(orderHintBits, referenceFrameOffset0, currentFrameOffset));
+        int distance1 = Math.abs(orderHintDifference(orderHintBits, currentFrameOffset, referenceFrameOffset1));
+        int context = distance0 == distance1 ? 3 : 0;
+        if (hasTopNeighbor(nonNullPosition)) {
+            context += jointCompoundNeighborContext(false, nonNullPosition.x4());
+        }
+        if (hasLeftNeighbor(nonNullPosition)) {
+            context += jointCompoundNeighborContext(true, nonNullPosition.y4());
+        }
+        return context;
     }
 
     /// Returns the switchable interpolation-filter context for the supplied block position and direction.
@@ -1895,6 +1960,7 @@ public final class BlockNeighborContext {
         byte skip = (byte) (nonNullHeader.skip() ? 1 : 0);
         byte skipMode = (byte) (nonNullHeader.skipMode() ? 1 : 0);
         byte compoundReference = (byte) (nonNullHeader.compoundReference() ? 1 : 0);
+        byte compoundPredictionType = compoundPredictionTypeContext(nonNullHeader.compoundPredictionType());
         byte segmentPredicted = (byte) (nonNullHeader.segmentPredicted() ? 1 : 0);
         byte segmentId = (byte) nonNullHeader.segmentId();
         byte paletteSize = (byte) nonNullHeader.yPaletteSize();
@@ -1930,6 +1996,7 @@ public final class BlockNeighborContext {
             aboveSkip[x4] = skip;
             aboveSkipMode[x4] = skipMode;
             aboveCompoundReference[x4] = compoundReference;
+            aboveCompoundPredictionType[x4] = compoundPredictionType;
             aboveReferenceFrame0[x4] = referenceFrame0;
             aboveReferenceFrame1[x4] = referenceFrame1;
             aboveMotionVector0[x4] = motionVector0;
@@ -1954,6 +2021,7 @@ public final class BlockNeighborContext {
             leftSkip[y4] = skip;
             leftSkipMode[y4] = skipMode;
             leftCompoundReference[y4] = compoundReference;
+            leftCompoundPredictionType[y4] = compoundPredictionType;
             leftReferenceFrame0[y4] = referenceFrame0;
             leftReferenceFrame1[y4] = referenceFrame1;
             leftMotionVector0[y4] = motionVector0;
@@ -2112,6 +2180,56 @@ public final class BlockNeighborContext {
         int referenceFrame0 = leftEdge ? leftReferenceFrame0[index] : aboveReferenceFrame0[index];
         int referenceFrame1 = leftEdge ? leftReferenceFrame1[index] : aboveReferenceFrame1[index];
         return (referenceFrame0 < 4) == (referenceFrame1 < 4);
+    }
+
+    /// Returns the masked-compound context contribution from one stored edge neighbor.
+    ///
+    /// @param leftEdge whether the stored neighbor lives on the left edge instead of the above edge
+    /// @param index the edge index in 4x4 units
+    /// @return the masked-compound context contribution from the stored neighbor
+    private int maskedCompoundNeighborContext(boolean leftEdge, int index) {
+        int compoundPredictionType =
+                leftEdge ? leftCompoundPredictionType[index] : aboveCompoundPredictionType[index];
+        int referenceFrame0 = leftEdge ? leftReferenceFrame0[index] : aboveReferenceFrame0[index];
+        if (compoundPredictionType >= CompoundPredictionType.SEGMENT.contextValue()) {
+            return 1;
+        }
+        return referenceFrame0 == 6 ? 3 : 0;
+    }
+
+    /// Returns the joint-compound context contribution from one stored edge neighbor.
+    ///
+    /// @param leftEdge whether the stored neighbor lives on the left edge instead of the above edge
+    /// @param index the edge index in 4x4 units
+    /// @return the joint-compound context contribution from the stored neighbor
+    private int jointCompoundNeighborContext(boolean leftEdge, int index) {
+        int compoundPredictionType =
+                leftEdge ? leftCompoundPredictionType[index] : aboveCompoundPredictionType[index];
+        int referenceFrame0 = leftEdge ? leftReferenceFrame0[index] : aboveReferenceFrame0[index];
+        return compoundPredictionType >= CompoundPredictionType.AVERAGE.contextValue() || referenceFrame0 == 6 ? 1 : 0;
+    }
+
+    /// Returns the edge context value stored for one compound prediction type.
+    ///
+    /// @param compoundPredictionType the decoded compound prediction type, or `null`
+    /// @return the edge context value stored for the supplied type
+    private static byte compoundPredictionTypeContext(@Nullable CompoundPredictionType compoundPredictionType) {
+        return (byte) (compoundPredictionType == null ? 0 : compoundPredictionType.contextValue());
+    }
+
+    /// Returns the wrapped order-hint difference `poc0 - poc1`.
+    ///
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param poc0 the minuend order hint
+    /// @param poc1 the subtrahend order hint
+    /// @return the wrapped order-hint difference `poc0 - poc1`
+    private static int orderHintDifference(int orderHintBits, int poc0, int poc1) {
+        if (orderHintBits == 0) {
+            return 0;
+        }
+        int mask = 1 << (orderHintBits - 1);
+        int diff = poc0 - poc1;
+        return (diff & (mask - 1)) - (diff & mask);
     }
 
     /// Accumulates forward-vs-backward reference counts from already-decoded neighbors.

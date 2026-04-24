@@ -20,6 +20,7 @@ import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
+import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
@@ -191,6 +192,9 @@ public final class TileBlockHeaderReader {
         @Nullable InterMotionVector motionVector1 = null;
         @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter = null;
         @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter = null;
+        @Nullable CompoundPredictionType compoundPredictionType = null;
+        boolean compoundMaskSign = false;
+        int compoundWedgeIndex = -1;
         boolean interIntra = false;
         @Nullable InterIntraPredictionMode interIntraMode = null;
         boolean interIntraWedge = false;
@@ -236,6 +240,18 @@ public final class TileBlockHeaderReader {
                 drlIndex = interModeSelection.drlIndex();
                 motionVector0 = interModeSelection.motionVector0();
                 motionVector1 = interModeSelection.motionVector1();
+            }
+            if (compoundReference) {
+                CompoundPredictionSelection compoundPredictionSelection = readCompoundPredictionSelection(
+                        nonNullPosition,
+                        nonNullSize,
+                        nonNullNeighborContext,
+                        referenceFrame0,
+                        referenceFrame1
+                );
+                compoundPredictionType = compoundPredictionSelection.type();
+                compoundMaskSign = compoundPredictionSelection.maskSign();
+                compoundWedgeIndex = compoundPredictionSelection.wedgeIndex();
             }
             if (canDecodeInterIntra(nonNullSize, compoundReference)
                     && syntaxReader.readUseInterIntra(nonNullSize.yModeSizeContext())) {
@@ -351,6 +367,9 @@ public final class TileBlockHeaderReader {
                 motionVector1,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
+                compoundPredictionType,
+                compoundMaskSign,
+                compoundWedgeIndex,
                 interIntra,
                 interIntraMode,
                 interIntraWedge,
@@ -598,6 +617,25 @@ public final class TileBlockHeaderReader {
         };
     }
 
+    /// Returns whether the supplied block size can signal compound wedge prediction.
+    ///
+    /// @param size the block size to test
+    /// @return whether the supplied block size can signal compound wedge prediction
+    private static boolean supportsCompoundWedge(BlockSize size) {
+        return switch (Objects.requireNonNull(size, "size")) {
+            case SIZE_32X32,
+                    SIZE_32X16,
+                    SIZE_32X8,
+                    SIZE_16X32,
+                    SIZE_16X16,
+                    SIZE_16X8,
+                    SIZE_8X32,
+                    SIZE_8X16,
+                    SIZE_8X8 -> true;
+            default -> false;
+        };
+    }
+
     /// Returns the inter-intra wedge entropy context for the supplied block size.
     ///
     /// @param size the block size to inspect
@@ -612,6 +650,25 @@ public final class TileBlockHeaderReader {
             case SIZE_32X16 -> 5;
             case SIZE_32X32 -> 6;
             default -> throw new IllegalArgumentException("Block size does not have an inter-intra wedge context: " + size);
+        };
+    }
+
+    /// Returns the compound wedge entropy context for the supplied block size.
+    ///
+    /// @param size the block size to inspect
+    /// @return the compound wedge entropy context for the supplied block size
+    private static int compoundWedgeContext(BlockSize size) {
+        return switch (Objects.requireNonNull(size, "size")) {
+            case SIZE_8X8 -> 0;
+            case SIZE_8X16 -> 1;
+            case SIZE_16X8 -> 2;
+            case SIZE_16X16 -> 3;
+            case SIZE_16X32 -> 4;
+            case SIZE_32X16 -> 5;
+            case SIZE_32X32 -> 6;
+            case SIZE_8X32 -> 7;
+            case SIZE_32X8 -> 8;
+            default -> throw new IllegalArgumentException("Block size does not have a compound wedge context: " + size);
         };
     }
 
@@ -756,6 +813,80 @@ public final class TileBlockHeaderReader {
             motionVector0 = decodeNewMotionVectorResidual(motionVector0);
         }
         return new InterModeSelection(singleInterMode, null, drlIndex, motionVector0, null);
+    }
+
+    /// Decodes the compound prediction blend type for one compound-reference block.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param neighborContext the mutable neighbor context that supplies compound mask contexts
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order
+    /// @return the decoded compound prediction blend type
+    private CompoundPredictionSelection readCompoundPredictionSelection(
+            BlockPosition position,
+            BlockSize size,
+            BlockNeighborContext neighborContext,
+            int referenceFrame0,
+            int referenceFrame1
+    ) {
+        if (tileContext.sequenceHeader().features().maskedCompound()
+                && syntaxReader.readUseMaskedCompound(neighborContext.maskedCompoundContext(position))) {
+            int wedgeIndex = -1;
+            CompoundPredictionType type;
+            if (supportsCompoundWedge(size)) {
+                int wedgeContext = compoundWedgeContext(size);
+                if (syntaxReader.readUseSegmentCompound(wedgeContext)) {
+                    type = CompoundPredictionType.SEGMENT;
+                } else {
+                    type = CompoundPredictionType.WEDGE;
+                    wedgeIndex = syntaxReader.readWedgeIndex(wedgeContext);
+                }
+            } else {
+                type = CompoundPredictionType.SEGMENT;
+            }
+            return new CompoundPredictionSelection(type, syntaxReader.readCompoundMaskSign(), wedgeIndex);
+        }
+
+        if (tileContext.sequenceHeader().features().jointCompound()) {
+            int context = jointCompoundContext(position, neighborContext, referenceFrame0, referenceFrame1);
+            return new CompoundPredictionSelection(
+                    syntaxReader.readUseAverageCompound(context)
+                            ? CompoundPredictionType.AVERAGE
+                            : CompoundPredictionType.WEIGHTED_AVERAGE,
+                    false,
+                    -1
+            );
+        }
+
+        return new CompoundPredictionSelection(CompoundPredictionType.AVERAGE, false, -1);
+    }
+
+    /// Returns the joint-compound entropy context for the current compound reference pair.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param neighborContext the mutable neighbor context that supplies compound type state
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order
+    /// @return the joint-compound entropy context for the current compound reference pair
+    private int jointCompoundContext(
+            BlockPosition position,
+            BlockNeighborContext neighborContext,
+            int referenceFrame0,
+            int referenceFrame1
+    ) {
+        @Nullable FrameHeader referenceHeader0 = tileContext.referenceFrameHeader(referenceFrame0);
+        @Nullable FrameHeader referenceHeader1 = tileContext.referenceFrameHeader(referenceFrame1);
+        if (referenceHeader0 == null || referenceHeader1 == null) {
+            throw new IllegalStateException("Joint compound prediction requires parsed reference frame order hints");
+        }
+        return neighborContext.jointCompoundContext(
+                position,
+                tileContext.frameHeader().frameOffset(),
+                referenceHeader0.frameOffset(),
+                referenceHeader1.frameOffset(),
+                tileContext.sequenceHeader().features().orderHintBits()
+        );
     }
 
     /// Decodes one switchable interpolation-filter selection for the current inter block.
@@ -1672,6 +1803,15 @@ public final class TileBlockHeaderReader {
         /// The decoded vertical switchable interpolation filter, or `null` when not available.
         private final @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter;
 
+        /// The decoded compound prediction blend type, or `null` when not available.
+        private final @Nullable CompoundPredictionType compoundPredictionType;
+
+        /// Whether the decoded segment or wedge compound mask uses inverted source order.
+        private final boolean compoundMaskSign;
+
+        /// The decoded compound wedge index, or `-1` when wedge blending is not used.
+        private final int compoundWedgeIndex;
+
         /// Whether the block uses inter-intra prediction.
         private final boolean interIntra;
 
@@ -1760,6 +1900,9 @@ public final class TileBlockHeaderReader {
         /// @param motionVector1 the secondary motion vector chosen for the block, or `null`
         /// @param horizontalInterpolationFilter the decoded horizontal switchable interpolation filter, or `null`
         /// @param verticalInterpolationFilter the decoded vertical switchable interpolation filter, or `null`
+        /// @param compoundPredictionType the decoded compound prediction blend type, or `null`
+        /// @param compoundMaskSign whether the decoded segment or wedge compound mask uses inverted source order
+        /// @param compoundWedgeIndex the decoded compound wedge index, or `-1`
         /// @param interIntra whether the block uses inter-intra prediction
         /// @param interIntraMode the decoded inter-intra prediction mode, or `null`
         /// @param interIntraWedge whether the inter-intra block uses a wedge mask
@@ -1801,6 +1944,9 @@ public final class TileBlockHeaderReader {
                 @Nullable InterMotionVector motionVector1,
                 @Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
                 @Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter,
+                @Nullable CompoundPredictionType compoundPredictionType,
+                boolean compoundMaskSign,
+                int compoundWedgeIndex,
                 boolean interIntra,
                 @Nullable InterIntraPredictionMode interIntraMode,
                 boolean interIntraWedge,
@@ -1842,6 +1988,9 @@ public final class TileBlockHeaderReader {
             this.motionVector1 = motionVector1;
             this.horizontalInterpolationFilter = horizontalInterpolationFilter;
             this.verticalInterpolationFilter = verticalInterpolationFilter;
+            this.compoundPredictionType = compoundPredictionType;
+            this.compoundMaskSign = compoundMaskSign;
+            this.compoundWedgeIndex = compoundWedgeIndex;
             this.interIntra = interIntra;
             this.interIntraMode = interIntraMode;
             this.interIntraWedge = interIntraWedge;
@@ -1911,6 +2060,24 @@ public final class TileBlockHeaderReader {
             }
             if ((horizontalInterpolationFilter == null) != (verticalInterpolationFilter == null)) {
                 throw new IllegalArgumentException("Switchable interpolation filters must be both present or both absent");
+            }
+            if (!compoundReference && compoundPredictionType != null) {
+                throw new IllegalArgumentException("Single-reference blocks must not carry compound prediction type state");
+            }
+            if (compoundReference && compoundPredictionType == null) {
+                throw new IllegalArgumentException("Compound-reference blocks must carry compound prediction type state");
+            }
+            if (compoundPredictionType == CompoundPredictionType.WEDGE) {
+                if (compoundWedgeIndex < 0 || compoundWedgeIndex >= 16) {
+                    throw new IllegalArgumentException("compoundWedgeIndex out of range: " + compoundWedgeIndex);
+                }
+            } else if (compoundWedgeIndex != -1) {
+                throw new IllegalArgumentException("compoundWedgeIndex must be -1 when compound wedge prediction is disabled");
+            }
+            if (compoundMaskSign
+                    && compoundPredictionType != CompoundPredictionType.SEGMENT
+                    && compoundPredictionType != CompoundPredictionType.WEDGE) {
+                throw new IllegalArgumentException("compoundMaskSign requires segment or wedge compound prediction");
             }
             if ((intra || useIntrabc || compoundReference) && interIntra) {
                 throw new IllegalArgumentException("Only single-reference inter blocks may carry inter-intra state");
@@ -2057,6 +2224,9 @@ public final class TileBlockHeaderReader {
                     motionVector1,
                     horizontalInterpolationFilter,
                     verticalInterpolationFilter,
+                    compoundReference ? CompoundPredictionType.AVERAGE : null,
+                    false,
+                    -1,
                     false,
                     null,
                     false,
@@ -2512,6 +2682,27 @@ public final class TileBlockHeaderReader {
             return verticalInterpolationFilter;
         }
 
+        /// Returns the decoded compound prediction blend type, or `null` when not available.
+        ///
+        /// @return the decoded compound prediction blend type, or `null`
+        public @Nullable CompoundPredictionType compoundPredictionType() {
+            return compoundPredictionType;
+        }
+
+        /// Returns whether the decoded segment or wedge compound mask uses inverted source order.
+        ///
+        /// @return whether the decoded segment or wedge compound mask uses inverted source order
+        public boolean compoundMaskSign() {
+            return compoundMaskSign;
+        }
+
+        /// Returns the decoded compound wedge index, or `-1` when wedge blending is not used.
+        ///
+        /// @return the decoded compound wedge index, or `-1`
+        public int compoundWedgeIndex() {
+            return compoundWedgeIndex;
+        }
+
         /// Returns whether the block uses inter-intra prediction.
         ///
         /// @return whether the block uses inter-intra prediction
@@ -2791,6 +2982,51 @@ public final class TileBlockHeaderReader {
         /// @return the secondary inter reference in internal LAST..ALTREF order, or `-1`
         public int referenceFrame1() {
             return referenceFrame1;
+        }
+    }
+
+    /// The decoded compound prediction blend selection for one compound-reference block.
+    @NotNullByDefault
+    private static final class CompoundPredictionSelection {
+        /// The decoded compound prediction blend type.
+        private final CompoundPredictionType type;
+
+        /// Whether the decoded segment or wedge mask uses inverted source order.
+        private final boolean maskSign;
+
+        /// The decoded compound wedge index, or `-1` when wedge blending is not used.
+        private final int wedgeIndex;
+
+        /// Creates one decoded compound prediction blend selection.
+        ///
+        /// @param type the decoded compound prediction blend type
+        /// @param maskSign whether the decoded segment or wedge mask uses inverted source order
+        /// @param wedgeIndex the decoded compound wedge index, or `-1`
+        private CompoundPredictionSelection(CompoundPredictionType type, boolean maskSign, int wedgeIndex) {
+            this.type = Objects.requireNonNull(type, "type");
+            this.maskSign = maskSign;
+            this.wedgeIndex = wedgeIndex;
+        }
+
+        /// Returns the decoded compound prediction blend type.
+        ///
+        /// @return the decoded compound prediction blend type
+        public CompoundPredictionType type() {
+            return type;
+        }
+
+        /// Returns whether the decoded segment or wedge mask uses inverted source order.
+        ///
+        /// @return whether the decoded segment or wedge mask uses inverted source order
+        public boolean maskSign() {
+            return maskSign;
+        }
+
+        /// Returns the decoded compound wedge index, or `-1` when wedge blending is not used.
+        ///
+        /// @return the decoded compound wedge index, or `-1`
+        public int wedgeIndex() {
+            return wedgeIndex;
         }
     }
 

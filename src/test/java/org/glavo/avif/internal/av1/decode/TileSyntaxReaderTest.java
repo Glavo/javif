@@ -188,6 +188,29 @@ final class TileSyntaxReaderTest {
         assertEquals(expectedSingleInterMode, singleModeReader.readSingleInterMode(4, 1, 3, false, false));
     }
 
+    /// Verifies that compound blend-type syntax uses the expected tile-local CDF tables.
+    @Test
+    void readsCompoundBlendTypeSyntax() {
+        byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
+        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileSyntaxReader reader = new TileSyntaxReader(tileContext);
+
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        boolean expectedUseMasked = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableMaskCompoundCdf(3));
+        boolean expectedUseAverage = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableJointCompoundCdf(2));
+        boolean expectedUseSegment = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableWedgeCompoundCdf(4));
+        boolean expectedMaskSign = oracleDecoder.decodeBooleanEqui();
+
+        assertEquals(expectedUseMasked, reader.readUseMaskedCompound(3));
+        assertArrayEquals(oracleCdf.mutableMaskCompoundCdf(3), tileContext.cdfContext().mutableMaskCompoundCdf(3));
+        assertEquals(expectedUseAverage, reader.readUseAverageCompound(2));
+        assertArrayEquals(oracleCdf.mutableJointCompoundCdf(2), tileContext.cdfContext().mutableJointCompoundCdf(2));
+        assertEquals(expectedUseSegment, reader.readUseSegmentCompound(4));
+        assertArrayEquals(oracleCdf.mutableWedgeCompoundCdf(4), tileContext.cdfContext().mutableWedgeCompoundCdf(4));
+        assertEquals(expectedMaskSign, reader.readCompoundMaskSign());
+    }
+
     /// Verifies that inter-intra syntax uses the expected tile-local CDF tables.
     @Test
     void readsInterIntraSyntax() {

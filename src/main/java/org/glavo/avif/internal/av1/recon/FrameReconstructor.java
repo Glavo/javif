@@ -20,6 +20,8 @@ import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
+import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
@@ -303,6 +305,7 @@ public final class FrameReconstructor {
                         chromaVPlane,
                         pixelFormat,
                         frameHeader,
+                        sequenceHeader.features().orderHintBits(),
                         checkedReferenceSurfaceSnapshots
                 );
             }
@@ -550,6 +553,7 @@ public final class FrameReconstructor {
     /// @param chromaUPlane the mutable chroma U plane, or `null`
     /// @param chromaVPlane the mutable chroma V plane, or `null`
     /// @param pixelFormat the active decoded chroma layout
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
     private static void reconstructNode(
             TilePartitionTreeReader.Node node,
             MutablePlaneBuffer lumaPlane,
@@ -557,6 +561,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             PixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
@@ -567,6 +572,7 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     pixelFormat,
                     frameHeader,
+                    orderHintBits,
                     referenceSurfaceSnapshots
             );
             return;
@@ -581,6 +587,7 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     pixelFormat,
                     frameHeader,
+                    orderHintBits,
                     referenceSurfaceSnapshots
             );
         }
@@ -593,6 +600,7 @@ public final class FrameReconstructor {
     /// @param chromaUPlane the mutable chroma U plane, or `null`
     /// @param chromaVPlane the mutable chroma V plane, or `null`
     /// @param pixelFormat the active decoded chroma layout
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
     private static void reconstructLeaf(
             TilePartitionTreeReader.LeafNode leafNode,
             MutablePlaneBuffer lumaPlane,
@@ -600,6 +608,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             PixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         TileBlockHeaderReader.BlockHeader header = leafNode.header();
@@ -668,6 +677,7 @@ public final class FrameReconstructor {
                     transformLayout,
                     pixelFormat,
                     frameHeader,
+                    orderHintBits,
                     referenceSurfaceSnapshots
             );
         }
@@ -879,6 +889,7 @@ public final class FrameReconstructor {
     /// @param transformLayout the decoded transform layout for the block
     /// @param pixelFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     private static void reconstructInterPrediction(
             MutablePlaneBuffer lumaPlane,
@@ -888,6 +899,7 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             PixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         if (header.compoundReference()) {
@@ -899,6 +911,7 @@ public final class FrameReconstructor {
                     transformLayout,
                     pixelFormat,
                     frameHeader,
+                    orderHintBits,
                     referenceSurfaceSnapshots
             );
         } else {
@@ -1257,8 +1270,8 @@ public final class FrameReconstructor {
     }
 
     /// Reconstructs the currently supported compound-reference inter prediction subset by averaging
-    /// the two predicted reference surfaces after each one has been sampled with the current
-    /// integer-copy or fixed-filter subpel path.
+    /// or masked-blending the two predicted reference surfaces after each one has been sampled
+    /// with the current integer-copy or fixed-filter subpel path.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -1267,6 +1280,7 @@ public final class FrameReconstructor {
     /// @param transformLayout the decoded transform layout for the block
     /// @param pixelFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     private static void reconstructCompoundInterPrediction(
             MutablePlaneBuffer lumaPlane,
@@ -1276,6 +1290,7 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             PixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 =
@@ -1298,12 +1313,25 @@ public final class FrameReconstructor {
         DecodedPlanes referencePlanes1 = referenceSurfaceSnapshot1.decodedPlanes();
         MotionVector motionVector0 = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         MotionVector motionVector1 = Objects.requireNonNull(header.motionVector1(), "header.motionVector1()").vector();
+        CompoundPredictionType compoundPredictionType =
+                Objects.requireNonNull(header.compoundPredictionType(), "header.compoundPredictionType()");
+        int jointWeight = compoundPredictionType == CompoundPredictionType.WEIGHTED_AVERAGE
+                ? jointCompoundWeight(
+                frameHeader,
+                referenceSurfaceSnapshot0.frameHeader(),
+                referenceSurfaceSnapshot1.frameHeader(),
+                orderHintBits
+        )
+                : 8;
         FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
         FrameHeader.InterpolationFilter verticalInterpolationFilter = resolveVerticalInterpolationFilter(header, frameHeader);
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        @Nullable int[] segmentMask = compoundPredictionType == CompoundPredictionType.SEGMENT
+                ? new int[visibleLumaWidth * visibleLumaHeight]
+                : null;
 
         reconstructCompoundInterPlanePrediction(
                 lumaPlane,
@@ -1322,7 +1350,18 @@ public final class FrameReconstructor {
                 visibleLumaWidth,
                 visibleLumaHeight,
                 horizontalInterpolationFilter,
-                verticalInterpolationFilter
+                verticalInterpolationFilter,
+                compoundPredictionType,
+                header.compoundMaskSign(),
+                header.compoundWedgeIndex(),
+                header.size(),
+                0,
+                0,
+                lumaPlane.bitDepth(),
+                jointWeight,
+                segmentMask,
+                visibleLumaWidth,
+                visibleLumaHeight
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -1355,7 +1394,18 @@ public final class FrameReconstructor {
                 visibleChromaWidth,
                 visibleChromaHeight,
                 horizontalInterpolationFilter,
-                verticalInterpolationFilter
+                verticalInterpolationFilter,
+                compoundPredictionType,
+                header.compoundMaskSign(),
+                header.compoundWedgeIndex(),
+                header.size(),
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                chromaUPlane.bitDepth(),
+                jointWeight,
+                segmentMask,
+                visibleLumaWidth,
+                visibleLumaHeight
         );
         reconstructCompoundInterPlanePrediction(
                 chromaVPlane,
@@ -1374,7 +1424,18 @@ public final class FrameReconstructor {
                 visibleChromaWidth,
                 visibleChromaHeight,
                 horizontalInterpolationFilter,
-                verticalInterpolationFilter
+                verticalInterpolationFilter,
+                compoundPredictionType,
+                header.compoundMaskSign(),
+                header.compoundWedgeIndex(),
+                header.size(),
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                chromaVPlane.bitDepth(),
+                jointWeight,
+                segmentMask,
+                visibleLumaWidth,
+                visibleLumaHeight
         );
     }
 
@@ -1459,7 +1520,7 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Reconstructs one compound inter-predicted plane by averaging two independently predicted
+    /// Reconstructs one compound inter-predicted plane by blending two independently predicted
     /// reference planes.
     ///
     /// @param destinationPlane the mutable destination plane
@@ -1479,6 +1540,17 @@ public final class FrameReconstructor {
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter mode
     /// @param verticalFilterMode the effective vertical interpolation filter mode
+    /// @param compoundPredictionType the decoded compound prediction blend type
+    /// @param maskSign whether the decoded segment or wedge mask uses inverted source order
+    /// @param wedgeIndex the decoded compound wedge index, or `-1`
+    /// @param blockSize the luma block size that owns this plane prediction
+    /// @param subsamplingX the horizontal chroma subsampling shift for this plane
+    /// @param subsamplingY the vertical chroma subsampling shift for this plane
+    /// @param bitDepth the decoded sample bit depth
+    /// @param jointWeight the decoded joint compound weight for weighted average prediction
+    /// @param segmentMask the luma-domain segment mask to populate or reuse, or `null`
+    /// @param segmentMaskWidth the luma-domain segment mask width
+    /// @param segmentMaskHeight the luma-domain segment mask height
     private static void reconstructCompoundInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane0,
@@ -1496,8 +1568,21 @@ public final class FrameReconstructor {
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
-            FrameHeader.InterpolationFilter verticalFilterMode
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            CompoundPredictionType compoundPredictionType,
+            boolean maskSign,
+            int wedgeIndex,
+            BlockSize blockSize,
+            int subsamplingX,
+            int subsamplingY,
+            int bitDepth,
+            int jointWeight,
+            @Nullable int[] segmentMask,
+            int segmentMaskWidth,
+            int segmentMaskHeight
     ) {
+        CompoundPredictionType nonNullCompoundPredictionType =
+                Objects.requireNonNull(compoundPredictionType, "compoundPredictionType");
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int sample0 = sampleInterPlaneValue(
@@ -1532,7 +1617,39 @@ public final class FrameReconstructor {
                         verticalFilterMode,
                         destinationPlane.maxSampleValue()
                 );
-                destinationPlane.setSample(destinationX + x, destinationY + y, averageCompoundSamples(sample0, sample1));
+                int sample = switch (nonNullCompoundPredictionType) {
+                    case AVERAGE -> averageCompoundSamples(sample0, sample1);
+                    case WEIGHTED_AVERAGE -> weightedAverageCompoundSamples(sample0, sample1, jointWeight);
+                    case WEDGE -> {
+                        int mask = InterIntraMasks.compoundWedgeMaskValue(
+                                blockSize,
+                                wedgeIndex,
+                                maskSign,
+                                x,
+                                y,
+                                subsamplingX,
+                                subsamplingY
+                        );
+                        yield blendMaskedCompoundSamples(sample0, sample1, mask);
+                    }
+                    case SEGMENT -> {
+                        int mask = segmentCompoundMaskValue(
+                                sample0,
+                                sample1,
+                                bitDepth,
+                                maskSign,
+                                x,
+                                y,
+                                subsamplingX,
+                                subsamplingY,
+                                segmentMask,
+                                segmentMaskWidth,
+                                segmentMaskHeight
+                        );
+                        yield blendMaskedCompoundSamples(sample0, sample1, mask);
+                    }
+                };
+                destinationPlane.setSample(destinationX + x, destinationY + y, sample);
             }
         }
     }
@@ -1993,6 +2110,183 @@ public final class FrameReconstructor {
     /// @return the current simple average-compound sample
     private static int averageCompoundSamples(int primarySample, int secondarySample) {
         return (primarySample + secondarySample + 1) >> 1;
+    }
+
+    /// Returns one weighted average-compound sample.
+    ///
+    /// @param primarySample the primary predicted sample
+    /// @param secondarySample the secondary predicted sample
+    /// @param primaryWeight the primary predictor weight in sixteenths
+    /// @return one weighted average-compound sample
+    private static int weightedAverageCompoundSamples(int primarySample, int secondarySample, int primaryWeight) {
+        return (primarySample * primaryWeight + secondarySample * (16 - primaryWeight) + 8) >> 4;
+    }
+
+    /// Returns one masked compound sample using the supplied secondary-source weight.
+    ///
+    /// @param primarySample the primary predicted sample
+    /// @param secondarySample the secondary predicted sample
+    /// @param secondaryWeight the secondary predictor weight in `[0, 64]`
+    /// @return one masked compound sample
+    private static int blendMaskedCompoundSamples(int primarySample, int secondarySample, int secondaryWeight) {
+        return (primarySample * (64 - secondaryWeight) + secondarySample * secondaryWeight + 32) >> 6;
+    }
+
+    /// Returns one segment-compound mask value as the effective secondary-source blend weight.
+    ///
+    /// @param primarySample the primary predicted sample
+    /// @param secondarySample the secondary predicted sample
+    /// @param bitDepth the decoded sample bit depth
+    /// @param maskSign whether the decoded segment mask uses inverted source order
+    /// @param x the plane-local sample X coordinate inside the block
+    /// @param y the plane-local sample Y coordinate inside the block
+    /// @param subsamplingX the horizontal chroma subsampling shift for this plane
+    /// @param subsamplingY the vertical chroma subsampling shift for this plane
+    /// @param segmentMask the luma-domain segment mask to populate or reuse, or `null`
+    /// @param segmentMaskWidth the luma-domain segment mask width
+    /// @param segmentMaskHeight the luma-domain segment mask height
+    /// @return one segment-compound mask value as the effective secondary-source blend weight
+    private static int segmentCompoundMaskValue(
+            int primarySample,
+            int secondarySample,
+            int bitDepth,
+            boolean maskSign,
+            int x,
+            int y,
+            int subsamplingX,
+            int subsamplingY,
+            @Nullable int[] segmentMask,
+            int segmentMaskWidth,
+            int segmentMaskHeight
+    ) {
+        int mask;
+        if (subsamplingX == 0 && subsamplingY == 0) {
+            mask = lumaSegmentCompoundMaskValue(primarySample, secondarySample, bitDepth);
+            if (segmentMask != null && x < segmentMaskWidth && y < segmentMaskHeight) {
+                segmentMask[y * segmentMaskWidth + x] = mask;
+            }
+        } else {
+            if (segmentMask == null) {
+                throw new IllegalStateException("Chroma segment compound prediction requires a luma segment mask");
+            }
+            mask = chromaSegmentCompoundMaskValue(
+                    segmentMask,
+                    segmentMaskWidth,
+                    segmentMaskHeight,
+                    x,
+                    y,
+                    subsamplingX,
+                    subsamplingY,
+                    maskSign
+            );
+        }
+        return maskSign ? mask : 64 - mask;
+    }
+
+    /// Returns one luma-domain segment-compound mask value.
+    ///
+    /// @param primarySample the primary predicted sample
+    /// @param secondarySample the secondary predicted sample
+    /// @param bitDepth the decoded sample bit depth
+    /// @return one luma-domain segment-compound mask value
+    private static int lumaSegmentCompoundMaskValue(int primarySample, int secondarySample, int bitDepth) {
+        int intermediateBits = 4;
+        int maskShift = bitDepth + intermediateBits - 4;
+        int maskRound = 1 << (maskShift - 5);
+        int scaledDifference = ((Math.abs(primarySample - secondarySample) << intermediateBits) + maskRound) >> maskShift;
+        return Math.min(38 + scaledDifference, 64);
+    }
+
+    /// Returns one chroma segment-compound mask value derived from the luma-domain segment mask.
+    ///
+    /// @param segmentMask the luma-domain segment mask
+    /// @param segmentMaskWidth the luma-domain segment mask width
+    /// @param segmentMaskHeight the luma-domain segment mask height
+    /// @param x the chroma-plane sample X coordinate inside the block
+    /// @param y the chroma-plane sample Y coordinate inside the block
+    /// @param subsamplingX the horizontal chroma subsampling shift
+    /// @param subsamplingY the vertical chroma subsampling shift
+    /// @param maskSign whether the decoded segment mask uses inverted source order
+    /// @return one chroma segment-compound mask value
+    private static int chromaSegmentCompoundMaskValue(
+            int[] segmentMask,
+            int segmentMaskWidth,
+            int segmentMaskHeight,
+            int x,
+            int y,
+            int subsamplingX,
+            int subsamplingY,
+            boolean maskSign
+    ) {
+        int lumaX = x << subsamplingX;
+        int lumaY = y << subsamplingY;
+        int horizontalSpan = 1 << subsamplingX;
+        int verticalSpan = 1 << subsamplingY;
+        int sum = 0;
+        for (int yy = 0; yy < verticalSpan; yy++) {
+            int sampleY = Math.min(segmentMaskHeight - 1, lumaY + yy);
+            for (int xx = 0; xx < horizontalSpan; xx++) {
+                int sampleX = Math.min(segmentMaskWidth - 1, lumaX + xx);
+                sum += segmentMask[sampleY * segmentMaskWidth + sampleX];
+            }
+            if (subsamplingX != 0) {
+                sum++;
+            }
+        }
+        return (sum - (maskSign ? 1 : 0)) >> (subsamplingX + subsamplingY);
+    }
+
+    /// Returns the joint compound primary weight for one decoded reference pair.
+    ///
+    /// @param frameHeader the current frame header
+    /// @param referenceHeader0 the primary reference frame header
+    /// @param referenceHeader1 the secondary reference frame header
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @return the joint compound primary weight for one decoded reference pair
+    private static int jointCompoundWeight(
+            FrameHeader frameHeader,
+            FrameHeader referenceHeader0,
+            FrameHeader referenceHeader1,
+            int orderHintBits
+    ) {
+        int distance1 = Math.min(
+                Math.abs(orderHintDifference(orderHintBits, referenceHeader0.frameOffset(), frameHeader.frameOffset())),
+                31
+        );
+        int distance0 = Math.min(
+                Math.abs(orderHintDifference(orderHintBits, referenceHeader1.frameOffset(), frameHeader.frameOffset())),
+                31
+        );
+        boolean order = distance0 <= distance1;
+        int[][] quantDistanceWeight = {{2, 3}, {2, 5}, {2, 7}};
+        int[][] quantDistanceLookup = {{9, 7}, {11, 5}, {12, 4}, {13, 3}};
+        int k;
+        for (k = 0; k < quantDistanceWeight.length; k++) {
+            int c0 = quantDistanceWeight[k][order ? 1 : 0];
+            int c1 = quantDistanceWeight[k][order ? 0 : 1];
+            int distance0Scaled = distance0 * c0;
+            int distance1Scaled = distance1 * c1;
+            if ((distance0 > distance1 && distance0Scaled < distance1Scaled)
+                    || (distance0 <= distance1 && distance0Scaled > distance1Scaled)) {
+                break;
+            }
+        }
+        return quantDistanceLookup[k][order ? 1 : 0];
+    }
+
+    /// Returns the wrapped order-hint difference `poc0 - poc1`.
+    ///
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param poc0 the minuend order hint
+    /// @param poc1 the subtrahend order hint
+    /// @return the wrapped order-hint difference `poc0 - poc1`
+    private static int orderHintDifference(int orderHintBits, int poc0, int poc1) {
+        if (orderHintBits == 0) {
+            return 0;
+        }
+        int mask = 1 << (orderHintBits - 1);
+        int diff = poc0 - poc1;
+        return (diff & (mask - 1)) - (diff & mask);
     }
 
     /// Resolves the effective horizontal interpolation filter for one inter block.

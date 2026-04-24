@@ -200,6 +200,37 @@ public final class TileSyntaxReader {
         return CompoundInterPredictionMode.fromSymbolIndex(symbol);
     }
 
+    /// Decodes one masked-compound enable flag from the supplied context index.
+    ///
+    /// @param context the zero-based masked-compound context index in `[0, 6)`
+    /// @return whether the current compound block uses a segment or wedge mask
+    public boolean readUseMaskedCompound(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableMaskCompoundCdf(context));
+    }
+
+    /// Decodes one joint-compound averaging flag from the supplied context index.
+    ///
+    /// @param context the zero-based joint-compound context index in `[0, 6)`
+    /// @return whether the current compound block uses simple averaging instead of weighted averaging
+    public boolean readUseAverageCompound(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableJointCompoundCdf(context));
+    }
+
+    /// Decodes one wedge-vs-segment compound flag from the supplied context index.
+    ///
+    /// @param context the zero-based wedge context index in `[0, 9)`
+    /// @return whether the current masked compound block uses a segment mask instead of a wedge mask
+    public boolean readUseSegmentCompound(int context) {
+        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableWedgeCompoundCdf(context));
+    }
+
+    /// Decodes one equiprobable compound-mask sign flag.
+    ///
+    /// @return the decoded compound-mask sign flag
+    public boolean readCompoundMaskSign() {
+        return msacDecoder.decodeBooleanEqui();
+    }
+
     /// Decodes one inter-intra enable flag from the supplied context index.
     ///
     /// @param context the zero-based inter-intra context index in `[0, 4)`

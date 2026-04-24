@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.model;
 
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,6 +31,8 @@ public final class FrameAssembly {
     private final SequenceHeader sequenceHeader;
     /// The parsed frame header for this frame.
     private final FrameHeader frameHeader;
+    /// The refreshed reference-frame headers indexed by runtime reference slot.
+    private final @Nullable FrameHeader[] referenceFrameHeaders;
     /// The byte offset of the first OBU that belongs to this frame.
     private final long streamOffset;
     /// The zero-based index of the first OBU that belongs to this frame.
@@ -53,8 +56,31 @@ public final class FrameAssembly {
             long streamOffset,
             int obuIndex
     ) {
+        this(sequenceHeader, frameHeader, new FrameHeader[8], streamOffset, obuIndex);
+    }
+
+    /// Creates a new in-progress frame assembly with the current reference-frame headers.
+    ///
+    /// @param sequenceHeader the active sequence header
+    /// @param frameHeader the parsed frame header
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by runtime reference slot
+    /// @param streamOffset the byte offset of the first frame OBU
+    /// @param obuIndex the zero-based index of the first frame OBU
+    public FrameAssembly(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            long streamOffset,
+            int obuIndex
+    ) {
         this.sequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
         this.frameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
+        @Nullable FrameHeader[] nonNullReferenceFrameHeaders =
+                Objects.requireNonNull(referenceFrameHeaders, "referenceFrameHeaders");
+        if (nonNullReferenceFrameHeaders.length != 8) {
+            throw new IllegalArgumentException("referenceFrameHeaders.length != 8: " + nonNullReferenceFrameHeaders.length);
+        }
+        this.referenceFrameHeaders = Arrays.copyOf(nonNullReferenceFrameHeaders, nonNullReferenceFrameHeaders.length);
         if (streamOffset < 0) {
             throw new IllegalArgumentException("streamOffset < 0: " + streamOffset);
         }
@@ -84,6 +110,18 @@ public final class FrameAssembly {
     /// @return the parsed frame header for this frame
     public FrameHeader frameHeader() {
         return frameHeader;
+    }
+
+    /// Returns the refreshed reference-frame header for one internal LAST..ALTREF reference index.
+    ///
+    /// @param referenceFrame the internal LAST..ALTREF reference index
+    /// @return the refreshed reference-frame header for the supplied reference, or `null`
+    public @Nullable FrameHeader referenceFrameHeader(int referenceFrame) {
+        int referenceSlot = frameHeader.referenceFrameIndex(referenceFrame);
+        if (referenceSlot < 0 || referenceSlot >= referenceFrameHeaders.length) {
+            return null;
+        }
+        return referenceFrameHeaders[referenceSlot];
     }
 
     /// Returns the byte offset of the first OBU that belongs to this frame.

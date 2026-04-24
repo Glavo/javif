@@ -124,6 +124,25 @@ final class InterIntraMasks {
         };
     }
 
+    /// Returns whether the supplied block size can signal compound wedge prediction.
+    ///
+    /// @param size the block size to test
+    /// @return whether the supplied block size can signal compound wedge prediction
+    static boolean supportsCompoundWedge(BlockSize size) {
+        return switch (Objects.requireNonNull(size, "size")) {
+            case SIZE_32X32,
+                    SIZE_32X16,
+                    SIZE_32X8,
+                    SIZE_16X32,
+                    SIZE_16X16,
+                    SIZE_16X8,
+                    SIZE_8X32,
+                    SIZE_8X16,
+                    SIZE_8X8 -> true;
+            default -> false;
+        };
+    }
+
     /// Returns the wedge entropy context for one inter-intra-capable block size.
     ///
     /// @param size the block size to inspect
@@ -181,6 +200,52 @@ final class InterIntraMasks {
         return subsampledWedgeMaskValue(nonNullSize, wedgeIndex, x, y, subsamplingX, subsamplingY);
     }
 
+    /// Returns one compound wedge mask value as the effective secondary-source blend weight.
+    ///
+    /// @param size the luma block size that owns the prediction
+    /// @param wedgeIndex the decoded wedge index
+    /// @param maskSign whether the compound mask uses inverted source order
+    /// @param x the plane-local sample X coordinate inside the block
+    /// @param y the plane-local sample Y coordinate inside the block
+    /// @param subsamplingX the horizontal chroma subsampling shift for the current plane
+    /// @param subsamplingY the vertical chroma subsampling shift for the current plane
+    /// @return one compound wedge mask value as the effective secondary-source blend weight
+    static int compoundWedgeMaskValue(
+            BlockSize size,
+            int wedgeIndex,
+            boolean maskSign,
+            int x,
+            int y,
+            int subsamplingX,
+            int subsamplingY
+    ) {
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        if (!supportsCompoundWedge(nonNullSize)) {
+            throw new IllegalArgumentException("Compound wedge mask is not defined for block size: " + nonNullSize);
+        }
+        if (wedgeIndex < 0 || wedgeIndex >= WEDGE_INDEX_COUNT) {
+            throw new IllegalArgumentException("wedgeIndex out of range: " + wedgeIndex);
+        }
+        if (subsamplingX < 0 || subsamplingX > 1 || subsamplingY < 0 || subsamplingY > 1) {
+            throw new IllegalArgumentException("Subsampling shifts must be in [0, 1]");
+        }
+
+        if (subsamplingX == 0 && subsamplingY == 0) {
+            int mask = lumaWedgeMaskValue(nonNullSize, wedgeIndex, x, y);
+            return maskSign ? mask : 64 - mask;
+        }
+        int mask = subsampledWedgeMaskValue(
+                nonNullSize,
+                wedgeIndex,
+                x,
+                y,
+                subsamplingX,
+                subsamplingY,
+                maskSign ? 1 : 0
+        );
+        return maskSign ? mask : 64 - mask;
+    }
+
     /// Returns one smooth-blend inter-intra mask value.
     ///
     /// @param mode the decoded inter-intra prediction mode
@@ -229,6 +294,28 @@ final class InterIntraMasks {
             int subsamplingX,
             int subsamplingY
     ) {
+        return subsampledWedgeMaskValue(size, wedgeIndex, x, y, subsamplingX, subsamplingY, 0);
+    }
+
+    /// Returns one wedge mask value after chroma subsampling with AV1's rounding sign applied.
+    ///
+    /// @param size the luma block size that owns the prediction
+    /// @param wedgeIndex the decoded wedge index
+    /// @param x the plane-local sample X coordinate inside the block
+    /// @param y the plane-local sample Y coordinate inside the block
+    /// @param subsamplingX the horizontal chroma subsampling shift for the current plane
+    /// @param subsamplingY the vertical chroma subsampling shift for the current plane
+    /// @param roundingSign the AV1 chroma wedge rounding sign in `[0, 1]`
+    /// @return one wedge mask value after chroma subsampling when needed
+    private static int subsampledWedgeMaskValue(
+            BlockSize size,
+            int wedgeIndex,
+            int x,
+            int y,
+            int subsamplingX,
+            int subsamplingY,
+            int roundingSign
+    ) {
         if (subsamplingX == 0 && subsamplingY == 0) {
             return lumaWedgeMaskValue(size, wedgeIndex, x, y);
         }
@@ -246,7 +333,7 @@ final class InterIntraMasks {
                 sum++;
             }
         }
-        return sum >> (subsamplingX + subsamplingY);
+        return (sum - roundingSign) >> (subsamplingX + subsamplingY);
     }
 
     /// Returns one luma-domain wedge mask value.

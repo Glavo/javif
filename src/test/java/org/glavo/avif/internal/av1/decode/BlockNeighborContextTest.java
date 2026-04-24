@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
@@ -166,6 +167,34 @@ final class BlockNeighborContextTest {
         assertEquals(2, context.backwardReferenceContext(position));
         assertEquals(2, context.backwardReference1Context(position));
         assertEquals(1, context.unidirectionalReference1Context(position));
+    }
+
+    /// Verifies that compound blend-type contexts track masked and joint compound neighbor state.
+    @Test
+    void derivesCompoundBlendTypeContextsFromUpdatedNeighbors() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                6,
+                null,
+                InterMotionVector.resolved(MotionVector.zero())
+        ));
+        context.updateFromBlockHeader(compoundInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
+                0,
+                4,
+                null,
+                InterMotionVector.resolved(MotionVector.zero()),
+                InterMotionVector.resolved(MotionVector.zero()),
+                CompoundPredictionType.SEGMENT
+        ));
+
+        BlockPosition position = new BlockPosition(4, 4);
+        assertEquals(4, context.maskedCompoundContext(position));
+        assertEquals(5, context.jointCompoundContext(position, 10, 8, 12, 4));
     }
 
     /// Verifies that switchable interpolation-filter contexts merge matching neighbor filters and sentinels.
@@ -1022,6 +1051,40 @@ final class BlockNeighborContextTest {
                 compoundInterMode,
                 motionVector0,
                 motionVector1,
+                CompoundPredictionType.AVERAGE
+        );
+    }
+
+    /// Creates one compact compound-reference inter block header with an explicit compound prediction type.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order
+    /// @param compoundInterMode the decoded compound inter mode, or `null`
+    /// @param motionVector0 the primary motion-vector state chosen for the block
+    /// @param motionVector1 the secondary motion-vector state chosen for the block
+    /// @param compoundPredictionType the decoded compound prediction blend type
+    /// @return one compact compound-reference inter block header with an explicit compound prediction type
+    private static TileBlockHeaderReader.BlockHeader compoundInterBlock(
+            BlockPosition position,
+            BlockSize size,
+            int referenceFrame0,
+            int referenceFrame1,
+            @org.jetbrains.annotations.Nullable org.glavo.avif.internal.av1.model.CompoundInterPredictionMode compoundInterMode,
+            InterMotionVector motionVector0,
+            InterMotionVector motionVector1,
+            CompoundPredictionType compoundPredictionType
+    ) {
+        return compoundInterBlock(
+                position,
+                size,
+                referenceFrame0,
+                referenceFrame1,
+                compoundInterMode,
+                motionVector0,
+                motionVector1,
+                compoundPredictionType,
                 null,
                 null
         );
@@ -1036,6 +1099,7 @@ final class BlockNeighborContextTest {
     /// @param compoundInterMode the decoded compound inter mode, or `null`
     /// @param motionVector0 the primary motion-vector state chosen for the block
     /// @param motionVector1 the secondary motion-vector state chosen for the block
+    /// @param compoundPredictionType the decoded compound prediction blend type
     /// @param horizontalInterpolationFilter the decoded horizontal interpolation filter, or `null`
     /// @param verticalInterpolationFilter the decoded vertical interpolation filter, or `null`
     /// @return one compact compound-reference inter block header used by neighbor-context tests with explicit interpolation filters
@@ -1047,6 +1111,45 @@ final class BlockNeighborContextTest {
             @org.jetbrains.annotations.Nullable org.glavo.avif.internal.av1.model.CompoundInterPredictionMode compoundInterMode,
             InterMotionVector motionVector0,
             InterMotionVector motionVector1,
+            @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
+            @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter
+    ) {
+        return compoundInterBlock(
+                position,
+                size,
+                referenceFrame0,
+                referenceFrame1,
+                compoundInterMode,
+                motionVector0,
+                motionVector1,
+                CompoundPredictionType.AVERAGE,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter
+        );
+    }
+
+    /// Creates one compact compound-reference inter block header used by neighbor-context tests with explicit interpolation filters.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order
+    /// @param compoundInterMode the decoded compound inter mode, or `null`
+    /// @param motionVector0 the primary motion-vector state chosen for the block
+    /// @param motionVector1 the secondary motion-vector state chosen for the block
+    /// @param compoundPredictionType the decoded compound prediction blend type
+    /// @param horizontalInterpolationFilter the decoded horizontal interpolation filter, or `null`
+    /// @param verticalInterpolationFilter the decoded vertical interpolation filter, or `null`
+    /// @return one compact compound-reference inter block header used by neighbor-context tests with explicit interpolation filters
+    private static TileBlockHeaderReader.BlockHeader compoundInterBlock(
+            BlockPosition position,
+            BlockSize size,
+            int referenceFrame0,
+            int referenceFrame1,
+            @org.jetbrains.annotations.Nullable org.glavo.avif.internal.av1.model.CompoundInterPredictionMode compoundInterMode,
+            InterMotionVector motionVector0,
+            InterMotionVector motionVector1,
+            CompoundPredictionType compoundPredictionType,
             @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter horizontalInterpolationFilter,
             @org.jetbrains.annotations.Nullable FrameHeader.InterpolationFilter verticalInterpolationFilter
     ) {
@@ -1068,9 +1171,16 @@ final class BlockNeighborContextTest {
                 motionVector1,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
+                compoundPredictionType,
+                false,
+                -1,
+                false,
+                null,
+                false,
+                -1,
                 false,
                 0,
-                -1,
+                0,
                 0,
                 new int[4],
                 null,

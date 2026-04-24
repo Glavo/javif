@@ -27,6 +27,7 @@ import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
+import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -2768,6 +2769,80 @@ final class FrameReconstructorTest {
         });
     }
 
+    /// Verifies that one monochrome compound-reference inter block applies the decoded wedge
+    /// compound mask to two integer-aligned stored reference surfaces.
+    @Test
+    void reconstructsCompoundReferenceI400WedgeMaskBlock() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[][] reference0 = rampSamples(8, 8, 10, 3, 17);
+        int[][] reference1 = rampSamples(8, 8, 180, -2, -9);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 =
+                createReferenceSurfaceSnapshot(PixelFormat.I400, reference0, null, null);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 =
+                createReferenceSurfaceSnapshot(PixelFormat.I400, reference1, null, null);
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        false,
+                        0,
+                        1,
+                        MotionVector.zero(),
+                        MotionVector.zero(),
+                        CompoundPredictionType.WEDGE,
+                        false,
+                        0
+                ),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, 1, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertPlaneEquals(planes.lumaPlane(), expectedCompoundWedgeBlend(reference0, reference1, size, false, 0));
+    }
+
+    /// Verifies that one monochrome compound-reference inter block derives and applies a segment
+    /// compound mask from the difference between both stored reference predictors.
+    @Test
+    void reconstructsCompoundReferenceI400SegmentMaskBlock() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[][] reference0 = rampSamples(8, 8, 20, 7, 11);
+        int[][] reference1 = rampSamples(8, 8, 220, -5, -13);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 =
+                createReferenceSurfaceSnapshot(PixelFormat.I400, reference0, null, null);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 =
+                createReferenceSurfaceSnapshot(PixelFormat.I400, reference1, null, null);
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        false,
+                        0,
+                        1,
+                        MotionVector.zero(),
+                        MotionVector.zero(),
+                        CompoundPredictionType.SEGMENT,
+                        true,
+                        -1
+                ),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, 1, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertPlaneEquals(planes.lumaPlane(), expectedCompoundSegmentBlend(reference0, reference1, true, 8));
+    }
+
     /// Verifies that one monochrome single-reference inter block bilinearly samples one
     /// fractional luma footprint from one stored reference surface when the frame filter is
     /// `BILINEAR`.
@@ -4884,6 +4959,9 @@ final class FrameReconstructorTest {
                 null,
                 null,
                 null,
+                null,
+                false,
+                -1,
                 true,
                 interIntraMode,
                 interIntraWedge,
@@ -4977,6 +5055,45 @@ final class FrameReconstructorTest {
             MotionVector motionVector0,
             MotionVector motionVector1
     ) {
+        return createCompoundReferenceInterBlockHeader(
+                position,
+                size,
+                hasChroma,
+                referenceFrame0,
+                referenceFrame1,
+                motionVector0,
+                motionVector1,
+                CompoundPredictionType.AVERAGE,
+                false,
+                -1
+        );
+    }
+
+    /// Creates one compound-reference inter block header with an explicit compound prediction type.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in LAST..ALTREF order
+    /// @param motionVector0 the resolved primary motion vector
+    /// @param motionVector1 the resolved secondary motion vector
+    /// @param compoundPredictionType the decoded compound prediction blend type
+    /// @param compoundMaskSign whether the decoded segment or wedge compound mask uses inverted source order
+    /// @param compoundWedgeIndex the decoded compound wedge index, or `-1`
+    /// @return one compound-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createCompoundReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector motionVector0,
+            MotionVector motionVector1,
+            CompoundPredictionType compoundPredictionType,
+            boolean compoundMaskSign,
+            int compoundWedgeIndex
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 size,
@@ -4993,8 +5110,20 @@ final class FrameReconstructorTest {
                 0,
                 InterMotionVector.resolved(motionVector0),
                 InterMotionVector.resolved(motionVector1),
+                null,
+                null,
+                compoundPredictionType,
+                compoundMaskSign,
+                compoundWedgeIndex,
+                false,
+                null,
+                false,
+                -1,
                 false,
                 0,
+                -1,
+                0,
+                new int[4],
                 null,
                 null,
                 0,
@@ -5160,6 +5289,92 @@ final class FrameReconstructorTest {
             }
         }
         return new DecodedPlane(width, height, width, storage);
+    }
+
+    /// Creates one deterministic sample ramp for reconstruction tests.
+    ///
+    /// @param width the raster width
+    /// @param height the raster height
+    /// @param base the sample value at the origin
+    /// @param stepX the sample increment per X coordinate
+    /// @param stepY the sample increment per Y coordinate
+    /// @return one deterministic sample ramp
+    private static int[][] rampSamples(int width, int height, int base, int stepX, int stepY) {
+        int[][] samples = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                samples[y][x] = base + x * stepX + y * stepY;
+            }
+        }
+        return samples;
+    }
+
+    /// Computes the expected compound wedge blend for two direct predictors.
+    ///
+    /// @param primarySamples the primary predictor samples
+    /// @param secondarySamples the secondary predictor samples
+    /// @param size the luma block size that owns the prediction
+    /// @param maskSign whether the decoded wedge mask uses inverted source order
+    /// @param wedgeIndex the decoded compound wedge index
+    /// @return the expected compound wedge blend
+    private static int[][] expectedCompoundWedgeBlend(
+            int[][] primarySamples,
+            int[][] secondarySamples,
+            BlockSize size,
+            boolean maskSign,
+            int wedgeIndex
+    ) {
+        int height = primarySamples.length;
+        int width = primarySamples[0].length;
+        int[][] expected = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int mask = InterIntraMasks.compoundWedgeMaskValue(size, wedgeIndex, maskSign, x, y, 0, 0);
+                expected[y][x] = (primarySamples[y][x] * (64 - mask) + secondarySamples[y][x] * mask + 32) >> 6;
+            }
+        }
+        return expected;
+    }
+
+    /// Computes the expected compound segment blend for two direct predictors.
+    ///
+    /// @param primarySamples the primary predictor samples
+    /// @param secondarySamples the secondary predictor samples
+    /// @param maskSign whether the decoded segment mask uses inverted source order
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the expected compound segment blend
+    private static int[][] expectedCompoundSegmentBlend(
+            int[][] primarySamples,
+            int[][] secondarySamples,
+            boolean maskSign,
+            int bitDepth
+    ) {
+        int height = primarySamples.length;
+        int width = primarySamples[0].length;
+        int[][] expected = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int mask = segmentCompoundMask(primarySamples[y][x], secondarySamples[y][x], bitDepth);
+                int secondaryWeight = maskSign ? mask : 64 - mask;
+                expected[y][x] = (primarySamples[y][x] * (64 - secondaryWeight)
+                        + secondarySamples[y][x] * secondaryWeight + 32) >> 6;
+            }
+        }
+        return expected;
+    }
+
+    /// Returns one luma-domain segment-compound mask value.
+    ///
+    /// @param primarySample the primary predicted sample
+    /// @param secondarySample the secondary predicted sample
+    /// @param bitDepth the decoded sample bit depth
+    /// @return one luma-domain segment-compound mask value
+    private static int segmentCompoundMask(int primarySample, int secondarySample, int bitDepth) {
+        int intermediateBits = 4;
+        int maskShift = bitDepth + intermediateBits - 4;
+        int maskRound = 1 << (maskShift - 5);
+        int scaledDifference = ((Math.abs(primarySample - secondarySample) << intermediateBits) + maskRound) >> maskShift;
+        return Math.min(38 + scaledDifference, 64);
     }
 
     /// Computes the expected inter-intra blend against the default edge-derived intra predictor.
@@ -5551,11 +5766,12 @@ final class FrameReconstructorTest {
                     MutablePlaneBuffer.class,
                     PixelFormat.class,
                     FrameHeader.class,
+                    int.class,
                     ReferenceSurfaceSnapshot[].class
             );
             reconstructNode.setAccessible(true);
             for (TilePartitionTreeReader.Node root : roots) {
-                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader, null);
+                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader, 0, null);
             }
         } catch (ReflectiveOperationException exception) {
             throw new AssertionError("Failed to reconstruct synthetic tile roots into one shared plane", exception);

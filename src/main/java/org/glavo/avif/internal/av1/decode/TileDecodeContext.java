@@ -24,6 +24,7 @@ import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
@@ -289,6 +290,14 @@ public final class TileDecodeContext {
     /// @return the active frame header for the tile
     public FrameHeader frameHeader() {
         return frameHeader;
+    }
+
+    /// Returns the refreshed reference-frame header for one internal LAST..ALTREF reference index.
+    ///
+    /// @param referenceFrame the internal LAST..ALTREF reference index
+    /// @return the refreshed reference-frame header for the supplied reference, or `null`
+    public @Nullable FrameHeader referenceFrameHeader(int referenceFrame) {
+        return assembly.referenceFrameHeader(referenceFrame);
     }
 
     /// Returns the selected tile bitstream.

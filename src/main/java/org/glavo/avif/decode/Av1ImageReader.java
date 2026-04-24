@@ -330,7 +330,13 @@ public final class Av1ImageReader implements AutoCloseable {
             return outputExistingFrame(packet, frameHeader.existingFrameIndex());
         }
 
-        pendingFrameAssembly = new FrameAssembly(activeSequenceHeader, frameHeader, packet.streamOffset(), packet.obuIndex());
+        pendingFrameAssembly = new FrameAssembly(
+                activeSequenceHeader,
+                frameHeader,
+                referenceFrameHeadersForParsing(),
+                packet.streamOffset(),
+                packet.obuIndex()
+        );
         return null;
     }
 
@@ -363,7 +369,13 @@ public final class Av1ImageReader implements AutoCloseable {
             return CombinedFrameStart.immediateOutput(outputExistingFrame(packet, frameHeader.existingFrameIndex()));
         }
 
-        FrameAssembly assembly = new FrameAssembly(activeSequenceHeader, frameHeader, packet.streamOffset(), packet.obuIndex());
+        FrameAssembly assembly = new FrameAssembly(
+                activeSequenceHeader,
+                frameHeader,
+                referenceFrameHeadersForParsing(),
+                packet.streamOffset(),
+                packet.obuIndex()
+        );
         reader.byteAlign();
         TileGroupHeader tileGroupHeader = tileGroupHeaderParser.parse(reader, packet, frameHeader);
         reader.byteAlign();

@@ -141,6 +141,39 @@ public final class CdfContext {
             {13046, 23214, 24505, 25942, 27435, 28442, 29330}
     });
 
+    /// The transformed default joint-compound selection CDFs.
+    private static final int[][] DEFAULT_JOINT_COMPOUND_CDFS = inverse2d(new int[][]{
+            {18244},
+            {12865},
+            {7053},
+            {13259},
+            {9334},
+            {4644}
+    });
+
+    /// The transformed default masked-compound selection CDFs.
+    private static final int[][] DEFAULT_MASK_COMPOUND_CDFS = inverse2d(new int[][]{
+            {26607},
+            {22891},
+            {18840},
+            {24594},
+            {19934},
+            {22674}
+    });
+
+    /// The transformed default wedge-vs-segment compound CDFs.
+    private static final int[][] DEFAULT_WEDGE_COMPOUND_CDFS = inverse2d(new int[][]{
+            {23431},
+            {13171},
+            {11470},
+            {9770},
+            {9100},
+            {8233},
+            {6172},
+            {11820},
+            {7701}
+    });
+
     /// The transformed default inter-intra enable CDFs.
     private static final int[][] DEFAULT_INTER_INTRA_CDFS = inverse2d(new int[][]{
             {16384},
@@ -1090,6 +1123,15 @@ public final class CdfContext {
     /// The mutable compound inter-mode CDFs.
     private final int[][] compoundInterModeCdfs;
 
+    /// The mutable joint-compound selection CDFs.
+    private final int[][] jointCompoundCdfs;
+
+    /// The mutable masked-compound selection CDFs.
+    private final int[][] maskCompoundCdfs;
+
+    /// The mutable wedge-vs-segment compound CDFs.
+    private final int[][] wedgeCompoundCdfs;
+
     /// The mutable inter-intra enable CDFs.
     private final int[][] interIntraCdfs;
 
@@ -1238,6 +1280,9 @@ public final class CdfContext {
     /// @param singleInterReferenceMvCdfs the mutable single-reference reference-motion-vector CDFs
     /// @param drlCdfs the mutable dynamic-reference-list selection CDFs
     /// @param compoundInterModeCdfs the mutable compound inter-mode CDFs
+    /// @param jointCompoundCdfs the mutable joint-compound selection CDFs
+    /// @param maskCompoundCdfs the mutable masked-compound selection CDFs
+    /// @param wedgeCompoundCdfs the mutable wedge-vs-segment compound CDFs
     /// @param interIntraCdfs the mutable inter-intra enable CDFs
     /// @param interIntraModeCdfs the mutable inter-intra prediction-mode CDFs
     /// @param interIntraWedgeCdfs the mutable inter-intra wedge enable CDFs
@@ -1297,6 +1342,9 @@ public final class CdfContext {
             int[][] singleInterReferenceMvCdfs,
             int[][] drlCdfs,
             int[][] compoundInterModeCdfs,
+            int[][] jointCompoundCdfs,
+            int[][] maskCompoundCdfs,
+            int[][] wedgeCompoundCdfs,
             int[][] interIntraCdfs,
             int[][] interIntraModeCdfs,
             int[][] interIntraWedgeCdfs,
@@ -1356,6 +1404,9 @@ public final class CdfContext {
         this.singleInterReferenceMvCdfs = Objects.requireNonNull(singleInterReferenceMvCdfs, "singleInterReferenceMvCdfs");
         this.drlCdfs = Objects.requireNonNull(drlCdfs, "drlCdfs");
         this.compoundInterModeCdfs = Objects.requireNonNull(compoundInterModeCdfs, "compoundInterModeCdfs");
+        this.jointCompoundCdfs = Objects.requireNonNull(jointCompoundCdfs, "jointCompoundCdfs");
+        this.maskCompoundCdfs = Objects.requireNonNull(maskCompoundCdfs, "maskCompoundCdfs");
+        this.wedgeCompoundCdfs = Objects.requireNonNull(wedgeCompoundCdfs, "wedgeCompoundCdfs");
         this.interIntraCdfs = Objects.requireNonNull(interIntraCdfs, "interIntraCdfs");
         this.interIntraModeCdfs = Objects.requireNonNull(interIntraModeCdfs, "interIntraModeCdfs");
         this.interIntraWedgeCdfs = Objects.requireNonNull(interIntraWedgeCdfs, "interIntraWedgeCdfs");
@@ -1424,6 +1475,9 @@ public final class CdfContext {
                 deepCopy(DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS),
                 deepCopy(DEFAULT_DRL_CDFS),
                 deepCopy(DEFAULT_COMPOUND_INTER_MODE_CDFS),
+                deepCopy(DEFAULT_JOINT_COMPOUND_CDFS),
+                deepCopy(DEFAULT_MASK_COMPOUND_CDFS),
+                deepCopy(DEFAULT_WEDGE_COMPOUND_CDFS),
                 deepCopy(DEFAULT_INTER_INTRA_CDFS),
                 deepCopy(DEFAULT_INTER_INTRA_MODE_CDFS),
                 deepCopy(DEFAULT_INTER_INTRA_WEDGE_CDFS),
@@ -1490,6 +1544,9 @@ public final class CdfContext {
                 deepCopy(singleInterReferenceMvCdfs),
                 deepCopy(drlCdfs),
                 deepCopy(compoundInterModeCdfs),
+                deepCopy(jointCompoundCdfs),
+                deepCopy(maskCompoundCdfs),
+                deepCopy(wedgeCompoundCdfs),
                 deepCopy(interIntraCdfs),
                 deepCopy(interIntraModeCdfs),
                 deepCopy(interIntraWedgeCdfs),
@@ -1655,6 +1712,30 @@ public final class CdfContext {
     /// @return the live mutable compound inter-mode CDF for the supplied context index
     public int[] mutableCompoundInterModeCdf(int context) {
         return compoundInterModeCdfs[Objects.checkIndex(context, compoundInterModeCdfs.length)];
+    }
+
+    /// Returns the live mutable joint-compound selection CDF for the supplied context index.
+    ///
+    /// @param context the zero-based joint-compound context index in `[0, 6)`
+    /// @return the live mutable joint-compound selection CDF for the supplied context index
+    public int[] mutableJointCompoundCdf(int context) {
+        return jointCompoundCdfs[Objects.checkIndex(context, jointCompoundCdfs.length)];
+    }
+
+    /// Returns the live mutable masked-compound selection CDF for the supplied context index.
+    ///
+    /// @param context the zero-based masked-compound context index in `[0, 6)`
+    /// @return the live mutable masked-compound selection CDF for the supplied context index
+    public int[] mutableMaskCompoundCdf(int context) {
+        return maskCompoundCdfs[Objects.checkIndex(context, maskCompoundCdfs.length)];
+    }
+
+    /// Returns the live mutable wedge-vs-segment compound CDF for the supplied context index.
+    ///
+    /// @param context the zero-based wedge context index in `[0, 9)`
+    /// @return the live mutable wedge-vs-segment compound CDF for the supplied context index
+    public int[] mutableWedgeCompoundCdf(int context) {
+        return wedgeCompoundCdfs[Objects.checkIndex(context, wedgeCompoundCdfs.length)];
     }
 
     /// Returns the live mutable inter-intra enable CDF for the supplied context index.
