@@ -67,7 +67,7 @@ public final class FramePostprocessor {
     ) {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
-        DecodedPlanes afterLoopFilter = loopFilterApplier.apply(checkedDecodedPlanes, checkedFrameHeader.loopFilter());
+        DecodedPlanes afterLoopFilter = loopFilterApplier.apply(checkedDecodedPlanes, checkedFrameHeader, syntaxDecodeResult);
         DecodedPlanes afterCdef = cdefApplier.apply(afterLoopFilter, checkedFrameHeader.cdef(), syntaxDecodeResult);
         return restorationApplier.apply(afterCdef, checkedFrameHeader.restoration());
     }

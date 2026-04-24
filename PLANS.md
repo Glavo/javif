@@ -49,15 +49,16 @@ Supported end-to-end behavior:
   combined `FRAME` input, including `allow_intrabc` frame-header parsing, decoded same-frame-copy
   leaf coverage, and luma/chroma copy validation against a pre-copy same-frame oracle.
 - Postfilter ordering now runs reconstruction -> loop filter -> CDEF -> restoration -> stored
-  reference surface, with inactive loop filter/restoration preserved exactly, block-indexed CDEF
-  applied from decoded `cdefIndex` syntax and frame strengths, active loop filter/restoration
-  rejected as stable `NOT_IMPLEMENTED`, and film grain kept as presentation-only output synthesis.
+  reference surface, with inactive loop filtering/restoration preserved exactly, active loop
+  filtering applied from decoded block and transform edges, block-indexed CDEF applied from decoded
+  `cdefIndex` syntax and frame strengths, active restoration rejected as stable `NOT_IMPLEMENTED`,
+  and film grain kept as presentation-only output synthesis.
 
 ## Remaining Decode Boundary
 
-- Active loop-filter and loop-restoration pixel filtering still need full block-edge masks,
-  restoration-unit syntax, and coefficient-driven filtering before those frame features can decode
-  instead of failing at the stable `NOT_IMPLEMENTED` boundary.
+- Active loop-restoration pixel filtering still needs restoration-unit syntax and
+  coefficient-driven WIENER/SGRPROJ filtering before those frame features can decode instead of
+  failing at the stable `NOT_IMPLEMENTED` boundary.
 
 ## Stable Contracts
 
@@ -72,8 +73,7 @@ The following contracts are stable and should be preserved:
 
 ## Main Work Priority
 
-1. Implement active loop-filter and loop-restoration pixel filtering once the required syntax
-   state is represented.
+1. Implement active loop-restoration syntax and coefficient-driven WIENER/SGRPROJ filtering.
 2. Broaden decoded real-stream coverage around the completed inter/reference subset.
 
 ## Exit Criteria

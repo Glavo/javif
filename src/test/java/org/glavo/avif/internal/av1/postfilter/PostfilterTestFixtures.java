@@ -256,6 +256,149 @@ final class PostfilterTestFixtures {
         );
     }
 
+    /// Creates a two-leaf syntax result split on the vertical 4x4 boundary.
+    ///
+    /// @param frameHeader the frame header that owns the syntax result
+    /// @param leftCdefIndex the decoded CDEF index for the left leaf
+    /// @param rightCdefIndex the decoded CDEF index for the right leaf
+    /// @return a two-leaf syntax result split on the vertical 4x4 boundary
+    static FrameSyntaxDecodeResult createVerticalSplitLeafSyntaxResult(
+            FrameHeader frameHeader,
+            int leftCdefIndex,
+            int rightCdefIndex
+    ) {
+        TilePartitionTreeReader.LeafNode leftLeaf = createLeaf(
+                new BlockPosition(0, 0),
+                BlockSize.SIZE_4X8,
+                leftCdefIndex,
+                TransformSize.RTX_4X8,
+                new TransformUnit[]{
+                        new TransformUnit(new BlockPosition(0, 0), TransformSize.TX_4X4),
+                        new TransformUnit(new BlockPosition(0, 1), TransformSize.TX_4X4)
+                }
+        );
+        TilePartitionTreeReader.LeafNode rightLeaf = createLeaf(
+                new BlockPosition(1, 0),
+                BlockSize.SIZE_4X8,
+                rightCdefIndex,
+                TransformSize.RTX_4X8,
+                new TransformUnit[]{
+                        new TransformUnit(new BlockPosition(1, 0), TransformSize.TX_4X4),
+                        new TransformUnit(new BlockPosition(1, 1), TransformSize.TX_4X4)
+                }
+        );
+        FrameAssembly assembly = new FrameAssembly(createSequenceHeader(), frameHeader, 0, 0);
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{{leftLeaf, rightLeaf}},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one intra leaf with caller-supplied transform coverage.
+    ///
+    /// @param position the leaf position in luma 4x4 units
+    /// @param blockSize the decoded block size
+    /// @param cdefIndex the decoded CDEF index
+    /// @param maxLumaTransformSize the maximum luma transform size for the leaf
+    /// @param lumaUnits the luma transform units that cover the leaf
+    /// @return one intra leaf with caller-supplied transform coverage
+    private static TilePartitionTreeReader.LeafNode createLeaf(
+            BlockPosition position,
+            BlockSize blockSize,
+            int cdefIndex,
+            TransformSize maxLumaTransformSize,
+            TransformUnit[] lumaUnits
+    ) {
+        TileBlockHeaderReader.BlockHeader blockHeader = createIntraBlockHeader(position, blockSize, cdefIndex);
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                blockSize.width4(),
+                blockSize.height4(),
+                blockSize.widthPixels(),
+                blockSize.heightPixels(),
+                maxLumaTransformSize,
+                null,
+                lumaUnits.length > 1,
+                lumaUnits
+        );
+        return new TilePartitionTreeReader.LeafNode(
+                blockHeader,
+                transformLayout,
+                new ResidualLayout(position, blockSize, createResidualUnits(lumaUnits))
+        );
+    }
+
+    /// Creates one decoded intra block header for postfilter tests.
+    ///
+    /// @param position the block position in luma 4x4 units
+    /// @param blockSize the decoded block size
+    /// @param cdefIndex the decoded CDEF index
+    /// @return one decoded intra block header for postfilter tests
+    private static TileBlockHeaderReader.BlockHeader createIntraBlockHeader(
+            BlockPosition position,
+            BlockSize blockSize,
+            int cdefIndex
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                null,
+                null,
+                -1,
+                null,
+                null,
+                false,
+                0,
+                cdefIndex,
+                0,
+                new int[4],
+                LumaIntraPredictionMode.DC,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
+    /// Creates zeroed residual units that match decoded transform coverage.
+    ///
+    /// @param transformUnits the transform units to mirror
+    /// @return zeroed residual units that match decoded transform coverage
+    private static TransformResidualUnit[] createResidualUnits(TransformUnit[] transformUnits) {
+        TransformResidualUnit[] residualUnits = new TransformResidualUnit[transformUnits.length];
+        for (int index = 0; index < transformUnits.length; index++) {
+            TransformUnit transformUnit = transformUnits[index];
+            TransformSize transformSize = transformUnit.size();
+            residualUnits[index] = new TransformResidualUnit(
+                    transformUnit.position(),
+                    transformSize,
+                    -1,
+                    new int[transformSize.widthPixels() * transformSize.heightPixels()],
+                    0
+            );
+        }
+        return residualUnits;
+    }
+
     /// Creates one immutable decoded plane from row-major integer samples.
     ///
     /// @param samples the row-major integer samples

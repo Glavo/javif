@@ -186,7 +186,61 @@ final class FramePostprocessorTest {
         assertTrue(exception.getMessage().contains("CDEF"));
     }
 
-    /// Verifies that active loop filtering remains a stable explicit unsupported boundary.
+    /// Verifies that active loop filtering uses decoded block and transform edges.
+    @Test
+    void postprocessAppliesActiveLoopFilterFromDecodedEdges() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                PixelFormat.I400,
+                new int[][]{
+                        {40, 40, 40, 40, 44, 44, 44, 44},
+                        {40, 40, 40, 40, 44, 44, 44, 44},
+                        {40, 40, 40, 40, 44, 44, 44, 44},
+                        {40, 40, 40, 40, 44, 44, 44, 44},
+                        {40, 40, 40, 40, 44, 44, 44, 44},
+                        {40, 40, 40, 40, 44, 44, 44, 44},
+                        {40, 40, 40, 40, 44, 44, 44, 44},
+                        {40, 40, 40, 40, 44, 44, 44, 44}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                PixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{12, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{0, 0, 0, 0, 0, 0, 0, 0},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult =
+                PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(frameHeader, 0, 0);
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertNotSame(decodedPlanes, postprocessed);
+        assertTrue(postprocessed.lumaPlane().sample(3, 3) > decodedPlanes.lumaPlane().sample(3, 3));
+        assertTrue(postprocessed.lumaPlane().sample(4, 3) < decodedPlanes.lumaPlane().sample(4, 3));
+        assertEquals(40, decodedPlanes.lumaPlane().sample(3, 3));
+        assertEquals(44, decodedPlanes.lumaPlane().sample(4, 3));
+    }
+
+    /// Verifies that active loop filtering fails explicitly when decoded block edges are unavailable.
     @Test
     void postprocessRejectsActiveLoopFilter() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
