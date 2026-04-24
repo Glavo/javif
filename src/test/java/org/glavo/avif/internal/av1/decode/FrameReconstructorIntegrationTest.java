@@ -90,6 +90,10 @@ final class FrameReconstructorIntegrationTest {
     private static final String FRAME_RECONSTRUCTOR_FIXTURE_RESOURCE_PATH =
             "av1/fixtures/generated/frame-reconstructor-integration-fixtures.txt";
 
+    /// The generated named-fixture resource backing deterministic tile-block-header payloads.
+    private static final String TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH =
+            "av1/fixtures/generated/tile-block-header-fixtures.txt";
+
     /// The top-left `8x8` luma block produced by the current legacy directional still-picture fixture.
     private static final int[][] LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8 = {
             {127, 128, 128, 128, 128, 128, 128, 128},
@@ -1263,6 +1267,152 @@ final class FrameReconstructorIntegrationTest {
         assertPlaneBlockEquals(requirePlane(decodedPlanes.chromaVPlane()), chromaOriginX, chromaOriginY, expectedChromaVSamples);
     }
 
+    /// Verifies that the generated real `intrabc` payload reconstructs one monochrome leaf through
+    /// the current bitstream-derived same-frame copy path.
+    @Test
+    void reconstructsBitstreamDerivedI400IntrabcLeafFromGeneratedHeaderFixture() {
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I400);
+    }
+
+    /// Verifies that the generated real `intrabc` payload reconstructs one `I420` leaf through the
+    /// current bitstream-derived same-frame copy path.
+    @Test
+    void reconstructsBitstreamDerivedI420IntrabcLeafFromGeneratedHeaderFixture() {
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I420);
+    }
+
+    /// Verifies that the generated real `intrabc` payload reconstructs one `I422` leaf through the
+    /// current bitstream-derived same-frame copy path.
+    @Test
+    void reconstructsBitstreamDerivedI422IntrabcLeafFromGeneratedHeaderFixture() {
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I422);
+    }
+
+    /// Verifies that the generated real `intrabc` payload reconstructs one `I444` leaf through the
+    /// current bitstream-derived same-frame copy path.
+    @Test
+    void reconstructsBitstreamDerivedI444IntrabcLeafFromGeneratedHeaderFixture() {
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I444);
+    }
+
+    /// Asserts that the generated real `intrabc` payload reconstructs one same-frame-copy leaf
+    /// exactly against the current bilinear sampling oracle for one requested pixel format.
+    ///
+    /// @param pixelFormat the decoded chroma layout to cover
+    private static void assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat pixelFormat) {
+        byte[] payload = readTileBlockHeaderFixture("intrabc");
+        BlockPosition targetPosition = new BlockPosition(4, 0);
+        int codedWidth = 24;
+        int codedHeight = 8;
+        TilePartitionTreeReader.LeafNode sourceLeaf0 = createIntrabcSourceLeaf(pixelFormat, new BlockPosition(0, 0));
+        TilePartitionTreeReader.LeafNode sourceLeaf1 = createIntrabcSourceLeaf(pixelFormat, new BlockPosition(2, 0));
+        TilePartitionTreeReader.LeafNode decodedLeaf = decodeIntrabcEnabledLeafFromPayload(
+                pixelFormat,
+                payload,
+                targetPosition,
+                BlockSize.SIZE_8X8,
+                codedWidth,
+                codedHeight,
+                FrameHeader.TransformMode.LARGEST
+        );
+
+        assertFalse(decodedLeaf.header().intra());
+        assertTrue(decodedLeaf.header().useIntrabc());
+        assertEquals(LumaIntraPredictionMode.DC, decodedLeaf.header().yMode());
+        if (pixelFormat == PixelFormat.I400) {
+            assertNull(decodedLeaf.header().uvMode());
+        } else {
+            assertEquals(UvIntraPredictionMode.DC, decodedLeaf.header().uvMode());
+        }
+
+        MotionVector motionVector = new MotionVector(0, -36);
+        TilePartitionTreeReader.LeafNode bridgedLeaf = new TilePartitionTreeReader.LeafNode(
+                copyBlockHeaderWithPrimaryMotionVector(decodedLeaf.header(), motionVector),
+                decodedLeaf.transformLayout(),
+                decodedLeaf.residualLayout()
+        );
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = clearDecodedLeafResiduals(bridgedLeaf);
+        FrameAssembly assembly = createIntrabcEnabledAssembly(
+                pixelFormat,
+                new byte[0],
+                codedWidth,
+                codedHeight,
+                FrameHeader.TransformMode.LARGEST
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes baselinePlanes = reconstructor.reconstruct(
+                createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1}),
+                new ReferenceSurfaceSnapshot[0]
+        );
+        DecodedPlanes zeroResidualPlanes = reconstructor.reconstruct(
+                createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, zeroResidualLeaf}),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        int lumaOriginX = zeroResidualLeaf.header().position().x4() << 2;
+        int lumaOriginY = zeroResidualLeaf.header().position().y4() << 2;
+        int visibleLumaWidth = zeroResidualLeaf.transformLayout().visibleWidthPixels();
+        int visibleLumaHeight = zeroResidualLeaf.transformLayout().visibleHeightPixels();
+        int[][] expectedLumaSamples = sampleReferencePlaneBlockBilinearly(
+                baselinePlanes.lumaPlane(),
+                visibleLumaWidth,
+                visibleLumaHeight,
+                lumaOriginX * 4 + motionVector.columnQuarterPel(),
+                lumaOriginY * 4 + motionVector.rowQuarterPel(),
+                4,
+                4
+        );
+
+        assertEquals(pixelFormat, zeroResidualPlanes.pixelFormat());
+        assertPlaneBlockEquals(zeroResidualPlanes.lumaPlane(), lumaOriginX, lumaOriginY, expectedLumaSamples);
+
+        if (pixelFormat == PixelFormat.I400) {
+            assertNull(zeroResidualPlanes.chromaUPlane());
+            assertNull(zeroResidualPlanes.chromaVPlane());
+        } else {
+            int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+            int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+            int chromaOriginX = lumaOriginX >> chromaSubsamplingX;
+            int chromaOriginY = lumaOriginY >> chromaSubsamplingY;
+            int visibleChromaWidth = ceilDivideByPowerOfTwo(visibleLumaWidth, chromaSubsamplingX);
+            int visibleChromaHeight = ceilDivideByPowerOfTwo(visibleLumaHeight, chromaSubsamplingY);
+            int chromaDenominatorX = 4 << chromaSubsamplingX;
+            int chromaDenominatorY = 4 << chromaSubsamplingY;
+            int[][] expectedChromaUSamples = sampleReferencePlaneBlockBilinearly(
+                    requirePlane(baselinePlanes.chromaUPlane()),
+                    visibleChromaWidth,
+                    visibleChromaHeight,
+                    chromaOriginX * chromaDenominatorX + motionVector.columnQuarterPel(),
+                    chromaOriginY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                    chromaDenominatorX,
+                    chromaDenominatorY
+            );
+            int[][] expectedChromaVSamples = sampleReferencePlaneBlockBilinearly(
+                    requirePlane(baselinePlanes.chromaVPlane()),
+                    visibleChromaWidth,
+                    visibleChromaHeight,
+                    chromaOriginX * chromaDenominatorX + motionVector.columnQuarterPel(),
+                    chromaOriginY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                    chromaDenominatorX,
+                    chromaDenominatorY
+            );
+            assertPlaneBlockEquals(requirePlane(zeroResidualPlanes.chromaUPlane()), chromaOriginX, chromaOriginY, expectedChromaUSamples);
+            assertPlaneBlockEquals(requirePlane(zeroResidualPlanes.chromaVPlane()), chromaOriginX, chromaOriginY, expectedChromaVSamples);
+        }
+
+        DecodedPlanes decodedPlanes = reconstructor.reconstruct(
+                createSyntheticResult(assembly, new TilePartitionTreeReader.Node[]{sourceLeaf0, sourceLeaf1, bridgedLeaf}),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        assertEquals(pixelFormat, decodedPlanes.pixelFormat());
+        assertTrue(
+                residualChangesIntrabcTargetBlock(zeroResidualLeaf, zeroResidualPlanes, decodedPlanes, pixelFormat)
+                        || allResidualUnitsZero(decodedLeaf.residualLayout())
+        );
+    }
+
     /// Verifies that one synthetic monochrome compound-reference inter leaf averages two stored
     /// reference surfaces through the frame-reconstructor integration path.
     @Test
@@ -2029,7 +2179,15 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @return one synthetic monochrome leaf that carries one luma palette
     private static TilePartitionTreeReader.LeafNode createMonochromeLeafWithLumaPalette() {
-        BlockPosition position = new BlockPosition(0, 0);
+        return createMonochromeLeafWithLumaPalette(new BlockPosition(0, 0));
+    }
+
+    /// Creates one synthetic positioned monochrome `8x8` leaf that carries one minimal two-entry
+    /// luma palette color map.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @return one synthetic positioned monochrome leaf that carries one luma palette
+    private static TilePartitionTreeReader.LeafNode createMonochromeLeafWithLumaPalette(BlockPosition position) {
         BlockSize blockSize = BlockSize.SIZE_8X8;
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
                 position,
@@ -2075,6 +2233,28 @@ final class FrameReconstructorIntegrationTest {
                 new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_8X8)}
         );
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Creates one synthetic palette-backed source leaf used by same-frame-copy integration tests.
+    ///
+    /// @param pixelFormat the decoded chroma layout to synthesize
+    /// @param position the block origin in 4x4 units
+    /// @return one synthetic palette-backed source leaf for the requested pixel format
+    private static TilePartitionTreeReader.LeafNode createIntrabcSourceLeaf(
+            PixelFormat pixelFormat,
+            BlockPosition position
+    ) {
+        switch (pixelFormat) {
+            case I400:
+                return createMonochromeLeafWithLumaPalette(position);
+            case I420:
+                return createI420LeafWithChromaPalette(position);
+            case I422:
+            case I444:
+                return createWideChromaLeafWithChromaPalette(pixelFormat, position);
+            default:
+                throw new IllegalArgumentException("Unsupported intrabc source pixel format: " + pixelFormat);
+        }
     }
 
     /// Creates one synthetic `I420` `8x8` leaf that carries one minimal two-entry chroma palette
@@ -2148,6 +2328,58 @@ final class FrameReconstructorIntegrationTest {
     /// @return one synthetic wide-chroma leaf that carries one chroma palette
     private static TilePartitionTreeReader.LeafNode createWideChromaLeafWithChromaPalette(
             PixelFormat pixelFormat,
+            BlockPosition position
+    ) {
+        int[] chromaPaletteU;
+        int[] chromaPaletteV;
+        int[][] chromaPaletteIndices;
+        switch (pixelFormat) {
+            case I422:
+                chromaPaletteU = new int[]{48, 176};
+                chromaPaletteV = new int[]{208, 80};
+                chromaPaletteIndices = new int[][]{
+                        {0, 1, 0, 1},
+                        {1, 0, 1, 0},
+                        {0, 1, 1, 0},
+                        {1, 0, 0, 1},
+                        {0, 0, 1, 1},
+                        {1, 1, 0, 0},
+                        {0, 1, 0, 1},
+                        {1, 0, 1, 0}
+                };
+                break;
+            case I444:
+                chromaPaletteU = new int[]{24, 120};
+                chromaPaletteV = new int[]{216, 72};
+                chromaPaletteIndices = new int[][]{
+                        {0, 1, 0, 1, 0, 1, 0, 1},
+                        {1, 0, 1, 0, 1, 0, 1, 0},
+                        {0, 1, 1, 0, 0, 1, 1, 0},
+                        {1, 0, 0, 1, 1, 0, 0, 1},
+                        {0, 0, 1, 1, 0, 0, 1, 1},
+                        {1, 1, 0, 0, 1, 1, 0, 0},
+                        {0, 1, 0, 1, 1, 0, 1, 0},
+                        {1, 0, 1, 0, 0, 1, 0, 1}
+                };
+                break;
+            default:
+                throw new IllegalArgumentException("Wide-chroma palette helper expects I422 or I444: " + pixelFormat);
+        }
+        return createWideChromaLeafWithChromaPalette(pixelFormat, position, chromaPaletteU, chromaPaletteV, chromaPaletteIndices);
+    }
+
+    /// Creates one synthetic positioned `I422` or `I444` `8x8` leaf that carries one minimal
+    /// chroma palette color map while leaving luma palette mode disabled.
+    ///
+    /// @param pixelFormat the requested wide-chroma layout
+    /// @param position the block origin in 4x4 units
+    /// @param chromaPaletteU the chroma-U palette entries
+    /// @param chromaPaletteV the chroma-V palette entries
+    /// @param chromaPaletteIndices the unpacked chroma palette map in row-major order
+    /// @return one synthetic positioned wide-chroma leaf that carries one chroma palette
+    private static TilePartitionTreeReader.LeafNode createWideChromaLeafWithChromaPalette(
+            PixelFormat pixelFormat,
+            BlockPosition position,
             int[] chromaPaletteU,
             int[] chromaPaletteV,
             int[][] chromaPaletteIndices
@@ -2155,7 +2387,6 @@ final class FrameReconstructorIntegrationTest {
         if (pixelFormat != PixelFormat.I422 && pixelFormat != PixelFormat.I444) {
             throw new IllegalArgumentException("Wide-chroma palette helper expects I422 or I444: " + pixelFormat);
         }
-        BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_8X8;
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
                 position,
@@ -2201,6 +2432,29 @@ final class FrameReconstructorIntegrationTest {
                 new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_8X8)}
         );
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
+    /// Creates one synthetic `I422` or `I444` `8x8` leaf that carries one minimal chroma palette
+    /// color map while leaving luma palette mode disabled.
+    ///
+    /// @param pixelFormat the requested wide-chroma layout
+    /// @param chromaPaletteU the chroma-U palette entries
+    /// @param chromaPaletteV the chroma-V palette entries
+    /// @param chromaPaletteIndices the unpacked chroma palette map in row-major order
+    /// @return one synthetic wide-chroma leaf that carries one chroma palette
+    private static TilePartitionTreeReader.LeafNode createWideChromaLeafWithChromaPalette(
+            PixelFormat pixelFormat,
+            int[] chromaPaletteU,
+            int[] chromaPaletteV,
+            int[][] chromaPaletteIndices
+    ) {
+        return createWideChromaLeafWithChromaPalette(
+                pixelFormat,
+                new BlockPosition(0, 0),
+                chromaPaletteU,
+                chromaPaletteV,
+                chromaPaletteIndices
+        );
     }
 
     /// Creates one synthetic `intrabc` leaf that copies one previously reconstructed same-frame
@@ -3030,6 +3284,43 @@ final class FrameReconstructorIntegrationTest {
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
     }
 
+    /// Decodes one `intrabc`-capable leaf from a caller-supplied tile payload using the current
+    /// integration block/transform/residual readers.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload to decode structurally
+    /// @param position the block origin to decode
+    /// @param blockSize the block size to decode
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return one `intrabc`-capable leaf decoded from the supplied tile payload
+    private static TilePartitionTreeReader.LeafNode decodeIntrabcEnabledLeafFromPayload(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            BlockPosition position,
+            BlockSize blockSize,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        TileDecodeContext tileContext = createIntrabcEnabledTileContext(
+                payload,
+                pixelFormat,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, blockSize, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+        return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
+    }
+
     /// Returns whether any residual unit in the supplied array exposes a clipped visible footprint.
     ///
     /// @param residualUnits the residual units to inspect
@@ -3175,6 +3466,52 @@ final class FrameReconstructorIntegrationTest {
             }
         }
         return false;
+    }
+
+    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @return the horizontal chroma subsampling shift
+    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+        switch (pixelFormat) {
+            case I400:
+            case I444:
+                return 0;
+            case I420:
+            case I422:
+                return 1;
+            default:
+                throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
+        }
+    }
+
+    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @return the vertical chroma subsampling shift
+    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+        switch (pixelFormat) {
+            case I400:
+            case I422:
+            case I444:
+                return 0;
+            case I420:
+                return 1;
+            default:
+                throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
+        }
+    }
+
+    /// Divides one visible sample count by `2^shift`, rounding up for clipped footprints.
+    ///
+    /// @param value the visible sample count
+    /// @param shift the power-of-two divisor shift
+    /// @return the ceiling-divided visible sample count
+    private static int ceilDivideByPowerOfTwo(int value, int shift) {
+        if (shift == 0) {
+            return value;
+        }
+        return (value + (1 << shift) - 1) >> shift;
     }
 
     /// Expands one packed palette map to concrete sample values using the same packed-nibble layout
@@ -3620,6 +3957,28 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
+    /// Returns one copy of the supplied decoded leaf with all residual units cleared while
+    /// preserving their original visible footprints.
+    ///
+    /// @param decodedLeaf the decoded leaf to copy
+    /// @return one copy of the supplied decoded leaf with all residual units cleared
+    private static TilePartitionTreeReader.LeafNode clearDecodedLeafResiduals(
+            TilePartitionTreeReader.LeafNode decodedLeaf
+    ) {
+        ResidualLayout residualLayout = decodedLeaf.residualLayout();
+        return new TilePartitionTreeReader.LeafNode(
+                decodedLeaf.header(),
+                decodedLeaf.transformLayout(),
+                createResidualLayout(
+                        residualLayout.position(),
+                        residualLayout.blockSize(),
+                        clearResidualUnits(residualLayout.lumaUnits()),
+                        clearResidualUnits(residualLayout.chromaUUnits()),
+                        clearResidualUnits(residualLayout.chromaVUnits())
+                )
+        );
+    }
+
     /// Returns one copy of the supplied decoded leaf with all chroma residual units cleared while
     /// preserving their original visible footprints.
     ///
@@ -3658,6 +4017,97 @@ final class FrameReconstructorIntegrationTest {
             );
         }
         return clearedUnits;
+    }
+
+    /// Returns whether one reconstructed `intrabc` target block changes after reintroducing the
+    /// decoded residual units on top of the zero-residual same-frame-copy prediction.
+    ///
+    /// @param zeroResidualLeaf the decoded `intrabc` leaf with all residual units cleared
+    /// @param baseline the reconstructed zero-residual prediction baseline
+    /// @param reconstructed the reconstructed output with decoded residual units restored
+    /// @param pixelFormat the decoded chroma layout
+    /// @return whether the visible `intrabc` target block changes after residual reintroduction
+    private static boolean residualChangesIntrabcTargetBlock(
+            TilePartitionTreeReader.LeafNode zeroResidualLeaf,
+            DecodedPlanes baseline,
+            DecodedPlanes reconstructed,
+            PixelFormat pixelFormat
+    ) {
+        int lumaOriginX = zeroResidualLeaf.header().position().x4() << 2;
+        int lumaOriginY = zeroResidualLeaf.header().position().y4() << 2;
+        int visibleLumaWidth = zeroResidualLeaf.transformLayout().visibleWidthPixels();
+        int visibleLumaHeight = zeroResidualLeaf.transformLayout().visibleHeightPixels();
+        if (rasterDiffers(
+                readPlaneBlock(baseline.lumaPlane(), lumaOriginX, lumaOriginY, visibleLumaWidth, visibleLumaHeight),
+                readPlaneBlock(reconstructed.lumaPlane(), lumaOriginX, lumaOriginY, visibleLumaWidth, visibleLumaHeight)
+        )) {
+            return true;
+        }
+        if (pixelFormat == PixelFormat.I400) {
+            return false;
+        }
+
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaOriginX = lumaOriginX >> chromaSubsamplingX;
+        int chromaOriginY = lumaOriginY >> chromaSubsamplingY;
+        int visibleChromaWidth = ceilDivideByPowerOfTwo(visibleLumaWidth, chromaSubsamplingX);
+        int visibleChromaHeight = ceilDivideByPowerOfTwo(visibleLumaHeight, chromaSubsamplingY);
+        return rasterDiffers(
+                readPlaneBlock(
+                        requirePlane(baseline.chromaUPlane()),
+                        chromaOriginX,
+                        chromaOriginY,
+                        visibleChromaWidth,
+                        visibleChromaHeight
+                ),
+                readPlaneBlock(
+                        requirePlane(reconstructed.chromaUPlane()),
+                        chromaOriginX,
+                        chromaOriginY,
+                        visibleChromaWidth,
+                        visibleChromaHeight
+                )
+        ) || rasterDiffers(
+                readPlaneBlock(
+                        requirePlane(baseline.chromaVPlane()),
+                        chromaOriginX,
+                        chromaOriginY,
+                        visibleChromaWidth,
+                        visibleChromaHeight
+                ),
+                readPlaneBlock(
+                        requirePlane(reconstructed.chromaVPlane()),
+                        chromaOriginX,
+                        chromaOriginY,
+                        visibleChromaWidth,
+                        visibleChromaHeight
+                )
+        );
+    }
+
+    /// Reads one decoded-plane block into a row-major integer raster.
+    ///
+    /// @param plane the decoded plane to sample
+    /// @param originX the top-left sample x-coordinate
+    /// @param originY the top-left sample y-coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @return one row-major integer raster copied from the requested block
+    private static int[][] readPlaneBlock(
+            DecodedPlane plane,
+            int originX,
+            int originY,
+            int width,
+            int height
+    ) {
+        int[][] block = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                block[y][x] = plane.sample(originX + x, originY + y);
+            }
+        }
+        return block;
     }
 
     /// Returns one guaranteed-present decoded plane after a non-null assertion.
@@ -4558,6 +5008,49 @@ final class FrameReconstructorIntegrationTest {
         return assembly;
     }
 
+    /// Creates one synthetic single-tile frame assembly whose frame header explicitly enables
+    /// `allow_intrabc` for same-frame copy integration coverage.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the frame transform mode
+    /// @return one synthetic single-tile frame assembly with `intrabc` enabled
+    private static FrameAssembly createIntrabcEnabledAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(
+                pixelFormat,
+                codedWidth,
+                codedHeight,
+                false,
+                SequenceHeader.AdaptiveBoolean.ON
+        );
+        FrameHeader frameHeader = createSyntheticFrameHeader(
+                FrameType.KEY,
+                codedWidth,
+                codedHeight,
+                1,
+                transformMode,
+                true,
+                true
+        );
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+        );
+        return assembly;
+    }
+
     /// Creates one synthetic sequence header for reconstruction integration tests.
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
@@ -4705,6 +5198,36 @@ final class FrameReconstructorIntegrationTest {
             FrameHeader.TransformMode transformMode,
             boolean allowScreenContentTools
     ) {
+        return createSyntheticFrameHeader(
+                frameType,
+                codedWidth,
+                codedHeight,
+                tileColumns,
+                transformMode,
+                allowScreenContentTools,
+                false
+        );
+    }
+
+    /// Creates one synthetic frame header for reconstruction integration tests.
+    ///
+    /// @param frameType the frame type to expose
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param tileColumns the number of horizontal tiles to expose
+    /// @param transformMode the frame transform mode
+    /// @param allowScreenContentTools whether the synthetic frame enables screen-content tools
+    /// @param allowIntrabc whether the synthetic frame enables `allow_intrabc`
+    /// @return one synthetic frame header for reconstruction integration tests
+    private static FrameHeader createSyntheticFrameHeader(
+            FrameType frameType,
+            int codedWidth,
+            int codedHeight,
+            int tileColumns,
+            FrameHeader.TransformMode transformMode,
+            boolean allowScreenContentTools,
+            boolean allowIntrabc
+    ) {
         int[] columnStarts = new int[tileColumns + 1];
         for (int i = 0; i <= tileColumns; i++) {
             columnStarts[i] = i;
@@ -4731,7 +5254,7 @@ final class FrameReconstructorIntegrationTest {
                 new int[]{-1, -1, -1, -1, -1, -1, -1},
                 new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
                 new FrameHeader.SuperResolutionInfo(false, codedWidth),
-                false,
+                allowIntrabc,
                 false,
                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
                 false,
@@ -5212,6 +5735,14 @@ final class FrameReconstructorIntegrationTest {
         return HexFixtureResources.readNamedBytes(FRAME_RECONSTRUCTOR_FIXTURE_RESOURCE_PATH, fixtureName);
     }
 
+    /// Reads one named tile-block-header fixture payload.
+    ///
+    /// @param fixtureName the logical fixture name in `tile-block-header-fixtures.txt`
+    /// @return the decoded tile-block-header fixture payload bytes
+    private static byte[] readTileBlockHeaderFixture(String fixtureName) {
+        return HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH, fixtureName);
+    }
+
     /// Creates one tile-local decode context used by monochrome residual integration helpers.
     ///
     /// @param payload the collected tile entropy payload
@@ -5257,6 +5788,28 @@ final class FrameReconstructorIntegrationTest {
     ) {
         return TileDecodeContext.create(
                 createPaletteEnabledAssembly(pixelFormat, payload, codedWidth, codedHeight, transformMode),
+                0
+        );
+    }
+
+    /// Creates one tile-local decode context with `allow_intrabc` enabled for same-frame copy
+    /// integration fixtures.
+    ///
+    /// @param payload the collected tile entropy payload
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param transformMode the synthetic frame transform mode
+    /// @return one tile-local decode context with `allow_intrabc` enabled
+    private static TileDecodeContext createIntrabcEnabledTileContext(
+            byte[] payload,
+            PixelFormat pixelFormat,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.TransformMode transformMode
+    ) {
+        return TileDecodeContext.create(
+                createIntrabcEnabledAssembly(pixelFormat, payload, codedWidth, codedHeight, transformMode),
                 0
         );
     }

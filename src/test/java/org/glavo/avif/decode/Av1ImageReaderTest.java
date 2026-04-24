@@ -502,6 +502,7 @@ final class Av1ImageReaderTest {
         assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(true);
     }
 
+
     /// Verifies that tile-group OBUs are rejected when no standalone or combined frame header is active.
     @Test
     void readFrameRejectsTileGroupBeforeFrameHeader() {
@@ -1719,6 +1720,7 @@ final class Av1ImageReaderTest {
         });
     }
 
+
     /// Asserts that one standalone `show_existing_frame` header exposes the requested synthetic
     /// stored reference surface through every buffered-input adapter.
     ///
@@ -2826,6 +2828,7 @@ final class Av1ImageReaderTest {
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
+
 
     /// Creates one non-reduced still-picture-compatible `I420` sequence header payload that
     /// enables both `show_existing_frame` and explicit film grain signaling.
