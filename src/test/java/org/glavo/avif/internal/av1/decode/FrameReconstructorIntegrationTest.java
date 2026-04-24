@@ -1712,6 +1712,117 @@ final class FrameReconstructorIntegrationTest {
         assertPlaneEquals(decodedPlanes.lumaPlane(), expectedLuma);
     }
 
+    /// Verifies that one generated real compound-inter payload decodes a non-skip `NEWMV_NEWMV`
+    /// block header and reconstructs by averaging both parsed motion-vector predictions.
+    @Test
+    void reconstructsParsedNewNewCompoundInterLeafFromStoredReferenceSurfaces() {
+        byte[] payload = readTileBlockHeaderFixture("compound-inter-mode");
+        BlockPosition position = new BlockPosition(4, 4);
+        BlockSize blockSize = BlockSize.SIZE_16X16;
+        FrameAssembly assembly = createInterAssembly(PixelFormat.I400, payload, 64, 64, 0, 1);
+        TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        seedInterReferenceNeighborsForParsedCompoundMode(neighborContext);
+        TileBlockHeaderReader.BlockHeader header =
+                reader.read(position, blockSize, neighborContext);
+        InterMotionVector motionVector0 = requireNonNullInterMotionVector(header.motionVector0());
+        InterMotionVector motionVector1 = requireNonNullInterMotionVector(header.motionVector1());
+
+        assertFalse(header.skip());
+        assertFalse(header.skipMode());
+        assertFalse(header.intra());
+        assertTrue(header.compoundReference());
+        assertEquals(0, header.referenceFrame0());
+        assertEquals(1, header.referenceFrame1());
+        assertEquals(CompoundInterPredictionMode.NEWMV_NEWMV, header.compoundInterMode());
+        assertEquals(new MotionVector(8, -2), motionVector0.vector());
+        assertEquals(new MotionVector(0, 4), motionVector1.vector());
+        assertTrue(motionVector0.resolved());
+        assertTrue(motionVector1.resolved());
+
+        TransformSize lumaTransformSize = TransformSize.TX_16X16;
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                header,
+                new TransformLayout(
+                        position,
+                        blockSize,
+                        blockSize.width4(),
+                        blockSize.height4(),
+                        lumaTransformSize,
+                        null,
+                        false,
+                        new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+                ),
+                createResidualLayout(
+                        position,
+                        blockSize,
+                        new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)}
+                )
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
+
+        DecodedPlane referenceLumaPlane0 = createGradientPlane(64, 64, 11, 3, 5);
+        DecodedPlane referenceLumaPlane1 = createGradientPlane(64, 64, 211, -2, -4);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                64,
+                64,
+                referenceLumaPlane0,
+                null,
+                null
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                64,
+                64,
+                referenceLumaPlane1,
+                null,
+                null
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                syntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        int lumaOriginX = position.x4() << 2;
+        int lumaOriginY = position.y4() << 2;
+        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertFalse(decodedPlanes.hasChroma());
+        assertPlaneBlockEquals(
+                decodedPlanes.lumaPlane(),
+                lumaOriginX,
+                lumaOriginY,
+                InterPredictionOracle.averageBlocks(
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceLumaPlane0,
+                                blockSize.widthPixels(),
+                                blockSize.heightPixels(),
+                                lumaOriginX * 4 + motionVector0.vector().columnQuarterPel(),
+                                lumaOriginY * 4 + motionVector0.vector().rowQuarterPel(),
+                                4,
+                                4,
+                                blockSize.widthPixels(),
+                                blockSize.heightPixels(),
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                        ),
+                        InterPredictionOracle.sampleReferencePlaneBlock(
+                                referenceLumaPlane1,
+                                blockSize.widthPixels(),
+                                blockSize.heightPixels(),
+                                lumaOriginX * 4 + motionVector1.vector().columnQuarterPel(),
+                                lumaOriginY * 4 + motionVector1.vector().rowQuarterPel(),
+                                4,
+                                4,
+                                blockSize.widthPixels(),
+                                blockSize.heightPixels(),
+                                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                        )
+                )
+        );
+    }
+
     /// Verifies that one synthetic `I420` compound-reference inter leaf reconstructs through one
     /// switchable frame header by averaging two dual-filter subpel predictions.
     @Test
@@ -5888,7 +5999,8 @@ final class FrameReconstructorIntegrationTest {
     }
 
     /// Creates one synthetic inter frame header for reference-surface reconstruction tests with
-    /// two stored references and one caller-supplied subpel filter.
+    /// two stored references, switchable compound-reference syntax, and one caller-supplied
+    /// subpel filter.
     ///
     /// @param codedWidth the coded and rendered frame width
     /// @param codedHeight the coded and rendered frame height
@@ -5971,7 +6083,7 @@ final class FrameReconstructorIntegrationTest {
                         0
                 ),
                 FrameHeader.TransformMode.LARGEST,
-                false,
+                true,
                 false,
                 false,
                 new int[]{-1, -1},
@@ -6110,6 +6222,79 @@ final class FrameReconstructorIntegrationTest {
     /// @return the decoded tile-block-header fixture payload bytes
     private static byte[] readTileBlockHeaderFixture(String fixtureName) {
         return HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH, fixtureName);
+    }
+
+    /// Seeds the neighbor context used by the generated compound-inter payload so the block at
+    /// `(4, 4)` observes the same reference and motion-vector stack as the block-header fixture.
+    ///
+    /// @param neighborContext the mutable neighbor context to seed before reading the target block
+    private static void seedInterReferenceNeighborsForParsedCompoundMode(BlockNeighborContext neighborContext) {
+        neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(8, -4)),
+                null,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
+        neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+                0,
+                4,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(new MotionVector(12, 4)),
+                InterMotionVector.predicted(new MotionVector(-8, 16)),
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        ));
     }
 
     /// Creates one tile-local decode context used by monochrome residual integration helpers.

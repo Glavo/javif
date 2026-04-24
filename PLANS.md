@@ -36,8 +36,9 @@ Supported end-to-end behavior:
   to final block vectors, `refmvs` direct/secondary/top-right/top-left/temporal candidates with
   symmetric single/compound reference matching, multi-sample temporal fringe probing, and
   projected/scaled previous-frame temporal motion fields, parsed skip-mode compound reconstruction
-  against two stored reference surfaces, and normative horizontal super-resolution for key/intra,
-  public still-picture, synthetic inter, and bitstream-derived inter reconstruction paths.
+  against two stored reference surfaces, generated real `NEWMV_NEWMV` compound-inter payloads
+  reconstructed against parsed dual motion vectors, and normative horizontal super-resolution for
+  key/intra, public still-picture, synthetic inter, and bitstream-derived inter reconstruction paths.
 - Self-contained parsed-stream inter public-reader paths for standalone and combined `FRAME`
   inputs across `I420/I422/I444`, backed by a preceding parsed reference frame rather than injected
   parser metadata.
@@ -55,7 +56,6 @@ Supported end-to-end behavior:
 - Motion-compensation coverage still needs inter-intra prediction.
 - Motion-compensation coverage still needs masked compound prediction.
 - Motion-compensation coverage still needs OBMC.
-- Motion-compensation coverage still needs broader real parsed compound streams.
 - Active loop-filter and loop-restoration pixel filtering still need full block-edge masks,
   restoration-unit syntax, and coefficient-driven filtering before those frame features can decode
   instead of failing at the stable `NOT_IMPLEMENTED` boundary.
