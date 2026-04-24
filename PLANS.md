@@ -2,12 +2,8 @@
 
 ## Summary
 
-This file is no longer organized as multiple named tracks.
-
-That structure was useful earlier, when several major workstreams were open in parallel. The
-current state is different: most of the decoder foundation is already complete, and the remaining
-work is now concentrated in one main area, the reconstruction core and the real-stream coverage
-that proves it.
+Most of the decoder foundation is already complete. The remaining work is now concentrated in one
+main area: the reconstruction core and the real-stream coverage that proves it.
 
 The repository already has:
 
@@ -104,7 +100,7 @@ Everything outside that subset must continue to fail explicitly with a stable
   are still incomplete.
 - `I422/I444` now have direct parsed still-picture output and stored-surface reuse, but still lack
   broader real parsed-stream fixture coverage beyond the current minimal subset.
-- The next practical public decode gaps are no longer basic directional intra. They are now:
+- The next practical public decode gaps are:
   - broader chroma residual coverage
   - broader palette coverage
   - broader `intrabc`
@@ -150,15 +146,13 @@ The syntax front end is effectively complete for the current rollout:
 - stored CDF state
 - stored temporal-motion state
 
-Future syntax fixes should be driven by specific remaining reconstruction needs, not by reopening a
-separate syntax-only workstream.
+Future syntax fixes should be driven by specific remaining reconstruction needs.
 
 ### Frame Header and Film Grain Parameters
 
 Frame-header grain parsing and normalized storage are complete.
 
-Remaining grain work is no longer parser work. It belongs to presentation fidelity and synthesis
-behavior.
+Remaining grain work belongs to presentation fidelity and synthesis behavior.
 
 ### Postfilter and Grain Ordering
 
@@ -219,7 +213,7 @@ streams without falling back to `NOT_IMPLEMENTED`.
 
 ### Already In Place
 
-- decoded-plane storage and the original first-pixel key/intra path
+- decoded-plane storage and the first-pixel key/intra path
 - direct parsed high-bit-depth still-picture subset:
   - `10-bit I420`
   - `12-bit I444`
@@ -307,4 +301,4 @@ It should describe:
 - what is still blocked
 - what the next highest-value work is
 
-It should not drift back into a historical changelog or a from-scratch port blueprint.
+It should not drift into a changelog or speculative redesign document.
