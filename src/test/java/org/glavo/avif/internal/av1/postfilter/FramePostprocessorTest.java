@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -278,7 +279,104 @@ final class FramePostprocessorTest {
         assertTrue(exception.getMessage().contains("loop filtering"));
     }
 
-    /// Verifies that active loop restoration remains a stable explicit unsupported boundary.
+    /// Verifies that active Wiener loop restoration uses decoded restoration-unit coefficients.
+    @Test
+    void postprocessAppliesActiveWienerRestorationFromDecodedUnit() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                PixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 96, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                PixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.WIENER,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        6,
+                        6
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(
+                frameHeader,
+                0,
+                RestorationUnit.wiener(new int[][]{
+                        {0, 0, 20},
+                        {0, 0, 0}
+                })
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertNotSame(decodedPlanes, postprocessed);
+        assertTrue(postprocessed.lumaPlane().sample(3, 3) < 96);
+        assertTrue(postprocessed.lumaPlane().sample(3, 3) > 32);
+        assertEquals(96, decodedPlanes.lumaPlane().sample(3, 3));
+    }
+
+    /// Verifies that active self-guided loop restoration uses decoded restoration-unit coefficients.
+    @Test
+    void postprocessAppliesActiveSelfGuidedRestorationFromDecodedUnit() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                PixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 96, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                PixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.SELF_GUIDED,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        6,
+                        6
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(
+                frameHeader,
+                0,
+                RestorationUnit.selfGuided(0, new int[]{31, 31})
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertNotSame(decodedPlanes, postprocessed);
+        assertTrue(postprocessed.lumaPlane().sample(3, 3) < 96);
+        assertTrue(postprocessed.lumaPlane().sample(3, 3) > 32);
+        assertEquals(96, decodedPlanes.lumaPlane().sample(3, 3));
+    }
+
+    /// Verifies that active loop restoration fails explicitly when decoded restoration units are unavailable.
     @Test
     void postprocessRejectsActiveRestoration() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(

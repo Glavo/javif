@@ -51,14 +51,14 @@ Supported end-to-end behavior:
 - Postfilter ordering now runs reconstruction -> loop filter -> CDEF -> restoration -> stored
   reference surface, with inactive loop filtering/restoration preserved exactly, active loop
   filtering applied from decoded block and transform edges, block-indexed CDEF applied from decoded
-  `cdefIndex` syntax and frame strengths, active restoration rejected as stable `NOT_IMPLEMENTED`,
-  and film grain kept as presentation-only output synthesis.
+  `cdefIndex` syntax and frame strengths, active loop-restoration unit syntax decoded per
+  superblock, coefficient-driven WIENER/SGRPROJ restoration applied per decoded unit, and film
+  grain kept as presentation-only output synthesis.
 
 ## Remaining Decode Boundary
 
-- Active loop-restoration pixel filtering still needs restoration-unit syntax and
-  coefficient-driven WIENER/SGRPROJ filtering before those frame features can decode instead of
-  failing at the stable `NOT_IMPLEMENTED` boundary.
+- No active decode boundary is currently listed here. New unsupported syntax should be added here
+  only when it is an intentional stable `NOT_IMPLEMENTED` boundary rather than a transient bug.
 
 ## Stable Contracts
 
@@ -69,12 +69,14 @@ The following contracts are stable and should be preserved:
 - `ReferenceSurfaceSnapshot`: frame header, syntax result, decoded planes, final tile CDF snapshots,
   and projected temporal-motion state for reference reuse.
 - `ResidualLayout`: luma and chroma residual units with explicit transform types.
+- `RestorationUnitMap`: decoded per-plane loop-restoration units and coefficients.
 - `FilmGrainParams`: normalized film grain parameters inside `FrameHeader`.
 
 ## Main Work Priority
 
-1. Implement active loop-restoration syntax and coefficient-driven WIENER/SGRPROJ filtering.
-2. Broaden decoded real-stream coverage around the completed inter/reference subset.
+1. Broaden decoded real-stream coverage around the completed inter/reference and postfilter subsets.
+2. Add exact-oracle fixtures for real streams that exercise active loop filter, CDEF, restoration,
+   super-resolution, and reference refresh together.
 
 ## Exit Criteria
 

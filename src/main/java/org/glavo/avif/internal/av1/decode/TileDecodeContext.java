@@ -60,6 +60,9 @@ public final class TileDecodeContext {
     /// The mutable tile-local block syntax state shared across superblocks.
     private final BlockSyntaxState blockSyntaxState;
 
+    /// The tile-local loop-restoration units decoded from this tile.
+    private final RestorationUnitMap restorationUnitMap;
+
     /// The zero-based tile index within the frame.
     private final int tileIndex;
 
@@ -107,6 +110,7 @@ public final class TileDecodeContext {
     /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
     /// @param blockSyntaxState the mutable tile-local block syntax state shared across superblocks
+    /// @param restorationUnitMap the tile-local loop-restoration units decoded from this tile
     /// @param tileIndex the zero-based tile index within the frame
     /// @param tileRow the zero-based tile row within the frame
     /// @param tileColumn the zero-based tile column within the frame
@@ -129,6 +133,7 @@ public final class TileDecodeContext {
             TemporalMotionField temporalMotionField,
             TemporalMotionField decodedTemporalMotionField,
             BlockSyntaxState blockSyntaxState,
+            RestorationUnitMap restorationUnitMap,
             int tileIndex,
             int tileRow,
             int tileColumn,
@@ -151,6 +156,7 @@ public final class TileDecodeContext {
         this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
         this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
         this.blockSyntaxState = Objects.requireNonNull(blockSyntaxState, "blockSyntaxState");
+        this.restorationUnitMap = Objects.requireNonNull(restorationUnitMap, "restorationUnitMap");
         this.tileIndex = tileIndex;
         this.tileRow = tileRow;
         this.tileColumn = tileColumn;
@@ -256,6 +262,7 @@ public final class TileDecodeContext {
                 effectiveTemporalMotionField,
                 new TemporalMotionField(width8, height8),
                 new BlockSyntaxState(frameHeader.quantization().baseQIndex()),
+                RestorationUnitMap.createEmpty(nonNullAssembly),
                 tileIndex,
                 tileRow,
                 tileColumn,
@@ -340,6 +347,13 @@ public final class TileDecodeContext {
     /// @return the mutable tile-local block syntax state shared across superblocks
     public BlockSyntaxState blockSyntaxState() {
         return blockSyntaxState;
+    }
+
+    /// Returns the tile-local loop-restoration units decoded from this tile.
+    ///
+    /// @return the tile-local loop-restoration units decoded from this tile
+    public RestorationUnitMap restorationUnitMap() {
+        return restorationUnitMap;
     }
 
     /// Returns the zero-based tile index within the frame.

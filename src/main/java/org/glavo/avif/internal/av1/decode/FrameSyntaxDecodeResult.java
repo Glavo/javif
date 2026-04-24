@@ -34,6 +34,9 @@ public final class FrameSyntaxDecodeResult {
     /// The tile-local temporal motion fields produced while decoding the current frame.
     private final TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields;
 
+    /// The decoded frame-level loop-restoration unit syntax.
+    private final RestorationUnitMap restorationUnitMap;
+
     /// The final tile-local CDF contexts produced while decoding the current frame.
     private final CdfContext[] finalTileCdfContexts;
 
@@ -53,6 +56,7 @@ public final class FrameSyntaxDecodeResult {
                 assembly,
                 tileRoots,
                 decodedTemporalMotionFields,
+                RestorationUnitMap.createEmpty(Objects.requireNonNull(assembly, "assembly")),
                 createDefaultTileCdfContexts(Objects.requireNonNull(assembly, "assembly").totalTiles())
         );
     }
@@ -67,6 +71,29 @@ public final class FrameSyntaxDecodeResult {
             FrameAssembly assembly,
             TilePartitionTreeReader.Node[][] tileRoots,
             TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields,
+            CdfContext[] finalTileCdfContexts
+    ) {
+        this(
+                assembly,
+                tileRoots,
+                decodedTemporalMotionFields,
+                RestorationUnitMap.createEmpty(Objects.requireNonNull(assembly, "assembly")),
+                finalTileCdfContexts
+        );
+    }
+
+    /// Creates one structural frame-decode result.
+    ///
+    /// @param assembly the fully assembled frame that was structurally decoded
+    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced while decoding the current frame
+    /// @param restorationUnitMap the decoded frame-level loop-restoration unit syntax
+    /// @param finalTileCdfContexts the final tile-local CDF contexts produced while decoding the current frame
+    public FrameSyntaxDecodeResult(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.Node[][] tileRoots,
+            TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields,
+            RestorationUnitMap restorationUnitMap,
             CdfContext[] finalTileCdfContexts
     ) {
         this.assembly = Objects.requireNonNull(assembly, "assembly");
@@ -96,6 +123,7 @@ public final class FrameSyntaxDecodeResult {
                     "decodedTemporalMotionFields[" + i + "]"
             ).copy();
         }
+        this.restorationUnitMap = Objects.requireNonNull(restorationUnitMap, "restorationUnitMap").copy();
         this.finalTileCdfContexts = new CdfContext[finalTileCdfContexts.length];
         for (int i = 0; i < finalTileCdfContexts.length; i++) {
             this.finalTileCdfContexts[i] = Objects.requireNonNull(finalTileCdfContexts[i], "finalTileCdfContexts[" + i + "]").copy();
@@ -155,6 +183,13 @@ public final class FrameSyntaxDecodeResult {
         return decodedTemporalMotionFields[checkedTileIndex(tileIndex)].copy();
     }
 
+    /// Returns a snapshot of the decoded loop-restoration unit syntax.
+    ///
+    /// @return a snapshot of the decoded loop-restoration unit syntax
+    public RestorationUnitMap restorationUnitMap() {
+        return restorationUnitMap.copy();
+    }
+
     /// Returns a snapshot of the final tile-local CDF contexts for every tile.
     ///
     /// @return a snapshot of the final tile-local CDF contexts for every tile
@@ -182,7 +217,13 @@ public final class FrameSyntaxDecodeResult {
     /// @param replacementTileCdfContexts the replacement final tile-local CDF contexts
     /// @return a copy of this structural frame-decode result with replaced final tile-local CDF contexts
     public FrameSyntaxDecodeResult withFinalTileCdfContexts(CdfContext[] replacementTileCdfContexts) {
-        return new FrameSyntaxDecodeResult(assembly, tileRoots(), decodedTemporalMotionFields(), replacementTileCdfContexts);
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                tileRoots(),
+                decodedTemporalMotionFields(),
+                restorationUnitMap,
+                replacementTileCdfContexts
+        );
     }
 
     /// Validates and returns one tile index.

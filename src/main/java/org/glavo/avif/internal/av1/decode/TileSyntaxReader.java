@@ -40,7 +40,7 @@ import java.util.Objects;
 /// `CdfContext`: partitioning, skip, skip mode, intra/inter, compound and single-reference
 /// selection, inter prediction-mode symbols, inter-intra syntax, `intrabc`, Y/UV intra prediction modes, palette
 /// presence and size signaling, CDEF and delta-q/delta-lf side syntax, motion-vector residuals,
-/// filter intra, angle deltas, and CFL alpha.
+/// loop-restoration unit syntax, filter intra, angle deltas, and CFL alpha.
 @NotNullByDefault
 public final class TileSyntaxReader {
     /// The `mv_joint` symbol that leaves both motion-vector components unchanged.
@@ -51,6 +51,27 @@ public final class TileSyntaxReader {
 
     /// The `mv_joint` bit that signals a vertical motion-vector residual.
     private static final int MOTION_VECTOR_JOINT_VERTICAL = 2;
+
+    /// The Wiener coefficient lower bounds in AV1 coefficient order.
+    private static final int[] WIENER_TAPS_MIN = {-5, -23, -17};
+
+    /// The Wiener coefficient upper bounds in AV1 coefficient order.
+    private static final int[] WIENER_TAPS_MAX = {10, 8, 46};
+
+    /// The Wiener coefficient subexponential `k` parameters in AV1 coefficient order.
+    private static final int[] WIENER_TAPS_K = {1, 2, 3};
+
+    /// The self-guided projection coefficient lower bounds.
+    private static final int[] SELF_GUIDED_PROJECTION_MIN = {-96, -32};
+
+    /// The self-guided projection coefficient upper bounds.
+    private static final int[] SELF_GUIDED_PROJECTION_MAX = {31, 95};
+
+    /// The self-guided projection coefficient subexponential `k` parameter.
+    private static final int SELF_GUIDED_PROJECTION_SUBEXP_K = 4;
+
+    /// The self-guided projection coefficient precision.
+    private static final int SELF_GUIDED_PROJECTION_BITS = 7;
 
     /// The tile-local decode state that owns the mutable decoder and CDF context.
     private final TileDecodeContext tileContext;
@@ -567,6 +588,71 @@ public final class TileSyntaxReader {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableIntrabcCdf());
     }
 
+    /// Decodes one concrete loop-restoration unit type for the supplied frame-level type.
+    ///
+    /// @param frameType the frame-level restoration type for the active plane
+    /// @return one concrete loop-restoration unit type
+    public FrameHeader.RestorationType readRestorationUnitType(FrameHeader.RestorationType frameType) {
+        FrameHeader.RestorationType checkedFrameType = Objects.requireNonNull(frameType, "frameType");
+        return switch (checkedFrameType) {
+            case NONE -> FrameHeader.RestorationType.NONE;
+            case WIENER -> msacDecoder.decodeBooleanAdapt(cdfContext.mutableRestorationWienerCdf())
+                    ? FrameHeader.RestorationType.WIENER
+                    : FrameHeader.RestorationType.NONE;
+            case SELF_GUIDED -> msacDecoder.decodeBooleanAdapt(cdfContext.mutableRestorationSelfGuidedCdf())
+                    ? FrameHeader.RestorationType.SELF_GUIDED
+                    : FrameHeader.RestorationType.NONE;
+            case SWITCHABLE -> switch (msacDecoder.decodeSymbolAdapt(cdfContext.mutableRestorationSwitchableCdf(), 2)) {
+                case 0 -> FrameHeader.RestorationType.NONE;
+                case 1 -> FrameHeader.RestorationType.WIENER;
+                case 2 -> FrameHeader.RestorationType.SELF_GUIDED;
+                default -> throw new IllegalStateException("Unsupported switchable restoration symbol");
+            };
+        };
+    }
+
+    /// Decodes one Wiener coefficient using AV1 restoration subexponential coding.
+    ///
+    /// @param coefficientIndex the Wiener coefficient index in `[0, 3)`
+    /// @param reference the previous reference coefficient for this plane, pass, and coefficient
+    /// @return one decoded Wiener coefficient
+    public int readWienerCoefficient(int coefficientIndex, int reference) {
+        int index = Objects.checkIndex(coefficientIndex, WIENER_TAPS_MIN.length);
+        return readSignedSubexpWithReference(
+                WIENER_TAPS_MIN[index],
+                WIENER_TAPS_MAX[index],
+                WIENER_TAPS_K[index],
+                reference
+        );
+    }
+
+    /// Decodes one self-guided projection coefficient using AV1 restoration subexponential coding.
+    ///
+    /// @param coefficientIndex the projection coefficient index in `[0, 2)`
+    /// @param reference the previous reference coefficient for this plane and coefficient
+    /// @return one decoded self-guided projection coefficient
+    public int readSelfGuidedProjectionCoefficient(int coefficientIndex, int reference) {
+        int index = Objects.checkIndex(coefficientIndex, SELF_GUIDED_PROJECTION_MIN.length);
+        return readSignedSubexpWithReference(
+                SELF_GUIDED_PROJECTION_MIN[index],
+                SELF_GUIDED_PROJECTION_MAX[index],
+                SELF_GUIDED_PROJECTION_SUBEXP_K,
+                reference
+        );
+    }
+
+    /// Returns the derived second self-guided projection coefficient when its filter radius is disabled.
+    ///
+    /// @param firstReference the current first projection coefficient reference
+    /// @return the derived second projection coefficient
+    public int derivedSelfGuidedProjectionCoefficient1(int firstReference) {
+        return clip(
+                (1 << SELF_GUIDED_PROJECTION_BITS) - firstReference,
+                SELF_GUIDED_PROJECTION_MIN[1],
+                SELF_GUIDED_PROJECTION_MAX[1]
+        );
+    }
+
     /// Decodes one inter-frame Y intra prediction mode using the supplied size-context index.
     ///
     /// @param sizeContext the zero-based Y-mode size context in `[0, 4)`
@@ -773,6 +859,27 @@ public final class TileSyntaxReader {
             magnitude = -magnitude;
         }
         return magnitude << resolutionLog2;
+    }
+
+    /// Decodes one signed subexponential value recentered around a reference.
+    ///
+    /// @param minimum the inclusive lower bound
+    /// @param maximum the inclusive upper bound
+    /// @param k the subexponential group width
+    /// @param reference the recentering reference value
+    /// @return the decoded signed subexponential value
+    private int readSignedSubexpWithReference(int minimum, int maximum, int k, int reference) {
+        return minimum + msacDecoder.decodeSubexp(reference - minimum, maximum + 1 - minimum, k);
+    }
+
+    /// Clips one integer into inclusive bounds.
+    ///
+    /// @param value the input value
+    /// @param minimum the inclusive lower bound
+    /// @param maximum the inclusive upper bound
+    /// @return the clipped integer
+    private static int clip(int value, int minimum, int maximum) {
+        return Math.max(minimum, Math.min(value, maximum));
     }
 
     /// Decodes one signed motion-vector component residual.

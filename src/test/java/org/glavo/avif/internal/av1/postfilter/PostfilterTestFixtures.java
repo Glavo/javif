@@ -18,6 +18,8 @@ package org.glavo.avif.internal.av1.postfilter;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.RestorationUnit;
+import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -253,6 +255,29 @@ final class PostfilterTestFixtures {
                 assembly,
                 new TilePartitionTreeReader.Node[][]{{leafNode}},
                 new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
+    /// Creates one single-leaf syntax result with one decoded luma restoration unit.
+    ///
+    /// @param frameHeader the frame header that owns the syntax result
+    /// @param cdefIndex the decoded CDEF index to expose from the leaf
+    /// @param restorationUnit the decoded luma restoration unit
+    /// @return one single-leaf syntax result with one decoded luma restoration unit
+    static FrameSyntaxDecodeResult createSingleLeafSyntaxResult(
+            FrameHeader frameHeader,
+            int cdefIndex,
+            RestorationUnit restorationUnit
+    ) {
+        FrameSyntaxDecodeResult baseResult = createSingleLeafSyntaxResult(frameHeader, cdefIndex);
+        RestorationUnitMap restorationUnitMap = RestorationUnitMap.createEmpty(baseResult.assembly());
+        restorationUnitMap.setUnit(0, 0, 0, restorationUnit);
+        return new FrameSyntaxDecodeResult(
+                baseResult.assembly(),
+                baseResult.tileRoots(),
+                baseResult.decodedTemporalMotionFields(),
+                restorationUnitMap,
+                baseResult.finalTileCdfContexts()
         );
     }
 

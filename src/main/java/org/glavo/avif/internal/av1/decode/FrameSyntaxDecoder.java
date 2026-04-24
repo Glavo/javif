@@ -71,14 +71,22 @@ public final class FrameSyntaxDecoder {
         TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields =
                 new TileDecodeContext.TemporalMotionField[tileCount];
         CdfContext[] finalTileCdfContexts = new CdfContext[tileCount];
+        RestorationUnitMap restorationUnitMap = RestorationUnitMap.createEmpty(nonNullAssembly);
         for (int tileIndex = 0; tileIndex < tileCount; tileIndex++) {
             TileDecodeContext tileContext = createTileContext(nonNullAssembly, tileIndex);
             TilePartitionTreeReader treeReader = new TilePartitionTreeReader(tileContext);
             tileRoots[tileIndex] = treeReader.readTile();
+            restorationUnitMap.mergeFrom(tileContext.restorationUnitMap());
             decodedTemporalMotionFields[tileIndex] = tileContext.decodedTemporalMotionField().copy();
             finalTileCdfContexts[tileIndex] = tileContext.cdfContext().copy();
         }
-        return new FrameSyntaxDecodeResult(nonNullAssembly, tileRoots, decodedTemporalMotionFields, finalTileCdfContexts);
+        return new FrameSyntaxDecodeResult(
+                nonNullAssembly,
+                tileRoots,
+                decodedTemporalMotionFields,
+                restorationUnitMap,
+                finalTileCdfContexts
+        );
     }
 
     /// Creates one tile-local decode context, attaching reference temporal state when it matches.

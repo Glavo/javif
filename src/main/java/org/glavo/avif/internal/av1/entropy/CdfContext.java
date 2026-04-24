@@ -833,6 +833,15 @@ public final class CdfContext {
     /// The transformed default `intrabc` CDF.
     private static final int[] DEFAULT_INTRABC_CDF = inverse(30531);
 
+    /// The transformed default Wiener restoration enable CDF.
+    private static final int[] DEFAULT_RESTORATION_WIENER_CDF = inverse(9984);
+
+    /// The transformed default self-guided restoration enable CDF.
+    private static final int[] DEFAULT_RESTORATION_SELF_GUIDED_CDF = inverse(14199);
+
+    /// The transformed default switchable restoration CDF.
+    private static final int[] DEFAULT_RESTORATION_SWITCHABLE_CDF = inverse(13158, 22885);
+
     /// The transformed default luma intra-mode CDFs.
     private static final int[][] DEFAULT_Y_MODE_CDFS = inverse2d(new int[][]{
             {22801, 23489, 24293, 24756, 25601, 26123, 26606, 27418, 27945, 29228, 29685, 30349},
@@ -1277,6 +1286,15 @@ public final class CdfContext {
     /// The mutable `intrabc` CDF.
     private final int[] intrabcCdf;
 
+    /// The mutable Wiener restoration enable CDF.
+    private final int[] restorationWienerCdf;
+
+    /// The mutable self-guided restoration enable CDF.
+    private final int[] restorationSelfGuidedCdf;
+
+    /// The mutable switchable restoration CDF.
+    private final int[] restorationSwitchableCdf;
+
     /// The mutable luma intra-mode CDFs.
     private final int[][] yModeCdfs;
 
@@ -1372,6 +1390,9 @@ public final class CdfContext {
     /// @param motionVectorClassNFpCdfs the mutable non-class-0 fractional motion-vector CDFs
     /// @param motionVectorClassNHpCdfs the mutable non-class-0 high-precision motion-vector CDFs
     /// @param intrabcCdf the mutable `intrabc` CDF
+    /// @param restorationWienerCdf the mutable Wiener restoration enable CDF
+    /// @param restorationSelfGuidedCdf the mutable self-guided restoration enable CDF
+    /// @param restorationSwitchableCdf the mutable switchable restoration CDF
     /// @param yModeCdfs the mutable luma intra-mode CDFs
     /// @param useFilterIntraCdfs the mutable `use_filter_intra` CDFs
     /// @param filterIntraCdf the mutable filter-intra-mode CDF
@@ -1436,6 +1457,9 @@ public final class CdfContext {
             int[][] motionVectorClassNFpCdfs,
             int[][] motionVectorClassNHpCdfs,
             int[] intrabcCdf,
+            int[] restorationWienerCdf,
+            int[] restorationSelfGuidedCdf,
+            int[] restorationSwitchableCdf,
             int[][] yModeCdfs,
             int[][] useFilterIntraCdfs,
             int[] filterIntraCdf,
@@ -1503,6 +1527,9 @@ public final class CdfContext {
         this.motionVectorClassNFpCdfs = Objects.requireNonNull(motionVectorClassNFpCdfs, "motionVectorClassNFpCdfs");
         this.motionVectorClassNHpCdfs = Objects.requireNonNull(motionVectorClassNHpCdfs, "motionVectorClassNHpCdfs");
         this.intrabcCdf = Objects.requireNonNull(intrabcCdf, "intrabcCdf");
+        this.restorationWienerCdf = Objects.requireNonNull(restorationWienerCdf, "restorationWienerCdf");
+        this.restorationSelfGuidedCdf = Objects.requireNonNull(restorationSelfGuidedCdf, "restorationSelfGuidedCdf");
+        this.restorationSwitchableCdf = Objects.requireNonNull(restorationSwitchableCdf, "restorationSwitchableCdf");
         this.yModeCdfs = Objects.requireNonNull(yModeCdfs, "yModeCdfs");
         this.useFilterIntraCdfs = Objects.requireNonNull(useFilterIntraCdfs, "useFilterIntraCdfs");
         this.filterIntraCdf = Objects.requireNonNull(filterIntraCdf, "filterIntraCdf");
@@ -1573,6 +1600,9 @@ public final class CdfContext {
                 deepCopy(DEFAULT_MOTION_VECTOR_CLASSN_FP_CDFS),
                 deepCopy(DEFAULT_MOTION_VECTOR_CLASSN_HP_CDFS),
                 Arrays.copyOf(DEFAULT_INTRABC_CDF, DEFAULT_INTRABC_CDF.length),
+                Arrays.copyOf(DEFAULT_RESTORATION_WIENER_CDF, DEFAULT_RESTORATION_WIENER_CDF.length),
+                Arrays.copyOf(DEFAULT_RESTORATION_SELF_GUIDED_CDF, DEFAULT_RESTORATION_SELF_GUIDED_CDF.length),
+                Arrays.copyOf(DEFAULT_RESTORATION_SWITCHABLE_CDF, DEFAULT_RESTORATION_SWITCHABLE_CDF.length),
                 deepCopy(DEFAULT_Y_MODE_CDFS),
                 deepCopy(DEFAULT_USE_FILTER_INTRA_CDFS),
                 Arrays.copyOf(DEFAULT_FILTER_INTRA_CDF, DEFAULT_FILTER_INTRA_CDF.length),
@@ -1644,6 +1674,9 @@ public final class CdfContext {
                 deepCopy(motionVectorClassNFpCdfs),
                 deepCopy(motionVectorClassNHpCdfs),
                 Arrays.copyOf(intrabcCdf, intrabcCdf.length),
+                Arrays.copyOf(restorationWienerCdf, restorationWienerCdf.length),
+                Arrays.copyOf(restorationSelfGuidedCdf, restorationSelfGuidedCdf.length),
+                Arrays.copyOf(restorationSwitchableCdf, restorationSwitchableCdf.length),
                 deepCopy(yModeCdfs),
                 deepCopy(useFilterIntraCdfs),
                 Arrays.copyOf(filterIntraCdf, filterIntraCdf.length),
@@ -2103,6 +2136,27 @@ public final class CdfContext {
     /// @return the live mutable `intrabc` CDF
     public int[] mutableIntrabcCdf() {
         return intrabcCdf;
+    }
+
+    /// Returns the live mutable Wiener restoration enable CDF.
+    ///
+    /// @return the live mutable Wiener restoration enable CDF
+    public int[] mutableRestorationWienerCdf() {
+        return restorationWienerCdf;
+    }
+
+    /// Returns the live mutable self-guided restoration enable CDF.
+    ///
+    /// @return the live mutable self-guided restoration enable CDF
+    public int[] mutableRestorationSelfGuidedCdf() {
+        return restorationSelfGuidedCdf;
+    }
+
+    /// Returns the live mutable switchable restoration CDF.
+    ///
+    /// @return the live mutable switchable restoration CDF
+    public int[] mutableRestorationSwitchableCdf() {
+        return restorationSwitchableCdf;
     }
 
     /// Returns the live mutable luma intra-mode CDF for the supplied context index.

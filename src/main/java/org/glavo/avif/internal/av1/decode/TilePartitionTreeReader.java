@@ -67,6 +67,9 @@ public final class TilePartitionTreeReader {
     /// The residual syntax reader used after transform layouts are decoded.
     private final TileResidualSyntaxReader residualSyntaxReader;
 
+    /// The loop-restoration syntax reader used before each superblock partition tree.
+    private final TileLoopRestorationReader loopRestorationReader;
+
     /// The tile width rounded up to 4x4 units.
     private final int tileWidth4;
 
@@ -84,6 +87,7 @@ public final class TilePartitionTreeReader {
         this.blockHeaderReader = new TileBlockHeaderReader(nonNullTileContext);
         this.transformLayoutReader = new TileTransformLayoutReader(nonNullTileContext);
         this.residualSyntaxReader = new TileResidualSyntaxReader(nonNullTileContext);
+        this.loopRestorationReader = new TileLoopRestorationReader(nonNullTileContext, syntaxReader);
         this.tileWidth4 = (nonNullTileContext.width() + 3) >> 2;
         this.tileHeight4 = (nonNullTileContext.height() + 3) >> 2;
     }
@@ -115,7 +119,9 @@ public final class TilePartitionTreeReader {
         List<Node> nodes = new ArrayList<>(superblockColumns * superblockRows);
         for (int row = 0; row < superblockRows; row++) {
             for (int column = 0; column < superblockColumns; column++) {
-                Node node = readSquare(rootLevel, new BlockPosition(column * rootSize4, row * rootSize4));
+                BlockPosition position = new BlockPosition(column * rootSize4, row * rootSize4);
+                loopRestorationReader.readSuperblock(position, rootSize4, rootSize4);
+                Node node = readSquare(rootLevel, position);
                 if (node != null) {
                     nodes.add(node);
                 }
