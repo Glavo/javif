@@ -32,7 +32,8 @@ reconstruction core and the real-stream coverage that proves it.
   - average-compound prediction
   - integer-copy prediction
   - fixed-filter and block-resolved `SWITCHABLE` subpel prediction
-  - first horizontal super-resolution subset
+  - normative horizontal super-resolution for key/intra, public still-picture, synthetic inter, and
+    bitstream-derived inter reconstruction paths
   - first hybrid parsed-stream inter success path with `I420/I422/I444` public-layout coverage that
     still relies on injected parser metadata for the broader fixture
 
@@ -71,15 +72,13 @@ Everything outside that subset must continue to fail explicitly with a stable
 - `intrabc` coverage still needs broader parsed-stream syntax and reconstruction fixtures.
 - Inter/reference coverage still needs self-contained parsed-stream inter support without injected
   parser metadata, plus richer motion compensation.
-- Super-resolution still needs higher-fidelity AV1 resampling behavior and broader parsed-stream
-  inter super-resolution coverage.
 - The next practical public decode gaps are:
   - parsed-stream inter without injected parser metadata
   - richer motion compensation
   - broader parsed-stream `intrabc`
   - direct parsed wider-chroma palette streams
   - broader parsed chroma residual/token coverage
-  - higher-fidelity super-resolution and postfilter behavior
+  - higher-fidelity postfilter behavior
 
 ## Frozen Internal Contracts
 
@@ -126,7 +125,6 @@ records execution priority and completion conditions.
 3. Broaden parsed-stream `intrabc`.
 4. Broaden palette and wider-chroma real fixture coverage.
 5. Broaden transform/coefficient coverage beyond the current `DCT_DCT <= 64-axis` subset.
-6. Broaden super-resolution fidelity and parsed-stream coverage.
 
 ### Exit Criteria
 

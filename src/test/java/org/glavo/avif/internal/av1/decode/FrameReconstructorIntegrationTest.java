@@ -50,6 +50,7 @@ import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.glavo.avif.testutil.InterPredictionOracle;
+import org.glavo.avif.testutil.SuperResolutionOracle;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -390,7 +391,7 @@ final class FrameReconstructorIntegrationTest {
     }
 
     /// Verifies that one synthetic `I420` inter leaf first reconstructs in the coded domain and
-    /// then reuses the current horizontal super-resolution helper to expose one post-upscale
+    /// then reuses the normative horizontal super-resolution helper to expose one post-upscale
     /// output surface.
     @Test
     void reconstructsSyntheticI420InterLeafWithSuperResolutionFromStoredReferenceSurface() {
@@ -434,6 +435,134 @@ final class FrameReconstructorIntegrationTest {
                 new MotionVector(2, 6),
                 FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
         );
+    }
+
+    /// Verifies that one decoded real inter tile payload can reconstruct in the coded domain and
+    /// then pass through normative horizontal super-resolution.
+    @Test
+    void reconstructsBitstreamDerivedI420InterLeafWithSuperResolutionFromStoredReferenceSurface() {
+        MotionVector motionVector = new MotionVector(2, 2);
+        FrameHeader.InterpolationFilter interpolationFilter = FrameHeader.InterpolationFilter.BILINEAR;
+        FrameAssembly assembly = createSuperResolvedInterAssembly(
+                PixelFormat.I420,
+                64,
+                72,
+                64,
+                0,
+                FrameType.INTER,
+                interpolationFilter
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
+        TilePartitionTreeReader.LeafNode decodedLeaf = firstLeaf(syntaxDecodeResult.tileRoots(0));
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                copyBlockHeaderWithPrimaryMotionVector(decodedLeaf.header(), motionVector),
+                decodedLeaf.transformLayout(),
+                createResidualLayout(
+                        decodedLeaf.header().position(),
+                        decodedLeaf.header().size(),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().lumaUnits()),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaUUnits()),
+                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaVUnits())
+                )
+        );
+        FrameSyntaxDecodeResult zeroResidualSyntaxDecodeResult = new FrameSyntaxDecodeResult(
+                syntaxDecodeResult.assembly(),
+                new TilePartitionTreeReader.Node[][]{{zeroResidualLeaf}},
+                syntaxDecodeResult.decodedTemporalMotionFields(),
+                syntaxDecodeResult.finalTileCdfContexts()
+        );
+
+        DecodedPlane referenceLumaPlane = createCheckerboardPlane(64, 64, 16, 208);
+        DecodedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
+        DecodedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I420,
+                64,
+                64,
+                referenceLumaPlane,
+                referenceChromaUPlane,
+                referenceChromaVPlane
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                zeroResidualSyntaxDecodeResult,
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        int lumaOriginX = zeroResidualLeaf.header().position().x4() << 2;
+        int lumaOriginY = zeroResidualLeaf.header().position().y4() << 2;
+        int visibleLumaWidth = zeroResidualLeaf.transformLayout().visibleWidthPixels();
+        int visibleLumaHeight = zeroResidualLeaf.transformLayout().visibleHeightPixels();
+        int chromaOriginX = lumaOriginX >> 1;
+        int chromaOriginY = lumaOriginY >> 1;
+        int visibleChromaWidth = visibleLumaWidth >> 1;
+        int visibleChromaHeight = visibleLumaHeight >> 1;
+
+        int[][] codedLuma = new int[64][64];
+        int[][] codedChromaU = new int[32][32];
+        int[][] codedChromaV = new int[32][32];
+        fillRasterBlock(
+                codedLuma,
+                lumaOriginX,
+                lumaOriginY,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        referenceLumaPlane,
+                        visibleLumaWidth,
+                        visibleLumaHeight,
+                        lumaOriginX * 4 + motionVector.columnQuarterPel(),
+                        lumaOriginY * 4 + motionVector.rowQuarterPel(),
+                        4,
+                        4,
+                        visibleLumaWidth,
+                        visibleLumaHeight,
+                        interpolationFilter
+                )
+        );
+        fillRasterBlock(
+                codedChromaU,
+                chromaOriginX,
+                chromaOriginY,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        referenceChromaUPlane,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        chromaOriginX * 8 + motionVector.columnQuarterPel(),
+                        chromaOriginY * 8 + motionVector.rowQuarterPel(),
+                        8,
+                        8,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        interpolationFilter
+                )
+        );
+        fillRasterBlock(
+                codedChromaV,
+                chromaOriginX,
+                chromaOriginY,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        referenceChromaVPlane,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        chromaOriginX * 8 + motionVector.columnQuarterPel(),
+                        chromaOriginY * 8 + motionVector.rowQuarterPel(),
+                        8,
+                        8,
+                        visibleChromaWidth,
+                        visibleChromaHeight,
+                        interpolationFilter
+                )
+        );
+
+        assertTrue(assembly.frameHeader().superResolution().enabled());
+        assertEquals(64, assembly.frameHeader().frameSize().codedWidth());
+        assertEquals(72, assembly.frameHeader().frameSize().upscaledWidth());
+        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertTrue(decodedPlanes.hasChroma());
+        assertEquals(72, decodedPlanes.codedWidth());
+        assertEquals(64, decodedPlanes.codedHeight());
+        assertPlaneEquals(decodedPlanes.lumaPlane(), SuperResolutionOracle.upscaleBlock(codedLuma, 72, 8));
+        assertPlaneEquals(requirePlane(decodedPlanes.chromaUPlane()), SuperResolutionOracle.upscaleBlock(codedChromaU, 36, 8));
+        assertPlaneEquals(requirePlane(decodedPlanes.chromaVPlane()), SuperResolutionOracle.upscaleBlock(codedChromaV, 36, 8));
     }
 
     /// Verifies that one synthetic `I420` single-reference inter leaf reconstructs through one
@@ -3738,65 +3867,46 @@ final class FrameReconstructorIntegrationTest {
         }
     }
 
-    /// Returns the expected horizontally upscaled raster produced by the current linear
+    /// Returns the expected horizontally upscaled raster produced by the normative
     /// super-resolution helper for one decoded plane.
     ///
     /// @param sourcePlane the coded-domain source plane
     /// @param targetWidth the post-upscale plane width
     /// @return the expected horizontally upscaled raster
     private static int[][] expectedHorizontallyUpscaledPlane(DecodedPlane sourcePlane, int targetWidth) {
-        int[][] expected = new int[sourcePlane.height()][targetWidth];
-        for (int y = 0; y < sourcePlane.height(); y++) {
-            int[] sourceRow = new int[sourcePlane.width()];
-            for (int x = 0; x < sourcePlane.width(); x++) {
-                sourceRow[x] = sourcePlane.sample(x, y);
-            }
-            expected[y] = expectedHorizontallyUpscaledRow(sourceRow, targetWidth);
-        }
-        return expected;
+        return SuperResolutionOracle.upscalePlane(sourcePlane, targetWidth, 8);
     }
 
-    /// Returns the expected horizontally upscaled raster produced by the current linear
+    /// Returns the expected horizontally upscaled raster produced by the normative
     /// super-resolution helper for one caller-supplied coded-domain block.
     ///
     /// @param sourceBlock the coded-domain source block in row-major order
     /// @param targetWidth the post-upscale row width
     /// @return the expected horizontally upscaled raster
     private static int[][] expectedHorizontallyUpscaledBlock(int[][] sourceBlock, int targetWidth) {
-        int[][] expected = new int[sourceBlock.length][targetWidth];
-        for (int y = 0; y < sourceBlock.length; y++) {
-            expected[y] = expectedHorizontallyUpscaledRow(sourceBlock[y], targetWidth);
-        }
-        return expected;
+        return SuperResolutionOracle.upscaleBlock(sourceBlock, targetWidth, 8);
     }
 
-    /// Returns the expected horizontally upscaled row produced by the current linear
+    /// Copies one sample block into one mutable expected raster.
+    ///
+    /// @param destination the destination raster in row-major order
+    /// @param originX the horizontal destination offset
+    /// @param originY the vertical destination offset
+    /// @param block the source block in row-major order
+    private static void fillRasterBlock(int[][] destination, int originX, int originY, int[][] block) {
+        for (int y = 0; y < block.length; y++) {
+            System.arraycopy(block[y], 0, destination[originY + y], originX, block[y].length);
+        }
+    }
+
+    /// Returns the expected horizontally upscaled row produced by the normative
     /// super-resolution helper.
     ///
     /// @param sourceRow the coded-domain source row
     /// @param targetWidth the post-upscale row width
     /// @return the expected horizontally upscaled row
     private static int[] expectedHorizontallyUpscaledRow(int[] sourceRow, int targetWidth) {
-        if (sourceRow.length == 0) {
-            throw new IllegalArgumentException("sourceRow must not be empty");
-        }
-        int[] upscaledRow = new int[targetWidth];
-        if (sourceRow.length == 1) {
-            for (int x = 0; x < targetWidth; x++) {
-                upscaledRow[x] = sourceRow[0];
-            }
-            return upscaledRow;
-        }
-        for (int x = 0; x < targetWidth; x++) {
-            long sourcePositionFixed = ((long) x * (sourceRow.length - 1) << 12) / (targetWidth - 1);
-            int sourceIndex0 = (int) (sourcePositionFixed >> 12);
-            int sourceIndex1 = Math.min(sourceIndex0 + 1, sourceRow.length - 1);
-            int fraction = (int) (sourcePositionFixed & 0x0FFF);
-            upscaledRow[x] =
-                    ((sourceRow[sourceIndex0] * (0x1000 - fraction)) + (sourceRow[sourceIndex1] * fraction) + 0x0800)
-                            >> 12;
-        }
-        return upscaledRow;
+        return SuperResolutionOracle.upscaleRow(sourceRow, targetWidth, 8);
     }
 
     /// Asserts one rectangular plane block is filled with one constant sample value.
@@ -4711,8 +4821,8 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
-    /// Asserts that the current minimal inter super-resolution subset reconstructs one coded-domain
-    /// `I420` inter block and then horizontally upsamples it to the stored/output domain.
+    /// Asserts that the inter super-resolution path reconstructs one coded-domain `I420` inter
+    /// block and then normatively upsamples it to the stored/output domain.
     ///
     /// @param frameType the inter-like frame type to expose
     private static void assertSyntheticI420InterSuperResolution(FrameType frameType) {

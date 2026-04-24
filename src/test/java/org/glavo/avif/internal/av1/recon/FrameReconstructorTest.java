@@ -44,12 +44,14 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.testutil.InterPredictionOracle;
+import org.glavo.avif.testutil.SuperResolutionOracle;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -203,8 +205,17 @@ final class FrameReconstructorTest {
         assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 2048);
     }
 
-    /// Verifies that the current minimal super-resolution subset horizontally upsamples one
-    /// reconstructed luma plane from the coded width to the upscaled width.
+    /// Verifies one non-linear AV1 normative super-resolution output row against fixed samples.
+    @Test
+    void superResolutionOracleUsesNormativeEightTapFilter() {
+        assertArrayEquals(
+                new int[]{13, 76, 181, 244, 238, 218, 220, 226},
+                expectedHorizontallyUpscaledRow(new int[]{32, 32, 224, 224}, 8)
+        );
+    }
+
+    /// Verifies that the super-resolution path normatively upsamples one reconstructed luma plane
+    /// from the coded width to the upscaled width.
     @Test
     void reconstructsSuperResolvedI400KeyFrameByHorizontallyUpscalingLuma() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -259,8 +270,8 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal super-resolution subset horizontally upsamples chroma
-    /// planes to their post-super-resolution widths in the current `I420` key/intra subset.
+    /// Verifies that the super-resolution path normatively upsamples chroma planes to their
+    /// post-super-resolution widths in the current `I420` key/intra subset.
     @Test
     void reconstructsSuperResolvedI420IntraFrameByHorizontallyUpscalingChromaPlanes() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -286,8 +297,8 @@ final class FrameReconstructorTest {
         assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 2, 128);
     }
 
-    /// Verifies that the current minimal inter super-resolution subset horizontally upsamples one
-    /// stored-reference luma prediction after the coded-domain inter copy has completed.
+    /// Verifies that the inter super-resolution path normatively upsamples one stored-reference
+    /// luma prediction after the coded-domain inter copy has completed.
     @Test
     void reconstructsSuperResolvedI400InterFrameByHorizontallyUpscalingPredictedLuma() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -328,7 +339,7 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal inter super-resolution subset samples one wider stored
+    /// Verifies that the inter super-resolution path samples one wider stored
     /// post-super-resolution luma surface in the coded domain before horizontally upscaling it.
     @Test
     void reconstructsSuperResolvedI400InterFrameFromPostSuperResolvedStoredReferenceSurface() {
@@ -391,8 +402,8 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal inter super-resolution subset horizontally upsamples both
-    /// luma and chroma after one bilinear single-reference `I420` prediction.
+    /// Verifies that the inter super-resolution path normatively upsamples both luma and chroma
+    /// after one bilinear single-reference `I420` prediction.
     @Test
     void reconstructsSuperResolvedI420InterFrameByHorizontallyUpscalingPredictedPlanes() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -503,7 +514,7 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal inter super-resolution subset can sample one wider stored
+    /// Verifies that the inter super-resolution path can sample one wider stored
     /// post-super-resolution `I420` surface with one minimal safe motion vector before upscaling
     /// the coded-domain result into the current output domain.
     @Test
@@ -605,9 +616,8 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal inter super-resolution subset also accepts `SWITCH`
-    /// frames and horizontally upsamples one bilinear `I420` inter prediction on both luma and
-    /// chroma planes.
+    /// Verifies that the inter super-resolution path also accepts `SWITCH` frames and normatively
+    /// upsamples one bilinear `I420` inter prediction on both luma and chroma planes.
     @Test
     void reconstructsSuperResolvedI420SwitchFrameByHorizontallyUpscalingPredictedPlanes() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -719,7 +729,7 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal inter super-resolution subset can sample one stored
+    /// Verifies that the inter super-resolution path can sample one stored
     /// reference surface that already lives in the post-super-resolution domain when the active
     /// frame reconstructs at a smaller coded width.
     @Test
@@ -777,7 +787,7 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal inter super-resolution subset also remaps chroma planes
+    /// Verifies that the inter super-resolution path also remaps chroma planes
     /// from one stored post-super-resolution `I420` reference surface before the horizontal
     /// upscaling pass.
     @Test
@@ -874,7 +884,7 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that the current minimal inter super-resolution subset still overlays supported
+    /// Verifies that the inter super-resolution path still overlays supported
     /// residuals before the horizontal upscaling pass.
     @Test
     void reconstructsSuperResolvedI400InterFrameWithResidualOverlay() {
@@ -5045,32 +5055,13 @@ final class FrameReconstructorTest {
         return (int) ((numerator + (divisor >> 1)) / divisor);
     }
 
-    /// Returns the expected horizontally upscaled row produced by the current linear super-resolution helper.
+    /// Returns the expected horizontally upscaled row produced by the normative super-resolution helper.
     ///
     /// @param sourceRow the coded-width source row
     /// @param targetWidth the upscaled row width
     /// @return the expected horizontally upscaled row
     private static int[] expectedHorizontallyUpscaledRow(int[] sourceRow, int targetWidth) {
-        if (sourceRow.length == 0) {
-            throw new IllegalArgumentException("sourceRow must not be empty");
-        }
-        int[] upscaledRow = new int[targetWidth];
-        if (sourceRow.length == 1) {
-            for (int x = 0; x < targetWidth; x++) {
-                upscaledRow[x] = sourceRow[0];
-            }
-            return upscaledRow;
-        }
-        for (int x = 0; x < targetWidth; x++) {
-            long sourcePositionFixed = ((long) x * (sourceRow.length - 1) << 12) / (targetWidth - 1);
-            int sourceIndex0 = (int) (sourcePositionFixed >> 12);
-            int sourceIndex1 = Math.min(sourceIndex0 + 1, sourceRow.length - 1);
-            int fraction = (int) (sourcePositionFixed & 0x0FFF);
-            upscaledRow[x] =
-                    ((sourceRow[sourceIndex0] * (0x1000 - fraction)) + (sourceRow[sourceIndex1] * fraction) + 0x0800)
-                            >> 12;
-        }
-        return upscaledRow;
+        return SuperResolutionOracle.upscaleRow(sourceRow, targetWidth, 8);
     }
 
     /// Returns one coded-domain plane predicted from one stored post-super-resolution reference

@@ -357,6 +357,30 @@ final class Av1ImageReaderTest {
         assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 12, false);
     }
 
+    /// Verifies that parsed combined still-picture streams can enable normative horizontal
+    /// super-resolution and still return one public `ArgbIntFrame`.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForSupportedCombinedSuperResolvedStillPictureStreams() throws IOException {
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I400, true);
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I420, true);
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I422, true);
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I444, true);
+    }
+
+    /// Verifies that parsed standalone still-picture streams can enable normative horizontal
+    /// super-resolution and still return one public `ArgbIntFrame`.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForSupportedStandaloneSuperResolvedStillPictureStreams() throws IOException {
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I400, false);
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I420, false);
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I422, false);
+        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I444, false);
+    }
+
     /// Verifies that `readAllFrames()` preserves the current supported first-pixel combined
     /// still-picture success path across all buffered-input adapters.
     ///
@@ -1960,6 +1984,40 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Asserts that one real parsed super-resolved still-picture stream round-trips through the
+    /// public reader.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @param combined whether to use one combined `FRAME` OBU instead of standalone frame assembly
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertSupportedSuperResolvedStillPictureRoundTrip(
+            PixelFormat pixelFormat,
+            boolean combined
+    ) throws IOException {
+        byte[] stream = combined
+                ? concat(
+                        obu(1, fullSuperResolvedSequenceHeaderPayload(pixelFormat)),
+                        obu(6, fullSuperResolvedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+                )
+                : concat(
+                        obu(1, fullSuperResolvedSequenceHeaderPayload(pixelFormat)),
+                        obu(3, fullSuperResolvedStillPictureFrameHeaderPayload()),
+                        obu(4, SUPPORTED_SINGLE_TILE_PAYLOAD)
+                );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxDecodeResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(syntaxDecodeResult);
+            assertOpaqueGrayStillPictureFrame(decodedFrame, pixelFormat, 0);
+            assertTrue(syntaxDecodeResult.assembly().frameHeader().superResolution().enabled());
+            assertEquals(57, syntaxDecodeResult.assembly().frameHeader().frameSize().codedWidth());
+            assertEquals(64, syntaxDecodeResult.assembly().frameHeader().frameSize().upscaledWidth());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
     /// Asserts that one real parsed high-bit-depth still-picture decode in the requested additional
     /// chroma layout immediately refreshes a reference slot and then round-trips through
     /// `show_existing_frame`.
@@ -3512,6 +3570,46 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables frame
+    /// super-resolution while exposing the requested `8-bit` public chroma layout.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @return one non-reduced still-picture-compatible sequence header payload with super-resolution enabled
+    private static byte[] fullSuperResolvedSequenceHeaderPayload(PixelFormat pixelFormat) {
+        BitWriter writer = new BitWriter();
+        writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 5);
+        writer.writeBits(0, 12);
+        writer.writeBits(3, 3);
+        writer.writeBits(1, 2);
+        writer.writeFlag(false);
+        writer.writeBits(5, 4);
+        writer.writeBits(5, 4);
+        writer.writeBits(63, 6);
+        writer.writeBits(63, 6);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writeReducedStillPictureColorConfig(writer, pixelFormat, 8, false);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
 
     /// Creates one non-reduced still-picture-compatible `I420` sequence header payload that
     /// enables both `show_existing_frame` and explicit film grain signaling.
@@ -3571,6 +3669,17 @@ final class Av1ImageReaderTest {
     private static byte[] fullStillPictureFrameHeaderPayload() {
         BitWriter writer = new BitWriter();
         writeFullStillPictureFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates one non-reduced still-picture-compatible key frame header payload that enables
+    /// frame super-resolution.
+    ///
+    /// @return one non-reduced still-picture-compatible super-resolved key frame header payload
+    private static byte[] fullSuperResolvedStillPictureFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writeFullSuperResolvedStillPictureFrameHeaderBits(writer);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -3678,6 +3787,19 @@ final class Av1ImageReaderTest {
     private static byte[] fullStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
         BitWriter writer = new BitWriter();
         writeFullStillPictureFrameHeaderBits(writer);
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
+    /// Creates one non-reduced still-picture-compatible combined frame payload that enables frame
+    /// super-resolution.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the frame header
+    /// @return one non-reduced still-picture-compatible super-resolved combined frame payload
+    private static byte[] fullSuperResolvedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writeFullSuperResolvedStillPictureFrameHeaderBits(writer);
+        writer.padToByteBoundary();
         writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
     }
@@ -3911,6 +4033,30 @@ final class Av1ImageReaderTest {
     /// @param writer the destination bit writer
     private static void writeFullStillPictureFrameHeaderBits(BitWriter writer) {
         writeFullStillPictureFrameHeaderBitsBeforeFilmGrain(writer);
+        writer.writeFlag(false);
+    }
+
+    /// Writes one non-reduced still-picture-compatible key frame header syntax with frame-level
+    /// super-resolution enabled.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeFullSuperResolvedStillPictureFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 3);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
         writer.writeFlag(false);
     }
 

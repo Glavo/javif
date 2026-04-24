@@ -42,7 +42,7 @@ import java.util.Objects;
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
 /// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, a
-/// minimal horizontal super-resolution upscaling subset for key/intra frames plus the current
+/// normative horizontal super-resolution upscaling path for key/intra frames plus the current
 /// inter/reference prediction subset, and a minimal luma/chroma residual subset including clipped
 /// frame-fringe chroma footprints and the currently supported square and rectangular `DCT_DCT`
 /// transform sizes whose axes stay within `64` samples.
@@ -62,6 +62,33 @@ public final class FrameReconstructor {
 
     /// The supported AV1 fractional phases for fixed interpolation filters.
     private static final int INTER_FILTER_PHASES = 16;
+
+    /// The number of coefficients in one normative super-resolution filter.
+    private static final int SUPERRES_FILTER_TAP_COUNT = 8;
+
+    /// The AV1 normative super-resolution filter normalization shift.
+    private static final int SUPERRES_FILTER_BITS = 7;
+
+    /// The number of AV1 super-resolution fractional phases.
+    private static final int SUPERRES_SUBPEL_BITS = 6;
+
+    /// The mask for one AV1 super-resolution fractional phase.
+    private static final int SUPERRES_SUBPEL_MASK = (1 << SUPERRES_SUBPEL_BITS) - 1;
+
+    /// The fixed-point precision used by AV1 super-resolution coordinate stepping.
+    private static final int SUPERRES_SCALE_SUBPEL_BITS = 14;
+
+    /// The mask for one AV1 super-resolution fixed-point coordinate.
+    private static final int SUPERRES_SCALE_SUBPEL_MASK = (1 << SUPERRES_SCALE_SUBPEL_BITS) - 1;
+
+    /// The extra fixed-point bits above the normative super-resolution phase precision.
+    private static final int SUPERRES_SCALE_EXTRA_BITS = SUPERRES_SCALE_SUBPEL_BITS - SUPERRES_SUBPEL_BITS;
+
+    /// The AV1 half-phase offset used when deriving the first super-resolution sample position.
+    private static final int SUPERRES_SCALE_EXTRA_OFFSET = 1 << (SUPERRES_SCALE_EXTRA_BITS - 1);
+
+    /// The signed source-sample offset of the first normative super-resolution tap.
+    private static final int SUPERRES_FILTER_START_OFFSET = SUPERRES_FILTER_TAP_COUNT / 2 - 1;
 
     /// The default AV1 regular 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
     private static final int[][] REGULAR_SUBPEL_FILTERS = {
@@ -158,6 +185,74 @@ public final class FrameReconstructor {
             {0, 0, 2, 20, 31, 11, 0, 0},
             {0, 0, 2, 18, 31, 13, 0, 0},
             {0, 0, 1, 17, 31, 15, 0, 0}
+    };
+
+    /// The AV1 normative 64-phase horizontal super-resolution filters.
+    private static final int[][] SUPERRES_FILTERS = {
+            {0, 0, 0, 128, 0, 0, 0, 0},
+            {0, 0, -1, 128, 2, -1, 0, 0},
+            {0, 1, -3, 127, 4, -2, 1, 0},
+            {0, 1, -4, 127, 6, -3, 1, 0},
+            {0, 2, -6, 126, 8, -3, 1, 0},
+            {0, 2, -7, 125, 11, -4, 1, 0},
+            {-1, 2, -8, 125, 13, -5, 2, 0},
+            {-1, 3, -9, 124, 15, -6, 2, 0},
+            {-1, 3, -10, 123, 18, -6, 2, -1},
+            {-1, 3, -11, 122, 20, -7, 3, -1},
+            {-1, 4, -12, 121, 22, -8, 3, -1},
+            {-1, 4, -13, 120, 25, -9, 3, -1},
+            {-1, 4, -14, 118, 28, -9, 3, -1},
+            {-1, 4, -15, 117, 30, -10, 4, -1},
+            {-1, 5, -16, 116, 32, -11, 4, -1},
+            {-1, 5, -16, 114, 35, -12, 4, -1},
+            {-1, 5, -17, 112, 38, -12, 4, -1},
+            {-1, 5, -18, 111, 40, -13, 5, -1},
+            {-1, 5, -18, 109, 43, -14, 5, -1},
+            {-1, 6, -19, 107, 45, -14, 5, -1},
+            {-1, 6, -19, 105, 48, -15, 5, -1},
+            {-1, 6, -19, 103, 51, -16, 5, -1},
+            {-1, 6, -20, 101, 53, -16, 6, -1},
+            {-1, 6, -20, 99, 56, -17, 6, -1},
+            {-1, 6, -20, 97, 58, -17, 6, -1},
+            {-1, 6, -20, 95, 61, -18, 6, -1},
+            {-2, 7, -20, 93, 64, -18, 6, -2},
+            {-2, 7, -20, 91, 66, -19, 6, -1},
+            {-2, 7, -20, 88, 69, -19, 6, -1},
+            {-2, 7, -20, 86, 71, -19, 6, -1},
+            {-2, 7, -20, 84, 74, -20, 7, -2},
+            {-2, 7, -20, 81, 76, -20, 7, -1},
+            {-2, 7, -20, 79, 79, -20, 7, -2},
+            {-1, 7, -20, 76, 81, -20, 7, -2},
+            {-2, 7, -20, 74, 84, -20, 7, -2},
+            {-1, 6, -19, 71, 86, -20, 7, -2},
+            {-1, 6, -19, 69, 88, -20, 7, -2},
+            {-1, 6, -19, 66, 91, -20, 7, -2},
+            {-2, 6, -18, 64, 93, -20, 7, -2},
+            {-1, 6, -18, 61, 95, -20, 6, -1},
+            {-1, 6, -17, 58, 97, -20, 6, -1},
+            {-1, 6, -17, 56, 99, -20, 6, -1},
+            {-1, 6, -16, 53, 101, -20, 6, -1},
+            {-1, 5, -16, 51, 103, -19, 6, -1},
+            {-1, 5, -15, 48, 105, -19, 6, -1},
+            {-1, 5, -14, 45, 107, -19, 6, -1},
+            {-1, 5, -14, 43, 109, -18, 5, -1},
+            {-1, 5, -13, 40, 111, -18, 5, -1},
+            {-1, 4, -12, 38, 112, -17, 5, -1},
+            {-1, 4, -12, 35, 114, -16, 5, -1},
+            {-1, 4, -11, 32, 116, -16, 5, -1},
+            {-1, 4, -10, 30, 117, -15, 4, -1},
+            {-1, 3, -9, 28, 118, -14, 4, -1},
+            {-1, 3, -9, 25, 120, -13, 4, -1},
+            {-1, 3, -8, 22, 121, -12, 4, -1},
+            {-1, 3, -7, 20, 122, -11, 3, -1},
+            {-1, 2, -6, 18, 123, -10, 3, -1},
+            {0, 2, -6, 15, 124, -9, 3, -1},
+            {0, 2, -5, 13, 125, -8, 2, -1},
+            {0, 1, -4, 11, 125, -7, 2, 0},
+            {0, 1, -3, 8, 126, -6, 2, 0},
+            {0, 1, -3, 6, 127, -4, 1, 0},
+            {0, 1, -2, 4, 127, -3, 1, 0},
+            {0, 0, -1, 2, 128, -1, 0, 0}
     };
 
     /// Reconstructs one supported structural frame result into decoded planes.
@@ -308,13 +403,11 @@ public final class FrameReconstructor {
         };
     }
 
-    /// Applies the current minimal horizontal super-resolution subset to one reconstructed frame.
+    /// Applies normative AV1 horizontal super-resolution to one reconstructed frame.
     ///
-    /// The current implementation performs a deterministic horizontal linear resampling pass from
-    /// the coded frame width to the upscaled width after reconstruction has already populated the
-    /// coded-domain planes. The resulting stored planes already match the post-super-resolution
-    /// reference-surface domain, so the returned `DecodedPlanes` expose the upscaled plane widths
-    /// as their coded dimensions.
+    /// The pass runs after reconstruction has populated coded-domain planes. The returned
+    /// `DecodedPlanes` expose the post-super-resolution plane widths as their coded dimensions so
+    /// stored reference surfaces live in the AV1 post-super-resolution domain.
     ///
     /// @param bitDepth the decoded sample bit depth
     /// @param pixelFormat the active decoded chroma layout
@@ -365,7 +458,7 @@ public final class FrameReconstructor {
         };
     }
 
-    /// Upscales one decoded plane horizontally with the current minimal deterministic linear filter.
+    /// Upscales one decoded plane horizontally with the normative AV1 super-resolution filter.
     ///
     /// @param plane the decoded plane to upscale
     /// @param targetWidth the post-upscale plane width
@@ -394,30 +487,58 @@ public final class FrameReconstructor {
         int sourceWidth = checkedPlane.width();
         int sourceStride = checkedPlane.stride();
         int maximumSample = (1 << bitDepth) - 1;
+        int step = upscaleConvolveStep(sourceWidth, targetWidth);
+        int firstPosition = upscaleConvolveInitialPosition(sourceWidth, targetWidth, step);
 
         for (int y = 0; y < checkedPlane.height(); y++) {
             int sourceRowOffset = y * sourceStride;
             int upscaledRowOffset = y * targetWidth;
-            if (sourceWidth == 1) {
-                short repeatedSample = sourceSamples[sourceRowOffset];
-                for (int x = 0; x < targetWidth; x++) {
-                    upscaledSamples[upscaledRowOffset + x] = repeatedSample;
-                }
-                continue;
-            }
+            int position = firstPosition;
             for (int x = 0; x < targetWidth; x++) {
-                long sourcePositionFixed = ((long) x * (sourceWidth - 1) << 12) / (targetWidth - 1);
-                int sourceIndex0 = (int) (sourcePositionFixed >> 12);
-                int sourceIndex1 = Math.min(sourceIndex0 + 1, sourceWidth - 1);
-                int fraction = (int) (sourcePositionFixed & 0x0FFF);
-                int sample0 = sourceSamples[sourceRowOffset + sourceIndex0] & 0xFFFF;
-                int sample1 = sourceSamples[sourceRowOffset + sourceIndex1] & 0xFFFF;
-                int interpolatedSample = ((sample0 * (0x1000 - fraction)) + (sample1 * fraction) + 0x0800) >> 12;
-                upscaledSamples[upscaledRowOffset + x] = (short) clamp(interpolatedSample, 0, maximumSample);
+                int integerPosition = position >> SUPERRES_SCALE_SUBPEL_BITS;
+                int filterIndex = (position & SUPERRES_SCALE_SUBPEL_MASK) >> SUPERRES_SCALE_EXTRA_BITS;
+                int[] filter = SUPERRES_FILTERS[filterIndex];
+                long sum = 0;
+                for (int tap = 0; tap < SUPERRES_FILTER_TAP_COUNT; tap++) {
+                    int sourceX = clamp(
+                            integerPosition + tap - SUPERRES_FILTER_START_OFFSET,
+                            0,
+                            sourceWidth - 1
+                    );
+                    int sourceSample = sourceSamples[sourceRowOffset + sourceX] & 0xFFFF;
+                    sum += (long) sourceSample * filter[tap];
+                }
+                int filteredSample = roundShiftSigned(sum, SUPERRES_FILTER_BITS);
+                upscaledSamples[upscaledRowOffset + x] = (short) clamp(filteredSample, 0, maximumSample);
+                position += step;
             }
         }
 
         return new DecodedPlane(targetWidth, checkedPlane.height(), targetWidth, upscaledSamples);
+    }
+
+    /// Returns the AV1 super-resolution fixed-point step for one source and target width.
+    ///
+    /// @param sourceWidth the downscaled coded-domain source width
+    /// @param targetWidth the post-super-resolution target width
+    /// @return the fixed-point horizontal step
+    private static int upscaleConvolveStep(int sourceWidth, int targetWidth) {
+        return (int) ((((long) sourceWidth << SUPERRES_SCALE_SUBPEL_BITS) + (targetWidth >> 1)) / targetWidth);
+    }
+
+    /// Returns the AV1 super-resolution fixed-point position for the first output sample.
+    ///
+    /// @param sourceWidth the downscaled coded-domain source width
+    /// @param targetWidth the post-super-resolution target width
+    /// @param step the fixed-point horizontal step
+    /// @return the initial fixed-point horizontal position
+    private static int upscaleConvolveInitialPosition(int sourceWidth, int targetWidth, int step) {
+        long error = (long) targetWidth * step - ((long) sourceWidth << SUPERRES_SCALE_SUBPEL_BITS);
+        int position = (int) (((-((long) targetWidth - sourceWidth) << (SUPERRES_SCALE_SUBPEL_BITS - 1))
+                + (targetWidth >> 1)) / targetWidth)
+                + SUPERRES_SCALE_EXTRA_OFFSET
+                - (int) (error >> 1);
+        return position & SUPERRES_SCALE_SUBPEL_MASK;
     }
 
     /// Recursively reconstructs one partition-tree node.
@@ -1594,8 +1715,8 @@ public final class FrameReconstructor {
     /// Maps one destination-plane sample coordinate into the current reference-plane numerator
     /// domain.
     ///
-    /// The current implementation preserves both plane endpoints and uses one rounded linear map
-    /// between them, which is sufficient for the current minimal inter super-resolution subset.
+    /// The mapping preserves both plane endpoints and uses one rounded linear transform before the
+    /// destination frame's normative super-resolution pass runs.
     ///
     /// @param destinationCoordinate the zero-based destination-plane coordinate
     /// @param destinationExtent the destination-plane extent in samples
