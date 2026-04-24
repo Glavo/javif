@@ -23,7 +23,8 @@ Supported end-to-end behavior:
 - Parsed chroma residual fixture paths for `I420/I422/I444`, backed by explicit chroma transform
   units in `TransformLayout`, including clipped fringe footprints, wider-chroma `I422`,
   unsubsampled `I444`, multi-unit `I420`, and larger-transform chroma token coverage.
-- Stored-surface `show_existing_frame` output and reference-surface reuse.
+- Stored-surface `show_existing_frame` output and reference-surface reuse, with stored syntax
+  preserving postfilter structural metadata such as restoration-unit map dimensions.
 - Reference temporal-motion inheritance with compatible fields reused directly and differently
   scaled reference fields projected onto the current tile grid with motion-vector scaling.
 - Real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`, including
@@ -52,8 +53,8 @@ Supported end-to-end behavior:
   reference surface, with inactive loop filtering/restoration preserved exactly, active loop
   filtering applied from decoded block and transform edges, block-indexed CDEF applied from decoded
   `cdefIndex` syntax and frame strengths, active loop-restoration unit syntax decoded per
-  superblock, coefficient-driven WIENER/SGRPROJ restoration applied per decoded unit, and film
-  grain kept as presentation-only output synthesis.
+  superblock into `RestorationUnitMap`, coefficient-driven WIENER/SGRPROJ restoration applied per
+  decoded unit, and film grain kept as presentation-only output synthesis.
 
 ## Remaining Decode Boundary
 
@@ -75,8 +76,8 @@ The following contracts are stable and should be preserved:
 ## Main Work Priority
 
 1. Broaden decoded real-stream coverage around the completed inter/reference and postfilter subsets.
-2. Add exact-oracle fixtures for real streams that exercise active loop filter, CDEF, restoration,
-   super-resolution, and reference refresh together.
+2. Add public-reader exact-oracle fixtures for real streams that exercise active loop filter, CDEF,
+   restoration, super-resolution, and reference refresh together.
 
 ## Exit Criteria
 

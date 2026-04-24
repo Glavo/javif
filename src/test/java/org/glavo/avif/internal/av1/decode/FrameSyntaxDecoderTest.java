@@ -33,6 +33,7 @@ import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -47,6 +48,11 @@ final class FrameSyntaxDecoderTest {
     /// One fixed payload whose first skip decision changes when the skip CDF is inherited.
     private static final byte[] DIFFERENT_INHERITED_SKIP_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/frame-cdf-different-skip.hex");
+
+    /// One fixed payload whose leading loop-restoration unit decodes as active Wiener syntax.
+    private static final byte[] RESTORATION_WIENER_PAYLOAD = new byte[]{
+            0x4E, 0, 0, 0, 0, 0, 0, 0
+    };
 
     /// Verifies that structural frame decoding expands tile syntax and produces a temporal motion field.
     @Test
@@ -81,6 +87,42 @@ final class FrameSyntaxDecoderTest {
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
 
         assertEquals(1029, result.finalTileCdfContext(0).mutableSkipCdf(0)[0]);
+    }
+
+    /// Verifies that structural frame decoding captures active loop-restoration unit syntax.
+    @Test
+    void decodeFrameCapturesActiveLoopRestorationUnitSyntax() {
+        FrameHeader.RestorationInfo restoration = new FrameHeader.RestorationInfo(
+                new FrameHeader.RestorationType[]{
+                        FrameHeader.RestorationType.WIENER,
+                        FrameHeader.RestorationType.NONE,
+                        FrameHeader.RestorationType.NONE
+                },
+                6,
+                6
+        );
+        FrameAssembly assembly = createAssembly(
+                FrameType.KEY,
+                RESTORATION_WIENER_PAYLOAD,
+                false,
+                64,
+                64,
+                restoration
+        );
+
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
+        RestorationUnitMap restorationUnitMap = result.restorationUnitMap();
+        RestorationUnit unit = restorationUnitMap.unit(0, 0, 0);
+
+        assertEquals(1, restorationUnitMap.columns(0));
+        assertEquals(1, restorationUnitMap.rows(0));
+        assertEquals(0, restorationUnitMap.columns(1));
+        assertEquals(0, restorationUnitMap.rows(1));
+        assertNotNull(unit);
+        assertEquals(FrameHeader.RestorationType.WIENER, unit.type());
+        assertArrayEquals(new int[]{3, -7, 15}, unit.wienerCoefficients()[0]);
+        assertArrayEquals(new int[]{3, -6, 31}, unit.wienerCoefficients()[1]);
+        assertEquals(BlockSize.SIZE_64X64, result.tileRoots(0)[0].size());
     }
 
     /// Verifies that reference-frame CDF snapshots seed subsequent tile syntax decoding.
@@ -200,6 +242,33 @@ final class FrameSyntaxDecoderTest {
             int codedWidth,
             int codedHeight
     ) {
+        return createAssembly(
+                frameType,
+                payload,
+                useReferenceFrameMotionVectors,
+                codedWidth,
+                codedHeight,
+                noRestoration()
+        );
+    }
+
+    /// Creates a synthetic frame assembly used by structural frame-decoder tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param payload the collected tile entropy payload
+    /// @param useReferenceFrameMotionVectors whether temporal motion vectors are enabled
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param restoration the frame-level loop-restoration configuration
+    /// @return a synthetic frame assembly used by structural frame-decoder tests
+    private static FrameAssembly createAssembly(
+            FrameType frameType,
+            byte[] payload,
+            boolean useReferenceFrameMotionVectors,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.RestorationInfo restoration
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 codedWidth,
@@ -307,15 +376,7 @@ final class FrameSyntaxDecoderTest {
                         new int[]{0, 0}
                 ),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
-                new FrameHeader.RestorationInfo(
-                        new FrameHeader.RestorationType[]{
-                                FrameHeader.RestorationType.NONE,
-                                FrameHeader.RestorationType.NONE,
-                                FrameHeader.RestorationType.NONE
-                        },
-                        0,
-                        0
-                ),
+                restoration,
                 FrameHeader.TransformMode.LARGEST,
                 false,
                 false,
@@ -334,6 +395,21 @@ final class FrameSyntaxDecoderTest {
                 new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
         );
         return assembly;
+    }
+
+    /// Creates disabled frame-level loop-restoration state.
+    ///
+    /// @return disabled frame-level loop-restoration state
+    private static FrameHeader.RestorationInfo noRestoration() {
+        return new FrameHeader.RestorationInfo(
+                new FrameHeader.RestorationType[]{
+                        FrameHeader.RestorationType.NONE,
+                        FrameHeader.RestorationType.NONE,
+                        FrameHeader.RestorationType.NONE
+                },
+                0,
+                0
+        );
     }
 
     /// Returns the first leaf node in raster order from one tile-root array.

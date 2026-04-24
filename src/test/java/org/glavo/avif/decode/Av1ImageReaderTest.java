@@ -20,6 +20,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.BlockNeighborContext;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
 import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TileResidualSyntaxReader;
@@ -393,6 +394,32 @@ final class Av1ImageReaderTest {
         assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I420, false);
         assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I422, false);
         assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I444, false);
+    }
+
+    /// Verifies that one super-resolved public still-picture decode refreshes reference state that
+    /// `show_existing_frame` can reuse without dropping structural postfilter metadata.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsStoredReferenceSurfaceForSuperResolvedShowExistingFrame() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSuperResolvedSequenceHeaderPayload(PixelFormat.I420)),
+                obu(6, fullSuperResolvedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                obu(3, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), PixelFormat.I420, 0);
+            FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(firstSyntaxResult);
+            assertTrue(firstSyntaxResult.assembly().frameHeader().superResolution().enabled());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), PixelFormat.I420, 1);
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
     }
 
     /// Verifies that `readAllFrames()` preserves the current supported first-pixel combined
@@ -3578,11 +3605,17 @@ final class Av1ImageReaderTest {
     private static void assertReferenceStateStoredForLastSyntaxResult(Av1ImageReader reader) {
         FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
         assertNotNull(syntaxResult);
+        RestorationUnitMap syntaxRestorationUnitMap = syntaxResult.restorationUnitMap();
         for (int i = 0; i < 8; i++) {
             FrameSyntaxDecodeResult storedResult = reader.referenceFrameSyntaxResult(i);
             assertNotNull(storedResult);
             assertSame(syntaxResult.assembly(), storedResult.assembly());
             assertEquals(syntaxResult.tileCount(), storedResult.tileCount());
+            RestorationUnitMap storedRestorationUnitMap = storedResult.restorationUnitMap();
+            for (int plane = 0; plane < 3; plane++) {
+                assertEquals(syntaxRestorationUnitMap.columns(plane), storedRestorationUnitMap.columns(plane));
+                assertEquals(syntaxRestorationUnitMap.rows(plane), storedRestorationUnitMap.rows(plane));
+            }
         }
     }
 
