@@ -27,8 +27,8 @@ reconstruction core and the real-stream coverage that proves it.
   - integer-copy prediction
   - fixed-filter and block-resolved `SWITCHABLE` subpel prediction
   - first horizontal super-resolution subset
-  - first hybrid parsed-stream inter success path that still relies on injected parser metadata for
-    the broader fixture
+  - first hybrid parsed-stream inter success path with `I420/I422/I444` public-layout coverage that
+    still relies on injected parser metadata for the broader fixture
 
 Everything outside that subset must continue to fail explicitly with a stable
 `NOT_IMPLEMENTED` boundary rather than silently producing incorrect output.
@@ -67,8 +67,8 @@ Everything outside that subset must continue to fail explicitly with a stable
   support is stronger at the synthetic frame-syntax/runtime level than in the real fixture corpus.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Palette reconstruction now covers the current synthetic `I400/I420/I422/I444` subset plus the
-  first deterministic real wider-chroma palette fixture, but broader edge cases and direct parsed
-  wider-chroma palette streams are still missing.
+  first deterministic real wider-chroma palette fixture, but direct parsed wider-chroma palette
+  still-picture streams and broader edge cases are still missing.
 - `intrabc` reconstruction now covers:
   - a first synthetic same-frame `BILINEAR` subset
   - a first generated-header real syntax-and-reconstruction integration path
@@ -79,7 +79,7 @@ Everything outside that subset must continue to fail explicitly with a stable
   - integer-copy prediction
   - fixed-filter and block-resolved `SWITCHABLE` subpel sampling
   - a first geometry-remapped stored-reference path for post-super-resolution surfaces
-  - a first hybrid parsed-stream public inter success path
+  - a first hybrid parsed-stream public inter success path with `I420/I422/I444` public-layout coverage
 
   Broader self-contained parsed-stream inter support and richer motion compensation are still
   incomplete.

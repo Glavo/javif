@@ -532,6 +532,29 @@ final class Av1ImageReaderTest {
         assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(true);
     }
 
+    /// Verifies that the current hybrid parsed inter success path also works under widened parsed
+    /// `I422` and `I444` public layouts when the preceding parsed key frame and the injected parser
+    /// metadata use the same chroma format.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForStandaloneRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+            throws IOException {
+        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I422, false);
+        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I444, false);
+    }
+
+    /// Verifies that the combined hybrid parsed inter success path also works under widened parsed
+    /// `I422` and `I444` public layouts.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForCombinedRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+            throws IOException {
+        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I422, true);
+        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I444, true);
+    }
+
 
     /// Verifies that tile-group OBUs are rejected when no standalone or combined frame header is active.
     @Test
@@ -1066,7 +1089,21 @@ final class Av1ImageReaderTest {
     ///
     /// @return injected reference-slot state for the real parsed inter-frame success path
     private static InjectedReferenceState[] createInterReferenceStatesForRealParsedInterFrame() {
-        SequenceHeader sequenceHeader = createFullInterSequenceHeader();
+        return createInterReferenceStatesForRealParsedInterFrame(PixelFormat.I420);
+    }
+
+    /// Creates injected reference-slot state for the real parsed inter-frame success path in the
+    /// requested public chroma layout.
+    ///
+    /// Slot `0` carries one populated reconstructed surface while the remaining parser-visible
+    /// slots provide only the order-hint and frame-size metadata needed by the parsed inter frame.
+    ///
+    /// @param pixelFormat the parsed chroma layout exposed by the inter sequence and stored surfaces
+    /// @return injected reference-slot state for the requested parsed inter-frame success path
+    private static InjectedReferenceState[] createInterReferenceStatesForRealParsedInterFrame(
+            PixelFormat pixelFormat
+    ) {
+        SequenceHeader sequenceHeader = createFullInterSequenceHeader(pixelFormat);
         FrameHeader[] referenceFrameHeaders = createInterReferenceFrameHeaders();
         InjectedReferenceState[] referenceStates = new InjectedReferenceState[referenceFrameHeaders.length];
         for (int i = 0; i < referenceFrameHeaders.length; i++) {
@@ -1078,7 +1115,7 @@ final class Av1ImageReaderTest {
                 referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
                         referenceFrameHeader,
                         syntaxResult,
-                        createGradientInterReferenceDecodedPlanes(referenceFrameHeader)
+                        createGradientInterReferenceDecodedPlanes(referenceFrameHeader, pixelFormat)
                 );
             }
             referenceStates[i] = new InjectedReferenceState(
@@ -1139,8 +1176,17 @@ final class Av1ImageReaderTest {
     ///
     /// @return one synthetic non-reduced `I420` sequence header compatible with parsed inter frames
     private static SequenceHeader createFullInterSequenceHeader() {
+        return createFullInterSequenceHeader(PixelFormat.I420);
+    }
+
+    /// Creates one synthetic non-reduced sequence header compatible with parsed inter-frame public
+    /// reader coverage in the requested chroma layout.
+    ///
+    /// @param pixelFormat the parsed chroma layout exposed by the synthetic inter sequence
+    /// @return one synthetic non-reduced sequence header compatible with parsed inter frames
+    private static SequenceHeader createFullInterSequenceHeader(PixelFormat pixelFormat) {
         return new SequenceHeader(
-                0,
+                reducedStillPictureProfile(pixelFormat),
                 1024,
                 512,
                 new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
@@ -1181,10 +1227,10 @@ final class Av1ImageReaderTest {
                         2,
                         2,
                         false,
-                        PixelFormat.I420,
+                        pixelFormat,
                         0,
-                        true,
-                        true,
+                        pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422,
+                        pixelFormat == PixelFormat.I420,
                         false
                 )
         );
@@ -1814,8 +1860,23 @@ final class Av1ImageReaderTest {
     private static void assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(
             boolean combined
     ) throws IOException {
+        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I420, combined);
+    }
+
+    /// Asserts that one real parsed inter frame reconstructs through the public reader when the
+    /// same stream first decodes one parsed key frame that provides the primary stored reference
+    /// surface and the remaining parser-visible inter metadata is injected immediately afterward.
+    ///
+    /// @param pixelFormat the parsed chroma layout used by both the preceding key frame and the
+    ///                    injected parser metadata
+    /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(
+            PixelFormat pixelFormat,
+            boolean combined
+    ) throws IOException {
         byte[] stream = concat(
-                obu(1, fullSequenceHeaderPayload()),
+                obu(1, fullSequenceHeaderPayload(pixelFormat)),
                 obu(6, fullStillPictureCombinedFramePayload(PALETTE_BLOCK_TILE_PAYLOAD)),
                 combined
                         ? obu(6, combinedInterFramePayload(INTER_BLOCK_TILE_PAYLOAD))
@@ -1832,7 +1893,7 @@ final class Av1ImageReaderTest {
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "parsed primary reference surface");
             assertStillPictureFrameMatchesReferenceSurface(referenceFrame, parsedPrimaryReferenceSurface, 0);
 
-            InjectedReferenceState[] referenceStates = createInterReferenceStatesForRealParsedInterFrame();
+            InjectedReferenceState[] referenceStates = createInterReferenceStatesForRealParsedInterFrame(pixelFormat);
             referenceStates[0] = withReferenceSurface(referenceStates[0], parsedPrimaryReferenceSurface);
             injectInterReferenceStates(reader, referenceStates);
 
@@ -2161,24 +2222,37 @@ final class Av1ImageReaderTest {
         );
     }
 
-    /// Creates one exact `I420` gradient surface for the injected stored inter reference slot.
+    /// Creates one exact gradient surface for the injected stored inter reference slot in the
+    /// requested chroma layout.
     ///
     /// @param frameHeader the frame header whose coded and render dimensions should be used
-    /// @return one exact `I420` gradient surface for the injected stored inter reference slot
-    private static DecodedPlanes createGradientInterReferenceDecodedPlanes(FrameHeader frameHeader) {
+    /// @param pixelFormat the parsed chroma layout exposed by the stored reference surface
+    /// @return one exact gradient surface for the injected stored inter reference slot
+    private static DecodedPlanes createGradientInterReferenceDecodedPlanes(
+            FrameHeader frameHeader,
+            PixelFormat pixelFormat
+    ) {
         FrameHeader.FrameSize frameSize = frameHeader.frameSize();
-        int chromaWidth = (frameSize.codedWidth() + 1) / 2;
-        int chromaHeight = (frameSize.height() + 1) / 2;
+        int chromaWidth = switch (pixelFormat) {
+            case I400 -> 0;
+            case I420, I422 -> (frameSize.codedWidth() + 1) / 2;
+            case I444 -> frameSize.codedWidth();
+        };
+        int chromaHeight = switch (pixelFormat) {
+            case I400 -> 0;
+            case I420 -> (frameSize.height() + 1) / 2;
+            case I422, I444 -> frameSize.height();
+        };
         return new DecodedPlanes(
                 8,
-                PixelFormat.I420,
+                pixelFormat,
                 frameSize.codedWidth(),
                 frameSize.height(),
                 frameSize.renderWidth(),
                 frameSize.renderHeight(),
                 createGradientPlane(frameSize.codedWidth(), frameSize.height(), 16, 1, 2),
-                createGradientPlane(chromaWidth, chromaHeight, 64, 2, 3),
-                createGradientPlane(chromaWidth, chromaHeight, 160, 1, 2)
+                pixelFormat == PixelFormat.I400 ? null : createGradientPlane(chromaWidth, chromaHeight, 64, 2, 3),
+                pixelFormat == PixelFormat.I400 ? null : createGradientPlane(chromaWidth, chromaHeight, 160, 1, 2)
         );
     }
 
@@ -2543,6 +2617,8 @@ final class Av1ImageReaderTest {
         assertDecodedStillPictureFrameMetadata(
                 decodedFrame,
                 decodedPlanes.bitDepth(),
+                decodedPlanes.codedWidth(),
+                decodedPlanes.codedHeight(),
                 decodedPlanes.pixelFormat(),
                 referenceSurfaceSnapshot.frameHeader().frameType(),
                 expectedPresentationIndex
@@ -2677,9 +2753,39 @@ final class Av1ImageReaderTest {
             FrameType expectedFrameType,
             long expectedPresentationIndex
     ) {
+        assertDecodedStillPictureFrameMetadata(
+                decodedFrame,
+                expectedBitDepth,
+                64,
+                64,
+                expectedPixelFormat,
+                expectedFrameType,
+                expectedPresentationIndex
+        );
+    }
+
+    /// Asserts the decoded-frame metadata shared by the current still-picture fixtures for one
+    /// explicit bit depth, geometry, and frame type.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedBitDepth the expected decoded bit depth exposed by the public frame
+    /// @param expectedWidth the expected decoded frame width
+    /// @param expectedHeight the expected decoded frame height
+    /// @param expectedPixelFormat the expected chroma layout exposed by the public frame
+    /// @param expectedFrameType the expected AV1 frame type exposed by the public frame
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertDecodedStillPictureFrameMetadata(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            int expectedBitDepth,
+            int expectedWidth,
+            int expectedHeight,
+            PixelFormat expectedPixelFormat,
+            FrameType expectedFrameType,
+            long expectedPresentationIndex
+    ) {
         assertNotNull(decodedFrame);
-        assertEquals(64, decodedFrame.width());
-        assertEquals(64, decodedFrame.height());
+        assertEquals(expectedWidth, decodedFrame.width());
+        assertEquals(expectedHeight, decodedFrame.height());
         assertEquals(expectedBitDepth, decodedFrame.bitDepth());
         assertEquals(expectedPixelFormat, decodedFrame.pixelFormat());
         assertEquals(expectedFrameType, decodedFrame.frameType());
@@ -2693,14 +2799,33 @@ final class Av1ImageReaderTest {
     /// @return the first raster-order leaf whose decoded block header carries palette state
     private static TilePartitionTreeReader.LeafNode requireFirstPaletteLeaf(FrameSyntaxDecodeResult syntaxResult) {
         List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxResult.tileRoots(0));
+        StringBuilder summary = new StringBuilder()
+                .append("allowSCT=")
+                .append(syntaxResult.assembly().frameHeader().allowScreenContentTools())
+                .append(", pixelFormat=")
+                .append(syntaxResult.assembly().sequenceHeader().colorConfig().pixelFormat());
         for (TilePartitionTreeReader.LeafNode leaf : leaves) {
+            summary.append(" | leaf ")
+                    .append(leaf.position().x4())
+                    .append(',')
+                    .append(leaf.position().y4())
+                    .append(' ')
+                    .append(leaf.size())
+                    .append(" yPal=")
+                    .append(leaf.header().yPaletteSize())
+                    .append(" uvPal=")
+                    .append(leaf.header().uvPaletteSize())
+                    .append(" yMode=")
+                    .append(leaf.header().yMode())
+                    .append(" uvMode=")
+                    .append(leaf.header().uvMode());
             if (leaf.header().yPaletteSize() > 0 || leaf.header().uvPaletteSize() > 0) {
                 assertTrue(leaf.header().yPaletteSize() > 0);
                 assertTrue(leaf.header().uvPaletteSize() > 0);
                 return leaf;
             }
         }
-        throw new AssertionError("No palette leaf decoded from the real bitstream-derived fixture");
+        throw new AssertionError("No palette leaf decoded from the real bitstream-derived fixture: " + summary);
     }
 
     /// Asserts that the first raster-order decoded leaf is intra-coded.
@@ -2872,6 +2997,23 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the requested public chroma layout
     /// @return the reduced still-picture sequence header payload
     private static byte[] reducedStillPicturePayload(PixelFormat pixelFormat) {
+        return reducedStillPicturePayload(pixelFormat, 64, 64);
+    }
+
+    /// Creates a reduced still-picture sequence header payload for one requested public chroma
+    /// layout and coded geometry.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @param codedWidth the requested coded frame width
+    /// @param codedHeight the requested coded frame height
+    /// @return the reduced still-picture sequence header payload
+    private static byte[] reducedStillPicturePayload(PixelFormat pixelFormat, int codedWidth, int codedHeight) {
+        if (codedWidth < 1 || codedWidth > 1024) {
+            throw new IllegalArgumentException("codedWidth out of supported fixture range: " + codedWidth);
+        }
+        if (codedHeight < 1 || codedHeight > 512) {
+            throw new IllegalArgumentException("codedHeight out of supported fixture range: " + codedHeight);
+        }
         BitWriter writer = new BitWriter();
         writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
         writer.writeFlag(true);
@@ -2880,8 +3022,8 @@ final class Av1ImageReaderTest {
         writer.writeBits(1, 2);
         writer.writeBits(9, 4);
         writer.writeBits(8, 4);
-        writer.writeBits(63, 10);
-        writer.writeBits(63, 9);
+        writer.writeBits(codedWidth - 1L, 10);
+        writer.writeBits(codedHeight - 1L, 9);
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);
@@ -3009,6 +3151,18 @@ final class Av1ImageReaderTest {
     }
 
     /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// `show_existing_frame` while exposing the requested `8-bit` public chroma layout and coded
+    /// dimensions.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @param codedWidth the requested coded frame width
+    /// @param codedHeight the requested coded frame height
+    /// @return one non-reduced still-picture-compatible sequence header payload
+    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, int codedWidth, int codedHeight) {
+        return fullSequenceHeaderPayload(pixelFormat, 8, false, codedWidth, codedHeight);
+    }
+
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
     /// `show_existing_frame` while exposing the requested public chroma layout and decoded bit
     /// depth.
     ///
@@ -3039,6 +3193,32 @@ final class Av1ImageReaderTest {
     /// @param filmGrainPresent whether frame headers in the stream may signal film grain
     /// @return one non-reduced still-picture-compatible sequence header payload
     private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, int bitDepth, boolean filmGrainPresent) {
+        return fullSequenceHeaderPayload(pixelFormat, bitDepth, filmGrainPresent, 64, 64);
+    }
+
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// `show_existing_frame` while exposing the requested public chroma layout, decoded bit depth,
+    /// film grain capability, and coded dimensions.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @param bitDepth the requested decoded sample bit depth
+    /// @param filmGrainPresent whether frame headers in the stream may signal film grain
+    /// @param codedWidth the requested coded frame width
+    /// @param codedHeight the requested coded frame height
+    /// @return one non-reduced still-picture-compatible sequence header payload
+    private static byte[] fullSequenceHeaderPayload(
+            PixelFormat pixelFormat,
+            int bitDepth,
+            boolean filmGrainPresent,
+            int codedWidth,
+            int codedHeight
+    ) {
+        if (codedWidth < 1 || codedWidth > 64) {
+            throw new IllegalArgumentException("codedWidth out of supported fixture range: " + codedWidth);
+        }
+        if (codedHeight < 1 || codedHeight > 64) {
+            throw new IllegalArgumentException("codedHeight out of supported fixture range: " + codedHeight);
+        }
         BitWriter writer = new BitWriter();
         writer.writeBits(reducedStillPictureProfile(pixelFormat, bitDepth), 3);
         writer.writeFlag(false);
@@ -3052,8 +3232,8 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeBits(5, 4);
         writer.writeBits(5, 4);
-        writer.writeBits(63, 6);
-        writer.writeBits(63, 6);
+        writer.writeBits(codedWidth - 1L, 6);
+        writer.writeBits(codedHeight - 1L, 6);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(true);
@@ -3136,6 +3316,18 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one non-reduced still-picture-compatible key frame header payload that enables
+    /// frame-level screen-content tools so the current deterministic palette fixture can be parsed
+    /// directly.
+    ///
+    /// @return one non-reduced still-picture-compatible palette key frame header payload
+    private static byte[] fullPaletteStillPictureFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writeFullPaletteStillPictureFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
 
     /// Creates a minimal standalone `show_existing_frame` header payload.
     ///
@@ -3200,6 +3392,19 @@ final class Av1ImageReaderTest {
     private static byte[] fullStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
         BitWriter writer = new BitWriter();
         writeFullStillPictureFrameHeaderBits(writer);
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
+    /// Creates one non-reduced still-picture-compatible combined frame payload whose frame header
+    /// enables frame-level screen-content tools for direct parsed palette coverage.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the palette-compatible frame header
+    /// @return one non-reduced still-picture-compatible combined frame payload for palette coverage
+    private static byte[] fullPaletteStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writeFullPaletteStillPictureFrameHeaderBits(writer);
+        writer.padToByteBoundary();
         writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
     }
@@ -3337,6 +3542,32 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
     }
+
+    /// Writes one non-reduced still-picture-compatible key frame header syntax that enables
+    /// frame-level screen-content tools so the deterministic palette fixture can be parsed through
+    /// the public reader.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeFullPaletteStillPictureFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+    }
+
 
     /// Writes one explicit still-picture film grain syntax block compatible with the current
     /// `8-bit I420` combined-frame fixture.
