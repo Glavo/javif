@@ -609,46 +609,46 @@ final class Av1ImageReaderTest {
     }
 
     /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
-    /// when the same stream first refreshes parsed reference state with one preceding key frame.
+    /// when the same stream first refreshes the only parser-visible reference slot it needs.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsArgbIntFrameForStandaloneRealParsedInterFrameBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+    void readFrameReturnsArgbIntFrameForStandaloneRealParsedInterFrameBackedByParsedPrimaryReferenceSurface()
             throws IOException {
-        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(false);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(false);
     }
 
     /// Verifies that one combined real parsed inter frame reconstructs through the public reader
-    /// when the same stream first refreshes parsed reference state with one preceding key frame.
+    /// when the same stream first refreshes the only parser-visible reference slot it needs.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsArgbIntFrameForCombinedRealParsedInterFrameBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+    void readFrameReturnsArgbIntFrameForCombinedRealParsedInterFrameBackedByParsedPrimaryReferenceSurface()
             throws IOException {
-        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(true);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(true);
     }
 
-    /// Verifies that the current hybrid parsed inter success path also works under widened parsed
-    /// `I422` and `I444` public layouts when the preceding parsed key frame and the injected parser
-    /// metadata use the same chroma format.
+    /// Verifies that the self-contained parsed inter success path also works under widened parsed
+    /// `I422` and `I444` public layouts when the preceding parsed key frame provides the stored
+    /// reference surface.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsArgbIntFrameForStandaloneRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+    void readFrameReturnsArgbIntFrameForStandaloneRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurface()
             throws IOException {
-        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I422, false);
-        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I444, false);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I422, false);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I444, false);
     }
 
-    /// Verifies that the combined hybrid parsed inter success path also works under widened parsed
-    /// `I422` and `I444` public layouts.
+    /// Verifies that the combined self-contained parsed inter success path also works under widened
+    /// parsed `I422` and `I444` public layouts.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsArgbIntFrameForCombinedRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+    void readFrameReturnsArgbIntFrameForCombinedRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurface()
             throws IOException {
-        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I422, true);
-        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I444, true);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I422, true);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I444, true);
     }
 
 
@@ -1406,29 +1406,6 @@ final class Av1ImageReaderTest {
                     referenceState.referenceSurfaceSnapshot()
             );
         }
-    }
-
-    /// Returns one copy of the supplied injected reference state whose stored surface snapshot keeps
-    /// the injected parser metadata but reuses the caller-supplied parsed decoded planes.
-    ///
-    /// @param referenceState the injected reference state to copy
-    /// @param referenceSurfaceSnapshot the parsed stored reference surface whose decoded planes should be preserved
-    /// @return one copy of the supplied injected reference state with a replacement surface snapshot
-    private static InjectedReferenceState withReferenceSurface(
-            InjectedReferenceState referenceState,
-            ReferenceSurfaceSnapshot referenceSurfaceSnapshot
-    ) {
-        ReferenceSurfaceSnapshot wrappedSurfaceSnapshot = new ReferenceSurfaceSnapshot(
-                referenceState.frameHeader(),
-                referenceState.syntaxResult(),
-                referenceSurfaceSnapshot.decodedPlanes()
-        );
-        return new InjectedReferenceState(
-                referenceState.sequenceHeader(),
-                referenceState.frameHeader(),
-                referenceState.syntaxResult(),
-                wrappedSurfaceSnapshot
-        );
     }
 
     /// Creates one synthetic non-reduced `I420` sequence header compatible with parsed inter-frame
@@ -2250,26 +2227,26 @@ final class Av1ImageReaderTest {
     }
 
     /// Asserts that one real parsed inter frame reconstructs through the public reader when the
-    /// same stream first decodes one parsed key frame that provides the primary stored reference
-    /// surface and the remaining parser-visible inter metadata is injected immediately afterward.
+    /// same stream first decodes one parsed key frame that provides the only referenced surface and
+    /// parser-visible reference header.
     ///
     /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
-    private static void assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(
+    private static void assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(
             boolean combined
     ) throws IOException {
-        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(PixelFormat.I420, combined);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I420, combined);
     }
 
     /// Asserts that one real parsed inter frame reconstructs through the public reader when the
     /// same stream first decodes one parsed key frame that provides the primary stored reference
-    /// surface and the remaining parser-visible inter metadata is injected immediately afterward.
+    /// surface and parser-visible reference header.
     ///
     /// @param pixelFormat the parsed chroma layout used by both the preceding key frame and the
-    ///                    injected parser metadata
+    ///                    parsed inter frame
     /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
-    private static void assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(
+    private static void assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(
             PixelFormat pixelFormat,
             boolean combined
     ) throws IOException {
@@ -2277,9 +2254,9 @@ final class Av1ImageReaderTest {
                 obu(1, fullSequenceHeaderPayload(pixelFormat)),
                 obu(6, fullStillPictureCombinedFramePayload(PALETTE_BLOCK_TILE_PAYLOAD)),
                 combined
-                        ? obu(6, combinedInterFramePayload(INTER_BLOCK_TILE_PAYLOAD))
+                        ? obu(6, selfContainedCombinedInterFramePayload(INTER_BLOCK_TILE_PAYLOAD))
                         : concat(
-                        obu(3, interFrameHeaderPayload()),
+                        obu(3, selfContainedInterFrameHeaderPayload()),
                         obu(4, INTER_BLOCK_TILE_PAYLOAD)
                 )
         );
@@ -2291,14 +2268,8 @@ final class Av1ImageReaderTest {
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "parsed primary reference surface");
             assertStillPictureFrameMatchesReferenceSurface(referenceFrame, parsedPrimaryReferenceSurface, 0);
 
-            InjectedReferenceState[] referenceStates = createInterReferenceStatesForRealParsedInterFrame(pixelFormat);
-            referenceStates[0] = withReferenceSurface(referenceStates[0], parsedPrimaryReferenceSurface);
-            injectInterReferenceStates(reader, referenceStates);
-
             ReferenceSurfaceSnapshot[] referenceSurfaceSlots = new ReferenceSurfaceSnapshot[8];
-            for (int i = 0; i < referenceStates.length; i++) {
-                referenceSurfaceSlots[i] = referenceStates[i].referenceSurfaceSnapshot();
-            }
+            referenceSurfaceSlots[0] = parsedPrimaryReferenceSurface;
 
             DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxResult =
@@ -2310,10 +2281,9 @@ final class Av1ImageReaderTest {
             );
 
             assertFirstDecodedLeafIsInter(syntaxResult);
+            assertArrayEquals(new int[]{0, 0, 0, 0, 0, 0, 0}, syntaxResult.assembly().frameHeader().referenceFrameIndices());
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 1);
-            assertSame(referenceStates[0].frameHeader(), reader.referenceFrameHeader(0));
-            assertSame(referenceStates[0].syntaxResult(), reader.referenceFrameSyntaxResult(0));
-            assertSame(referenceStates[0].referenceSurfaceSnapshot(), reader.referenceSurfaceSnapshot(0));
+            assertSame(parsedPrimaryReferenceSurface, reader.referenceSurfaceSnapshot(0));
             assertNull(reader.readFrame());
         });
     }
@@ -3826,6 +3796,29 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one standalone inter frame header payload that only references already refreshed
+    /// slot `0` metadata from the same parsed stream.
+    ///
+    /// @return one standalone self-contained inter frame header payload
+    private static byte[] selfContainedInterFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writeSelfContainedInterFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates one combined inter frame payload whose frame-header bits only reference slot `0`.
+    ///
+    /// @param tileGroupPayload the single-tile payload appended after the inter frame header bits
+    /// @return one combined self-contained inter frame payload
+    private static byte[] selfContainedCombinedInterFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writeSelfContainedInterFrameHeaderBits(writer);
+        writer.padToByteBoundary();
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
     /// Creates a reduced still-picture combined frame payload with a single tile group.
     ///
     /// @return the reduced still-picture combined frame payload
@@ -4105,6 +4098,42 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(true);
+        writer.writeFlag(false);
+    }
+
+    /// Writes one inter frame-header syntax block that parses using only the reference headers
+    /// refreshed by the preceding parsed key frame.
+    ///
+    /// The payload keeps the same `all-zero-8` tile compatible with the public reconstruction path
+    /// by using sequence-bounded frame geometry, fixed interpolation, all-lossless quantization,
+    /// and slot `0` for every LAST..ALTREF reference.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeSelfContainedInterFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(false);
+        writer.writeBits(1, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(7, 3);
+        writer.writeBits(0, 8);
+        for (int i = 0; i < 7; i++) {
+            writer.writeBits(0, 3);
+        }
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
         writer.writeFlag(false);
     }
 

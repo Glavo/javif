@@ -25,21 +25,22 @@ Supported end-to-end behavior:
 - Real bitstream-driven multi-tile first-pixel still-picture paths for `I420/I422/I444`, including
   horizontal, vertical, `2x2`, combined-frame, standalone, and split tile-group variants.
 - Direct real parsed `I422/I444` public-layout paths for still output, high-bit-depth output,
-  stored-surface reuse, multi-tile first-pixel streams, and the current hybrid inter subset.
+  stored-surface reuse, multi-tile first-pixel streams, and the current self-contained inter subset.
 - First inter/reference subset: single-reference prediction, average-compound prediction,
   integer-copy prediction, fixed-filter and block-resolved `SWITCHABLE` subpel prediction, and
   normative horizontal super-resolution for key/intra, public still-picture, synthetic inter, and
   bitstream-derived inter reconstruction paths.
-- First hybrid parsed-stream inter success path with `I420/I422/I444` public-layout coverage that
-  still relies on injected parser metadata for the broader fixture.
+- Self-contained parsed-stream inter public-reader paths for standalone and combined `FRAME`
+  inputs across `I420/I422/I444`, backed by a preceding parsed reference frame rather than injected
+  parser metadata.
 
 ## Remaining Decode Boundary
 
 - Transform/coefficient coverage still needs broader transform types and coefficient patterns beyond
   the current `DCT_DCT <= 64-axis` subset.
 - `intrabc` coverage still needs broader parsed-stream syntax and reconstruction fixtures.
-- Inter/reference coverage still needs self-contained parsed-stream inter support without injected
-  parser metadata, plus richer motion compensation.
+- Motion-compensation coverage still needs richer inter/reference features beyond the current
+  single-reference, average-compound, fixed-filter, switchable-filter, and super-resolution subset.
 - Postfilter behavior still needs higher-fidelity in-loop and presentation-path coverage.
 
 ## Stable Contracts
@@ -58,18 +59,16 @@ transform/coefficient support.
 
 ## Main Work Priority
 
-1. Broaden real parsed-stream inter coverage without injected parser metadata.
-2. Broaden motion compensation fidelity and feature coverage.
-3. Broaden parsed-stream `intrabc`.
-4. Broaden transform/coefficient coverage beyond the current `DCT_DCT <= 64-axis` subset.
-5. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
+1. Broaden motion compensation fidelity and feature coverage.
+2. Broaden parsed-stream `intrabc`.
+3. Broaden transform/coefficient coverage beyond the current `DCT_DCT <= 64-axis` subset.
+4. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
 
 ## Exit Criteria
 
 This remaining work is complete when decoded frames produce stable `DecodedPlanes` across a
-materially broader real-stream subset, reference surfaces refresh and reuse correctly across that
-subset, and the public reader no longer depends on injected parser metadata for the current real
-parsed inter fixtures.
+materially broader real-stream subset and reference surfaces refresh and reuse correctly across
+that subset.
 
 ## Validation And Maintenance
 
