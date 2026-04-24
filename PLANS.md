@@ -122,75 +122,6 @@ The following contract still needs broader semantic coverage, but its shape shou
   - dense coefficient storage
   - context bytes needed by later stages
 
-## Completed Areas
-
-### Syntax Front End
-
-The syntax front end is effectively complete for the current rollout:
-
-- OBU reader
-- sequence header parsing
-- frame header parsing
-- tile/block syntax decoding
-- stored CDF state
-- stored temporal-motion state
-
-Future syntax fixes should be driven by specific remaining reconstruction needs.
-
-### Frame Header and Film Grain Parameters
-
-Frame-header grain parsing and normalized storage are complete.
-
-Remaining grain work belongs to presentation fidelity and synthesis behavior.
-
-### Postfilter and Grain Ordering
-
-The current supported subset already has the correct stage ordering:
-
-- reconstruction
-- postfilter shell
-- stored postfilter/post-super-resolution/pre-grain reference surface
-- optional presentation-time grain application
-
-Loop filter, CDEF, restoration, and grain synthesis still need broader fidelity over time, but the
-contract and ownership are settled.
-
-### Output Conversion
-
-Public output conversion is complete for the current supported subset:
-
-- `8-bit I400/I420/I422/I444 -> ArgbIntFrame`
-- `10-bit` / `12-bit I400/I420/I422/I444 -> ArgbLongFrame`
-
-Later changes here should be incremental fidelity or feature coverage work, not a structural
-rewrite.
-
-### Public Runtime Integration
-
-Public runtime integration is complete for the current supported subset:
-
-- runtime reference slots
-- output policy
-- public frame materialization
-- stored-surface `show_existing_frame`
-- current `decodeFrameType` filtering
-- current grain-aware presentation contract
-
-Future public behavior changes should only happen when the reconstruction core widens.
-
-### Oracle and Regression Harness
-
-The regression harness is already in the desired shape:
-
-- named fixed fixtures
-- exact-oracle syntax tests
-- first-pixel public-reader tests
-- reconstruction/output unit tests
-- deterministic wider-chroma and palette regressions
-
-New tests should now be added as part of the owning implementation change, not as a separate
-planning area.
-
 ## Remaining Main Work Area: Reconstruction Core
 
 This is now the only major unfinished area.
@@ -200,32 +131,9 @@ This is now the only major unfinished area.
 Finish the reconstruction core until the decoder can handle a substantially broader set of real AV1
 streams without falling back to `NOT_IMPLEMENTED`.
 
-### Already In Place
-
-- decoded-plane storage and the first-pixel key/intra path
-- direct parsed high-bit-depth still-picture subset:
-  - `10-bit I420`
-  - `12-bit I444`
-- high-bit-depth dequantization through current `8/10/12-bit` QTX tables
-- non-zero luma/chroma `DCT_DCT` reconstruction for the current square and rectangular subset whose
-  axes stay within `64`
-- current `I420/I422/I444` CFL subset
-- current bitstream-driven chroma residual coverage for the first `I420/I422` paths
-- serial multi-tile reconstruction inside the current supported subset
-- minimal synthetic and first real wider-chroma palette reconstruction coverage
-- current wider-chroma key/intra first-pixel subset
-- first inter/reference subset:
-  - single-reference prediction
-  - average-compound prediction
-  - integer-copy prediction
-  - fixed-filter and block-resolved `SWITCHABLE` subpel sampling
-  - one larger-residual real inter integration path
-  - first parsed-stream fixed-filter integration coverage
-  - first hybrid public-reader parsed inter success path
-- first key/intra plus inter horizontal super-resolution subset, including geometry-remapped stored
-  reference surfaces
-- first synthetic same-frame `intrabc` bilinear subset and first generated-header real
-  syntax-and-reconstruction integration path
+The currently implemented reconstruction scope is summarized in `Implemented` and
+`Remaining Decode Boundary` above. The remaining work below is the part that still blocks this area
+from being considered complete.
 
 ### Remaining Gaps
 
