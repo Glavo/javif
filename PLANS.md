@@ -32,9 +32,10 @@ Supported end-to-end behavior:
   stored-surface reuse, multi-tile first-pixel streams, and the current self-contained inter subset.
 - First inter/reference subset: single-reference prediction, inter-intra blend and wedge
   prediction, average, weighted, wedge-masked, and segment-masked compound prediction,
-  OBMC causal-neighbor blending, integer-copy prediction, bit-depth-preserving
-  fixed-filter and block-resolved `SWITCHABLE` subpel prediction, parsed candidate-only `NEAREST` /
-  `NEAR` / skip-mode motion vectors promoted to final block vectors, `refmvs`
+  OBMC causal-neighbor blending, local warped single-reference affine prediction from causal
+  same-reference motion samples, integer-copy prediction, bit-depth-preserving fixed-filter and
+  block-resolved `SWITCHABLE` subpel prediction, parsed candidate-only `NEAREST` / `NEAR` /
+  skip-mode motion vectors promoted to final block vectors, `refmvs`
   direct/secondary/top-right/top-left/temporal candidates with symmetric single/compound reference
   matching, multi-sample temporal fringe probing, and projected/scaled previous-frame temporal
   motion fields, parsed skip-mode compound reconstruction against two stored reference surfaces,
@@ -54,7 +55,6 @@ Supported end-to-end behavior:
 
 ## Remaining Decode Boundary
 
-- Motion-compensation coverage still needs warped motion.
 - Active loop-filter and loop-restoration pixel filtering still need full block-edge masks,
   restoration-unit syntax, and coefficient-driven filtering before those frame features can decode
   instead of failing at the stable `NOT_IMPLEMENTED` boundary.
@@ -72,9 +72,9 @@ The following contracts are stable and should be preserved:
 
 ## Main Work Priority
 
-1. Broaden motion compensation fidelity and feature coverage.
-2. Implement active loop-filter and loop-restoration pixel filtering once the required syntax
+1. Implement active loop-filter and loop-restoration pixel filtering once the required syntax
    state is represented.
+2. Broaden decoded real-stream coverage around the completed inter/reference subset.
 
 ## Exit Criteria
 

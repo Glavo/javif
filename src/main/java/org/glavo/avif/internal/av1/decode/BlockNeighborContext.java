@@ -1983,6 +1983,32 @@ public final class BlockNeighborContext {
         return false;
     }
 
+    /// Returns whether the current block has already-decoded causal samples usable by local warped motion.
+    ///
+    /// Local warped motion can only use single-reference inter neighbors that share the current
+    /// primary reference and expose a final primary motion vector.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the current block size
+    /// @param referenceFrame0 the current block primary inter reference in internal LAST..ALTREF order
+    /// @return whether at least one compatible above or left neighbor can seed local warped motion
+    public boolean hasLocalWarpSamples(BlockPosition position, BlockSize size, int referenceFrame0) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        if (referenceFrame0 < 0) {
+            return false;
+        }
+
+        int startX4 = nonNullPosition.x4();
+        int startY4 = nonNullPosition.y4();
+        int endX4 = Math.min(tileWidth4, startX4 + nonNullSize.width4());
+        int endY4 = Math.min(tileHeight4, startY4 + nonNullSize.height4());
+        if (startY4 > 0 && hasLocalWarpSampleAlongSpan(true, startY4 - 1, startX4, endX4, referenceFrame0)) {
+            return true;
+        }
+        return startX4 > 0 && hasLocalWarpSampleAlongSpan(false, startX4 - 1, startY4, endY4, referenceFrame0);
+    }
+
     /// Updates the neighbor state after decoding one block header.
     ///
     /// @param header the decoded block header that should become the new above/left edge state
@@ -2177,6 +2203,51 @@ public final class BlockNeighborContext {
     /// @return the stored decoded block covering one tile-relative 4x4 coordinate, or `null`
     private @Nullable StoredBlock storedBlockAt(int x4, int y4) {
         return storedBlocks[blockIndex(x4, y4)];
+    }
+
+    /// Returns whether a stored row or column contains a compatible local-warp sample block.
+    ///
+    /// @param rowScan whether the scan walks a fixed row instead of a fixed column
+    /// @param fixedCoordinate4 the fixed row or column coordinate in 4x4 units
+    /// @param spanStart4 the inclusive start of the scanned span on the varying axis
+    /// @param spanEnd4 the exclusive end of the scanned span on the varying axis
+    /// @param referenceFrame0 the current block primary inter reference in internal LAST..ALTREF order
+    /// @return whether a compatible local-warp sample block was found
+    private boolean hasLocalWarpSampleAlongSpan(
+            boolean rowScan,
+            int fixedCoordinate4,
+            int spanStart4,
+            int spanEnd4,
+            int referenceFrame0
+    ) {
+        StoredBlock[] visitedBlocks = new StoredBlock[Math.max(1, spanEnd4 - spanStart4)];
+        int visitedCount = 0;
+        for (int varyingCoordinate4 = spanStart4; varyingCoordinate4 < spanEnd4; varyingCoordinate4++) {
+            @Nullable StoredBlock storedBlock = rowScan
+                    ? storedBlockAt(varyingCoordinate4, fixedCoordinate4)
+                    : storedBlockAt(fixedCoordinate4, varyingCoordinate4);
+            if (storedBlock == null || containsStoredBlock(visitedBlocks, visitedCount, storedBlock)) {
+                continue;
+            }
+            visitedBlocks[visitedCount++] = storedBlock;
+            if (isLocalWarpSampleBlock(storedBlock, referenceFrame0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether one stored block can seed current-block local warped motion.
+    ///
+    /// @param storedBlock the stored causal neighbor block
+    /// @param referenceFrame0 the current block primary inter reference in internal LAST..ALTREF order
+    /// @return whether one stored block can seed current-block local warped motion
+    private static boolean isLocalWarpSampleBlock(StoredBlock storedBlock, int referenceFrame0) {
+        StoredBlock nonNullStoredBlock = Objects.requireNonNull(storedBlock, "storedBlock");
+        return !nonNullStoredBlock.intra()
+                && !nonNullStoredBlock.compoundReference()
+                && nonNullStoredBlock.referenceFrame0() == referenceFrame0
+                && nonNullStoredBlock.motionVector0().resolved();
     }
 
     /// Returns one stored edge motion vector, falling back to a provisional zero vector.

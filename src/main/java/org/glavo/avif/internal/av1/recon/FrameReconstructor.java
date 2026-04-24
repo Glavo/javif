@@ -47,10 +47,11 @@ import java.util.Objects;
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
 /// `I420` / `I422` / `I444` CFL chroma subset, parsed and synthetic luma/chroma palette paths, a
 /// normative horizontal super-resolution upscaling path for key/intra frames plus the current
-/// inter/reference prediction subset, and a minimal luma/chroma residual subset including clipped
-/// frame-fringe chroma footprints, explicit transform-type residual reconstruction for the
-/// currently modeled square and rectangular transform sizes whose axes stay within `64` samples,
-/// and bit-depth preserving inter subpel filtering for stored reference surfaces.
+/// inter/reference prediction subset including OBMC and local warped single-reference prediction,
+/// and a minimal luma/chroma residual subset including clipped frame-fringe chroma footprints,
+/// explicit transform-type residual reconstruction for the currently modeled square and
+/// rectangular transform sizes whose axes stay within `64` samples, and bit-depth preserving inter
+/// subpel filtering for stored reference surfaces.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// The number of coefficients in one 8-tap interpolation kernel.
@@ -113,6 +114,9 @@ public final class FrameReconstructor {
                     62, 62, 63, 63, 63, 63, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64
             }
     };
+
+    /// The maximum number of causal motion-vector samples used for one local warped model.
+    private static final int LOCAL_WARP_SAMPLE_CAPACITY = 8;
 
     /// The default AV1 regular 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
     private static final int[][] REGULAR_SUBPEL_FILTERS = {
@@ -584,6 +588,126 @@ public final class FrameReconstructor {
         }
     }
 
+    /// One causal neighbor sample used to estimate a local warped affine motion model.
+    @NotNullByDefault
+    private static final class LocalWarpSample {
+        /// The decoded neighbor block that produced this sample.
+        private final TileBlockHeaderReader.BlockHeader header;
+
+        /// The sample X position in luma destination coordinates.
+        private final double destinationX;
+
+        /// The sample Y position in luma destination coordinates.
+        private final double destinationY;
+
+        /// The sample horizontal motion delta relative to the current block, in quarter-pel units.
+        private final int columnDeltaQuarterPel;
+
+        /// The sample vertical motion delta relative to the current block, in quarter-pel units.
+        private final int rowDeltaQuarterPel;
+
+        /// Creates one causal neighbor sample used for local warped motion estimation.
+        ///
+        /// @param header the decoded neighbor block that produced this sample
+        /// @param destinationX the sample X position in luma destination coordinates
+        /// @param destinationY the sample Y position in luma destination coordinates
+        /// @param columnDeltaQuarterPel the horizontal motion delta relative to the current block
+        /// @param rowDeltaQuarterPel the vertical motion delta relative to the current block
+        private LocalWarpSample(
+                TileBlockHeaderReader.BlockHeader header,
+                double destinationX,
+                double destinationY,
+                int columnDeltaQuarterPel,
+                int rowDeltaQuarterPel
+        ) {
+            this.header = Objects.requireNonNull(header, "header");
+            this.destinationX = destinationX;
+            this.destinationY = destinationY;
+            this.columnDeltaQuarterPel = columnDeltaQuarterPel;
+            this.rowDeltaQuarterPel = rowDeltaQuarterPel;
+        }
+    }
+
+    /// One affine local warped motion model estimated from causal same-reference motion samples.
+    @NotNullByDefault
+    private static final class LocalWarpModel {
+        /// The current block center X in luma destination coordinates.
+        private final double centerX;
+
+        /// The current block center Y in luma destination coordinates.
+        private final double centerY;
+
+        /// The base horizontal motion-vector component in quarter-pel units.
+        private final int baseColumnQuarterPel;
+
+        /// The base vertical motion-vector component in quarter-pel units.
+        private final int baseRowQuarterPel;
+
+        /// The horizontal motion derivative by luma X coordinate, in quarter-pel units per pixel.
+        private final double columnDx;
+
+        /// The horizontal motion derivative by luma Y coordinate, in quarter-pel units per pixel.
+        private final double columnDy;
+
+        /// The vertical motion derivative by luma X coordinate, in quarter-pel units per pixel.
+        private final double rowDx;
+
+        /// The vertical motion derivative by luma Y coordinate, in quarter-pel units per pixel.
+        private final double rowDy;
+
+        /// Creates one affine local warped motion model.
+        ///
+        /// @param centerX the current block center X in luma destination coordinates
+        /// @param centerY the current block center Y in luma destination coordinates
+        /// @param baseColumnQuarterPel the base horizontal motion-vector component
+        /// @param baseRowQuarterPel the base vertical motion-vector component
+        /// @param columnDx the horizontal motion derivative by luma X coordinate
+        /// @param columnDy the horizontal motion derivative by luma Y coordinate
+        /// @param rowDx the vertical motion derivative by luma X coordinate
+        /// @param rowDy the vertical motion derivative by luma Y coordinate
+        private LocalWarpModel(
+                double centerX,
+                double centerY,
+                int baseColumnQuarterPel,
+                int baseRowQuarterPel,
+                double columnDx,
+                double columnDy,
+                double rowDx,
+                double rowDy
+        ) {
+            this.centerX = centerX;
+            this.centerY = centerY;
+            this.baseColumnQuarterPel = baseColumnQuarterPel;
+            this.baseRowQuarterPel = baseRowQuarterPel;
+            this.columnDx = columnDx;
+            this.columnDy = columnDy;
+            this.rowDx = rowDx;
+            this.rowDy = rowDy;
+        }
+
+        /// Returns the horizontal source offset for one luma-domain destination sample.
+        ///
+        /// @param lumaX the destination X coordinate in luma samples
+        /// @param lumaY the destination Y coordinate in luma samples
+        /// @return the horizontal source offset in quarter-pel units
+        public int columnOffsetQuarterPel(double lumaX, double lumaY) {
+            double dx = lumaX - centerX;
+            double dy = lumaY - centerY;
+            return baseColumnQuarterPel + (int) Math.round(dx * columnDx + dy * columnDy);
+        }
+
+        /// Returns the vertical source offset for one luma-domain destination sample.
+        ///
+        /// @param lumaX the destination X coordinate in luma samples
+        /// @param lumaY the destination Y coordinate in luma samples
+        /// @return the vertical source offset in quarter-pel units
+        public int rowOffsetQuarterPel(double lumaX, double lumaY) {
+            double dx = lumaX - centerX;
+            double dy = lumaY - centerY;
+            return baseRowQuarterPel + (int) Math.round(dx * rowDx + dy * rowDy);
+        }
+    }
+
     /// Upscales one decoded plane horizontally with the normative AV1 super-resolution filter.
     ///
     /// @param plane the decoded plane to upscale
@@ -981,9 +1105,6 @@ public final class FrameReconstructor {
             if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
                 throw new IllegalStateException("Inter palette reconstruction is not implemented yet");
             }
-            if (header.motionMode() == MotionMode.LOCAL_WARPED) {
-                throw new IllegalStateException("Local warped motion reconstruction is not implemented yet");
-            }
             if (header.interIntra() && !InterIntraMasks.supportsInterIntra(header.size())) {
                 throw new IllegalStateException("Inter-intra reconstruction encountered an unsupported block size");
             }
@@ -1083,16 +1204,30 @@ public final class FrameReconstructor {
                     referenceSurfaceSnapshots
             );
         } else {
-            reconstructSingleReferenceInterPrediction(
-                    lumaPlane,
-                    chromaUPlane,
-                    chromaVPlane,
-                    header,
-                    transformLayout,
-                    pixelFormat,
-                    frameHeader,
-                    referenceSurfaceSnapshots
-            );
+            if (header.motionMode() == MotionMode.LOCAL_WARPED) {
+                reconstructLocalWarpedInterPrediction(
+                        lumaPlane,
+                        chromaUPlane,
+                        chromaVPlane,
+                        header,
+                        transformLayout,
+                        pixelFormat,
+                        frameHeader,
+                        referenceSurfaceSnapshots,
+                        decodedBlockMap
+                );
+            } else {
+                reconstructSingleReferenceInterPrediction(
+                        lumaPlane,
+                        chromaUPlane,
+                        chromaVPlane,
+                        header,
+                        transformLayout,
+                        pixelFormat,
+                        frameHeader,
+                        referenceSurfaceSnapshots
+                );
+            }
             if (header.interIntra()) {
                 applyInterIntraPrediction(lumaPlane, chromaUPlane, chromaVPlane, header, transformLayout, pixelFormat);
             }
@@ -1108,8 +1243,6 @@ public final class FrameReconstructor {
                         referenceSurfaceSnapshots,
                         decodedBlockMap
                 );
-            } else if (header.motionMode() == MotionMode.LOCAL_WARPED) {
-                throw new IllegalStateException("Local warped motion reconstruction is not implemented yet");
             }
         }
     }
@@ -1712,6 +1845,408 @@ public final class FrameReconstructor {
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter
         );
+    }
+
+    /// Reconstructs a single-reference inter predictor using an affine local warped motion model.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the inter state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
+    private static void reconstructLocalWarpedInterPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            PixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                requireReferenceSurfaceSnapshot(
+                        referenceSurfaceSnapshots,
+                        frameHeader,
+                        pixelFormat,
+                        lumaPlane.bitDepth(),
+                        header.referenceFrame0()
+                );
+        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
+        FrameHeader.InterpolationFilter verticalInterpolationFilter = resolveVerticalInterpolationFilter(header, frameHeader);
+        LocalWarpModel model = estimateLocalWarpModel(header, decodedBlockMap);
+        int lumaX = header.position().x4() << 2;
+        int lumaY = header.position().y4() << 2;
+        int visibleLumaWidth = transformLayout.visibleWidthPixels();
+        int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        reconstructLocalWarpedPlanePrediction(
+                lumaPlane,
+                referencePlanes.lumaPlane(),
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                0,
+                0,
+                4,
+                4,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
+                model
+        );
+
+        if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
+            return;
+        }
+
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = lumaX >> chromaSubsamplingX;
+        int chromaY = lumaY >> chromaSubsamplingY;
+        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
+        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaDenominatorX = 4 << chromaSubsamplingX;
+        int chromaDenominatorY = 4 << chromaSubsamplingY;
+
+        reconstructLocalWarpedPlanePrediction(
+                chromaUPlane,
+                Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                chromaDenominatorX,
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
+                model
+        );
+        reconstructLocalWarpedPlanePrediction(
+                chromaVPlane,
+                Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                chromaDenominatorX,
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                horizontalInterpolationFilter,
+                verticalInterpolationFilter,
+                model
+        );
+    }
+
+    /// Reconstructs one plane through a local warped affine motion model.
+    ///
+    /// @param destinationPlane the mutable destination plane
+    /// @param referencePlane the immutable reference plane
+    /// @param destinationX the zero-based horizontal destination coordinate
+    /// @param destinationY the zero-based vertical destination coordinate
+    /// @param width the predicted width in plane samples
+    /// @param height the predicted height in plane samples
+    /// @param subsamplingX the horizontal luma-to-plane subsampling shift
+    /// @param subsamplingY the vertical luma-to-plane subsampling shift
+    /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
+    /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
+    /// @param verticalFilterMode the effective vertical interpolation filter mode
+    /// @param model the affine local warped motion model
+    private static void reconstructLocalWarpedPlanePrediction(
+            MutablePlaneBuffer destinationPlane,
+            DecodedPlane referencePlane,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            int subsamplingX,
+            int subsamplingY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            LocalWarpModel model
+    ) {
+        for (int y = 0; y < height; y++) {
+            int planeY = destinationY + y;
+            int lumaY = planeY << subsamplingY;
+            for (int x = 0; x < width; x++) {
+                int planeX = destinationX + x;
+                int lumaX = planeX << subsamplingX;
+                int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
+                        planeX,
+                        destinationPlane.width(),
+                        referencePlane.width(),
+                        denominatorX
+                ) + model.columnOffsetQuarterPel(lumaX, lumaY);
+                int sourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
+                        planeY,
+                        destinationPlane.height(),
+                        referencePlane.height(),
+                        denominatorY
+                ) + model.rowOffsetQuarterPel(lumaX, lumaY);
+                int sample;
+                if (Math.floorMod(sourceNumeratorX, denominatorX) == 0
+                        && Math.floorMod(sourceNumeratorY, denominatorY) == 0) {
+                    sample = referencePlane.sample(
+                            clamp(sourceNumeratorX / denominatorX, 0, referencePlane.width() - 1),
+                            clamp(sourceNumeratorY / denominatorY, 0, referencePlane.height() - 1)
+                    );
+                } else {
+                    sample = filteredInterpolateAt(
+                            referencePlane,
+                            sourceNumeratorX,
+                            sourceNumeratorY,
+                            denominatorX,
+                            denominatorY,
+                            widthForFilterSelection,
+                            heightForFilterSelection,
+                            horizontalFilterMode,
+                            verticalFilterMode,
+                            destinationPlane.maxSampleValue()
+                    );
+                }
+                destinationPlane.setSample(planeX, planeY, sample);
+            }
+        }
+    }
+
+    /// Estimates one local warped affine motion model from causal same-reference neighbors.
+    ///
+    /// @param header the decoded current block header
+    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
+    /// @return one local warped affine motion model for the current block
+    private static LocalWarpModel estimateLocalWarpModel(
+            TileBlockHeaderReader.BlockHeader header,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        MotionVector baseMotionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
+        double centerX = blockCenterCoordinate(header.position().x4(), header.size().widthPixels());
+        double centerY = blockCenterCoordinate(header.position().y4(), header.size().heightPixels());
+        LocalWarpSample[] samples = new LocalWarpSample[LOCAL_WARP_SAMPLE_CAPACITY];
+        int sampleCount = collectLocalWarpAboveSamples(header, decodedBlockMap, baseMotionVector, samples, 0);
+        sampleCount = collectLocalWarpLeftSamples(header, decodedBlockMap, baseMotionVector, samples, sampleCount);
+
+        double a00 = 0.0;
+        double a01 = 0.0;
+        double a11 = 0.0;
+        double columnB0 = 0.0;
+        double columnB1 = 0.0;
+        double rowB0 = 0.0;
+        double rowB1 = 0.0;
+        for (int i = 0; i < sampleCount; i++) {
+            LocalWarpSample sample = Objects.requireNonNull(samples[i], "samples[i]");
+            double dx = sample.destinationX - centerX;
+            double dy = sample.destinationY - centerY;
+            a00 += dx * dx;
+            a01 += dx * dy;
+            a11 += dy * dy;
+            columnB0 += dx * sample.columnDeltaQuarterPel;
+            columnB1 += dy * sample.columnDeltaQuarterPel;
+            rowB0 += dx * sample.rowDeltaQuarterPel;
+            rowB1 += dy * sample.rowDeltaQuarterPel;
+        }
+
+        double columnDx = 0.0;
+        double columnDy = 0.0;
+        double rowDx = 0.0;
+        double rowDy = 0.0;
+        double determinant = a00 * a11 - a01 * a01;
+        if (Math.abs(determinant) > 0.000001) {
+            columnDx = (columnB0 * a11 - columnB1 * a01) / determinant;
+            columnDy = (a00 * columnB1 - a01 * columnB0) / determinant;
+            rowDx = (rowB0 * a11 - rowB1 * a01) / determinant;
+            rowDy = (a00 * rowB1 - a01 * rowB0) / determinant;
+        } else {
+            double denominator = a00 + a11;
+            if (denominator > 0.000001) {
+                columnDx = columnB0 / denominator;
+                columnDy = columnB1 / denominator;
+                rowDx = rowB0 / denominator;
+                rowDy = rowB1 / denominator;
+            }
+        }
+
+        return new LocalWarpModel(
+                centerX,
+                centerY,
+                baseMotionVector.columnQuarterPel(),
+                baseMotionVector.rowQuarterPel(),
+                columnDx,
+                columnDy,
+                rowDx,
+                rowDy
+        );
+    }
+
+    /// Collects compatible above-neighbor samples for local warped motion estimation.
+    ///
+    /// @param header the decoded current block header
+    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
+    /// @param baseMotionVector the current block primary motion vector
+    /// @param samples the destination local-warp sample array
+    /// @param sampleCount the number of valid samples already present
+    /// @return the updated number of valid samples
+    private static int collectLocalWarpAboveSamples(
+            TileBlockHeaderReader.BlockHeader header,
+            DecodedBlockMap decodedBlockMap,
+            MotionVector baseMotionVector,
+            LocalWarpSample[] samples,
+            int sampleCount
+    ) {
+        int blockX4 = header.position().x4();
+        int blockY4 = header.position().y4();
+        if (blockY4 <= 0) {
+            return sampleCount;
+        }
+        int endX4 = blockX4 + header.size().width4();
+        int scanX4 = blockX4;
+        while (scanX4 < endX4 && sampleCount < samples.length) {
+            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(scanX4, blockY4 - 1);
+            if (neighbor == null) {
+                scanX4 += 2;
+                continue;
+            }
+            TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
+            int nextX4 = Math.min(endX4, neighborHeader.position().x4() + neighborHeader.size().width4());
+            sampleCount = appendLocalWarpSample(header, neighborHeader, baseMotionVector, samples, sampleCount);
+            scanX4 = Math.max(scanX4 + 1, nextX4);
+        }
+        return sampleCount;
+    }
+
+    /// Collects compatible left-neighbor samples for local warped motion estimation.
+    ///
+    /// @param header the decoded current block header
+    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
+    /// @param baseMotionVector the current block primary motion vector
+    /// @param samples the destination local-warp sample array
+    /// @param sampleCount the number of valid samples already present
+    /// @return the updated number of valid samples
+    private static int collectLocalWarpLeftSamples(
+            TileBlockHeaderReader.BlockHeader header,
+            DecodedBlockMap decodedBlockMap,
+            MotionVector baseMotionVector,
+            LocalWarpSample[] samples,
+            int sampleCount
+    ) {
+        int blockX4 = header.position().x4();
+        int blockY4 = header.position().y4();
+        if (blockX4 <= 0) {
+            return sampleCount;
+        }
+        int endY4 = blockY4 + header.size().height4();
+        int scanY4 = blockY4;
+        while (scanY4 < endY4 && sampleCount < samples.length) {
+            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(blockX4 - 1, scanY4);
+            if (neighbor == null) {
+                scanY4 += 2;
+                continue;
+            }
+            TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
+            int nextY4 = Math.min(endY4, neighborHeader.position().y4() + neighborHeader.size().height4());
+            sampleCount = appendLocalWarpSample(header, neighborHeader, baseMotionVector, samples, sampleCount);
+            scanY4 = Math.max(scanY4 + 1, nextY4);
+        }
+        return sampleCount;
+    }
+
+    /// Appends one compatible local-warp sample if the neighbor is eligible and not already used.
+    ///
+    /// @param currentHeader the decoded current block header
+    /// @param neighborHeader the decoded causal neighbor block header
+    /// @param baseMotionVector the current block primary motion vector
+    /// @param samples the destination local-warp sample array
+    /// @param sampleCount the number of valid samples already present
+    /// @return the updated number of valid samples
+    private static int appendLocalWarpSample(
+            TileBlockHeaderReader.BlockHeader currentHeader,
+            TileBlockHeaderReader.BlockHeader neighborHeader,
+            MotionVector baseMotionVector,
+            LocalWarpSample[] samples,
+            int sampleCount
+    ) {
+        if (sampleCount >= samples.length
+                || !isLocalWarpReferenceNeighbor(currentHeader, neighborHeader)
+                || containsLocalWarpSample(samples, sampleCount, neighborHeader)) {
+            return sampleCount;
+        }
+        MotionVector neighborMotionVector =
+                Objects.requireNonNull(neighborHeader.motionVector0(), "neighborHeader.motionVector0()").vector();
+        samples[sampleCount] = new LocalWarpSample(
+                neighborHeader,
+                blockCenterCoordinate(neighborHeader.position().x4(), neighborHeader.size().widthPixels()),
+                blockCenterCoordinate(neighborHeader.position().y4(), neighborHeader.size().heightPixels()),
+                neighborMotionVector.columnQuarterPel() - baseMotionVector.columnQuarterPel(),
+                neighborMotionVector.rowQuarterPel() - baseMotionVector.rowQuarterPel()
+        );
+        return sampleCount + 1;
+    }
+
+    /// Returns whether the local-warp sample array already contains one neighbor header.
+    ///
+    /// @param samples the local-warp sample array
+    /// @param sampleCount the number of valid samples already present
+    /// @param header the neighbor header to search for
+    /// @return whether the local-warp sample array already contains one neighbor header
+    private static boolean containsLocalWarpSample(
+            LocalWarpSample[] samples,
+            int sampleCount,
+            TileBlockHeaderReader.BlockHeader header
+    ) {
+        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
+        for (int i = 0; i < sampleCount; i++) {
+            if (Objects.requireNonNull(samples[i], "samples[i]").header == nonNullHeader) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether one neighbor can provide a local-warp motion sample for the current block.
+    ///
+    /// @param currentHeader the decoded current block header
+    /// @param neighborHeader the decoded causal neighbor block header
+    /// @return whether one neighbor can provide a local-warp motion sample for the current block
+    private static boolean isLocalWarpReferenceNeighbor(
+            TileBlockHeaderReader.BlockHeader currentHeader,
+            TileBlockHeaderReader.BlockHeader neighborHeader
+    ) {
+        TileBlockHeaderReader.BlockHeader nonNullNeighborHeader = Objects.requireNonNull(neighborHeader, "neighborHeader");
+        return !nonNullNeighborHeader.intra()
+                && !nonNullNeighborHeader.useIntrabc()
+                && !nonNullNeighborHeader.compoundReference()
+                && nonNullNeighborHeader.referenceFrame0() == currentHeader.referenceFrame0()
+                && nonNullNeighborHeader.motionVector0() != null
+                && nonNullNeighborHeader.motionVector0().resolved();
+    }
+
+    /// Returns the luma-domain center coordinate for one block axis.
+    ///
+    /// @param origin4 the block origin in 4x4 units
+    /// @param sizePixels the block size in luma samples on the same axis
+    /// @return the luma-domain center coordinate for one block axis
+    private static double blockCenterCoordinate(int origin4, int sizePixels) {
+        return (origin4 << 2) + sizePixels * 0.5 - 0.5;
     }
 
     /// Applies AV1 inter-intra blending to the already built single-reference inter predictor.

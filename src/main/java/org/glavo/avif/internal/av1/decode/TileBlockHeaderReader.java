@@ -250,6 +250,7 @@ public final class TileBlockHeaderReader {
                     segmentData,
                     skipMode,
                     compoundReference,
+                    referenceFrame0,
                     singleInterMode,
                     compoundInterMode
             );
@@ -830,9 +831,8 @@ public final class TileBlockHeaderReader {
 
     /// Decodes the block-level inter motion-compensation mode.
     ///
-    /// The current decoder implements OBMC when the frame cannot signal local warped motion.
-    /// Frames that may signal local warped motion keep failing at the remaining warped-motion
-    /// boundary rather than risking arithmetic-decoder desynchronization.
+    /// The decoder reads the three-way motion-mode symbol when local warped motion has compatible
+    /// causal samples; otherwise it reads the legacy OBMC flag or returns simple prediction.
     ///
     /// @param position the local tile-relative block origin
     /// @param size the decoded block size
@@ -840,6 +840,7 @@ public final class TileBlockHeaderReader {
     /// @param segmentData the decoded segment feature state
     /// @param skipMode whether skip-mode syntax selected this block
     /// @param compoundReference whether the block uses compound references
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
     /// @param singleInterMode the decoded single-reference inter mode, or `null`
     /// @param compoundInterMode the decoded compound inter mode, or `null`
     /// @return the decoded motion-compensation mode
@@ -850,6 +851,7 @@ public final class TileBlockHeaderReader {
             FrameHeader.SegmentData segmentData,
             boolean skipMode,
             boolean compoundReference,
+            int referenceFrame0,
             @Nullable SingleInterPredictionMode singleInterMode,
             @Nullable CompoundInterPredictionMode compoundInterMode
     ) {
@@ -869,8 +871,10 @@ public final class TileBlockHeaderReader {
         if (singleInterMode == SingleInterPredictionMode.GLOBALMV && !frameHeader.forceIntegerMotionVectors()) {
             return MotionMode.SIMPLE;
         }
-        if (frameHeader.warpedMotion() && !frameHeader.forceIntegerMotionVectors()) {
-            throw new IllegalStateException("Local warped motion is not implemented yet");
+        if (frameHeader.warpedMotion()
+                && !frameHeader.forceIntegerMotionVectors()
+                && neighborContext.hasLocalWarpSamples(position, size, referenceFrame0)) {
+            return syntaxReader.readMotionMode(size.cdfIndex());
         }
         return syntaxReader.readUseObmc(size.cdfIndex()) ? MotionMode.OBMC : MotionMode.SIMPLE;
     }

@@ -3115,6 +3115,102 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Verifies that one monochrome local-warped block estimates an affine predictor from causal
+    /// same-reference motion samples.
+    @Test
+    void reconstructsLocalWarpedI400InterBlockFromCausalMotionSamples() {
+        BlockSize size = BlockSize.SIZE_8X8;
+        BlockPosition abovePosition = new BlockPosition(2, 0);
+        BlockPosition leftPosition = new BlockPosition(0, 2);
+        BlockPosition currentPosition = new BlockPosition(2, 2);
+        int[][] lumaSamples = rampSamples(16, 16, 3, 5, 8);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                lumaSamples,
+                null,
+                null
+        );
+        TileBlockHeaderReader.BlockHeader aboveHeader = createSingleReferenceInterBlockHeader(
+                abovePosition,
+                size,
+                false,
+                0,
+                new MotionVector(0, 4)
+        );
+        TileBlockHeaderReader.BlockHeader leftHeader = createSingleReferenceInterBlockHeader(
+                leftPosition,
+                size,
+                false,
+                0,
+                new MotionVector(4, 0)
+        );
+        TileBlockHeaderReader.BlockHeader currentHeader = createSingleReferenceInterBlockHeader(
+                currentPosition,
+                size,
+                false,
+                0,
+                MotionVector.zero(),
+                MotionMode.LOCAL_WARPED
+        );
+        TilePartitionTreeReader.LeafNode aboveLeaf = new TilePartitionTreeReader.LeafNode(
+                aboveHeader,
+                createTransformLayout(abovePosition, size, PixelFormat.I400),
+                createResidualLayout(abovePosition, size, true)
+        );
+        TilePartitionTreeReader.LeafNode leftLeaf = new TilePartitionTreeReader.LeafNode(
+                leftHeader,
+                createTransformLayout(leftPosition, size, PixelFormat.I400),
+                createResidualLayout(leftPosition, size, true)
+        );
+        TilePartitionTreeReader.LeafNode currentLeaf = new TilePartitionTreeReader.LeafNode(
+                currentHeader,
+                createTransformLayout(currentPosition, size, PixelFormat.I400),
+                createResidualLayout(currentPosition, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        PixelFormat.I400,
+                        16,
+                        16,
+                        0,
+                        FrameHeader.InterpolationFilter.BILINEAR,
+                        aboveLeaf,
+                        leftLeaf,
+                        currentLeaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                8,
+                8,
+                expectedLocalWarpedBilinearPlaneBlock(
+                        referenceSurfaceSnapshot.decodedPlanes().lumaPlane(),
+                        16,
+                        16,
+                        8,
+                        8,
+                        8,
+                        8,
+                        0,
+                        0,
+                        11.5,
+                        11.5,
+                        0.0,
+                        -0.5,
+                        -0.5,
+                        0.0,
+                        0,
+                        0,
+                        4,
+                        4
+                )
+        );
+    }
+
     /// Verifies that one monochrome single-reference inter block samples one stored reference
     /// surface through the current fixed `EIGHT_TAP_REGULAR` subpel path.
     @Test
@@ -6329,6 +6425,80 @@ final class FrameReconstructorTest {
                         referencePlane.height(),
                         denominatorY
                 ) + sourceOffsetQuarterPelY;
+                predicted[y][x] = bilinearInterpolatePlaneAt(
+                        referencePlane,
+                        sourceNumeratorX,
+                        sourceNumeratorY,
+                        denominatorX,
+                        denominatorY
+                );
+            }
+        }
+        return predicted;
+    }
+
+    /// Returns one plane block predicted by the synthetic affine local-warped bilinear oracle.
+    ///
+    /// @param referencePlane the stored reference plane in the post-super-resolution domain
+    /// @param destinationPlaneWidth the destination plane width
+    /// @param destinationPlaneHeight the destination plane height
+    /// @param destinationX the predicted block origin X in destination-plane samples
+    /// @param destinationY the predicted block origin Y in destination-plane samples
+    /// @param width the predicted block width in plane samples
+    /// @param height the predicted block height in plane samples
+    /// @param subsamplingX the horizontal luma-to-plane subsampling shift
+    /// @param subsamplingY the vertical luma-to-plane subsampling shift
+    /// @param centerX the local-warp model center X in luma destination coordinates
+    /// @param centerY the local-warp model center Y in luma destination coordinates
+    /// @param columnDx the horizontal motion derivative by luma X coordinate
+    /// @param columnDy the horizontal motion derivative by luma Y coordinate
+    /// @param rowDx the vertical motion derivative by luma X coordinate
+    /// @param rowDy the vertical motion derivative by luma Y coordinate
+    /// @param baseColumnQuarterPel the base horizontal motion-vector component
+    /// @param baseRowQuarterPel the base vertical motion-vector component
+    /// @param denominatorX the plane-local horizontal denominator
+    /// @param denominatorY the plane-local vertical denominator
+    /// @return one plane block predicted by the synthetic affine local-warped bilinear oracle
+    private static int[][] expectedLocalWarpedBilinearPlaneBlock(
+            DecodedPlane referencePlane,
+            int destinationPlaneWidth,
+            int destinationPlaneHeight,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            int subsamplingX,
+            int subsamplingY,
+            double centerX,
+            double centerY,
+            double columnDx,
+            double columnDy,
+            double rowDx,
+            double rowDy,
+            int baseColumnQuarterPel,
+            int baseRowQuarterPel,
+            int denominatorX,
+            int denominatorY
+    ) {
+        int[][] predicted = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            int planeY = destinationY + y;
+            int lumaY = planeY << subsamplingY;
+            for (int x = 0; x < width; x++) {
+                int planeX = destinationX + x;
+                int lumaX = planeX << subsamplingX;
+                int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
+                        planeX,
+                        destinationPlaneWidth,
+                        referencePlane.width(),
+                        denominatorX
+                ) + baseColumnQuarterPel + (int) Math.round((lumaX - centerX) * columnDx + (lumaY - centerY) * columnDy);
+                int sourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
+                        planeY,
+                        destinationPlaneHeight,
+                        referencePlane.height(),
+                        denominatorY
+                ) + baseRowQuarterPel + (int) Math.round((lumaX - centerX) * rowDx + (lumaY - centerY) * rowDy);
                 predicted[y][x] = bilinearInterpolatePlaneAt(
                         referencePlane,
                         sourceNumeratorX,

@@ -841,6 +841,58 @@ final class BlockNeighborContextTest {
         assertFalse(contextWithIntra.hasOverlappableCandidates(currentPosition, currentSize));
     }
 
+    /// Verifies that local warped motion only accepts compatible same-reference causal samples.
+    @Test
+    void detectsLocalWarpSamplesFromSameReferenceCausalEdges() {
+        BlockPosition currentPosition = new BlockPosition(4, 4);
+        BlockSize currentSize = BlockSize.SIZE_16X16;
+
+        BlockNeighborContext emptyContext = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        assertFalse(emptyContext.hasLocalWarpSamples(currentPosition, currentSize, 0));
+
+        BlockNeighborContext contextWithAbove = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        contextWithAbove.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(8, -4))
+        ));
+        assertTrue(contextWithAbove.hasLocalWarpSamples(currentPosition, currentSize, 0));
+
+        BlockNeighborContext contextWithDifferentReference = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        contextWithDifferentReference.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                1,
+                null,
+                InterMotionVector.resolved(new MotionVector(8, -4))
+        ));
+        assertFalse(contextWithDifferentReference.hasLocalWarpSamples(currentPosition, currentSize, 0));
+
+        BlockNeighborContext contextWithCompoundLeft = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        contextWithCompoundLeft.updateFromBlockHeader(compoundInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X16,
+                0,
+                4,
+                null,
+                InterMotionVector.resolved(new MotionVector(12, 4)),
+                InterMotionVector.resolved(new MotionVector(-4, 20))
+        ));
+        assertFalse(contextWithCompoundLeft.hasLocalWarpSamples(currentPosition, currentSize, 0));
+
+        BlockNeighborContext contextWithProvisionalAbove = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        contextWithProvisionalAbove.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_16X8,
+                0,
+                null,
+                InterMotionVector.predicted(new MotionVector(8, -4))
+        ));
+        assertFalse(contextWithProvisionalAbove.hasLocalWarpSamples(currentPosition, currentSize, 0));
+    }
+
     /// Creates a simple tile context used by neighbor-context tests.
     ///
     /// @param frameType the synthetic frame type
