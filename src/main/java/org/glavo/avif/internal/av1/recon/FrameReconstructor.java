@@ -44,9 +44,9 @@ import java.util.Objects;
 /// `I420` / `I422` / `I444` CFL chroma subset, parsed and synthetic luma/chroma palette paths, a
 /// normative horizontal super-resolution upscaling path for key/intra frames plus the current
 /// inter/reference prediction subset, and a minimal luma/chroma residual subset including clipped
-/// frame-fringe chroma footprints and the currently supported square and rectangular `DCT_DCT`
-/// transform sizes whose axes stay within `64` samples, and bit-depth preserving inter subpel
-/// filtering for stored reference surfaces.
+/// frame-fringe chroma footprints, explicit transform-type residual reconstruction for the
+/// currently modeled square and rectangular transform sizes whose axes stay within `64` samples,
+/// and bit-depth preserving inter subpel filtering for stored reference surfaces.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// The number of coefficients in one 8-tap interpolation kernel.
@@ -843,7 +843,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current modeled DCT_DCT luma units: "
+                        "Non-zero residual reconstruction currently supports only the current modeled luma transform sizes: "
                                 + residualUnit.size()
                 );
             }
@@ -851,7 +851,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.chromaUUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current modeled DCT_DCT chroma units: "
+                        "Non-zero residual reconstruction currently supports only the current modeled chroma transform sizes: "
                                 + residualUnit.size()
                 );
             }
@@ -859,7 +859,7 @@ public final class FrameReconstructor {
         for (TransformResidualUnit residualUnit : residualLayout.chromaVUnits()) {
             if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
                 throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current modeled DCT_DCT chroma units: "
+                        "Non-zero residual reconstruction currently supports only the current modeled chroma transform sizes: "
                                 + residualUnit.size()
                 );
             }
@@ -2195,7 +2195,8 @@ public final class FrameReconstructor {
             );
             int[] residualSamples = InverseTransformer.reconstructResidualBlock(
                     dequantizedCoefficients,
-                    residualUnit.size()
+                    residualUnit.size(),
+                    residualUnit.transformType()
             );
             InverseTransformer.addResidualBlock(
                     lumaPlane,
@@ -2260,7 +2261,8 @@ public final class FrameReconstructor {
             int[] dequantizedCoefficients = ChromaDequantizer.dequantize(residualUnit, dequantizationContext);
             int[] residualSamples = InverseTransformer.reconstructResidualBlock(
                     dequantizedCoefficients,
-                    residualUnit.size()
+                    residualUnit.size(),
+                    residualUnit.transformType()
             );
             InverseTransformer.addResidualBlock(
                     chromaPlane,

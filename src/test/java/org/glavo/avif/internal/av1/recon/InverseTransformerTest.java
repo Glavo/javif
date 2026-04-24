@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -144,6 +145,99 @@ final class InverseTransformerTest {
         int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_16X8);
 
         assertBlockFilledWithPositiveValue(residual, 16, 8);
+    }
+
+    /// Verifies that `IDTX` preserves coefficient positions instead of spreading energy through
+    /// a cosine basis.
+    @Test
+    void reconstructsFourByFourIdentityTransformWithoutSpatialMixing() {
+        int[] coefficients = new int[16];
+        coefficients[5] = 64;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.IDTX
+        );
+
+        assertArrayEquals(
+                new int[]{
+                        0, 0, 0, 0,
+                        0, 8, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0
+                },
+                residual
+        );
+    }
+
+    /// Verifies that horizontal one-dimensional DCT transforms only the coefficient row selected
+    /// by the vertical identity axis.
+    @Test
+    void reconstructsHorizontalDctTransformWithVerticalIdentity() {
+        int[] coefficients = new int[16];
+        coefficients[1] = 4096;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.H_DCT
+        );
+
+        assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
+        assertTrue(residual[3] < 0, "Mirrored horizontal basis sample should stay negative");
+        assertEquals(residual[0], -residual[3]);
+        assertEquals(residual[1], -residual[2]);
+        for (int index = 4; index < residual.length; index++) {
+            assertEquals(0, residual[index]);
+        }
+    }
+
+    /// Verifies that vertical one-dimensional ADST transforms only the coefficient column selected
+    /// by the horizontal identity axis.
+    @Test
+    void reconstructsVerticalAdstTransformWithHorizontalIdentity() {
+        int[] coefficients = new int[16];
+        coefficients[4] = 4096;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.V_ADST
+        );
+
+        assertTrue(residual[0] > 0, "First vertical ADST basis sample should stay positive");
+        assertTrue(residual[12] != 0, "Last vertical ADST basis sample should stay non-zero");
+        for (int row = 0; row < 4; row++) {
+            assertEquals(0, residual[(row << 2) + 1]);
+            assertEquals(0, residual[(row << 2) + 2]);
+            assertEquals(0, residual[(row << 2) + 3]);
+        }
+    }
+
+    /// Verifies that `FLIPADST` is reconstructed as the spatial mirror of `ADST` on the same axis.
+    @Test
+    void reconstructsFlipAdstAsMirroredAdst() {
+        int[] coefficients = new int[16];
+        coefficients[4] = 4096;
+
+        int[] adst = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.V_ADST
+        );
+        int[] flipAdst = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.V_FLIPADST
+        );
+
+        for (int row = 0; row < 4; row++) {
+            int mirroredRow = 3 - row;
+            for (int column = 0; column < 4; column++) {
+                assertEquals(adst[mirroredRow * 4 + column], flipAdst[row * 4 + column]);
+            }
+        }
     }
 
     /// Verifies that residual addition clips through the mutable plane buffer.

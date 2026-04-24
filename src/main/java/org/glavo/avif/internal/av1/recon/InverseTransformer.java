@@ -15,19 +15,19 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.internal.av1.model.TransformKernel;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Minimal inverse-transform helper for the first residual-producing reconstruction path.
+/// Inverse-transform helper for the residual-producing reconstruction path.
 ///
-/// The current implementation assumes the rollout's fixed luma/chroma `DCT_DCT` transform type
-/// and supports the currently needed square and rectangular transforms. Exact staged integer
-/// kernels are used for the `4` / `8` / `16` subset, while larger `32` / `64` axes fall back to
-/// orthonormal cosine synthesis with the same final AV1-style `>> 3` scaling. It exposes one
-/// method that reconstructs a residual sample block and one method that adds that block into an
-/// already predicted plane.
+/// Exact staged integer kernels are used for the `DCT_DCT` `4` / `8` / `16` subset, while larger
+/// `DCT_DCT` axes and every explicit non-`DCT_DCT` transform type use cached separable synthesis
+/// matrices with the same final AV1-style `>> 3` scaling. It exposes one method that reconstructs
+/// a residual sample block and one method that adds that block into an already predicted plane.
 @NotNullByDefault
 final class InverseTransformer {
     /// The AV1 inverse-transform cosine precision.
@@ -84,6 +84,9 @@ final class InverseTransformer {
     /// The `dav1d` literal used by the `TX_16X16` odd stages.
     private static final int COSPI_DELTA_3784 = 3784 - 4096;
 
+    /// The cached orthonormal inverse-DCT basis for one `4`-point vector.
+    private static final double[][] INVERSE_DCT_BASIS_4 = createInverseDctBasis(4);
+
     /// The cached orthonormal inverse-DCT basis for one `8`-point vector.
     private static final double[][] INVERSE_DCT_BASIS_8 = createInverseDctBasis(8);
 
@@ -95,6 +98,51 @@ final class InverseTransformer {
 
     /// The cached orthonormal inverse-DCT basis for one `64`-point vector.
     private static final double[][] INVERSE_DCT_BASIS_64 = createInverseDctBasis(64);
+
+    /// The cached orthonormal inverse-ADST basis for one `4`-point vector.
+    private static final double[][] INVERSE_ADST_BASIS_4 = createInverseAdstBasis(4);
+
+    /// The cached orthonormal inverse-ADST basis for one `8`-point vector.
+    private static final double[][] INVERSE_ADST_BASIS_8 = createInverseAdstBasis(8);
+
+    /// The cached orthonormal inverse-ADST basis for one `16`-point vector.
+    private static final double[][] INVERSE_ADST_BASIS_16 = createInverseAdstBasis(16);
+
+    /// The cached orthonormal inverse-ADST basis for one `32`-point vector.
+    private static final double[][] INVERSE_ADST_BASIS_32 = createInverseAdstBasis(32);
+
+    /// The cached orthonormal inverse-ADST basis for one `64`-point vector.
+    private static final double[][] INVERSE_ADST_BASIS_64 = createInverseAdstBasis(64);
+
+    /// The cached flipped inverse-ADST basis for one `4`-point vector.
+    private static final double[][] INVERSE_FLIPADST_BASIS_4 = createFlippedBasis(INVERSE_ADST_BASIS_4);
+
+    /// The cached flipped inverse-ADST basis for one `8`-point vector.
+    private static final double[][] INVERSE_FLIPADST_BASIS_8 = createFlippedBasis(INVERSE_ADST_BASIS_8);
+
+    /// The cached flipped inverse-ADST basis for one `16`-point vector.
+    private static final double[][] INVERSE_FLIPADST_BASIS_16 = createFlippedBasis(INVERSE_ADST_BASIS_16);
+
+    /// The cached flipped inverse-ADST basis for one `32`-point vector.
+    private static final double[][] INVERSE_FLIPADST_BASIS_32 = createFlippedBasis(INVERSE_ADST_BASIS_32);
+
+    /// The cached flipped inverse-ADST basis for one `64`-point vector.
+    private static final double[][] INVERSE_FLIPADST_BASIS_64 = createFlippedBasis(INVERSE_ADST_BASIS_64);
+
+    /// The cached identity basis for one `4`-point vector.
+    private static final double[][] IDENTITY_BASIS_4 = createIdentityBasis(4);
+
+    /// The cached identity basis for one `8`-point vector.
+    private static final double[][] IDENTITY_BASIS_8 = createIdentityBasis(8);
+
+    /// The cached identity basis for one `16`-point vector.
+    private static final double[][] IDENTITY_BASIS_16 = createIdentityBasis(16);
+
+    /// The cached identity basis for one `32`-point vector.
+    private static final double[][] IDENTITY_BASIS_32 = createIdentityBasis(32);
+
+    /// The cached identity basis for one `64`-point vector.
+    private static final double[][] IDENTITY_BASIS_64 = createIdentityBasis(64);
 
     /// Prevents instantiation of this utility class.
     private InverseTransformer() {
@@ -109,34 +157,70 @@ final class InverseTransformer {
     /// @param transformSize the transform size to reconstruct
     /// @return one signed residual sample block in natural raster order
     static int[] reconstructResidualBlock(int[] dequantizedCoefficients, TransformSize transformSize) {
+        return reconstructResidualBlock(dequantizedCoefficients, transformSize, TransformType.DCT_DCT);
+    }
+
+    /// Reconstructs one residual sample block from dequantized transform coefficients.
+    ///
+    /// Input and output both use natural raster order. The returned samples are signed residuals
+    /// that are ready to add to a predictor plane of the same dimensions.
+    ///
+    /// @param dequantizedCoefficients the dequantized transform coefficients in natural raster order
+    /// @param transformSize the transform size to reconstruct
+    /// @param transformType the transform type to reconstruct
+    /// @return one signed residual sample block in natural raster order
+    static int[] reconstructResidualBlock(
+            int[] dequantizedCoefficients,
+            TransformSize transformSize,
+            TransformType transformType
+    ) {
         int[] nonNullCoefficients = Objects.requireNonNull(dequantizedCoefficients, "dequantizedCoefficients");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int transformArea = checkedTransformArea(nonNullTransformSize);
         if (nonNullCoefficients.length != transformArea) {
             throw new IllegalArgumentException("dequantizedCoefficients length does not match transform area");
         }
 
-        return switch (nonNullTransformSize) {
-            case TX_4X4 -> reconstructFourByFour(nonNullCoefficients);
-            case TX_8X8 -> reconstructEightByEight(nonNullCoefficients);
-            case TX_16X16 -> reconstructSixteenBySixteen(nonNullCoefficients);
-            case RTX_4X8 -> reconstructRectangularDctDct(nonNullCoefficients, 4, 8, 0);
-            case RTX_8X4 -> reconstructRectangularDctDct(nonNullCoefficients, 8, 4, 0);
-            case RTX_4X16 -> reconstructRectangularDctDct(nonNullCoefficients, 4, 16, 1);
-            case RTX_16X4 -> reconstructRectangularDctDct(nonNullCoefficients, 16, 4, 1);
-            case RTX_8X16 -> reconstructRectangularDctDct(nonNullCoefficients, 8, 16, 1);
-            case RTX_16X8 -> reconstructRectangularDctDct(nonNullCoefficients, 16, 8, 1);
-            case TX_32X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 32);
-            case TX_64X64 -> reconstructGenericLargeDctDct(nonNullCoefficients, 64, 64);
-            case RTX_16X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 16, 32);
-            case RTX_32X16 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 16);
-            case RTX_32X64 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 64);
-            case RTX_64X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 64, 32);
-            case RTX_8X32 -> reconstructGenericLargeDctDct(nonNullCoefficients, 8, 32);
-            case RTX_32X8 -> reconstructGenericLargeDctDct(nonNullCoefficients, 32, 8);
-            case RTX_16X64 -> reconstructGenericLargeDctDct(nonNullCoefficients, 16, 64);
-            case RTX_64X16 -> reconstructGenericLargeDctDct(nonNullCoefficients, 64, 16);
-            default -> throw unsupportedTransformSize(nonNullTransformSize);
+        if (nonNullTransformType != TransformType.DCT_DCT) {
+            return reconstructGenericTransform(
+                    nonNullCoefficients,
+                    nonNullTransformSize.widthPixels(),
+                    nonNullTransformSize.heightPixels(),
+                    nonNullTransformType
+            );
+        }
+
+        return reconstructDctDct(nonNullCoefficients, nonNullTransformSize);
+    }
+
+    /// Reconstructs one residual sample block from dequantized `DCT_DCT` coefficients.
+    ///
+    /// @param coefficients the dequantized `DCT_DCT` coefficients in natural raster order
+    /// @param transformSize the transform size to reconstruct
+    /// @return one signed residual sample block in natural raster order
+    private static int[] reconstructDctDct(int[] coefficients, TransformSize transformSize) {
+        return switch (transformSize) {
+            case TX_4X4 -> reconstructFourByFour(coefficients);
+            case TX_8X8 -> reconstructEightByEight(coefficients);
+            case TX_16X16 -> reconstructSixteenBySixteen(coefficients);
+            case RTX_4X8 -> reconstructRectangularDctDct(coefficients, 4, 8, 0);
+            case RTX_8X4 -> reconstructRectangularDctDct(coefficients, 8, 4, 0);
+            case RTX_4X16 -> reconstructRectangularDctDct(coefficients, 4, 16, 1);
+            case RTX_16X4 -> reconstructRectangularDctDct(coefficients, 16, 4, 1);
+            case RTX_8X16 -> reconstructRectangularDctDct(coefficients, 8, 16, 1);
+            case RTX_16X8 -> reconstructRectangularDctDct(coefficients, 16, 8, 1);
+            case TX_32X32 -> reconstructGenericLargeDctDct(coefficients, 32, 32);
+            case TX_64X64 -> reconstructGenericLargeDctDct(coefficients, 64, 64);
+            case RTX_16X32 -> reconstructGenericLargeDctDct(coefficients, 16, 32);
+            case RTX_32X16 -> reconstructGenericLargeDctDct(coefficients, 32, 16);
+            case RTX_32X64 -> reconstructGenericLargeDctDct(coefficients, 32, 64);
+            case RTX_64X32 -> reconstructGenericLargeDctDct(coefficients, 64, 32);
+            case RTX_8X32 -> reconstructGenericLargeDctDct(coefficients, 8, 32);
+            case RTX_32X8 -> reconstructGenericLargeDctDct(coefficients, 32, 8);
+            case RTX_16X64 -> reconstructGenericLargeDctDct(coefficients, 16, 64);
+            case RTX_64X16 -> reconstructGenericLargeDctDct(coefficients, 64, 16);
+            default -> throw unsupportedTransformSize(transformSize);
         };
     }
 
@@ -413,6 +497,49 @@ final class InverseTransformer {
         return output;
     }
 
+    /// Reconstructs one non-`DCT_DCT` residual block through cached separable basis matrices.
+    ///
+    /// @param coefficients the dequantized coefficients in natural raster order
+    /// @param width the transform width in samples
+    /// @param height the transform height in samples
+    /// @param transformType the explicit transform type to reconstruct
+    /// @return one signed residual sample block in natural raster order
+    private static int[] reconstructGenericTransform(
+            int[] coefficients,
+            int width,
+            int height,
+            TransformType transformType
+    ) {
+        double[][] horizontalBasis = inverseBasis(transformType.horizontalKernel(), width);
+        double[][] verticalBasis = inverseBasis(transformType.verticalKernel(), height);
+        double[] rowBuffer = new double[width * height];
+        int[] output = new int[width * height];
+
+        for (int row = 0; row < height; row++) {
+            int rowOffset = row * width;
+            for (int column = 0; column < width; column++) {
+                double sum = 0.0;
+                double[] basisRow = horizontalBasis[column];
+                for (int frequency = 0; frequency < width; frequency++) {
+                    sum += basisRow[frequency] * coefficients[rowOffset + frequency];
+                }
+                rowBuffer[rowOffset + column] = sum;
+            }
+        }
+
+        for (int column = 0; column < width; column++) {
+            for (int row = 0; row < height; row++) {
+                double sum = 0.0;
+                double[] basisRow = verticalBasis[row];
+                for (int frequency = 0; frequency < height; frequency++) {
+                    sum += basisRow[frequency] * rowBuffer[frequency * width + column];
+                }
+                output[row * width + column] = saturatedInt(Math.round(sum / 8.0));
+            }
+        }
+        return output;
+    }
+
     /// Reconstructs one supported one-dimensional inverse DCT vector.
     ///
     /// @param input the dequantized input vector
@@ -609,11 +736,71 @@ final class InverseTransformer {
     /// @return one cached orthonormal inverse-DCT basis matrix
     private static double[][] inverseDctBasis(int length) {
         return switch (length) {
+            case 4 -> INVERSE_DCT_BASIS_4;
             case 8 -> INVERSE_DCT_BASIS_8;
             case 16 -> INVERSE_DCT_BASIS_16;
             case 32 -> INVERSE_DCT_BASIS_32;
             case 64 -> INVERSE_DCT_BASIS_64;
             default -> throw new IllegalStateException("Unsupported inverse DCT basis length: " + length);
+        };
+    }
+
+    /// Returns one cached inverse basis matrix for the supplied one-dimensional kernel.
+    ///
+    /// @param kernel the transform kernel to select
+    /// @param length the requested vector length
+    /// @return one cached inverse basis matrix for the supplied kernel and length
+    private static double[][] inverseBasis(TransformKernel kernel, int length) {
+        return switch (kernel) {
+            case DCT -> inverseDctBasis(length);
+            case ADST -> inverseAdstBasis(length);
+            case FLIPADST -> inverseFlipAdstBasis(length);
+            case IDENTITY -> identityBasis(length);
+        };
+    }
+
+    /// Returns one cached orthonormal inverse-ADST basis matrix for the requested vector length.
+    ///
+    /// @param length the requested vector length
+    /// @return one cached orthonormal inverse-ADST basis matrix
+    private static double[][] inverseAdstBasis(int length) {
+        return switch (length) {
+            case 4 -> INVERSE_ADST_BASIS_4;
+            case 8 -> INVERSE_ADST_BASIS_8;
+            case 16 -> INVERSE_ADST_BASIS_16;
+            case 32 -> INVERSE_ADST_BASIS_32;
+            case 64 -> INVERSE_ADST_BASIS_64;
+            default -> throw new IllegalStateException("Unsupported inverse ADST basis length: " + length);
+        };
+    }
+
+    /// Returns one cached flipped inverse-ADST basis matrix for the requested vector length.
+    ///
+    /// @param length the requested vector length
+    /// @return one cached flipped inverse-ADST basis matrix
+    private static double[][] inverseFlipAdstBasis(int length) {
+        return switch (length) {
+            case 4 -> INVERSE_FLIPADST_BASIS_4;
+            case 8 -> INVERSE_FLIPADST_BASIS_8;
+            case 16 -> INVERSE_FLIPADST_BASIS_16;
+            case 32 -> INVERSE_FLIPADST_BASIS_32;
+            case 64 -> INVERSE_FLIPADST_BASIS_64;
+            default -> throw new IllegalStateException("Unsupported inverse FLIPADST basis length: " + length);
+        };
+    }
+
+    /// Returns one cached identity basis matrix for the requested vector length.
+    ///
+    /// @param length the requested vector length
+    /// @return one cached identity basis matrix
+    private static double[][] identityBasis(int length) {
+        return switch (length) {
+            case 4 -> IDENTITY_BASIS_4;
+            case 8 -> IDENTITY_BASIS_8;
+            case 16 -> IDENTITY_BASIS_16;
+            case 32 -> IDENTITY_BASIS_32;
+            case 64 -> IDENTITY_BASIS_64;
+            default -> throw new IllegalStateException("Unsupported identity basis length: " + length);
         };
     }
 
@@ -635,6 +822,51 @@ final class InverseTransformer {
                 basis[row][frequency] = normalization
                         * Math.cos(((2.0 * row + 1.0) * frequency * Math.PI) / (2.0 * length));
             }
+        }
+        return basis;
+    }
+
+    /// Creates one orthonormal inverse-ADST basis matrix for the supplied vector length.
+    ///
+    /// The generated rows use the asymmetric sine basis with denominator `2 * n + 1`.
+    /// `FLIPADST` reuses this matrix with reversed spatial rows.
+    ///
+    /// @param length the vector length in samples
+    /// @return one orthonormal inverse-ADST basis matrix for the supplied vector length
+    private static double[][] createInverseAdstBasis(int length) {
+        double[][] basis = new double[length][length];
+        double scale = Math.sqrt(4.0 / (2.0 * length + 1.0));
+        double denominator = 2.0 * length + 1.0;
+        for (int row = 0; row < length; row++) {
+            for (int frequency = 0; frequency < length; frequency++) {
+                basis[row][frequency] = scale
+                        * Math.sin(((2.0 * row + 1.0) * (frequency + 1.0) * Math.PI) / denominator);
+            }
+        }
+        return basis;
+    }
+
+    /// Creates one flipped basis matrix by reversing the spatial rows of an existing basis.
+    ///
+    /// @param basis the basis whose spatial rows should be flipped
+    /// @return one flipped basis matrix
+    private static double[][] createFlippedBasis(double[][] basis) {
+        int length = basis.length;
+        double[][] flipped = new double[length][length];
+        for (int row = 0; row < length; row++) {
+            System.arraycopy(basis[length - 1 - row], 0, flipped[row], 0, length);
+        }
+        return flipped;
+    }
+
+    /// Creates one identity basis matrix for the supplied vector length.
+    ///
+    /// @param length the vector length in samples
+    /// @return one identity basis matrix for the supplied vector length
+    private static double[][] createIdentityBasis(int length) {
+        double[][] basis = new double[length][length];
+        for (int i = 0; i < length; i++) {
+            basis[i][i] = 1.0;
         }
         return basis;
     }

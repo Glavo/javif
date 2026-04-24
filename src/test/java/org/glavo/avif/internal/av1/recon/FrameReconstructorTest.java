@@ -41,6 +41,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.testutil.InterPredictionOracle;
@@ -1324,6 +1325,53 @@ final class FrameReconstructorTest {
 
         assertFalse(residualPlanes.hasChroma());
         assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
+    }
+
+    /// Verifies that frame reconstruction consumes the explicit transform type stored on each
+    /// residual unit instead of treating every unit as `DCT_DCT`.
+    @Test
+    void reconstructsSingleTileI400KeyFrameWithIdentityTransformResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TransformSize transformSize = size.maxLumaTransformSize();
+        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        coefficients[5] = 64;
+        TransformResidualUnit residualUnit = new TransformResidualUnit(
+                position,
+                transformSize,
+                TransformType.IDTX,
+                5,
+                coefficients,
+                0x40 | 63
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                new ResidualLayout(position, size, new TransformResidualUnit[]{residualUnit})
+        );
+
+        DecodedPlane reconstructed = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, residualLeaf)
+        ).lumaPlane();
+        int[] dequantizedCoefficients = LumaDequantizer.dequantize(
+                residualUnit,
+                new LumaDequantizer.Context(0, 0, 8)
+        );
+        int[] expectedResidual = InverseTransformer.reconstructResidualBlock(
+                dequantizedCoefficients,
+                transformSize,
+                TransformType.IDTX
+        );
+        int[][] expectedSamples = new int[4][4];
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                expectedSamples[y][x] = clamp(128 + expectedResidual[(y << 2) + x], 0, 255);
+            }
+        }
+
+        assertPlaneEquals(reconstructed, expectedSamples);
+        assertEquals(128, reconstructed.sample(0, 0));
+        assertTrue(reconstructed.sample(1, 1) > 128);
     }
 
     /// Verifies that a positive monochrome DC residual also reconstructs through the current
