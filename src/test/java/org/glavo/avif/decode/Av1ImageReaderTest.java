@@ -28,6 +28,7 @@ import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -94,6 +95,14 @@ final class Av1ImageReaderTest {
     /// reference surface with a zero motion vector.
     private static final byte[] INTER_BLOCK_TILE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+
+    /// The generated named-fixture resource backing deterministic tile-block-header payloads.
+    private static final String TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH =
+            "av1/fixtures/generated/tile-block-header-fixtures.txt";
+
+    /// One deterministic real `intrabc` tile payload whose decoded block uses same-frame copy.
+    private static final byte[] INTRABC_BLOCK_TILE_PAYLOAD =
+            HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH, "intrabc");
 
     /// The expected packed opaque gray pixel produced by the supported still-picture payload.
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
@@ -649,6 +658,22 @@ final class Av1ImageReaderTest {
             throws IOException {
         assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I422, true);
         assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I444, true);
+    }
+
+    /// Verifies that one standalone real parsed `intrabc` key frame reconstructs through the public reader.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForStandaloneRealParsedIntrabcFrame() throws IOException {
+        assertRealParsedIntrabcFrameRoundTrip(false);
+    }
+
+    /// Verifies that one combined real parsed `intrabc` key frame reconstructs through the public reader.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForCombinedRealParsedIntrabcFrame() throws IOException {
+        assertRealParsedIntrabcFrameRoundTrip(true);
     }
 
 
@@ -2288,6 +2313,51 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Asserts that one real parsed `intrabc` frame reconstructs through the public reader with
+    /// `allow_intrabc` carried by the parsed frame header.
+    ///
+    /// @param combined whether the `intrabc` frame is carried by one combined `FRAME` OBU
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertRealParsedIntrabcFrameRoundTrip(boolean combined) throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload(PixelFormat.I420)),
+                combined
+                        ? obu(6, fullIntrabcStillPictureCombinedFramePayload(INTRABC_BLOCK_TILE_PAYLOAD))
+                        : concat(
+                        obu(3, fullIntrabcStillPictureFrameHeaderPayload()),
+                        obu(4, INTRABC_BLOCK_TILE_PAYLOAD)
+                )
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxResult =
+                    Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
+            TilePartitionTreeReader.LeafNode intrabcLeaf = requireDecodedTileContainsIntrabcLeaf(syntaxResult);
+            DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(syntaxResult);
+            DecodedPlanes baselinePlanes = new FrameReconstructor().reconstruct(
+                    copySyntaxResultWithLeavesBefore(syntaxResult, intrabcLeaf)
+            );
+            ReferenceSurfaceSnapshot expectedOutputSnapshot = new ReferenceSurfaceSnapshot(
+                    syntaxResult.assembly().frameHeader(),
+                    syntaxResult,
+                    reconstructedPlanes
+            );
+
+            assertTrue(syntaxResult.assembly().frameHeader().allowScreenContentTools());
+            assertTrue(syntaxResult.assembly().frameHeader().allowIntrabc());
+            assertIntrabcLeafCopiesSameFrameSamples(
+                    intrabcLeaf,
+                    syntaxResult.assembly().sequenceHeader().colorConfig().pixelFormat(),
+                    baselinePlanes,
+                    reconstructedPlanes
+            );
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 0);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
 
     /// Asserts that one standalone `show_existing_frame` header exposes the requested synthetic
     /// stored reference surface through every buffered-input adapter.
@@ -3224,6 +3294,269 @@ final class Av1ImageReaderTest {
         assertEquals(0, firstLeaf.header().referenceFrame0());
     }
 
+    /// Returns the first decoded `intrabc` leaf from tile `0`.
+    ///
+    /// @param syntaxResult the structural decode result produced by the public reader
+    /// @return the first decoded `intrabc` leaf from tile `0`
+    private static TilePartitionTreeReader.LeafNode requireDecodedTileContainsIntrabcLeaf(
+            @org.jetbrains.annotations.Nullable FrameSyntaxDecodeResult syntaxResult
+    ) {
+        assertNotNull(syntaxResult);
+        List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxResult.tileRoots(0));
+        assertFalse(leaves.isEmpty());
+        StringBuilder summary = new StringBuilder();
+        for (TilePartitionTreeReader.LeafNode leaf : leaves) {
+            if (leaf.header().useIntrabc()) {
+                assertFalse(leaf.header().intra());
+                assertFalse(leaf.header().compoundReference());
+                assertNotNull(leaf.header().motionVector0());
+                return leaf;
+            }
+            summary.append(" | leaf ")
+                    .append(leaf.header().position().x4())
+                    .append(',')
+                    .append(leaf.header().position().y4())
+                    .append(' ')
+                    .append(leaf.header().size())
+                    .append(" intra=")
+                    .append(leaf.header().intra())
+                    .append(" intrabc=")
+                    .append(leaf.header().useIntrabc());
+        }
+        throw new AssertionError("No intrabc leaf decoded from the public reader fixture:" + summary);
+    }
+
+    /// Copies one syntax result while keeping only the raster-order leaves before a target leaf.
+    ///
+    /// @param syntaxResult the complete syntax result
+    /// @param targetLeaf the leaf where reconstruction should stop
+    /// @return one syntax result containing only the leaves reconstructed before `targetLeaf`
+    private static FrameSyntaxDecodeResult copySyntaxResultWithLeavesBefore(
+            FrameSyntaxDecodeResult syntaxResult,
+            TilePartitionTreeReader.LeafNode targetLeaf
+    ) {
+        TilePartitionTreeReader.Node[][] tileRoots = new TilePartitionTreeReader.Node[syntaxResult.tileCount()][];
+        for (int tileIndex = 0; tileIndex < tileRoots.length; tileIndex++) {
+            tileRoots[tileIndex] = new TilePartitionTreeReader.Node[0];
+        }
+        List<TilePartitionTreeReader.LeafNode> leaves = leavesInRasterOrder(syntaxResult.tileRoots(0));
+        List<TilePartitionTreeReader.Node> precedingLeaves = new ArrayList<>();
+        for (TilePartitionTreeReader.LeafNode leaf : leaves) {
+            if (leaf == targetLeaf) {
+                tileRoots[0] = precedingLeaves.toArray(new TilePartitionTreeReader.Node[0]);
+                return new FrameSyntaxDecodeResult(
+                        syntaxResult.assembly(),
+                        tileRoots,
+                        syntaxResult.decodedTemporalMotionFields(),
+                        syntaxResult.finalTileCdfContexts()
+                );
+            }
+            precedingLeaves.add(leaf);
+        }
+        throw new IllegalArgumentException("targetLeaf was not found in tile 0");
+    }
+
+    /// Asserts that one `intrabc` leaf copies the same-frame samples reconstructed before it.
+    ///
+    /// @param intrabcLeaf the decoded `intrabc` leaf to validate
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param baselinePlanes the decoded planes reconstructed before `intrabcLeaf`
+    /// @param reconstructedPlanes the decoded planes reconstructed with `intrabcLeaf`
+    private static void assertIntrabcLeafCopiesSameFrameSamples(
+            TilePartitionTreeReader.LeafNode intrabcLeaf,
+            PixelFormat pixelFormat,
+            DecodedPlanes baselinePlanes,
+            DecodedPlanes reconstructedPlanes
+    ) {
+        MotionVector motionVector =
+                Objects.requireNonNull(intrabcLeaf.header().motionVector0(), "motionVector0").vector();
+        int lumaX = intrabcLeaf.header().position().x4() << 2;
+        int lumaY = intrabcLeaf.header().position().y4() << 2;
+        int visibleLumaWidth = intrabcLeaf.transformLayout().visibleWidthPixels();
+        int visibleLumaHeight = intrabcLeaf.transformLayout().visibleHeightPixels();
+        assertPlaneBlockMatchesBilinearSample(
+                reconstructedPlanes.lumaPlane(),
+                baselinePlanes.lumaPlane(),
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                lumaX * 4 + motionVector.columnQuarterPel(),
+                lumaY * 4 + motionVector.rowQuarterPel(),
+                4,
+                4
+        );
+
+        if (!intrabcLeaf.header().hasChroma()) {
+            return;
+        }
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = lumaX >> chromaSubsamplingX;
+        int chromaY = lumaY >> chromaSubsamplingY;
+        int visibleChromaWidth = ceilDivideByPowerOfTwo(visibleLumaWidth, chromaSubsamplingX);
+        int visibleChromaHeight = ceilDivideByPowerOfTwo(visibleLumaHeight, chromaSubsamplingY);
+        int chromaDenominatorX = 4 << chromaSubsamplingX;
+        int chromaDenominatorY = 4 << chromaSubsamplingY;
+        assertPlaneBlockMatchesBilinearSample(
+                Objects.requireNonNull(reconstructedPlanes.chromaUPlane(), "chromaUPlane"),
+                Objects.requireNonNull(baselinePlanes.chromaUPlane(), "baselineChromaUPlane"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaX * chromaDenominatorX + motionVector.columnQuarterPel(),
+                chromaY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                chromaDenominatorX,
+                chromaDenominatorY
+        );
+        assertPlaneBlockMatchesBilinearSample(
+                Objects.requireNonNull(reconstructedPlanes.chromaVPlane(), "chromaVPlane"),
+                Objects.requireNonNull(baselinePlanes.chromaVPlane(), "baselineChromaVPlane"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                chromaX * chromaDenominatorX + motionVector.columnQuarterPel(),
+                chromaY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                chromaDenominatorX,
+                chromaDenominatorY
+        );
+    }
+
+    /// Asserts that one decoded plane block matches bilinear samples from one reference plane.
+    ///
+    /// @param actualPlane the decoded destination plane
+    /// @param referencePlane the same-frame reference plane reconstructed before the copy
+    /// @param destinationX the horizontal destination coordinate
+    /// @param destinationY the vertical destination coordinate
+    /// @param width the copied width in samples
+    /// @param height the copied height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    private static void assertPlaneBlockMatchesBilinearSample(
+            DecodedPlane actualPlane,
+            DecodedPlane referencePlane,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        for (int y = 0; y < height; y++) {
+            int sampleNumeratorY = sourceNumeratorY + y * denominatorY;
+            for (int x = 0; x < width; x++) {
+                int sampleNumeratorX = sourceNumeratorX + x * denominatorX;
+                assertEquals(
+                        bilinearSample(referencePlane, sampleNumeratorX, sampleNumeratorY, denominatorX, denominatorY),
+                        actualPlane.sample(destinationX + x, destinationY + y)
+                );
+            }
+        }
+    }
+
+    /// Samples one reference plane with bilinear interpolation and edge extension.
+    ///
+    /// @param referencePlane the same-frame reference plane
+    /// @param sampleNumeratorX the horizontal source numerator
+    /// @param sampleNumeratorY the vertical source numerator
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param denominatorY the vertical interpolation denominator
+    /// @return one bilinearly interpolated sample
+    private static int bilinearSample(
+            DecodedPlane referencePlane,
+            int sampleNumeratorX,
+            int sampleNumeratorY,
+            int denominatorX,
+            int denominatorY
+    ) {
+        int sourceY0 = Math.floorDiv(sampleNumeratorY, denominatorY);
+        int fractionY = Math.floorMod(sampleNumeratorY, denominatorY);
+        int clampedSourceY0 = Math.max(0, Math.min(sourceY0, referencePlane.height() - 1));
+        int clampedSourceY1 = Math.max(0, Math.min(sourceY0 + 1, referencePlane.height() - 1));
+        int sourceX0 = Math.floorDiv(sampleNumeratorX, denominatorX);
+        int fractionX = Math.floorMod(sampleNumeratorX, denominatorX);
+        int clampedSourceX0 = Math.max(0, Math.min(sourceX0, referencePlane.width() - 1));
+        int clampedSourceX1 = Math.max(0, Math.min(sourceX0 + 1, referencePlane.width() - 1));
+        return bilinearInterpolate(
+                referencePlane.sample(clampedSourceX0, clampedSourceY0),
+                referencePlane.sample(clampedSourceX1, clampedSourceY0),
+                referencePlane.sample(clampedSourceX0, clampedSourceY1),
+                referencePlane.sample(clampedSourceX1, clampedSourceY1),
+                fractionX,
+                denominatorX,
+                fractionY,
+                denominatorY
+        );
+    }
+
+    /// Returns one bilinearly interpolated unsigned sample.
+    ///
+    /// @param topLeft the top-left source sample
+    /// @param topRight the top-right source sample
+    /// @param bottomLeft the bottom-left source sample
+    /// @param bottomRight the bottom-right source sample
+    /// @param fractionX the horizontal source fraction in `[0, denominatorX)`
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param fractionY the vertical source fraction in `[0, denominatorY)`
+    /// @param denominatorY the vertical interpolation denominator
+    /// @return one bilinearly interpolated unsigned sample
+    private static int bilinearInterpolate(
+            int topLeft,
+            int topRight,
+            int bottomLeft,
+            int bottomRight,
+            int fractionX,
+            int denominatorX,
+            int fractionY,
+            int denominatorY
+    ) {
+        int inverseFractionX = denominatorX - fractionX;
+        int inverseFractionY = denominatorY - fractionY;
+        long denominator = (long) denominatorX * denominatorY;
+        long weightedSum = (long) inverseFractionX * inverseFractionY * topLeft
+                + (long) fractionX * inverseFractionY * topRight
+                + (long) inverseFractionX * fractionY * bottomLeft
+                + (long) fractionX * fractionY * bottomRight;
+        return (int) ((weightedSum + (denominator >> 1)) / denominator);
+    }
+
+    /// Returns the base-2 chroma horizontal subsampling factor for one pixel format.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @return the base-2 chroma horizontal subsampling factor
+    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I420, I422 -> 1;
+            case I444 -> 0;
+        };
+    }
+
+    /// Returns the base-2 chroma vertical subsampling factor for one pixel format.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @return the base-2 chroma vertical subsampling factor
+    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I420 -> 1;
+            case I422, I444 -> 0;
+        };
+    }
+
+    /// Divides one positive integer by a power of two, rounding up.
+    ///
+    /// @param value the positive value to divide
+    /// @param shift the non-negative base-2 divisor shift
+    /// @return the rounded-up quotient
+    private static int ceilDivideByPowerOfTwo(int value, int shift) {
+        return (value + (1 << shift) - 1) >> shift;
+    }
+
     /// Captures every currently populated reference-surface slot from one reader.
     ///
     /// @param reader the reader whose stored reference surfaces should be copied
@@ -3759,6 +4092,17 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one non-reduced still-picture-compatible key frame header payload that enables
+    /// frame-level screen-content tools and `allow_intrabc`.
+    ///
+    /// @return one non-reduced still-picture-compatible `intrabc` key frame header payload
+    private static byte[] fullIntrabcStillPictureFrameHeaderPayload() {
+        BitWriter writer = new BitWriter();
+        writeFullIntrabcStillPictureFrameHeaderBits(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
 
     /// Creates a minimal standalone `show_existing_frame` header payload.
     ///
@@ -3886,6 +4230,19 @@ final class Av1ImageReaderTest {
     private static byte[] fullPaletteStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
         BitWriter writer = new BitWriter();
         writeFullPaletteStillPictureFrameHeaderBits(writer);
+        writer.padToByteBoundary();
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
+    /// Creates one non-reduced still-picture-compatible combined frame payload whose frame header
+    /// enables `allow_intrabc`.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the `intrabc`-compatible frame header
+    /// @return one non-reduced still-picture-compatible combined frame payload for `intrabc` coverage
+    private static byte[] fullIntrabcStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writeFullIntrabcStillPictureFrameHeaderBits(writer);
         writer.padToByteBoundary();
         writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
@@ -4207,6 +4564,30 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+    }
+
+    /// Writes one non-reduced still-picture-compatible key frame header syntax that enables
+    /// frame-level screen-content tools and `allow_intrabc`.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeFullIntrabcStillPictureFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeBits(0, 8);
         writer.writeFlag(false);

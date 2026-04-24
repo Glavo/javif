@@ -35,10 +35,12 @@ Supported end-to-end behavior:
 - Self-contained parsed-stream inter public-reader paths for standalone and combined `FRAME`
   inputs across `I420/I422/I444`, backed by a preceding parsed reference frame rather than injected
   parser metadata.
+- Parsed-stream `intrabc` public-reader paths for standalone frame-header/tile-group input and
+  combined `FRAME` input, including `allow_intrabc` frame-header parsing, decoded same-frame-copy
+  leaf coverage, and luma/chroma copy validation against a pre-copy same-frame oracle.
 
 ## Remaining Decode Boundary
 
-- `intrabc` coverage still needs broader parsed-stream syntax and reconstruction fixtures.
 - Motion-compensation coverage still needs richer inter/reference features beyond the current
   bit-depth-preserving single-reference, average-compound, fixed-filter, switchable-filter, and
   super-resolution subset.
@@ -58,8 +60,7 @@ The following contracts are stable and should be preserved:
 ## Main Work Priority
 
 1. Broaden motion compensation fidelity and feature coverage.
-2. Broaden parsed-stream `intrabc`.
-3. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
+2. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
 
 ## Exit Criteria
 
