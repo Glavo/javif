@@ -328,6 +328,16 @@ final class Av1ImageReaderTest {
         assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I444, true);
     }
 
+    /// Verifies that the current still-picture first-pixel path also succeeds for parsed
+    /// `10-bit I420` and `12-bit I444` combined streams and returns `ArgbLongFrame`.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbLongFrameForSupportedCombinedHighBitDepthStillPictureStreams() throws IOException {
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 10);
+        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 12);
+    }
+
     /// Verifies that `readAllFrames()` preserves the current supported first-pixel combined
     /// still-picture success path across all buffered-input adapters.
     ///
@@ -1656,6 +1666,38 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Asserts that the supported minimal real tile payload round-trips through the public reader
+    /// with one parsed high-bit-depth still-picture sequence header and returns `ArgbLongFrame`.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @param bitDepth the parsed decoded bit depth to expose
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertSupportedHighBitDepthStillPictureRoundTrip(
+            PixelFormat pixelFormat,
+            int bitDepth
+    ) throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload(pixelFormat, bitDepth)),
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxDecodeResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(syntaxDecodeResult);
+            assertOpaqueGrayStillPictureLongFrame(
+                    decodedFrame,
+                    syntaxDecodeResult.assembly().frameHeader(),
+                    bitDepth,
+                    pixelFormat,
+                    0
+            );
+            assertFirstDecodedLeafIsIntra(syntaxDecodeResult);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
     /// Asserts that one real parsed still-picture decode in the requested additional chroma layout
     /// immediately refreshes a reference slot and then round-trips through `show_existing_frame`.
     ///
@@ -2436,6 +2478,40 @@ final class Av1ImageReaderTest {
         assertStillPictureFrameFilledWith(decodedFrame, expectedPixelFormat, expectedPresentationIndex, OPAQUE_MID_GRAY);
     }
 
+    /// Asserts that one parsed high-bit-depth still-picture frame matches the expected constant
+    /// midpoint decoded planes and therefore exposes `ArgbLongFrame`.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param frameHeader the parsed still-picture frame header
+    /// @param expectedBitDepth the expected decoded sample bit depth
+    /// @param expectedPixelFormat the expected chroma layout exposed by the public frame
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertOpaqueGrayStillPictureLongFrame(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            FrameHeader frameHeader,
+            int expectedBitDepth,
+            PixelFormat expectedPixelFormat,
+            long expectedPresentationIndex
+    ) {
+        assertNotNull(decodedFrame);
+        assertDecodedStillPictureFrameMetadata(
+                decodedFrame,
+                expectedBitDepth,
+                expectedPixelFormat,
+                FrameType.KEY,
+                expectedPresentationIndex
+        );
+        assertTrue(decodedFrame instanceof ArgbLongFrame);
+
+        DecodedPlanes decodedPlanes = createFilledDecodedPlanes(
+                frameHeader,
+                expectedPixelFormat,
+                expectedBitDepth,
+                1 << (expectedBitDepth - 1)
+        );
+        assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes), ((ArgbLongFrame) decodedFrame).pixels());
+    }
+
     /// Asserts that the reader returned one legacy directional opaque gray still-picture frame.
     ///
     /// @param decodedFrame the decoded frame returned by the public reader
@@ -2813,7 +2889,7 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
-        writeReducedStillPictureColorConfig(writer, pixelFormat, false);
+        writeReducedStillPictureColorConfig(writer, pixelFormat, 8, false);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -2824,13 +2900,21 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the requested public chroma layout
     /// @return the reduced still-picture sequence-profile value
     private static int reducedStillPictureProfile(PixelFormat pixelFormat) {
+        return reducedStillPictureProfile(pixelFormat, 8);
+    }
+
+    /// Returns the AV1 sequence-profile value used by the still-picture fixtures for the requested
+    /// public chroma layout and decoded bit depth.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @param bitDepth the requested decoded sample bit depth
+    /// @return the still-picture fixture sequence-profile value
+    private static int reducedStillPictureProfile(PixelFormat pixelFormat, int bitDepth) {
         return switch (pixelFormat) {
-            case I420 -> 0;
+            case I420 -> bitDepth == 12 ? 2 : 0;
             case I422 -> 2;
-            case I444 -> 1;
-            case I400 -> throw new IllegalArgumentException(
-                    "Reduced still-picture fixture expects I420, I422, or I444: " + pixelFormat
-            );
+            case I444 -> bitDepth == 12 ? 2 : 1;
+            case I400 -> bitDepth == 12 ? 2 : 0;
         };
     }
 
@@ -2845,34 +2929,65 @@ final class Av1ImageReaderTest {
             PixelFormat pixelFormat,
             boolean filmGrainPresent
     ) {
+        writeReducedStillPictureColorConfig(writer, pixelFormat, 8, filmGrainPresent);
+    }
+
+    /// Writes the reduced still-picture color-configuration bits for the requested public chroma
+    /// layout, decoded bit depth, and film grain capability flag.
+    ///
+    /// @param writer the destination bit writer
+    /// @param pixelFormat the requested public chroma layout
+    /// @param bitDepth the requested decoded sample bit depth
+    /// @param filmGrainPresent whether the sequence header should advertise film grain support
+    private static void writeReducedStillPictureColorConfig(
+            BitWriter writer,
+            PixelFormat pixelFormat,
+            int bitDepth,
+            boolean filmGrainPresent
+    ) {
+        int profile = reducedStillPictureProfile(pixelFormat, bitDepth);
+        writer.writeFlag(bitDepth != 8);
+        if (profile == 2 && bitDepth == 10) {
+            writer.writeFlag(false);
+        } else if (profile == 2 && bitDepth == 12) {
+            writer.writeFlag(true);
+        }
+        if (profile != 1) {
+            writer.writeFlag(pixelFormat == PixelFormat.I400);
+        }
+        writer.writeFlag(false);
         switch (pixelFormat) {
-            case I420 -> {
-                writer.writeFlag(false);
-                writer.writeFlag(false);
-                writer.writeFlag(false);
+            case I400 -> {
                 writer.writeFlag(true);
+                writer.writeFlag(filmGrainPresent);
+            }
+            case I420 -> {
+                writer.writeFlag(true);
+                if (profile == 2 && bitDepth == 12) {
+                    writer.writeFlag(true);
+                    writer.writeFlag(true);
+                }
                 writer.writeBits(1, 2);
                 writer.writeFlag(true);
                 writer.writeFlag(filmGrainPresent);
             }
             case I422 -> {
-                writer.writeFlag(false);
-                writer.writeFlag(false);
-                writer.writeFlag(false);
                 writer.writeFlag(true);
+                if (profile == 2 && bitDepth == 12) {
+                    writer.writeFlag(true);
+                    writer.writeFlag(false);
+                }
                 writer.writeFlag(true);
                 writer.writeFlag(filmGrainPresent);
             }
             case I444 -> {
-                writer.writeFlag(false);
-                writer.writeFlag(false);
                 writer.writeFlag(true);
+                if (profile == 2 && bitDepth == 12) {
+                    writer.writeFlag(false);
+                }
                 writer.writeFlag(true);
                 writer.writeFlag(filmGrainPresent);
             }
-            case I400 -> throw new IllegalArgumentException(
-                    "Reduced still-picture fixture expects I420, I422, or I444: " + pixelFormat
-            );
         }
     }
 
@@ -2894,6 +3009,17 @@ final class Av1ImageReaderTest {
     }
 
     /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// `show_existing_frame` while exposing the requested public chroma layout and decoded bit
+    /// depth.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @param bitDepth the requested decoded sample bit depth
+    /// @return one non-reduced still-picture-compatible sequence header payload
+    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, int bitDepth) {
+        return fullSequenceHeaderPayload(pixelFormat, bitDepth, false);
+    }
+
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
     /// `show_existing_frame` while exposing the requested `8-bit` public chroma layout and
     /// caller-selected film grain capability.
     ///
@@ -2901,8 +3027,20 @@ final class Av1ImageReaderTest {
     /// @param filmGrainPresent whether frame headers in the stream may signal film grain
     /// @return one non-reduced still-picture-compatible sequence header payload
     private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, boolean filmGrainPresent) {
+        return fullSequenceHeaderPayload(pixelFormat, 8, filmGrainPresent);
+    }
+
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// `show_existing_frame` while exposing the requested public chroma layout, decoded bit depth,
+    /// and caller-selected film grain capability.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @param bitDepth the requested decoded sample bit depth
+    /// @param filmGrainPresent whether frame headers in the stream may signal film grain
+    /// @return one non-reduced still-picture-compatible sequence header payload
+    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, int bitDepth, boolean filmGrainPresent) {
         BitWriter writer = new BitWriter();
-        writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
+        writer.writeBits(reducedStillPictureProfile(pixelFormat, bitDepth), 3);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
@@ -2930,10 +3068,7 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
-        writer.writeFlag(false);
-        writeReducedStillPictureColorConfig(writer, pixelFormat, filmGrainPresent);
+        writeReducedStillPictureColorConfig(writer, pixelFormat, bitDepth, filmGrainPresent);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }

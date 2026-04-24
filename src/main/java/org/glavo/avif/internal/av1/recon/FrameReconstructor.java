@@ -36,8 +36,8 @@ import java.util.Objects;
 
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
-/// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
-/// plus a first single-reference, average-compound, and same-frame `intrabc` subset with
+/// The current implementation is intentionally narrow. It reconstructs only the current `8-bit`,
+/// `10-bit`, and `12-bit` key/intra subset plus a first single-reference, average-compound, and same-frame `intrabc` subset with
 /// the current fixed-filter subpel prediction path over the current serial tile traversal,
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
@@ -249,9 +249,12 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
-        if (sequenceHeader.colorConfig().bitDepth() != 8) {
+        if (sequenceHeader.colorConfig().bitDepth() != 8
+                && sequenceHeader.colorConfig().bitDepth() != 10
+                && sequenceHeader.colorConfig().bitDepth() != 12) {
             throw new IllegalStateException(
-                    "Pixel reconstruction currently requires 8-bit samples: " + sequenceHeader.colorConfig().bitDepth()
+                    "Pixel reconstruction currently requires 8-bit, 10-bit, or 12-bit samples: "
+                            + sequenceHeader.colorConfig().bitDepth()
             );
         }
         if (sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I400
@@ -484,6 +487,7 @@ public final class FrameReconstructor {
                 transformLayout,
                 residualLayout,
                 pixelFormat,
+                lumaPlane.bitDepth(),
                 frameHeader,
                 referenceSurfaceSnapshots
         );
@@ -623,11 +627,13 @@ public final class FrameReconstructor {
     /// @param transformLayout the decoded block transform layout
     /// @param residualLayout the decoded block residual layout
     /// @param pixelFormat the active decoded chroma layout
+    /// @param bitDepth the decoded sample bit depth of the current frame
     private static void requireSupportedLeaf(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             ResidualLayout residualLayout,
             PixelFormat pixelFormat,
+            int bitDepth,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
@@ -682,9 +688,21 @@ public final class FrameReconstructor {
             if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
                 throw new IllegalStateException("Inter palette reconstruction is not implemented yet");
             }
-            requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame0());
+            requireReferenceSurfaceSnapshot(
+                    referenceSurfaceSnapshots,
+                    frameHeader,
+                    pixelFormat,
+                    bitDepth,
+                    header.referenceFrame0()
+            );
             if (header.compoundReference()) {
-                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame1());
+                requireReferenceSurfaceSnapshot(
+                        referenceSurfaceSnapshots,
+                        frameHeader,
+                        pixelFormat,
+                        bitDepth,
+                        header.referenceFrame1()
+                );
             }
             requireSupportedInterMotionVector(
                     header.motionVector0().vector(),
@@ -883,7 +901,13 @@ public final class FrameReconstructor {
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
-                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame0());
+                requireReferenceSurfaceSnapshot(
+                        referenceSurfaceSnapshots,
+                        frameHeader,
+                        pixelFormat,
+                        lumaPlane.bitDepth(),
+                        header.referenceFrame0()
+                );
         DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
@@ -979,9 +1003,21 @@ public final class FrameReconstructor {
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 =
-                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame0());
+                requireReferenceSurfaceSnapshot(
+                        referenceSurfaceSnapshots,
+                        frameHeader,
+                        pixelFormat,
+                        lumaPlane.bitDepth(),
+                        header.referenceFrame0()
+                );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 =
-                requireReferenceSurfaceSnapshot(referenceSurfaceSnapshots, frameHeader, pixelFormat, header.referenceFrame1());
+                requireReferenceSurfaceSnapshot(
+                        referenceSurfaceSnapshots,
+                        frameHeader,
+                        pixelFormat,
+                        lumaPlane.bitDepth(),
+                        header.referenceFrame1()
+                );
         DecodedPlanes referencePlanes0 = referenceSurfaceSnapshot0.decodedPlanes();
         DecodedPlanes referencePlanes1 = referenceSurfaceSnapshot1.decodedPlanes();
         MotionVector motionVector0 = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
@@ -1716,12 +1752,14 @@ public final class FrameReconstructor {
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param frameHeader the frame header that owns the block
     /// @param pixelFormat the active decoded chroma layout
+    /// @param bitDepth the decoded sample bit depth of the current frame
     /// @param referenceFramePosition the internal LAST..ALTREF reference position
     /// @return one compatible stored reference surface for the supplied reference position
     private static ReferenceSurfaceSnapshot requireReferenceSurfaceSnapshot(
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             FrameHeader frameHeader,
             PixelFormat pixelFormat,
+            int bitDepth,
             int referenceFramePosition
     ) {
         if (referenceFramePosition < 0 || referenceFramePosition >= 7) {
@@ -1738,8 +1776,10 @@ public final class FrameReconstructor {
         }
 
         DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
-        if (referencePlanes.bitDepth() != 8) {
-            throw new IllegalStateException("Inter reconstruction currently requires one 8-bit stored reference surface");
+        if (referencePlanes.bitDepth() != bitDepth) {
+            throw new IllegalStateException(
+                    "Inter reconstruction currently requires one stored reference surface whose bit depth matches the current frame"
+            );
         }
         if (referencePlanes.pixelFormat() != pixelFormat) {
             throw new IllegalStateException(

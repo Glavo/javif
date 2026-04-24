@@ -80,6 +80,29 @@ final class FrameReconstructorTest {
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
     }
 
+    /// Verifies that the current key/intra reconstruction subset already accepts `10-bit I400`
+    /// zero-residual frames.
+    @Test
+    void reconstructsSingleTileTenBitI400KeyFrameWithZeroResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 10, 4, 4);
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), leaf)
+        );
+
+        assertEquals(10, planes.bitDepth());
+        assertEquals(PixelFormat.I400, planes.pixelFormat());
+        assertFalse(planes.hasChroma());
+        assertPlaneFilled(planes.lumaPlane(), 4, 4, 512);
+    }
+
     /// Verifies that a synthetic single-tile 8-bit `I420` intra frame reconstructs luma and chroma planes.
     @Test
     void reconstructsSingleTileI420IntraFrameWithZeroResidual() {
@@ -153,6 +176,31 @@ final class FrameReconstructorTest {
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
         assertPlaneFilled(requirePlane(planes.chromaUPlane()), 4, 4, 128);
         assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 128);
+    }
+
+    /// Verifies that the current key/intra reconstruction subset already accepts `12-bit I444`
+    /// zero-residual frames.
+    @Test
+    void reconstructsSingleTileTwelveBitI444IntraFrameWithZeroResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I444),
+                createResidualLayout(position, size, true)
+        );
+
+        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I444, 12, 4, 4);
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.INTRA, 4, 4), leaf)
+        );
+
+        assertEquals(12, planes.bitDepth());
+        assertEquals(PixelFormat.I444, planes.pixelFormat());
+        assertTrue(planes.hasChroma());
+        assertPlaneFilled(planes.lumaPlane(), 4, 4, 2048);
+        assertPlaneFilled(requirePlane(planes.chromaUPlane()), 4, 4, 2048);
+        assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 2048);
     }
 
     /// Verifies that the current minimal super-resolution subset horizontally upsamples one
@@ -1150,6 +1198,38 @@ final class FrameReconstructorTest {
 
         assertFalse(residualPlanes.hasChroma());
         assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
+    }
+
+    /// Verifies that a positive monochrome DC residual also reconstructs through the current
+    /// `10-bit` path and still produces one uniform luma plane.
+    @Test
+    void reconstructsSingleTileTenBitI400KeyFrameWithPositiveDcResidual() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+        TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, 64)
+        );
+
+        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 10, 4, 4);
+        FrameSyntaxDecodeResult baselineSyntax =
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), zeroResidualLeaf);
+        FrameSyntaxDecodeResult residualSyntax =
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), positiveResidualLeaf);
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlane baseline = reconstructor.reconstruct(baselineSyntax).lumaPlane();
+        DecodedPlane residual = reconstructor.reconstruct(residualSyntax).lumaPlane();
+
+        int residualSample = residual.sample(0, 0);
+        assertTrue(residualSample > baseline.sample(0, 0));
+        assertPlaneFilled(residual, 4, 4, residualSample);
     }
 
     /// Verifies that a negative `I420` luma DC residual shifts only the luma plane below the zero-residual baseline.
@@ -3309,8 +3389,20 @@ final class FrameReconstructorTest {
     /// @param height the frame height
     /// @return one minimal reduced-still-picture sequence header
     private static SequenceHeader createSequenceHeader(PixelFormat pixelFormat, int width, int height) {
+        return createSequenceHeader(pixelFormat, 8, width, height);
+    }
+
+    /// Creates one minimal reduced-still-picture sequence header for reconstruction tests with one
+    /// explicit decoded bit depth.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param bitDepth the decoded sample bit depth
+    /// @param width the frame width
+    /// @param height the frame height
+    /// @return one minimal reduced-still-picture sequence header
+    private static SequenceHeader createSequenceHeader(PixelFormat pixelFormat, int bitDepth, int width, int height) {
         return new SequenceHeader(
-                0,
+                sequenceProfile(pixelFormat, bitDepth),
                 width,
                 height,
                 new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
@@ -3344,7 +3436,7 @@ final class FrameReconstructorTest {
                         false
                 ),
                 new SequenceHeader.ColorConfig(
-                        8,
+                        bitDepth,
                         pixelFormat == PixelFormat.I400,
                         false,
                         2,
@@ -3358,6 +3450,20 @@ final class FrameReconstructorTest {
                         false
                 )
         );
+    }
+
+    /// Returns one reduced-still-picture-compatible AV1 profile for the requested chroma layout and
+    /// decoded bit depth.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param bitDepth the decoded sample bit depth
+    /// @return one reduced-still-picture-compatible AV1 profile
+    private static int sequenceProfile(PixelFormat pixelFormat, int bitDepth) {
+        return switch (pixelFormat) {
+            case I400, I420 -> bitDepth == 12 ? 2 : 0;
+            case I422 -> 2;
+            case I444 -> bitDepth == 12 ? 2 : 1;
+        };
     }
 
     /// Creates one minimal frame header for reconstruction tests.

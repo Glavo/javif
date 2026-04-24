@@ -25,82 +25,48 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/// Tests for minimal luma dequantization.
+/// Tests for minimal chroma dequantization.
 @NotNullByDefault
-final class LumaDequantizerTest {
-    /// Verifies that luma dequantization uses separate DC and AC lookup tables.
-    @Test
-    void dequantizesDcAndAcCoefficientsWithIndependentLookupTables() {
-        int[] coefficients = new int[16];
-        coefficients[0] = 2;
-        coefficients[1] = -3;
-
-        int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
-                new LumaDequantizer.Context(2, 0, 8)
-        );
-
-        int[] expected = new int[16];
-        expected[0] = 16;
-        expected[1] = -27;
-        assertArrayEquals(expected, dequantized);
-    }
-
-    /// Verifies that the derived DC qindex clamps before the lookup-table access.
-    @Test
-    void clampsDerivedDcQIndexBeforeLookup() {
-        int[] coefficients = new int[16];
-        coefficients[0] = 2;
-        coefficients[1] = 3;
-
-        int[] dequantized = LumaDequantizer.dequantize(
-                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
-                new LumaDequantizer.Context(1, -10, 8)
-        );
-
-        int[] expected = new int[16];
-        expected[0] = 8;
-        expected[1] = 24;
-        assertArrayEquals(expected, dequantized);
-    }
-
-    /// Verifies that `10-bit` luma dequantization uses the dav1d-derived QTX tables.
+final class ChromaDequantizerTest {
+    /// Verifies that `10-bit` chroma dequantization applies plane-local DC and AC deltas before
+    /// looking up the QTX tables.
     @Test
     void dequantizesCoefficientsWithTenBitLookupTables() {
         int[] coefficients = new int[16];
         coefficients[0] = 2;
         coefficients[1] = -3;
 
-        int[] dequantized = LumaDequantizer.dequantize(
+        int[] dequantized = ChromaDequantizer.dequantize(
                 new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
-                new LumaDequantizer.Context(2, 0, 10)
+                new ChromaDequantizer.Context(1, 1, 2, 10)
         );
 
         int[] expected = new int[16];
         expected[0] = 20;
-        expected[1] = -33;
+        expected[1] = -39;
         assertArrayEquals(expected, dequantized);
     }
 
-    /// Verifies that `12-bit` luma dequantization uses the dav1d-derived QTX tables.
+    /// Verifies that `12-bit` chroma dequantization applies plane-local DC and AC deltas before
+    /// looking up the QTX tables.
     @Test
     void dequantizesCoefficientsWithTwelveBitLookupTables() {
         int[] coefficients = new int[16];
         coefficients[0] = 2;
         coefficients[1] = -3;
 
-        int[] dequantized = LumaDequantizer.dequantize(
+        int[] dequantized = ChromaDequantizer.dequantize(
                 new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
-                new LumaDequantizer.Context(2, 0, 12)
+                new ChromaDequantizer.Context(1, 1, 2, 12)
         );
 
         int[] expected = new int[16];
         expected[0] = 36;
-        expected[1] = -57;
+        expected[1] = -81;
         assertArrayEquals(expected, dequantized);
     }
 
-    /// Verifies that unsupported bit depths still fail fast in the current subset.
+    /// Verifies that unsupported chroma bit depths still fail fast.
     @Test
     void rejectsUnsupportedBitDepths() {
         int[] coefficients = new int[16];
@@ -108,12 +74,12 @@ final class LumaDequantizerTest {
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> LumaDequantizer.dequantize(
+                () -> ChromaDequantizer.dequantize(
                         new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 0, coefficients, 0x01),
-                        new LumaDequantizer.Context(0, 0, 9)
+                        new ChromaDequantizer.Context(0, 0, 0, 11)
                 )
         );
 
-        assertEquals("Unsupported luma dequantization bit depth: 9", exception.getMessage());
+        assertEquals("Unsupported chroma dequantization bit depth: 11", exception.getMessage());
     }
 }

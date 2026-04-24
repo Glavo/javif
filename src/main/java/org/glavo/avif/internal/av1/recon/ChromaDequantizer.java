@@ -22,9 +22,9 @@ import java.util.Objects;
 
 /// Minimal chroma dequantizer for the first residual-producing reconstruction path.
 ///
-/// The current implementation matches the AV1 8-bit QTX lookup tables shared by luma and chroma
-/// coefficients. Plane-specific behavior is expressed only through the caller-supplied DC/AC delta
-/// quantizers.
+/// The current implementation matches the AV1 `8-bit`, `10-bit`, and `12-bit` QTX lookup tables
+/// shared by luma and chroma coefficients. Plane-specific behavior is expressed only through the
+/// caller-supplied DC/AC delta quantizers.
 @NotNullByDefault
 final class ChromaDequantizer {
     /// Prevents instantiation of this utility class.
@@ -43,7 +43,9 @@ final class ChromaDequantizer {
     static int[] dequantize(TransformResidualUnit residualUnit, Context context) {
         TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         Context nonNullContext = Objects.requireNonNull(context, "context");
-        if (nonNullContext.bitDepth() != 8) {
+        if (nonNullContext.bitDepth() != 8
+                && nonNullContext.bitDepth() != 10
+                && nonNullContext.bitDepth() != 12) {
             throw new IllegalStateException("Unsupported chroma dequantization bit depth: " + nonNullContext.bitDepth());
         }
 
@@ -54,8 +56,14 @@ final class ChromaDequantizer {
 
         int[] quantizedCoefficients = nonNullResidualUnit.coefficients();
         int[] dequantizedCoefficients = new int[quantizedCoefficients.length];
-        int dcQuantizer = QuantizerTables.dcQuantizer8(nonNullContext.qIndex() + nonNullContext.dcDelta());
-        int acQuantizer = QuantizerTables.acQuantizer8(nonNullContext.qIndex() + nonNullContext.acDelta());
+        int dcQuantizer = QuantizerTables.dcQuantizer(
+                nonNullContext.qIndex() + nonNullContext.dcDelta(),
+                nonNullContext.bitDepth()
+        );
+        int acQuantizer = QuantizerTables.acQuantizer(
+                nonNullContext.qIndex() + nonNullContext.acDelta(),
+                nonNullContext.bitDepth()
+        );
         dequantizedCoefficients[0] = scaledCoefficient(quantizedCoefficients[0], dcQuantizer);
         for (int coefficientIndex = 1; coefficientIndex < quantizedCoefficients.length; coefficientIndex++) {
             dequantizedCoefficients[coefficientIndex] = scaledCoefficient(quantizedCoefficients[coefficientIndex], acQuantizer);
