@@ -19,7 +19,7 @@ reconstruction core and the real-stream coverage that proves it.
   - smooth intra with clipped right/bottom visible footprints
   - filter intra, including clipped right/bottom visible footprints
   - CFL
-  - minimal palette
+  - minimal palette, including chroma palette plus chroma residual overlays
   - current `DCT_DCT` residual space with transform axes up to `64`
 - current stored-surface `show_existing_frame` path
 - the first inter/reference subset:
@@ -57,45 +57,27 @@ Everything outside that subset must continue to fail explicitly with a stable
 
 ## Remaining Decode Boundary
 
-- Non-zero reconstruction currently covers the current luma/chroma `DCT_DCT` subset whose
-  transform axes stay within `64` samples, including the larger square and rectangular sizes needed
-  by the current real inter fixture, but not the broader transform-type and coefficient space.
-- The public reader already consumes:
-  - a minimal real bitstream-derived `I420` chroma residual path
-  - a first real bitstream-derived `I422` chroma residual path
-  - a first direct parsed high-bit-depth still-picture subset
-- Stable real bitstream-driven multi-tile first-pixel fixtures are still missing. Multi-tile
-  support is stronger at the synthetic frame-syntax/runtime level than in the real fixture corpus.
-- Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
-- Palette reconstruction now covers the current synthetic `I400/I420/I422/I444` subset, chroma
-  palette plus chroma residual overlays for `I420/I422/I444`, and the first deterministic real
-  wider-chroma palette fixture, but direct parsed wider-chroma palette still-picture streams and
-  broader edge cases are still missing.
-- `intrabc` reconstruction now covers:
-  - a first synthetic same-frame `BILINEAR` subset
-  - a first generated-header real syntax-and-reconstruction integration path
-
-  Broader parsed-stream `intrabc` coverage is still missing.
-- Inter/reference reconstruction now covers:
-  - single-reference and average-compound prediction
-  - integer-copy prediction
-  - fixed-filter and block-resolved `SWITCHABLE` subpel sampling
-  - a first geometry-remapped stored-reference path for post-super-resolution surfaces
-  - a first hybrid parsed-stream public inter success path with `I420/I422/I444` public-layout coverage
-
-  Broader self-contained parsed-stream inter support and richer motion compensation are still
-  incomplete.
-- Key/intra reconstruction already covers a minimal horizontal super-resolution subset, and
-  inter/reference reconstruction already covers a first horizontal super-resolution subset, but
-  higher-fidelity AV1 resampling behavior and broader parsed-stream inter super-resolution coverage
-  are still incomplete.
-- `I422/I444` now have direct parsed still-picture output and stored-surface reuse, but still lack
-  broader real parsed-stream fixture coverage beyond the current minimal subset.
+- Transform/coefficient coverage still needs broader transform types and coefficient patterns beyond
+  the current `DCT_DCT <= 64-axis` reconstruction subset.
+- Chroma residual coverage still needs full chroma transform-layout modeling and broader real
+  parsed chroma token coverage beyond the current minimal `I420/I422` fixture paths.
+- Palette coverage still needs direct parsed wider-chroma palette still-picture streams and broader
+  palette edge cases.
+- `intrabc` coverage still needs broader parsed-stream syntax and reconstruction fixtures.
+- Inter/reference coverage still needs self-contained parsed-stream inter support without injected
+  parser metadata, plus richer motion compensation.
+- Super-resolution still needs higher-fidelity AV1 resampling behavior and broader parsed-stream
+  inter super-resolution coverage.
+- Real bitstream-driven multi-tile first-pixel fixtures are still missing. Multi-tile support is
+  stronger at the synthetic frame-syntax/runtime level than in the real fixture corpus.
+- `I422/I444` still need broader real parsed-stream coverage beyond direct still-picture output and
+  stored-surface reuse.
 - The next practical public decode gaps are:
-  - broader chroma residual coverage
-  - broader palette coverage
-  - broader `intrabc`
-  - richer inter motion compensation
+  - parsed-stream inter without injected parser metadata
+  - richer motion compensation
+  - broader parsed-stream `intrabc`
+  - direct parsed wider-chroma palette streams
+  - broader parsed chroma residual/token coverage
   - higher-fidelity super-resolution and postfilter behavior
 
 ## Frozen Internal Contracts
