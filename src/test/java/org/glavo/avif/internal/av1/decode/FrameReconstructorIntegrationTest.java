@@ -1888,6 +1888,48 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Verifies that one bitstream-derived `I444` chroma residual survives the integration path
+    /// through an unsubsampled larger chroma transform.
+    @Test
+    void reconstructsBitstreamDerivedLargerTransformI444ChromaResidualOnlyWithinVisibleFootprint() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        int codedWidth = 8;
+        int codedHeight = 8;
+        FrameHeader.TransformMode transformMode = FrameHeader.TransformMode.LARGEST;
+        byte[] payload = findPayloadForBitstreamDerivedChromaResidual(
+                PixelFormat.I444,
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+        TilePartitionTreeReader.LeafNode decodedLeaf = decodeChromaLeafFromPayload(
+                PixelFormat.I444,
+                payload,
+                position,
+                blockSize,
+                codedWidth,
+                codedHeight,
+                transformMode
+        );
+
+        assertFalse(decodedLeaf.header().skip());
+        assertTrue(decodedLeaf.header().hasChroma());
+        assertEquals(2, decodedLeaf.transformLayout().visibleWidth4());
+        assertEquals(2, decodedLeaf.transformLayout().visibleHeight4());
+        assertEquals(TransformSize.TX_8X8, decodedLeaf.transformLayout().chromaTransformSize());
+        assertTrue(
+                hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaUUnits())
+                        || hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaVUnits())
+        );
+        assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
+                createAssembly(PixelFormat.I444, new byte[0], codedWidth, codedHeight, transformMode),
+                decodedLeaf
+        );
+    }
+
     /// Verifies that one monochrome all-zero `filter_intra` leaf reconstructs through the minimal luma path.
     @Test
     void reconstructsMonochromeFilterIntraDcLeaf() {
@@ -3188,6 +3230,15 @@ final class FrameReconstructorIntegrationTest {
                 && codedHeight == 5
                 && transformMode == FrameHeader.TransformMode.LARGEST) {
             return readFrameReconstructorFixture("i422-clipped");
+        }
+        if (pixelFormat == PixelFormat.I444
+                && position.x4() == 0
+                && position.y4() == 0
+                && blockSize == BlockSize.SIZE_8X8
+                && codedWidth == 8
+                && codedHeight == 8
+                && transformMode == FrameHeader.TransformMode.LARGEST) {
+            return readFrameReconstructorFixture("i444-tx8x8");
         }
         throw new IllegalArgumentException("Unsupported chroma-residual fixture request");
     }

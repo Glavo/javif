@@ -711,6 +711,62 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Verifies that real bitstream-driven two-tile still-picture streams reach public output
+    /// and store both decoded tile surfaces through the normal reader path for each public chroma layout.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForRealTwoTileFirstPixelCombinedStillPictureStreams() throws IOException {
+        assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(PixelFormat.I420);
+        assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(PixelFormat.I422);
+        assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(PixelFormat.I444);
+    }
+
+    /// Asserts that one real bitstream-driven two-tile still-picture stream reaches public output
+    /// in the requested public chroma layout.
+    ///
+    /// @param pixelFormat the parsed chroma layout to expose
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertRealTwoTileFirstPixelCombinedStillPictureRoundTrip(
+            PixelFormat pixelFormat
+    ) throws IOException {
+        byte[] stream = concat(
+                obu(1, reducedStillPicturePayload(pixelFormat, 128, 64)),
+                obu(6, reducedStillPictureCombinedFramePayload(
+                        twoTileGroupPayload(SUPPORTED_SINGLE_TILE_PAYLOAD, SUPPORTED_SINGLE_TILE_PAYLOAD),
+                        true
+                ))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxResult =
+                    Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                    Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface");
+
+            assertEquals(2, syntaxResult.tileCount());
+            assertEquals(2, syntaxResult.assembly().frameHeader().tiling().columns());
+            assertEquals(1, syntaxResult.assembly().frameHeader().tiling().rows());
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
+            assertDecodedStillPictureFrameMetadata(
+                    decodedFrame,
+                    8,
+                    128,
+                    64,
+                    pixelFormat,
+                    FrameType.KEY,
+                    0
+            );
+            assertTrue(decodedFrame instanceof ArgbIntFrame);
+            ArgbIntFrame frame = (ArgbIntFrame) decodedFrame;
+            assertEquals(OPAQUE_MID_GRAY, frame.pixels()[0]);
+            assertEquals(ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes())[64], frame.pixels()[64]);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
     /// Verifies that one standalone `show_existing_frame` header can still expose the current
     /// supported opaque gray still-picture surface when the stored syntax state is widened to a
     /// synthetic two-tile layout.
@@ -3377,8 +3433,25 @@ final class Av1ImageReaderTest {
     /// @param tileGroupPayload the tile-group payload appended after the frame header
     /// @return the reduced still-picture combined frame payload
     private static byte[] reducedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        return reducedStillPictureCombinedFramePayload(tileGroupPayload, false);
+    }
+
+    /// Creates a reduced still-picture combined frame payload with a caller-supplied tile group and
+    /// optional two-column tiling syntax.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the frame header
+    /// @param twoHorizontalTiles whether the frame header should expose two horizontal tiles
+    /// @return the reduced still-picture combined frame payload
+    private static byte[] reducedStillPictureCombinedFramePayload(
+            byte[] tileGroupPayload,
+            boolean twoHorizontalTiles
+    ) {
         BitWriter writer = new BitWriter();
-        writeReducedStillPictureFrameHeaderBits(writer);
+        if (twoHorizontalTiles) {
+            writeReducedStillPictureTwoTileFrameHeaderBits(writer);
+        } else {
+            writeReducedStillPictureFrameHeaderBits(writer);
+        }
         writer.padToByteBoundary();
         writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
@@ -3448,6 +3521,20 @@ final class Av1ImageReaderTest {
         return new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
     }
 
+    /// Creates one implicit full-range two-tile tile-group payload.
+    ///
+    /// @param leftTilePayload the raw payload for tile `0`
+    /// @param rightTilePayload the raw payload for tile `1`
+    /// @return one implicit full-range two-tile tile-group payload
+    private static byte[] twoTileGroupPayload(byte[] leftTilePayload, byte[] rightTilePayload) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(0);
+        output.write(leftTilePayload.length - 1);
+        output.writeBytes(leftTilePayload);
+        output.writeBytes(rightTilePayload);
+        return output.toByteArray();
+    }
+
     /// Writes the reduced still-picture key frame header syntax without standalone trailing bits.
     ///
     /// @param writer the destination bit writer
@@ -3458,6 +3545,27 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+    }
+
+    /// Writes the reduced still-picture key frame header syntax for a two-column tile layout.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeReducedStillPictureTwoTileFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
         writer.writeBits(0, 8);
         writer.writeFlag(false);
         writer.writeFlag(false);

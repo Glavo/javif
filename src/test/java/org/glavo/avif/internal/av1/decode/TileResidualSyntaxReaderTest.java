@@ -362,6 +362,35 @@ final class TileResidualSyntaxReaderTest {
         assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
     }
 
+    /// Verifies that a minimal `I444` block can expose bitstream-derived non-zero larger-transform
+    /// chroma residual units with no chroma subsampling.
+    @Test
+    void readsNonZeroChromaResidualUnitsForMinimalI444Block() {
+        byte[] payload = findPayloadForNonZeroMinimalI444ChromaResidual();
+        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I444, FrameHeader.TransformMode.LARGEST);
+        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(0, 0);
+
+        TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
+        TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
+        ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
+        ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, PixelFormat.I444);
+        TransformResidualUnit expectedChromaU = expectedResidualLayout.chromaUUnits()[0];
+        TransformResidualUnit expectedChromaV = expectedResidualLayout.chromaVUnits()[0];
+
+        assertTrue(header.hasChroma());
+        assertEquals(TransformSize.TX_8X8, transformLayout.chromaTransformSize());
+        assertEquals(1, residualLayout.chromaUUnits().length);
+        assertEquals(1, residualLayout.chromaVUnits().length);
+        assertFalse(expectedChromaU.allZero());
+        assertFalse(expectedChromaV.allZero());
+        assertTrue(hasMultiCoefficientResidual(expectedChromaU) || hasMultiCoefficientResidual(expectedChromaV));
+        assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
+    }
+
     /// Verifies that minimal `I420` chroma residual decoding still works for odd visible frame dimensions.
     @Test
     void readsDcOnlyChromaResidualUnitsForMinimalI420BlockWithOddFrameDimensions() {
@@ -676,6 +705,22 @@ final class TileResidualSyntaxReaderTest {
         throw new IllegalStateException("No fixture-backed payload produced minimal non-zero I422 chroma residuals");
     }
 
+    /// Returns the fixture-backed payload whose minimal `I444` chroma residuals include non-zero
+    /// larger-transform chroma tokens.
+    ///
+    /// @return the fixture-backed payload whose minimal `I444` chroma residuals include non-zero chroma tokens
+    private static byte[] findPayloadForNonZeroMinimalI444ChromaResidual() {
+        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I444, true, false);
+        if (isolatedPayload != null) {
+            return isolatedPayload;
+        }
+        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(PixelFormat.I444, false, false);
+        if (fallbackPayload != null) {
+            return fallbackPayload;
+        }
+        throw new IllegalStateException("No fixture-backed payload produced minimal non-zero I444 chroma residuals");
+    }
+
     /// Returns the fixture-backed payload whose minimal `I420` chroma-U residual exposes one supported
     /// multi-coefficient `TX_4X4` unit.
     ///
@@ -776,6 +821,11 @@ final class TileResidualSyntaxReaderTest {
             return readTileResidualFixture(requireAllZeroLuma
                     ? "i422-minimal-dc-isolated"
                     : "i422-minimal-dc-fallback");
+        }
+        if (pixelFormat == PixelFormat.I444 && !requireAllZeroChroma) {
+            return readTileResidualFixture(requireAllZeroLuma
+                    ? "i444-minimal-nonzero-isolated"
+                    : "i444-minimal-nonzero-fallback");
         }
         return null;
     }

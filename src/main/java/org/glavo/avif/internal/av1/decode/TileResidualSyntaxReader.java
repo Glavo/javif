@@ -32,8 +32,8 @@ import java.util.Objects;
 /// `TransformLayout`, including pixel-level clipped chroma footprints along the frame fringe.
 /// `TX_4X4` keeps its dedicated context helpers, while larger transform sizes reuse the existing
 /// simplified token-context path instead of failing once multiple coefficients are present. That
-/// same larger-transform fallback now also covers the current single-unit `I420` chroma rollout
-/// for shapes such as `TX_8X8`.
+/// same larger-transform fallback also covers the current single-unit wider-chroma rollout,
+/// including unsubsampled `I444` shapes such as `TX_8X8`.
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
