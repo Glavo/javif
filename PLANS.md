@@ -16,6 +16,7 @@ reconstruction core and the real-stream coverage that proves it.
   - `12-bit I444 -> ArgbLongFrame`
 - current key/intra reconstruction subset:
   - directional and non-directional intra
+  - smooth intra with clipped right/bottom visible footprints
   - filter intra, including clipped right/bottom visible footprints
   - CFL
   - minimal palette

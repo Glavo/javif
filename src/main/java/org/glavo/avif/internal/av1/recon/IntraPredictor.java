@@ -449,12 +449,14 @@ final class IntraPredictor {
         }
 
         int defaultSample = 1 << (plane.bitDepth() - 1);
-        int[] top = new int[width];
-        int[] left = new int[height];
-        for (int i = 0; i < width; i++) {
+        int referenceWidth = mode.usesHorizontalSmoothReference() ? smoothWeightAxisSize(width) : width;
+        int referenceHeight = mode.usesVerticalSmoothReference() ? smoothWeightAxisSize(height) : height;
+        int[] top = new int[referenceWidth];
+        int[] left = new int[referenceHeight];
+        for (int i = 0; i < top.length; i++) {
             top[i] = plane.sampleOrFallback(x + i, y - 1, defaultSample);
         }
-        for (int i = 0; i < height; i++) {
+        for (int i = 0; i < left.length; i++) {
             left[i] = plane.sampleOrFallback(x - 1, y + i, defaultSample);
         }
 
@@ -691,8 +693,8 @@ final class IntraPredictor {
     /// @param y the zero-based vertical sample coordinate
     /// @param width the block width in samples
     /// @param height the block height in samples
-    /// @param top the top reference samples
-    /// @param left the left reference samples
+    /// @param top the top reference samples, including the smooth right-edge reference when clipped
+    /// @param left the left reference samples, including the smooth bottom-edge reference when clipped
     /// @param defaultSample the frame-edge default sample
     private static void predictDc(
             MutablePlaneBuffer plane,
@@ -932,10 +934,10 @@ final class IntraPredictor {
             int[] top,
             int[] left
     ) {
-        int[] horizontalWeights = smoothWeights(width);
-        int[] verticalWeights = smoothWeights(height);
-        int right = top[width - 1];
-        int bottom = left[height - 1];
+        int[] horizontalWeights = smoothWeights(top.length);
+        int[] verticalWeights = smoothWeights(left.length);
+        int right = top[horizontalWeights.length - 1];
+        int bottom = left[verticalWeights.length - 1];
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
                 int predicted = verticalWeights[row] * top[column]
@@ -955,7 +957,7 @@ final class IntraPredictor {
     /// @param width the block width in samples
     /// @param height the block height in samples
     /// @param top the top reference samples
-    /// @param left the left reference samples
+    /// @param left the left reference samples, including the smooth bottom-edge reference when clipped
     private static void predictSmoothVertical(
             MutablePlaneBuffer plane,
             int x,
@@ -965,8 +967,8 @@ final class IntraPredictor {
             int[] top,
             int[] left
     ) {
-        int[] verticalWeights = smoothWeights(height);
-        int bottom = left[height - 1];
+        int[] verticalWeights = smoothWeights(left.length);
+        int bottom = left[verticalWeights.length - 1];
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
                 int predicted = verticalWeights[row] * top[column]
@@ -983,7 +985,7 @@ final class IntraPredictor {
     /// @param y the zero-based vertical sample coordinate
     /// @param width the block width in samples
     /// @param height the block height in samples
-    /// @param top the top reference samples
+    /// @param top the top reference samples, including the smooth right-edge reference when clipped
     /// @param left the left reference samples
     private static void predictSmoothHorizontal(
             MutablePlaneBuffer plane,
@@ -994,8 +996,8 @@ final class IntraPredictor {
             int[] top,
             int[] left
     ) {
-        int[] horizontalWeights = smoothWeights(width);
-        int right = top[width - 1];
+        int[] horizontalWeights = smoothWeights(top.length);
+        int right = top[horizontalWeights.length - 1];
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
                 int predicted = horizontalWeights[column] * left[row]
@@ -1150,6 +1152,39 @@ final class IntraPredictor {
         };
     }
 
+    /// Returns the coded smooth-prediction reference axis for one visible edge length.
+    ///
+    /// Smooth prediction weights are tabled by coded block axis. A clipped right or bottom edge may
+    /// expose fewer visible samples, so reconstruction uses the next legal smooth axis and writes
+    /// only the visible footprint.
+    ///
+    /// @param visibleSize the visible edge length in samples
+    /// @return the smooth-prediction axis used to select weights and the far-edge reference
+    private static int smoothWeightAxisSize(int visibleSize) {
+        if (visibleSize <= 1) {
+            return 1;
+        }
+        if (visibleSize <= 2) {
+            return 2;
+        }
+        if (visibleSize <= 4) {
+            return 4;
+        }
+        if (visibleSize <= 8) {
+            return 8;
+        }
+        if (visibleSize <= 16) {
+            return 16;
+        }
+        if (visibleSize <= 32) {
+            return 32;
+        }
+        if (visibleSize <= 64) {
+            return 64;
+        }
+        throw new IllegalStateException("Unsupported smooth predictor size: " + visibleSize);
+    }
+
     /// Returns one AV1 directional derivative table entry.
     ///
     /// @param halfAngleIndex the zero-based half-angle table index
@@ -1220,6 +1255,20 @@ final class IntraPredictor {
                         VERTICAL_LEFT -> true;
                 default -> false;
             };
+        }
+
+        /// Returns whether this mode needs a smooth horizontal axis for clipped-edge prediction.
+        ///
+        /// @return whether this mode needs a smooth horizontal axis for clipped-edge prediction
+        private boolean usesHorizontalSmoothReference() {
+            return this == SMOOTH || this == SMOOTH_HORIZONTAL;
+        }
+
+        /// Returns whether this mode needs a smooth vertical axis for clipped-edge prediction.
+        ///
+        /// @return whether this mode needs a smooth vertical axis for clipped-edge prediction
+        private boolean usesVerticalSmoothReference() {
+            return this == SMOOTH || this == SMOOTH_VERTICAL;
         }
 
         /// Returns the AV1 directional base angle for one directional-capable mode.

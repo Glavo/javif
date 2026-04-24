@@ -137,6 +137,83 @@ final class IntraPredictorTest {
         );
     }
 
+    /// Verifies that smooth prediction uses the next legal coded axis for a clipped visible block.
+    @Test
+    void smoothPredictionClipsRightAndBottomEdges() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(1, 0, 10);
+        plane.setSample(2, 0, 20);
+        plane.setSample(3, 0, 30);
+        plane.setSample(0, 1, 60);
+        plane.setSample(0, 2, 70);
+        plane.setSample(0, 3, 80);
+
+        IntraPredictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH, 0);
+
+        assertBlockEquals(
+                plane,
+                1,
+                1,
+                new int[][]{
+                        {35, 54, 68},
+                        {65, 80, 90},
+                        {85, 96, 104}
+                }
+        );
+    }
+
+    /// Verifies that smooth vertical prediction uses the next legal coded vertical axis when the
+    /// bottom edge is clipped.
+    @Test
+    void smoothVerticalPredictionClipsBottomEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(1, 0, 10);
+        plane.setSample(2, 0, 20);
+        plane.setSample(3, 0, 30);
+        plane.setSample(0, 1, 60);
+        plane.setSample(0, 2, 70);
+        plane.setSample(0, 3, 80);
+
+        IntraPredictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH_VERTICAL, 0);
+
+        assertBlockEquals(
+                plane,
+                1,
+                1,
+                new int[][]{
+                        {10, 20, 30},
+                        {59, 65, 71},
+                        {89, 92, 95}
+                }
+        );
+    }
+
+    /// Verifies that smooth horizontal prediction uses the next legal coded horizontal axis when
+    /// the right edge is clipped.
+    @Test
+    void smoothHorizontalPredictionClipsRightEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(1, 0, 10);
+        plane.setSample(2, 0, 20);
+        plane.setSample(3, 0, 30);
+        plane.setSample(0, 1, 60);
+        plane.setSample(0, 2, 70);
+        plane.setSample(0, 3, 80);
+
+        IntraPredictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH_HORIZONTAL, 0);
+
+        assertBlockEquals(
+                plane,
+                1,
+                1,
+                new int[][]{
+                        {60, 88, 105},
+                        {70, 94, 109},
+                        {80, 100, 112}
+                }
+        );
+    }
+
     /// Verifies that filter-intra prediction applies the recursive 4x2 tap tables in raster order.
     @Test
     void filterIntraPredictionUsesRecursiveTapTables() {
