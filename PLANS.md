@@ -2,17 +2,8 @@
 
 ## Summary
 
-Most of the decoder foundation is already complete. The remaining work is now concentrated in one
-main area: the reconstruction core and the real-stream coverage that proves it.
-
-The repository already has:
-
-- a working AV1 syntax front end
-- stable decoded-plane and reference-surface contracts
-- a narrow but real pixel-producing decode path
-- public `ArgbIntFrame` and `ArgbLongFrame` output
-- stored-surface `show_existing_frame` reuse
-- deterministic regression fixtures and oracle coverage
+Most of the decoder foundation is already complete. The remaining work is concentrated in the
+reconstruction core and the real-stream coverage that proves it.
 
 `Av1ImageReader.readFrame()` already returns real frames for a narrow supported subset:
 
@@ -42,9 +33,7 @@ The repository already has:
 Everything outside that subset must continue to fail explicitly with a stable
 `NOT_IMPLEMENTED` boundary rather than silently producing incorrect output.
 
-## Current Baseline
-
-### Already Implemented
+## Implemented
 
 - `BufferedInput`, public reader/config/error/result types, and the raw OBU pipeline
 - frame-level and tile/block-level syntax decoding, including stored CDF and temporal-motion
@@ -65,7 +54,7 @@ Everything outside that subset must continue to fail explicitly with a stable
   - stored-surface reuse
   - film-grain-aware presentation ordering
 
-### Remaining Decode Boundary
+## Remaining Decode Boundary
 
 - Non-zero reconstruction currently covers the current luma/chroma `DCT_DCT` subset whose
   transform axes stay within `64` samples, including the larger square and rectangular sizes needed
