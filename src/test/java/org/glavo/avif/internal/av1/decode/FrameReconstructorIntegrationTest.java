@@ -1627,6 +1627,91 @@ final class FrameReconstructorIntegrationTest {
         });
     }
 
+    /// Verifies that parsed skip-mode compound motion vectors are final enough to reconstruct
+    /// through the average-compound inter path.
+    @Test
+    void reconstructsParsedSkipModeCompoundInterLeafFromStoredReferenceSurfaces() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_16X16;
+        FrameAssembly assembly = createSkipModeInterAssembly(
+                PixelFormat.I400,
+                readTileBlockHeaderFixture("skip-mode-inter"),
+                16,
+                16,
+                0,
+                1
+        );
+        TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, blockSize, neighborContext);
+
+        assertTrue(header.skipMode());
+        assertTrue(header.skip());
+        assertTrue(header.compoundReference());
+        assertEquals(0, header.referenceFrame0());
+        assertEquals(1, header.referenceFrame1());
+        assertEquals(CompoundInterPredictionMode.NEARESTMV_NEARESTMV, header.compoundInterMode());
+        assertEquals(InterMotionVector.resolved(MotionVector.zero()), header.motionVector0());
+        assertEquals(InterMotionVector.resolved(MotionVector.zero()), header.motionVector1());
+
+        TransformSize lumaTransformSize = TransformSize.TX_16X16;
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                4,
+                4,
+                lumaTransformSize,
+                null,
+                false,
+                new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
+        );
+        ResidualLayout residualLayout = createResidualLayout(
+                position,
+                blockSize,
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)}
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                header,
+                transformLayout,
+                residualLayout
+        );
+
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                16,
+                16,
+                createGradientPlane(16, 16, 0, 2, 4),
+                null,
+                null
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
+                PixelFormat.I400,
+                16,
+                16,
+                createGradientPlane(16, 16, 100, 2, 4),
+                null,
+                null
+        );
+
+        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+                createSyntheticResult(assembly, leafNode),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        int[][] expectedLuma = new int[16][16];
+        for (int y = 0; y < expectedLuma.length; y++) {
+            for (int x = 0; x < expectedLuma[y].length; x++) {
+                int sample0 = x * 2 + y * 4;
+                int sample1 = 100 + x * 2 + y * 4;
+                expectedLuma[y][x] = (sample0 + sample1 + 1) >> 1;
+            }
+        }
+        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertFalse(decodedPlanes.hasChroma());
+        assertPlaneEquals(decodedPlanes.lumaPlane(), expectedLuma);
+    }
+
     /// Verifies that one synthetic `I420` compound-reference inter leaf reconstructs through one
     /// switchable frame header by averaging two dual-filter subpel predictions.
     @Test
@@ -5029,6 +5114,42 @@ final class FrameReconstructorIntegrationTest {
         return assembly;
     }
 
+    /// Creates one synthetic single-tile skip-mode inter frame assembly whose skip-mode references
+    /// point at the first two direct reference slots.
+    ///
+    /// @param pixelFormat the synthetic decoded chroma layout
+    /// @param payload the tile payload stored in the single-tile assembly
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param referenceSlot0 the stored reference slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored reference slot exposed as `LAST2_FRAME`
+    /// @return one synthetic single-tile skip-mode inter frame assembly
+    private static FrameAssembly createSkipModeInterAssembly(
+            PixelFormat pixelFormat,
+            byte[] payload,
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot0,
+            int referenceSlot1
+    ) {
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(pixelFormat, codedWidth, codedHeight, false);
+        FrameHeader frameHeader = createSyntheticSkipModeInterFrameHeader(
+                codedWidth,
+                codedHeight,
+                referenceSlot0,
+                referenceSlot1
+        );
+        FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+        );
+        return assembly;
+    }
+
     /// Creates one synthetic single-tile inter or switch frame assembly whose frame header enables
     /// horizontal super-resolution.
     ///
@@ -5854,6 +5975,98 @@ final class FrameReconstructorIntegrationTest {
                 false,
                 false,
                 new int[]{-1, -1},
+                false,
+                false,
+                false
+        );
+    }
+
+    /// Creates one synthetic inter frame header with skip mode enabled for compound-reference
+    /// reconstruction tests.
+    ///
+    /// @param codedWidth the coded and rendered frame width
+    /// @param codedHeight the coded and rendered frame height
+    /// @param referenceSlot0 the stored reference slot exposed as `LAST_FRAME`
+    /// @param referenceSlot1 the stored reference slot exposed as `LAST2_FRAME`
+    /// @return one synthetic skip-mode inter frame header
+    private static FrameHeader createSyntheticSkipModeInterFrameHeader(
+            int codedWidth,
+            int codedHeight,
+            int referenceSlot0,
+            int referenceSlot1
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                FrameType.INTER,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0,
+                false,
+                new int[]{referenceSlot0, referenceSlot1, -1, -1, -1, -1, -1},
+                new FrameHeader.FrameSize(codedWidth, codedWidth, codedHeight, codedWidth, codedHeight),
+                new FrameHeader.SuperResolutionInfo(false, codedWidth),
+                false,
+                false,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                false,
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                true,
+                true,
+                true,
+                new int[]{0, 1},
                 false,
                 false,
                 false

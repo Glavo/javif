@@ -598,10 +598,9 @@ public final class TileBlockHeaderReader {
 
     /// Decodes the inter prediction mode and provisional dynamic-reference-list index for one block.
     ///
-    /// This stage intentionally stops at syntax parsing. Full motion-vector candidate lookup and
-    /// residual decoding are deferred to a later refmvs-backed implementation. The returned motion
-    /// vectors therefore mirror the same bounded provisional candidate stack used for `inter_mode`
-    /// and `drl` decoding instead of a full AV1 `refmvs` walk.
+    /// This stage uses the current bounded provisional candidate stack for `inter_mode` and `drl`
+    /// decoding. Candidate-only modes are promoted to final block vectors here, while `NEWMV`
+    /// components keep the candidate provisional until the residual has been decoded.
     ///
     /// @param position the local tile-relative block origin
     /// @param size the decoded block size
@@ -868,7 +867,7 @@ public final class TileBlockHeaderReader {
                 Objects.requireNonNull(candidate, "candidate");
         return switch (nonNullSingleInterMode) {
             case GLOBALMV -> InterMotionVector.resolved(MotionVector.zero());
-            case NEARESTMV, NEARMV -> nonNullCandidate.motionVector0();
+            case NEARESTMV, NEARMV -> nonNullCandidate.motionVector0().asResolved();
             case NEWMV -> nonNullCandidate.motionVector0().asPredicted();
         };
     }
@@ -893,7 +892,7 @@ public final class TileBlockHeaderReader {
                 || nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
             return nonNullCandidate.motionVector0().asPredicted();
         }
-        return nonNullCandidate.motionVector0();
+        return nonNullCandidate.motionVector0().asResolved();
     }
 
     /// Resolves the second compound-reference motion-vector predictor chosen for one decoded compound mode.
@@ -920,7 +919,7 @@ public final class TileBlockHeaderReader {
                 || nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
             return motionVector1.asPredicted();
         }
-        return motionVector1;
+        return motionVector1.asResolved();
     }
 
     /// Decodes one `NEWMV` residual around the supplied provisional motion-vector predictor.

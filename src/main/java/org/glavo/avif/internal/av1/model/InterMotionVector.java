@@ -74,6 +74,13 @@ public final class InterMotionVector {
         return resolved ? new InterMotionVector(vector, false) : this;
     }
 
+    /// Returns this motion vector promoted to a final block vector.
+    ///
+    /// @return this motion vector promoted to a final block vector
+    public InterMotionVector asResolved() {
+        return resolved ? this : new InterMotionVector(vector, true);
+    }
+
     /// Returns whether this inter motion-vector state equals the supplied object.
     ///
     /// @param obj the object to compare

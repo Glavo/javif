@@ -286,8 +286,8 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.singleInterMode());
         assertEquals(CompoundInterPredictionMode.NEARESTMV_NEARESTMV, header.compoundInterMode());
         assertEquals(0, header.drlIndex());
-        assertEquals(InterMotionVector.predicted(MotionVector.zero()), header.motionVector0());
-        assertEquals(InterMotionVector.predicted(MotionVector.zero()), header.motionVector1());
+        assertEquals(InterMotionVector.resolved(MotionVector.zero()), header.motionVector0());
+        assertEquals(InterMotionVector.resolved(MotionVector.zero()), header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
         assertEquals(0, header.yAngle());
@@ -1641,8 +1641,8 @@ final class TileBlockHeaderReaderTest {
         }
         return switch (mode) {
             case GLOBALMV -> InterMotionVector.resolved(MotionVector.zero());
-            case NEARESTMV -> provisionalContext.motionVectorCandidate(0).motionVector0();
-            case NEARMV -> provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0();
+            case NEARESTMV -> provisionalContext.motionVectorCandidate(0).motionVector0().asResolved();
+            case NEARMV -> provisionalContext.motionVectorCandidate(expectation.drlIndex()).motionVector0().asResolved();
             case NEWMV -> InterMotionVector.resolved(decodeMotionVectorResidual(
                     nonNullDecoder,
                     nonNullCdfContext,
@@ -1691,7 +1691,7 @@ final class TileBlockHeaderReaderTest {
                     nonNullFrameHeader.allowHighPrecisionMotionVectors(),
                     nonNullFrameHeader.forceIntegerMotionVectors()
             ));
-            default -> candidate;
+            default -> candidate.asResolved();
         };
     }
 
@@ -1736,7 +1736,7 @@ final class TileBlockHeaderReaderTest {
                     nonNullFrameHeader.allowHighPrecisionMotionVectors(),
                     nonNullFrameHeader.forceIntegerMotionVectors()
             ));
-            default -> candidate;
+            default -> candidate.asResolved();
         };
     }
 

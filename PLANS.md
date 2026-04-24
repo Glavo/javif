@@ -30,8 +30,10 @@ Supported end-to-end behavior:
   stored-surface reuse, multi-tile first-pixel streams, and the current self-contained inter subset.
 - First inter/reference subset: single-reference prediction, average-compound prediction,
   integer-copy prediction, bit-depth-preserving fixed-filter and block-resolved `SWITCHABLE`
-  subpel prediction, and normative horizontal super-resolution for key/intra, public
-  still-picture, synthetic inter, and bitstream-derived inter reconstruction paths.
+  subpel prediction, parsed candidate-only `NEAREST` / `NEAR` / skip-mode motion vectors promoted
+  to final block vectors, parsed skip-mode compound reconstruction against two stored reference
+  surfaces, and normative horizontal super-resolution for key/intra, public still-picture,
+  synthetic inter, and bitstream-derived inter reconstruction paths.
 - Self-contained parsed-stream inter public-reader paths for standalone and combined `FRAME`
   inputs across `I420/I422/I444`, backed by a preceding parsed reference frame rather than injected
   parser metadata.
@@ -45,9 +47,10 @@ Supported end-to-end behavior:
 
 ## Remaining Decode Boundary
 
-- Motion-compensation coverage still needs richer inter/reference features beyond the current
-  bit-depth-preserving single-reference, average-compound, fixed-filter, switchable-filter, and
-  super-resolution subset.
+- Motion-compensation coverage still needs the remaining richer inter/reference features beyond
+  the current bit-depth-preserving single-reference, average-compound, skip-mode compound,
+  fixed-filter, switchable-filter, and super-resolution subset, including fuller `refmvs`, warped
+  motion, inter-intra, masked compound, OBMC, and broader real parsed compound streams.
 - Active loop-filter and loop-restoration pixel filtering still need full block-edge masks,
   restoration-unit syntax, and coefficient-driven filtering before those frame features can decode
   instead of failing at the stable `NOT_IMPLEMENTED` boundary.
