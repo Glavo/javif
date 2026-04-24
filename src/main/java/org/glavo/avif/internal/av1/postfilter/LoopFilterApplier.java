@@ -23,10 +23,8 @@ import java.util.Objects;
 
 /// Applies the current loop-filter stage of the postfilter pipeline.
 ///
-/// The current implementation preserves samples exactly and exists to freeze the decoder ordering
-/// contract at "reconstruction -> loop filter -> CDEF -> restoration -> stored reference
-/// surface". This keeps reference-surface semantics stable while broader postfilter fidelity is
-/// expanded in follow-up work.
+/// Inactive loop filtering preserves samples exactly. Active loop filtering is rejected explicitly
+/// until the decoder carries the block-edge and transform-edge state needed for AV1 deblocking.
 @NotNullByDefault
 public final class LoopFilterApplier {
     /// Applies loop filtering to one reconstructed frame.
@@ -36,7 +34,14 @@ public final class LoopFilterApplier {
     /// @return the post-loop-filter planes
     public DecodedPlanes apply(DecodedPlanes decodedPlanes, FrameHeader.LoopFilterInfo loopFilter) {
         Objects.requireNonNull(decodedPlanes, "decodedPlanes");
-        Objects.requireNonNull(loopFilter, "loopFilter");
+        FrameHeader.LoopFilterInfo checkedLoopFilter = Objects.requireNonNull(loopFilter, "loopFilter");
+        int[] levelY = checkedLoopFilter.levelY();
+        if ((levelY.length > 0 && levelY[0] != 0)
+                || (levelY.length > 1 && levelY[1] != 0)
+                || checkedLoopFilter.levelU() != 0
+                || checkedLoopFilter.levelV() != 0) {
+            throw new IllegalStateException("Active AV1 loop filtering is not implemented yet");
+        }
         return decodedPlanes;
     }
 }

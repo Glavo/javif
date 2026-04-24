@@ -15,9 +15,11 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
+import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
@@ -49,10 +51,24 @@ public final class FramePostprocessor {
     /// @param frameHeader the normalized frame header that owns the planes
     /// @return the post-filter, pre-grain decoded planes
     public DecodedPlanes postprocess(DecodedPlanes decodedPlanes, FrameHeader frameHeader) {
+        return postprocess(decodedPlanes, frameHeader, null);
+    }
+
+    /// Runs postfiltering on one reconstructed frame.
+    ///
+    /// @param decodedPlanes the reconstructed planes to post-process
+    /// @param frameHeader the normalized frame header that owns the planes
+    /// @param syntaxDecodeResult the decoded frame syntax that carries block-level postfilter state, or `null`
+    /// @return the post-filter, pre-grain decoded planes
+    public DecodedPlanes postprocess(
+            DecodedPlanes decodedPlanes,
+            FrameHeader frameHeader,
+            @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
+    ) {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         DecodedPlanes afterLoopFilter = loopFilterApplier.apply(checkedDecodedPlanes, checkedFrameHeader.loopFilter());
-        DecodedPlanes afterCdef = cdefApplier.apply(afterLoopFilter, checkedFrameHeader.cdef());
+        DecodedPlanes afterCdef = cdefApplier.apply(afterLoopFilter, checkedFrameHeader.cdef(), syntaxDecodeResult);
         return restorationApplier.apply(afterCdef, checkedFrameHeader.restoration());
     }
 }

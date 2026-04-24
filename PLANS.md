@@ -38,13 +38,19 @@ Supported end-to-end behavior:
 - Parsed-stream `intrabc` public-reader paths for standalone frame-header/tile-group input and
   combined `FRAME` input, including `allow_intrabc` frame-header parsing, decoded same-frame-copy
   leaf coverage, and luma/chroma copy validation against a pre-copy same-frame oracle.
+- Postfilter ordering now runs reconstruction -> loop filter -> CDEF -> restoration -> stored
+  reference surface, with inactive loop filter/restoration preserved exactly, block-indexed CDEF
+  applied from decoded `cdefIndex` syntax and frame strengths, active loop filter/restoration
+  rejected as stable `NOT_IMPLEMENTED`, and film grain kept as presentation-only output synthesis.
 
 ## Remaining Decode Boundary
 
 - Motion-compensation coverage still needs richer inter/reference features beyond the current
   bit-depth-preserving single-reference, average-compound, fixed-filter, switchable-filter, and
   super-resolution subset.
-- Postfilter behavior still needs higher-fidelity in-loop and presentation-path coverage.
+- Active loop-filter and loop-restoration pixel filtering still need full block-edge masks,
+  restoration-unit syntax, and coefficient-driven filtering before those frame features can decode
+  instead of failing at the stable `NOT_IMPLEMENTED` boundary.
 
 ## Stable Contracts
 
@@ -60,7 +66,8 @@ The following contracts are stable and should be preserved:
 ## Main Work Priority
 
 1. Broaden motion compensation fidelity and feature coverage.
-2. Broaden postfilter behavior once reconstruction has enough stream coverage to validate it.
+2. Implement active loop-filter and loop-restoration pixel filtering once the required syntax
+   state is represented.
 
 ## Exit Criteria
 

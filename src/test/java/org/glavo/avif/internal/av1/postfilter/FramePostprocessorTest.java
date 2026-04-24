@@ -16,20 +16,24 @@
 package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FramePostprocessor`.
 @NotNullByDefault
 final class FramePostprocessorTest {
-    /// Verifies that the current postfilter pipeline preserves samples while freezing stage order.
+    /// Verifies that inactive in-loop filters preserve samples while freezing stage order.
     @Test
-    void postprocessPreservesCurrentDecodedSamples() {
+    void postprocessPreservesDecodedSamplesWhenInLoopFiltersAreInactive() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 PixelFormat.I420,
                 new int[][]{
@@ -58,24 +62,24 @@ final class FramePostprocessorTest {
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
                 PixelFormat.I420,
                 new FrameHeader.LoopFilterInfo(
-                        new int[]{8, 4},
-                        2,
-                        1,
-                        3,
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
                         true,
                         true,
                         new int[]{1, 0, 0, 0, -1, 0, -1, -1},
                         new int[]{0, 0}
                 ),
-                new FrameHeader.CdefInfo(3, 1, new int[]{4, 8}, new int[]{2, 6}),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
                         new FrameHeader.RestorationType[]{
-                                FrameHeader.RestorationType.SWITCHABLE,
-                                FrameHeader.RestorationType.WIENER,
-                                FrameHeader.RestorationType.SELF_GUIDED
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
                         },
-                        8,
-                        7
+                        0,
+                        0
                 ),
                 PostfilterTestFixtures.disabledFilmGrain()
         );
@@ -87,5 +91,174 @@ final class FramePostprocessorTest {
         assertEquals(183, postprocessed.lumaPlane().sample(7, 7));
         assertEquals(90, postprocessed.chromaUPlane().sample(0, 0));
         assertEquals(165, postprocessed.chromaVPlane().sample(3, 3));
+    }
+
+    /// Verifies that active CDEF applies a pixel-changing pass using decoded block CDEF indices.
+    @Test
+    void postprocessAppliesActiveCdefFromDecodedBlockIndex() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                PixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 64, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                PixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(6, 0, new int[]{60}, new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertNotSame(decodedPlanes, postprocessed);
+        assertTrue(postprocessed.lumaPlane().sample(3, 3) < 64);
+        assertEquals(64, decodedPlanes.lumaPlane().sample(3, 3));
+    }
+
+    /// Verifies that active CDEF fails explicitly when decoded block indices are unavailable.
+    @Test
+    void postprocessRejectsActiveCdefWithoutDecodedBlockIndex() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                PixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 64, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                PixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                new FrameHeader.CdefInfo(6, 0, new int[]{60}, new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> new FramePostprocessor().postprocess(decodedPlanes, frameHeader)
+        );
+
+        assertTrue(exception.getMessage().contains("CDEF"));
+    }
+
+    /// Verifies that active loop filtering remains a stable explicit unsupported boundary.
+    @Test
+    void postprocessRejectsActiveLoopFilter() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                PixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32},
+                        {32, 32, 32, 32},
+                        {32, 32, 32, 32},
+                        {32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                PixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(new int[]{4, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> new FramePostprocessor().postprocess(decodedPlanes, frameHeader)
+        );
+
+        assertTrue(exception.getMessage().contains("loop filtering"));
+    }
+
+    /// Verifies that active loop restoration remains a stable explicit unsupported boundary.
+    @Test
+    void postprocessRejectsActiveRestoration() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                PixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32},
+                        {32, 32, 32, 32},
+                        {32, 32, 32, 32},
+                        {32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                PixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.WIENER,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        6,
+                        6
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> new FramePostprocessor().postprocess(decodedPlanes, frameHeader)
+        );
+
+        assertTrue(exception.getMessage().contains("loop restoration"));
     }
 }

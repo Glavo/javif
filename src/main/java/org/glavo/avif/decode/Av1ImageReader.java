@@ -424,7 +424,19 @@ public final class Av1ImageReader implements AutoCloseable {
 
         @Nullable DecodedPlanes postprocessedPlanes = null;
         if (decodedPlanes != null) {
-            postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader);
+            try {
+                postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+            } catch (IllegalStateException exception) {
+                throw new DecodeException(
+                        DecodeErrorCode.NOT_IMPLEMENTED,
+                        DecodeStage.FRAME_DECODE,
+                        exception.getMessage() != null ? exception.getMessage() : "AV1 postfiltering is not implemented yet",
+                        packet.streamOffset(),
+                        packet.obuIndex(),
+                        null,
+                        exception
+                );
+            }
             refreshReferenceSurfaceState(
                     frameHeader,
                     new ReferenceSurfaceSnapshot(frameHeader, storedSyntaxDecodeResult, postprocessedPlanes)

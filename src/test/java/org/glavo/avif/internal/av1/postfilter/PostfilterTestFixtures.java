@@ -17,7 +17,21 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
+import org.glavo.avif.internal.av1.decode.TileDecodeContext;
+import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
+import org.glavo.avif.internal.av1.model.BlockPosition;
+import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.ResidualLayout;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.TransformLayout;
+import org.glavo.avif.internal.av1.model.TransformResidualUnit;
+import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -166,6 +180,82 @@ final class PostfilterTestFixtures {
         return FrameHeader.FilmGrainParams.disabled();
     }
 
+    /// Creates one single-leaf syntax result with the supplied decoded CDEF index.
+    ///
+    /// @param frameHeader the frame header that owns the syntax result
+    /// @param cdefIndex the decoded CDEF index to expose from the leaf
+    /// @return one single-leaf syntax result with the supplied decoded CDEF index
+    static FrameSyntaxDecodeResult createSingleLeafSyntaxResult(FrameHeader frameHeader, int cdefIndex) {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_8X8;
+        TileBlockHeaderReader.BlockHeader blockHeader = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                -1,
+                -1,
+                null,
+                null,
+                -1,
+                null,
+                null,
+                false,
+                0,
+                cdefIndex,
+                0,
+                new int[4],
+                LumaIntraPredictionMode.DC,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                2,
+                2,
+                8,
+                8,
+                TransformSize.TX_8X8,
+                null,
+                false,
+                new TransformUnit[]{new TransformUnit(position, TransformSize.TX_8X8)}
+        );
+        TransformResidualUnit lumaResidualUnit = new TransformResidualUnit(
+                position,
+                TransformSize.TX_8X8,
+                -1,
+                new int[TransformSize.TX_8X8.widthPixels() * TransformSize.TX_8X8.heightPixels()],
+                0
+        );
+        TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(
+                blockHeader,
+                transformLayout,
+                new ResidualLayout(position, blockSize, new TransformResidualUnit[]{lumaResidualUnit})
+        );
+        FrameAssembly assembly = new FrameAssembly(createSequenceHeader(), frameHeader, 0, 0);
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{{leafNode}},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
     /// Creates one immutable decoded plane from row-major integer samples.
     ///
     /// @param samples the row-major integer samples
@@ -180,6 +270,61 @@ final class PostfilterTestFixtures {
             }
         }
         return new DecodedPlane(width, height, width, packed);
+    }
+
+    /// Creates one minimal reduced-still-picture sequence header for syntax-result fixtures.
+    ///
+    /// @return one minimal reduced-still-picture sequence header for syntax-result fixtures
+    private static SequenceHeader createSequenceHeader() {
+        return new SequenceHeader(
+                0,
+                8,
+                8,
+                new SequenceHeader.TimingInfo(false, 0, 0, false, 0, false, 0, 0, 0, 0, false),
+                new SequenceHeader.OperatingPoint[]{
+                        new SequenceHeader.OperatingPoint(0, 0, 0, 0, false, false, false, null)
+                },
+                true,
+                true,
+                15,
+                15,
+                false,
+                0,
+                0,
+                new SequenceHeader.FeatureConfig(
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        SequenceHeader.AdaptiveBoolean.OFF,
+                        0,
+                        false,
+                        false,
+                        false,
+                        false
+                ),
+                new SequenceHeader.ColorConfig(
+                        8,
+                        false,
+                        false,
+                        2,
+                        2,
+                        2,
+                        true,
+                        PixelFormat.I400,
+                        0,
+                        true,
+                        true,
+                        false
+                )
+        );
     }
 
     /// Creates one default segmentation-feature table.

@@ -23,8 +23,8 @@ import java.util.Objects;
 
 /// Applies the current loop-restoration stage of the postfilter pipeline.
 ///
-/// The current implementation preserves samples exactly and keeps stored reference surfaces
-/// semantically post-restoration and pre-grain even before broader restoration fidelity lands.
+/// Inactive restoration preserves samples exactly. Active restoration is rejected explicitly until
+/// restoration unit syntax and filter coefficients are represented in the decoded frame state.
 @NotNullByDefault
 public final class RestorationApplier {
     /// Applies restoration to one decoded frame.
@@ -34,7 +34,12 @@ public final class RestorationApplier {
     /// @return the post-restoration planes
     public DecodedPlanes apply(DecodedPlanes decodedPlanes, FrameHeader.RestorationInfo restoration) {
         Objects.requireNonNull(decodedPlanes, "decodedPlanes");
-        Objects.requireNonNull(restoration, "restoration");
+        FrameHeader.RestorationInfo checkedRestoration = Objects.requireNonNull(restoration, "restoration");
+        for (FrameHeader.RestorationType type : checkedRestoration.types()) {
+            if (type != FrameHeader.RestorationType.NONE) {
+                throw new IllegalStateException("Active AV1 loop restoration is not implemented yet");
+            }
+        }
         return decodedPlanes;
     }
 }
