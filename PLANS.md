@@ -4,34 +4,15 @@
 
 This document replaces the original full-port blueprint with a status-aware execution plan for the remaining AV1 decoder work.
 
-The repository already has:
+The repository already has a working AV1 front end, a narrow but real reconstruction path, reference-surface storage, postfilter and film-grain stage ordering, and public ARGB output.
 
-- `BufferedInput`-based source handling
-- public reader/config/error/result skeletons
-- OBU reading and AV1 header parsing
-- frame assembly across standalone and combined frame OBUs
-- tile/block structural syntax decoding
-- transform layout decoding
-- partial residual syntax decoding
-- frame-level structural snapshots for CDF and temporal motion state
-- a minimal reconstruction core for a narrow first-pixel path
-- an internal ARGB output layer for `DecodedPlanes`
+`Av1ImageReader.readFrame()` can already return real frames for a deliberately narrow subset:
 
-`Av1ImageReader.readFrame()` no longer always stops before pixel reconstruction. The reader can now return a real `ArgbIntFrame` for a deliberately narrow subset:
-
-- raw AV1 OBU input only
-- serial execution only
-- current serial tile traversal, with real public output already exercised on the supported subset and synthetic multi-tile frame-syntax/runtime coverage in place
-- visible `KEY` / `INTRA` frames
-- `8-bit`
-- `I400`, `I420`, and the first real parsed-stream plus synthetic `I422` / `I444` reconstruction-output subset
-- non-directional and directional intra prediction, filter-intra luma prediction, and the current `I420` / `I422` / `I444` CFL chroma subset
-- minimal luma/chroma palette reconstruction for the current synthetic `I400` / `I420` / `I422` / `I444` key/intra path plus the first real bitstream-derived fixture-backed path for `I400` / `I420` direct parsed streams and `I422` / `I444` reconstruction/integration plus stored-surface reuse
-- minimal luma `DCT_DCT` residual support for the current square and rectangular transform subset whose axes stay within `64` samples
-- minimal bitstream-to-reconstruction `I420` chroma `DCT_DCT` residual support for the current uniform visible-grid transform subset, including clipped, fringe, multi-unit footprints, a deterministic `TX_4X4` multi-coefficient path, and the first deterministic larger-transform `TX_8X8` path
-- serial multi-tile traversal inside the current reconstruction subset, so the first-pixel path no longer hard-rejects multi-tile frame-syntax results before pixel reconstruction begins
-- the first real parsed-stream `I422` / `I444` still-picture fixtures for direct public `ArgbIntFrame` output and immediate `show_existing_frame` round-trips on refreshed supported surfaces
-- a first inter/reference reconstruction subset that now supports single-reference and average-compound prediction with integer-copy plus `BILINEAR`, fixed `EIGHT_TAP_*`, and block-resolved `SWITCHABLE` subpel sampling from stored reference surfaces, with larger real parsed-stream residual sizes no longer blocked at the inverse-transform boundary
+- raw AV1 OBU input, serial execution
+- visible `KEY` / `INTRA` frames in the current `8-bit I400/I420/I422/I444` still-picture subset
+- the current key/intra reconstruction subset: directional and non-directional intra, filter-intra, CFL, minimal palette, and the current `DCT_DCT` residual space whose transform axes stay within `64`
+- the current stored-surface `show_existing_frame` path
+- the first inter/reference subset: single-reference and average-compound prediction with integer-copy, fixed-filter / `SWITCHABLE` subpel sampling, horizontal super-resolution, and a first parsed-stream inter success path backed by injected stored references
 
 Everything outside that subset still fails explicitly with a stable `NOT_IMPLEMENTED` boundary instead of silently producing incorrect output.
 
@@ -50,21 +31,11 @@ Everything else expands from that baseline after correctness is stable.
 
 ### Already Implemented
 
-- Input abstraction is already unified around `BufferedInput`.
-- Public API types already exist: `Av1ImageReader`, `Av1DecoderConfig`, `DecodeException`, `DecodedFrame`, `ArgbIntFrame`, and `ArgbLongFrame`.
-- `SequenceHeaderParser` and `FrameHeaderParser` already cover most frame-level syntax, including tiling, quantization, segmentation, loop filter, CDEF, restoration, skip mode, and reference-state inheritance.
-- Film grain parameters are already parsed and normalized into `FrameHeader`, including signed chroma multiplier and offset normalization plus model-level invariant checks.
-- Tile parsing is already connected through `TileGroupHeaderParser`, `TileDataParser`, and `TileBitstreamParser`.
-- Structural decoding already exists through `FrameSyntaxDecoder`, `TilePartitionTreeReader`, `TileBlockHeaderReader`, `TileTransformLayoutReader`, and `TileResidualSyntaxReader`.
-- Reference slots already persist structural decode state, final tile CDF snapshots, and decoded temporal motion-field snapshots.
-- `DecodedPlane`, `DecodedPlanes`, and `ReferenceSurfaceSnapshot` already exist as the reconstruction/output boundary contracts.
-- `ArgbOutput` already converts `DecodedPlanes` into `ArgbIntFrame` for the current `8-bit I400/I420/I422/I444` output subset and into `ArgbLongFrame` for the current `10-bit` / `12-bit I400/I420/I422/I444` output subset.
-- A minimal reconstruction path already exists through `FrameReconstructor`, `IntraPredictor`, and `MutablePlaneBuffer`.
-- `LumaDequantizer` and `InverseTransformer` already support the current minimal non-zero luma residual path.
-- The current CFL reconstruction path now covers the current `I420`, `I422`, and `I444` subset instead of only `I420`.
-- Transform and residual modeling now preserve exact visible pixel footprints, not just 4x4 visibility.
-- `Av1ImageReader` already connects structural decode -> reconstruction -> ARGB output for the current supported subset.
-- The public reader already treats film-grain-bearing frames with a stable runtime contract: stored reference surfaces remain post-filter, post-super-resolution, and pre-grain, while presentation output applies the current deterministic film-grain subset only when `applyFilmGrain=true`.
+- `BufferedInput`, public reader/config/error/result types, and the raw OBU reader pipeline.
+- Frame-level and tile/block-level syntax decoding, including stored CDF and temporal-motion snapshots.
+- Stable reconstruction/output contracts: `DecodedPlane`, `DecodedPlanes`, and `ReferenceSurfaceSnapshot`.
+- A minimal but real reconstruction path through `FrameReconstructor`, `IntraPredictor`, dequantization, and inverse transform.
+- Public output wiring through `ArgbOutput`, `ArgbIntFrame`, `ArgbLongFrame`, stored-surface reuse, and the current film-grain-aware presentation contract.
 
 ### Remaining Decode Boundary
 
@@ -153,9 +124,9 @@ Exit criteria:
 
 Current gap after the first-pixel milestone:
 
-- Non-zero residual decode and reconstruction still do not cover the full reconstruction-ready coefficient space.
-- Chroma residual syntax now covers the minimal uniform visible-grid path, including clipped/fringe and multi-unit visible footprints plus the first deterministic `TX_4X4` multi-coefficient and larger-transform `TX_8X8` paths, but still does not cover the full chroma transform and coefficient space.
-- Several block features still remain syntax-only or rejected during reconstruction, most notably inter prediction and motion-compensation-related paths; palette now has only the current minimal synthetic and first real fixture-backed reconstruction coverage.
+- Residual and reconstruction coverage still do not span the full coefficient and transform space.
+- Chroma residual coverage is no longer minimal, but it is still far from complete.
+- Several block features are still syntax-only or reconstruction-limited, especially richer inter motion compensation, parsed-stream `intrabc`, and broader palette coverage.
 
 Write scope:
 
@@ -182,10 +153,9 @@ Exit criteria:
 
 Completed in this track:
 
-- full frame-header film-grain parsing and normalized storage
-- signed chroma multiplier and offset normalization aligned with the upstream parser model
-- film-grain inheritance validation and negative parser regressions
-- public reader runtime-policy coverage for `applyFilmGrain=false` pass-through vs. `applyFilmGrain=true` rejection
+- normalized frame-header film-grain parsing and storage
+- inheritance validation and parser regressions
+- public reader runtime-policy coverage for `applyFilmGrain`
 
 This track is now closed. Remaining grain work belongs to Track D, which covers synthesis and application.
 
@@ -228,27 +198,15 @@ Exit criteria:
 
 Completed within this track already:
 
-- mutable plane storage
-- minimal intra prediction
-- first public first-pixel path for single-tile `8-bit I400/I420` key/intra frames with all-zero residual
-- luma/chroma dequantization and inverse transform for the current square and rectangular `DCT_DCT` subset whose axes stay within `64` samples
-- minimal non-zero luma residual reconstruction inside the current key/intra subset
-- luma filter-intra reconstruction
-- directional intra reconstruction
-- the current `I420` / `I422` / `I444` CFL chroma reconstruction subset
-- minimal reconstruction-side `I420` chroma residual application for split U/V residual units
-- minimal bitstream-side `I420` chroma residual syntax for uniform visible-grid U/V layouts, including clipped/fringe and multi-unit visible footprints
-- deterministic `TX_4X4` multi-coefficient bitstream-derived `I420` chroma residual coverage, with corrected `TX_4X4` coefficient-context coordinate handling
-- deterministic larger-transform `TX_8X8` bitstream-derived `I420` chroma residual coverage at the syntax and integration levels
-- deterministic bitstream-derived `I422` chroma residual coverage at the syntax and integration levels, including DC-only, clipped-footprint, and larger-transform multi-coefficient paths
-- non-zero square and rectangular `DCT_DCT` reconstruction for the current luma/chroma key/intra subset whose axes stay within `64` samples
-- serial multi-tile reconstruction for the current supported key/intra subset, plus synthetic frame-syntax and public-reader `show_existing_frame` multi-tile coverage
-- minimal synthetic luma/chroma palette reconstruction coverage across the current `I400` / `I420` / `I422` / `I444` subset plus a first deterministic real bitstream-driven palette fixture at the reconstruction/integration level for the same wider-chroma subset and at the public-reader level through stored-surface reuse
-- minimal synthetic `I422/I444` key/intra reconstruction and `ArgbIntFrame` output coverage, including zero-residual chroma prediction, the first synthetic chroma residual paths, and stored-surface `show_existing_frame` public output coverage
-- the first real parsed-stream `I422/I444` still-picture public-output subset, including direct first-pixel decode and immediate `show_existing_frame` round-trips on refreshed supported surfaces
-- a first inter/reference reconstruction subset that consumes stored reference surfaces through single-reference and average-compound prediction with integer-copy plus the current fixed-filter subpel sampling path (`BILINEAR`, fixed `EIGHT_TAP_*`, and block-resolved `SWITCHABLE`), including synthetic reconstruction tests, residual-overlay coverage, one larger-residual real inter integration path without zero-residual normalization, the first real parsed-stream fixed-filter integration coverage up through the current `TX_64X64` / `TX_32X32` fixture geometry, synthetic/integration switchable directional-filter coverage, a first inter horizontal super-resolution subset that can also remap destination coordinates into stored post-super-resolution reference geometry, and the first public-reader parsed inter success path backed by injected stored references
-- a first key/intra horizontal super-resolution subset that horizontally upscales reconstructed planes into the stored post-super-resolution domain for later reuse and presentation output
-- a first synthetic same-frame `intrabc` subset that bilinearly samples already reconstructed `I400/I420/I422/I444` planes with resolved integer and fractional motion vectors, plus focused unit and integration coverage for fractional `I400` and `I420` same-frame sampling
+- decoded-plane storage, minimal intra reconstruction, and the original first-pixel key/intra path
+- non-zero luma/chroma `DCT_DCT` reconstruction for the current square and rectangular transform subset whose axes stay within `64`, plus the current `I420/I422/I444` CFL subset
+- current bitstream-driven chroma residual coverage for `I420/I422`, including clipped/fringe, multi-unit, deterministic multi-coefficient, and first larger-transform paths
+- serial multi-tile reconstruction inside the current supported subset, plus synthetic and stored-surface `show_existing_frame` coverage
+- minimal synthetic and first real wider-chroma palette reconstruction coverage, including public stored-surface reuse
+- current wider-chroma key/intra first-pixel subset, including direct parsed-stream `I422/I444` still-picture output
+- the first inter/reference subset: single-reference and average-compound prediction with integer-copy, fixed-filter and block-resolved `SWITCHABLE` subpel sampling, one larger-residual real inter integration path, the first parsed-stream fixed-filter integration coverage, and a first public-reader parsed inter success path backed by injected stored references
+- the first key/intra plus inter horizontal super-resolution subset, including geometry-remapped stored reference surfaces
+- the first synthetic same-frame `intrabc` bilinear subset for `I400/I420/I422/I444`
 
 Immediate next steps inside this track:
 
@@ -296,12 +254,9 @@ Exit criteria:
 
 Already complete in this track:
 
-- `org.glavo.avif.internal.av1.postfilter` now exists.
-- `FramePostprocessor` now runs loop filter -> CDEF -> restoration in decoder order for the current supported subset.
-- The current loop filter / CDEF / restoration subset is intentionally conservative and currently preserves samples exactly, while freezing the stage-ordering and reference-surface-storage contract.
-- `FilmGrainSynthesizer` now applies a deterministic current grain subset at presentation time for `I400/I420/I422/I444` and `8/10/12-bit`.
-- `Av1ImageReader` now stores post-filter, post-super-resolution, pre-grain reference surfaces and applies grain only to presentation output when `applyFilmGrain=true`.
-- Focused postfilter and public-reader regressions now lock the stage ordering and deterministic grain behavior.
+- `org.glavo.avif.internal.av1.postfilter` and `FramePostprocessor` freeze decoder stage ordering for the current supported subset.
+- The current loop filter / CDEF / restoration subset is intentionally conservative but already locks the storage contract for reference surfaces.
+- `FilmGrainSynthesizer` and `Av1ImageReader` already enforce the current presentation-only grain contract with focused regressions.
 
 This track is now closed. Remaining image-quality and spec-fidelity refinement for postfilter and grain behavior belongs to later coverage work, not to the baseline Track D contract.
 
@@ -340,11 +295,9 @@ Exit criteria:
 
 Already complete in this track:
 
-- `ArgbOutput`
-- `YuvToRgbTransform`
-- `OutputFrameMetadata`
-- the current `8-bit I400/I420/I422/I444 -> ArgbIntFrame` subset, including the first direct parsed-stream `I422/I444` still pictures
-- the current `10-bit` / `12-bit I400/I420/I422/I444 -> ArgbLongFrame` subset directly from `DecodedPlanes`
+- `ArgbOutput`, `YuvToRgbTransform`, and `OutputFrameMetadata`
+- the current `8-bit I400/I420/I422/I444 -> ArgbIntFrame` subset
+- the current `10-bit` / `12-bit I400/I420/I422/I444 -> ArgbLongFrame` subset
 
 Write scope:
 
@@ -379,16 +332,10 @@ Exit criteria:
 
 Already complete in this track:
 
-- `readFrame()` returns `ArgbIntFrame` for the current narrow first-pixel subset
-- frame filtering for `decodeFrameType` is applied at the current public output boundary
-- syntax reference state and reconstructed reference surfaces are stored separately
-- `show_existing_frame` reuses an already reconstructed stored surface for the current minimal output path
-- synthetic stored-reference `show_existing_frame` coverage now also includes `I422/I444` output once a reconstructed reference surface already exists
-- real parsed-stream `I422/I444` still pictures now also round-trip through `show_existing_frame` once the first supported frame refreshes a stored surface
-- dedicated runtime helpers now exist in `org.glavo.avif.internal.av1.runtime`, including `RuntimeReferenceSlot`, `FrameOutputPolicy`, and `OutputFrameFactory`
-- stored high-bit-depth reference surfaces now round-trip through the public `show_existing_frame` path as `ArgbLongFrame`
-- decode-frame-type filtering now has direct stored-surface coverage for `show_existing_frame` reuse
-- the current public boundary has already moved past `non-zero residual`, `filter_intra`, `CFL`, and directional intra on the legacy reduced still-picture path
+- `readFrame()` now returns real public frames for the current supported subset.
+- Runtime helpers centralize reference slots, output policy, and public-frame materialization.
+- `show_existing_frame` already reuses stored reconstructed surfaces for the current path, including high-bit-depth and wider-chroma stored-surface coverage.
+- Public runtime filtering already covers `decodeFrameType` and the current grain / stored-surface behavior.
 
 This track is now closed. Remaining output behavior work belongs to other tracks:
 
@@ -436,11 +383,9 @@ Exit criteria:
 Already complete in this track:
 
 - fixed structural fixtures and exact-oracle syntax tests
-- reader contract tests for malformed streams and stable error codes
-- first-pixel reader success tests
-- output-layer and reconstruction-layer unit tests
-- generated named-fixture payload resources that replace the remaining runtime brute-force
-  tile-syntax, block-header, residual, and frame-reconstruction payload searches
+- reader contract and first-pixel public-reader tests
+- output and reconstruction unit tests
+- named payload fixtures that replace the old runtime brute-force searches
 - deterministic wider-chroma and palette fixture coverage for reconstruction and public-reader reuse
 
 This track is now closed. Future test additions belong to the owning implementation track unless a
@@ -548,11 +493,9 @@ Acceptance:
 
 Status:
 
-- partially achieved now
-- current first-pixel output works for the current serial `8-bit I400/I420` key/intra subset, including synthetic multi-tile frame-syntax results, the minimal non-zero `DCT_DCT` luma/chroma residual subset for the current square and rectangular transforms whose axes stay within `64` samples, and a minimal real bitstream-derived `I420` chroma residual path for uniform visible-grid single-unit or multi-unit footprints up through the first deterministic larger-transform `TX_8X8` case
-- the current reconstruction/output layer now also covers the first synthetic plus real parsed-stream `I422/I444` key/intra subset, including `ArgbIntFrame` conversion, generalized wider-chroma CFL, direct still-picture first-pixel output, and `show_existing_frame` output reuse on refreshed supported surfaces
-- reconstruction-side, integration, and public-reader coverage now also include the current minimal synthetic luma/chroma palette path across `I400/I420/I422/I444` plus a first deterministic real bitstream-driven palette fixture whose wider-chroma coverage is already exercised through reconstruction/integration and stored-surface public reuse, but fuller chroma transform/token coverage, broader real palette coverage, direct parsed wider-chroma palette streams, inter paths, and a less artificial sample set are still missing
-- milestone is not closed until broader chroma residuals, broader real parsed-stream `I422/I444` fixtures, broader real palette coverage, inter paths, and a less artificial sample set are covered
+- partially achieved
+- first-pixel output is stable for the current serial key/intra subset, including wider-chroma still-picture output, the current palette subset, and stored-surface reuse
+- the milestone stays open because broader residual coverage, broader real wider-chroma fixtures, broader real palette coverage, and inter/reference output are still incomplete
 
 ### M3: Reference and Inter Frames
 
@@ -570,10 +513,10 @@ Acceptance:
 
 Status:
 
-- partially started
-- minimal `show_existing_frame` output reuse is now wired for already reconstructed stored surfaces
-- minimal inter/reference pixel decode is now started inside the reconstruction core for single-reference plus average-compound prediction with integer-copy and the current fixed-filter/block-resolved-switchable subpel path backed by stored reference surfaces, and the current real inter fixture now crosses the reconstruction boundary without zero-residual normalization; this now also includes a first horizontal inter super-resolution subset plus geometry-remapped sampling from stored post-super-resolution reference surfaces, and the public reader now exposes a first parsed inter success path backed by injected stored references, but broader parsed-stream inter output still stops at richer motion-compensation coverage gaps
-- a first synthetic same-frame `intrabc` bilinear path now also exists for already decoded `I400/I420/I422/I444` samples with integer and fractional motion vectors, but broader parsed-stream `intrabc` coverage is still missing
+- in progress
+- stored-surface reuse is already stable for the current minimal path
+- a real inter baseline now exists, but broader parsed-stream inter output still stops at richer motion-compensation gaps
+- `intrabc` is no longer absent, but it is still limited to the current synthetic bilinear subset
 
 ### M4: Full Presentation Pipeline
 
@@ -591,9 +534,9 @@ Acceptance:
 
 Status:
 
-- in progress
-- Track D baseline is complete for the current supported subset, with deterministic postfilter stage ordering and presentation-only film grain now covered by focused tests.
-- This milestone remains open until Track F completion and Track G feature-matrix expansion lock the broader public presentation matrix.
+- partially achieved
+- the supported-subset presentation pipeline is already wired and tested
+- the milestone remains open only for broader feature-matrix coverage
 
 ### M5: Coverage Closure
 
