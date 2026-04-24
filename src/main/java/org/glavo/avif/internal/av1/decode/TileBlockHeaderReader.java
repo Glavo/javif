@@ -1804,10 +1804,15 @@ public final class TileBlockHeaderReader {
             if ((intra || useIntrabc) && (referenceFrame0 != NO_REFERENCE_FRAME || referenceFrame1 != NO_REFERENCE_FRAME)) {
                 throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter references");
             }
-            if ((intra || useIntrabc)
+            if (intra
                     && (singleInterMode != null || compoundInterMode != null || drlIndex != -1
                     || motionVector0 != null || motionVector1 != null)) {
-                throw new IllegalArgumentException("Intra and intrabc blocks must not carry inter-mode or motion-vector state");
+                throw new IllegalArgumentException("Intra blocks must not carry inter-mode or motion-vector state");
+            }
+            if (useIntrabc
+                    && (singleInterMode != null || compoundInterMode != null || drlIndex != -1
+                    || motionVector1 != null)) {
+                throw new IllegalArgumentException("intrabc blocks must not carry inter-mode, DRL, or secondary motion-vector state");
             }
             if ((intra || useIntrabc)
                     && (horizontalInterpolationFilter != null || verticalInterpolationFilter != null)) {

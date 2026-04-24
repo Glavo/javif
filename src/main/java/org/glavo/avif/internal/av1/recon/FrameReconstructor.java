@@ -37,14 +37,16 @@ import java.util.Objects;
 /// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
 ///
 /// The current implementation is intentionally narrow. It reconstructs only 8-bit key/intra frames
-/// plus a first single-reference and average-compound inter subset with integer-copy and the
-/// current fixed-filter subpel prediction path over the current serial tile traversal,
+/// plus a first single-reference, average-compound, and same-frame `intrabc` subset with
+/// integer-copy and the current fixed-filter subpel prediction path over the current serial tile
+/// traversal,
 /// `I400`, `I420`, `I422`, or `I444` chroma layout,
 /// non-directional and directional intra prediction, filter-intra luma prediction, the current
-/// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, and
-/// a minimal luma/chroma residual subset including clipped frame-fringe chroma footprints and the
-/// currently supported square and rectangular `DCT_DCT` transform sizes whose axes stay within
-/// `64` samples.
+/// `I420` / `I422` / `I444` CFL chroma subset, the current minimal luma/chroma palette paths, a
+/// minimal horizontal super-resolution upscaling subset for key/intra frames, and a minimal
+/// luma/chroma residual subset including clipped frame-fringe chroma footprints and the currently
+/// supported square and rectangular `DCT_DCT` transform sizes whose axes stay within `64`
+/// samples.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// The number of coefficients in one 8-tap interpolation kernel.
@@ -210,6 +212,21 @@ public final class FrameReconstructor {
             }
         }
 
+        DecodedPlane decodedLumaPlane = lumaPlane.toDecodedPlane();
+        @Nullable DecodedPlane decodedChromaUPlane = chromaUPlane != null ? chromaUPlane.toDecodedPlane() : null;
+        @Nullable DecodedPlane decodedChromaVPlane = chromaVPlane != null ? chromaVPlane.toDecodedPlane() : null;
+
+        if (frameHeader.superResolution().enabled()) {
+            return applySuperResolution(
+                    sequenceHeader.colorConfig().bitDepth(),
+                    pixelFormat,
+                    frameSize,
+                    decodedLumaPlane,
+                    decodedChromaUPlane,
+                    decodedChromaVPlane
+            );
+        }
+
         return new DecodedPlanes(
                 sequenceHeader.colorConfig().bitDepth(),
                 pixelFormat,
@@ -217,9 +234,9 @@ public final class FrameReconstructor {
                 frameSize.height(),
                 frameSize.renderWidth(),
                 frameSize.renderHeight(),
-                lumaPlane.toDecodedPlane(),
-                chromaUPlane != null ? chromaUPlane.toDecodedPlane() : null,
-                chromaVPlane != null ? chromaVPlane.toDecodedPlane() : null
+                decodedLumaPlane,
+                decodedChromaUPlane,
+                decodedChromaVPlane
         );
     }
 
@@ -256,8 +273,10 @@ public final class FrameReconstructor {
                             + frameHeader.frameType()
             );
         }
-        if (frameHeader.superResolution().enabled()) {
-            throw new IllegalStateException("Super-resolution reconstruction is not implemented yet");
+        if (frameHeader.superResolution().enabled()
+                && frameHeader.frameType() != FrameType.KEY
+                && frameHeader.frameType() != FrameType.INTRA) {
+            throw new IllegalStateException("Inter super-resolution reconstruction is not implemented yet");
         }
     }
 
@@ -290,6 +309,117 @@ public final class FrameReconstructor {
                     bitDepth
             );
         };
+    }
+
+    /// Applies the current minimal horizontal super-resolution subset to one reconstructed frame.
+    ///
+    /// The current implementation performs a deterministic horizontal linear resampling pass from
+    /// the coded frame width to the upscaled width for key/intra frames only. The resulting stored
+    /// planes already match the post-super-resolution reference-surface domain, so the returned
+    /// `DecodedPlanes` expose the upscaled plane widths as their coded dimensions.
+    ///
+    /// @param bitDepth the decoded sample bit depth
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameSize the frame dimensions and render size
+    /// @param lumaPlane the reconstructed coded-width luma plane
+    /// @param chromaUPlane the reconstructed coded-width chroma U plane, or `null`
+    /// @param chromaVPlane the reconstructed coded-width chroma V plane, or `null`
+    /// @return one decoded-plane snapshot in the post-super-resolution domain
+    private static DecodedPlanes applySuperResolution(
+            int bitDepth,
+            PixelFormat pixelFormat,
+            FrameHeader.FrameSize frameSize,
+            DecodedPlane lumaPlane,
+            @Nullable DecodedPlane chromaUPlane,
+            @Nullable DecodedPlane chromaVPlane
+    ) {
+        int upscaledWidth = frameSize.upscaledWidth();
+        DecodedPlane upscaledLumaPlane = upscalePlaneHorizontally(lumaPlane, upscaledWidth, bitDepth);
+        @Nullable DecodedPlane upscaledChromaUPlane = chromaUPlane != null
+                ? upscalePlaneHorizontally(chromaUPlane, upscaledChromaWidth(pixelFormat, upscaledWidth), bitDepth)
+                : null;
+        @Nullable DecodedPlane upscaledChromaVPlane = chromaVPlane != null
+                ? upscalePlaneHorizontally(chromaVPlane, upscaledChromaWidth(pixelFormat, upscaledWidth), bitDepth)
+                : null;
+        return new DecodedPlanes(
+                bitDepth,
+                pixelFormat,
+                upscaledWidth,
+                frameSize.height(),
+                frameSize.renderWidth(),
+                frameSize.renderHeight(),
+                upscaledLumaPlane,
+                upscaledChromaUPlane,
+                upscaledChromaVPlane
+        );
+    }
+
+    /// Returns the post-super-resolution chroma width for one pixel format.
+    ///
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param upscaledLumaWidth the post-super-resolution luma width
+    /// @return the post-super-resolution chroma width for one pixel format
+    private static int upscaledChromaWidth(PixelFormat pixelFormat, int upscaledLumaWidth) {
+        return switch (pixelFormat) {
+            case I400 -> 0;
+            case I420, I422 -> (upscaledLumaWidth + 1) >> 1;
+            case I444 -> upscaledLumaWidth;
+        };
+    }
+
+    /// Upscales one decoded plane horizontally with the current minimal deterministic linear filter.
+    ///
+    /// @param plane the decoded plane to upscale
+    /// @param targetWidth the post-upscale plane width
+    /// @param bitDepth the decoded sample bit depth
+    /// @return one horizontally upscaled decoded plane
+    private static DecodedPlane upscalePlaneHorizontally(
+            DecodedPlane plane,
+            int targetWidth,
+            int bitDepth
+    ) {
+        DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
+        if (targetWidth <= 0) {
+            throw new IllegalArgumentException("targetWidth <= 0: " + targetWidth);
+        }
+        if (targetWidth == checkedPlane.width()) {
+            return checkedPlane;
+        }
+        if (targetWidth < checkedPlane.width()) {
+            throw new IllegalArgumentException(
+                    "targetWidth is smaller than the source width: " + targetWidth + " < " + checkedPlane.width()
+            );
+        }
+
+        short[] sourceSamples = checkedPlane.samples();
+        short[] upscaledSamples = new short[targetWidth * checkedPlane.height()];
+        int sourceWidth = checkedPlane.width();
+        int sourceStride = checkedPlane.stride();
+        int maximumSample = (1 << bitDepth) - 1;
+
+        for (int y = 0; y < checkedPlane.height(); y++) {
+            int sourceRowOffset = y * sourceStride;
+            int upscaledRowOffset = y * targetWidth;
+            if (sourceWidth == 1) {
+                short repeatedSample = sourceSamples[sourceRowOffset];
+                for (int x = 0; x < targetWidth; x++) {
+                    upscaledSamples[upscaledRowOffset + x] = repeatedSample;
+                }
+                continue;
+            }
+            for (int x = 0; x < targetWidth; x++) {
+                long sourcePositionFixed = ((long) x * (sourceWidth - 1) << 12) / (targetWidth - 1);
+                int sourceIndex0 = (int) (sourcePositionFixed >> 12);
+                int sourceIndex1 = Math.min(sourceIndex0 + 1, sourceWidth - 1);
+                int fraction = (int) (sourcePositionFixed & 0x0FFF);
+                int sample0 = sourceSamples[sourceRowOffset + sourceIndex0] & 0xFFFF;
+                int sample1 = sourceSamples[sourceRowOffset + sourceIndex1] & 0xFFFF;
+                int interpolatedSample = ((sample0 * (0x1000 - fraction)) + (sample1 * fraction) + 0x0800) >> 12;
+                upscaledSamples[upscaledRowOffset + x] = (short) clamp(interpolatedSample, 0, maximumSample);
+            }
+        }
+
+        return new DecodedPlane(targetWidth, checkedPlane.height(), targetWidth, upscaledSamples);
     }
 
     /// Recursively reconstructs one partition-tree node.
@@ -368,7 +498,16 @@ public final class FrameReconstructor {
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
 
-        if (header.intra()) {
+        if (header.useIntrabc()) {
+            reconstructIntrabcPrediction(
+                    lumaPlane,
+                    chromaUPlane,
+                    chromaVPlane,
+                    header,
+                    transformLayout,
+                    pixelFormat
+            );
+        } else if (header.intra()) {
             if (header.yPaletteSize() != 0) {
                 reconstructLumaPalette(
                         lumaPlane,
@@ -498,7 +637,17 @@ public final class FrameReconstructor {
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         if (header.useIntrabc()) {
-            throw new IllegalStateException("intrabc reconstruction is not implemented yet");
+            if (header.motionVector0() == null || !header.motionVector0().resolved()) {
+                throw new IllegalStateException("intrabc reconstruction requires one resolved motion vector");
+            }
+            if (header.compoundReference()) {
+                throw new IllegalStateException("intrabc reconstruction does not support compound references");
+            }
+            requireSupportedIntrabcMotionVector(
+                    header.motionVector0().vector(),
+                    pixelFormat,
+                    header.hasChroma()
+            );
         }
         if (header.hasChroma() && pixelFormat == PixelFormat.I400) {
             throw new IllegalStateException("Monochrome reconstruction encountered a block with chroma samples");
@@ -520,7 +669,7 @@ public final class FrameReconstructor {
         if (transformLayout.visibleWidth4() <= 0 || transformLayout.visibleHeight4() <= 0) {
             throw new IllegalStateException("Empty transform layout is not reconstructable");
         }
-        if (!header.intra()) {
+        if (!header.intra() && !header.useIntrabc()) {
             if (header.motionVector0() == null) {
                 throw new IllegalStateException("Inter reconstruction requires one resolved primary motion vector");
             }
@@ -628,6 +777,94 @@ public final class FrameReconstructor {
                     referenceSurfaceSnapshots
             );
         }
+    }
+
+    /// Reconstructs the current minimal `intrabc` subset by copying already reconstructed samples
+    /// from the current frame with one resolved integer motion vector.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the intrabc state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    private static void reconstructIntrabcPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            PixelFormat pixelFormat
+    ) {
+        MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
+        DecodedPlane lumaSnapshot = lumaPlane.toDecodedPlane();
+        int lumaX = header.position().x4() << 2;
+        int lumaY = header.position().y4() << 2;
+        int visibleLumaWidth = transformLayout.visibleWidthPixels();
+        int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        reconstructInterPlanePrediction(
+                lumaPlane,
+                lumaSnapshot,
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                4,
+                4,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+
+        if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
+            return;
+        }
+
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = lumaX >> chromaSubsamplingX;
+        int chromaY = lumaY >> chromaSubsamplingY;
+        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
+        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaDenominatorX = 4 << chromaSubsamplingX;
+        int chromaDenominatorY = 4 << chromaSubsamplingY;
+        DecodedPlane chromaUSnapshot = chromaUPlane.toDecodedPlane();
+        DecodedPlane chromaVSnapshot = chromaVPlane.toDecodedPlane();
+        reconstructInterPlanePrediction(
+                chromaUPlane,
+                chromaUSnapshot,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                chromaDenominatorX,
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
+        reconstructInterPlanePrediction(
+                chromaVPlane,
+                chromaVSnapshot,
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                motionVector.columnQuarterPel(),
+                motionVector.rowQuarterPel(),
+                chromaDenominatorX,
+                chromaDenominatorY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        );
     }
 
     /// Reconstructs the currently supported single-reference inter prediction subset.
@@ -1491,6 +1728,38 @@ public final class FrameReconstructor {
             throw new IllegalStateException(
                     "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters for "
                             + pixelFormat
+            );
+        }
+    }
+
+    /// Validates that one `intrabc` motion vector stays inside the current same-frame copy subset.
+    ///
+    /// The current implementation only supports integer-aligned luma/chroma `intrabc` vectors, so
+    /// reconstruction never needs fractional same-frame filtering.
+    ///
+    /// @param motionVector the resolved `intrabc` motion vector chosen for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param hasChroma whether the block carries chroma samples
+    private static void requireSupportedIntrabcMotionVector(
+            MotionVector motionVector,
+            PixelFormat pixelFormat,
+            boolean hasChroma
+    ) {
+        MotionVector checkedMotionVector = Objects.requireNonNull(motionVector, "motionVector");
+        if ((checkedMotionVector.rowQuarterPel() & 0x03) != 0
+                || (checkedMotionVector.columnQuarterPel() & 0x03) != 0) {
+            throw new IllegalStateException("intrabc reconstruction currently requires integer-aligned luma motion vectors");
+        }
+        if (!hasChroma || pixelFormat == PixelFormat.I400) {
+            return;
+        }
+
+        int chromaHorizontalAlignment = 4 << chromaSubsamplingX(pixelFormat);
+        int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
+        if (Math.floorMod(checkedMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
+                || Math.floorMod(checkedMotionVector.rowQuarterPel(), chromaVerticalAlignment) != 0) {
+            throw new IllegalStateException(
+                    "intrabc reconstruction currently requires integer-aligned chroma motion vectors for " + pixelFormat
             );
         }
     }

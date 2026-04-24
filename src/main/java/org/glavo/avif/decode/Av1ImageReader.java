@@ -31,6 +31,8 @@ import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
 import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
+import org.glavo.avif.internal.av1.postfilter.FilmGrainSynthesizer;
+import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
@@ -73,6 +75,10 @@ public final class Av1ImageReader implements AutoCloseable {
     private @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult;
     /// The minimal pixel reconstructor used by the first output-producing path.
     private final FrameReconstructor frameReconstructor;
+    /// The postfilter pipeline used before storing reference surfaces.
+    private final FramePostprocessor framePostprocessor;
+    /// The deterministic film-grain synthesizer used only at presentation time.
+    private final FilmGrainSynthesizer filmGrainSynthesizer;
     /// The zero-based presentation index assigned to the next returned frame.
     private long nextPresentationIndex;
     /// Whether this reader has already been closed.
@@ -92,6 +98,8 @@ public final class Av1ImageReader implements AutoCloseable {
         this.tileBitstreamParser = new TileBitstreamParser();
         this.referenceSlots = createReferenceSlots(8);
         this.frameReconstructor = new FrameReconstructor();
+        this.framePostprocessor = new FramePostprocessor();
+        this.filmGrainSynthesizer = new FilmGrainSynthesizer();
     }
 
     /// Opens an AV1 image reader using the default decoder configuration.
@@ -414,27 +422,23 @@ public final class Av1ImageReader implements AutoCloseable {
             }
         }
 
+        @Nullable DecodedPlanes postprocessedPlanes = null;
         if (decodedPlanes != null) {
+            postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader);
             refreshReferenceSurfaceState(
                     frameHeader,
-                    new ReferenceSurfaceSnapshot(frameHeader, storedSyntaxDecodeResult, decodedPlanes)
+                    new ReferenceSurfaceSnapshot(frameHeader, storedSyntaxDecodeResult, postprocessedPlanes)
             );
         }
         if (!shouldOutput) {
             return null;
         }
-        if (config.applyFilmGrain() && frameHeader.filmGrain().applyGrain()) {
-            throw new DecodeException(
-                    DecodeErrorCode.NOT_IMPLEMENTED,
-                    DecodeStage.OUTPUT_CONVERSION,
-                    "Film grain synthesis is not implemented yet",
-                    packet.streamOffset(),
-                    packet.obuIndex(),
-                    null
-            );
-        }
+        DecodedPlanes presentationPlanes = applyPresentationFilters(
+                Objects.requireNonNull(postprocessedPlanes, "postprocessedPlanes"),
+                frameHeader
+        );
         return OutputFrameFactory.createFrame(
-                decodedPlanes,
+                presentationPlanes,
                 frameHeader,
                 frameHeader.showFrame(),
                 nextPresentationIndex++
@@ -600,17 +604,26 @@ public final class Av1ImageReader implements AutoCloseable {
                     null
             );
         }
-        if (FrameOutputPolicy.requiresFilmGrainSynthesis(referencedFrameHeader, config)) {
-            throw new DecodeException(
-                    DecodeErrorCode.NOT_IMPLEMENTED,
-                    DecodeStage.OUTPUT_CONVERSION,
-                    "Film grain synthesis is not implemented yet",
-                    packet.streamOffset(),
-                    packet.obuIndex(),
-                    null
-            );
+        DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
+        return OutputFrameFactory.createFrame(presentationPlanes, referencedFrameHeader, true, nextPresentationIndex++);
+    }
+
+    /// Applies presentation-only output filters such as film grain.
+    ///
+    /// Stored reference surfaces remain post-filter, post-super-resolution, and pre-grain.
+    /// Presentation output may use a grain-applied copy when the current decoder configuration
+    /// requests it.
+    ///
+    /// @param decodedPlanes the post-filter, post-super-resolution, pre-grain planes
+    /// @param frameHeader the normalized frame header that owns the output
+    /// @return the presentation planes after output-only processing
+    private DecodedPlanes applyPresentationFilters(DecodedPlanes decodedPlanes, FrameHeader frameHeader) {
+        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
+        if (FrameOutputPolicy.requiresFilmGrainSynthesis(checkedFrameHeader, config)) {
+            return filmGrainSynthesizer.apply(checkedDecodedPlanes, checkedFrameHeader);
         }
-        return OutputFrameFactory.createExistingFrame(referenceSurfaceSnapshot, nextPresentationIndex++);
+        return checkedDecodedPlanes;
     }
 
     /// Creates a contextual invalid-bitstream exception for frame-assembly errors.

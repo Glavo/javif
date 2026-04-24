@@ -53,7 +53,7 @@ Everything else expands from that baseline after correctness is stable.
 - Input abstraction is already unified around `BufferedInput`.
 - Public API types already exist: `Av1ImageReader`, `Av1DecoderConfig`, `DecodeException`, `DecodedFrame`, `ArgbIntFrame`, and `ArgbLongFrame`.
 - `SequenceHeaderParser` and `FrameHeaderParser` already cover most frame-level syntax, including tiling, quantization, segmentation, loop filter, CDEF, restoration, skip mode, and reference-state inheritance.
-- Film grain parameters are already parsed and normalized into `FrameHeader`, including signed chroma multiplier and offset normalization plus model-level invariant checks; synthesis is still deferred.
+- Film grain parameters are already parsed and normalized into `FrameHeader`, including signed chroma multiplier and offset normalization plus model-level invariant checks.
 - Tile parsing is already connected through `TileGroupHeaderParser`, `TileDataParser`, and `TileBitstreamParser`.
 - Structural decoding already exists through `FrameSyntaxDecoder`, `TilePartitionTreeReader`, `TileBlockHeaderReader`, `TileTransformLayoutReader`, and `TileResidualSyntaxReader`.
 - Reference slots already persist structural decode state, final tile CDF snapshots, and decoded temporal motion-field snapshots.
@@ -64,7 +64,7 @@ Everything else expands from that baseline after correctness is stable.
 - The current CFL reconstruction path now covers the current `I420`, `I422`, and `I444` subset instead of only `I420`.
 - Transform and residual modeling now preserve exact visible pixel footprints, not just 4x4 visibility.
 - `Av1ImageReader` already connects structural decode -> reconstruction -> ARGB output for the current supported subset.
-- The public reader already treats film-grain-bearing frames with a stable runtime contract: `applyFilmGrain=false` exposes the stored pre-grain surface, while `applyFilmGrain=true` stops at the explicit `NOT_IMPLEMENTED` presentation boundary until synthesis exists.
+- The public reader already treats film-grain-bearing frames with a stable runtime contract: stored reference surfaces remain post-filter, post-super-resolution, and pre-grain, while presentation output applies the current deterministic film-grain subset only when `applyFilmGrain=true`.
 
 ### Remaining Decode Boundary
 
@@ -75,22 +75,23 @@ Everything else expands from that baseline after correctness is stable.
 - Stable real bitstream-driven multi-tile first-pixel fixtures are still missing, so multi-tile coverage is currently strongest at the synthetic frame-syntax/runtime level rather than the fixture corpus.
 - Full chroma transform-layout modeling and broader chroma token coverage are still incomplete.
 - Minimal synthetic palette reconstruction now covers the current `I400` / `I420` / `I422` / `I444` subset, and the first deterministic real bitstream-driven palette fixture now also covers `I422` / `I444` at the reconstruction/integration layer plus stored-surface public reuse; broader palette edge cases, direct parsed wider-chroma palette streams, and wider-chroma real fixture variety are still missing.
-- `intrabc` remains unsupported.
+- `intrabc` reconstruction now covers a first synthetic same-frame copy subset for `I400/I420/I422/I444`, reusing already reconstructed samples when one resolved motion vector stays integer-aligned; parsed-stream `intrabc`, compound `intrabc`, and fractional same-frame copy paths are still unsupported.
 - Inter/reference reconstruction has now started at a narrow single-reference plus average-compound subset with integer-copy plus the current fixed-filter and block-resolved `SWITCHABLE` subpel prediction path (`BILINEAR` plus fixed `EIGHT_TAP_*` modes), and the current real inter fixture no longer needs zero-residual normalization just to cross the reconstruction boundary; broader parsed-stream inter sample support and richer motion compensation still remain incomplete.
 - Direct parsed-stream first-pixel output now covers the current `8-bit I400/I420/I422/I444 -> ArgbIntFrame` still-picture subset, while broader `I422/I444` feature coverage still remains incomplete.
 - `show_existing_frame` now reuses one stored reconstructed reference surface for the current minimal output path when the referenced slot has a `ReferenceSurfaceSnapshot` and grain is not required, including the first real parsed-stream `I422/I444` still-picture round-trips and the earlier synthetic wider-chroma stored-surface coverage.
 - Reference surfaces are now consumed by a first synthetic-plus-integration inter-frame pixel path, and the current real inter fixture now reconstructs through its native larger residual sizes in integration tests; broader parsed-stream inter output is still blocked by motion-compensation and direct public-stream coverage gaps.
-- Postfiltering and film grain synthesis are still not implemented.
+- Postfilter stage ordering now exists through `FramePostprocessor`, with the current loop filter / CDEF / restoration subset acting as deterministic no-op shells while preserving the reference-surface contract, and presentation-only film grain synthesis now exists through the current deterministic `FilmGrainSynthesizer` subset.
+- Key/intra reconstruction now also covers a minimal horizontal super-resolution subset, which stores post-super-resolution surfaces for later reuse; inter super-resolution is still unsupported.
 - `I422/I444` still lack broader real parsed-stream fixture coverage beyond the current minimal still-picture subset even though direct first-pixel output and stored-surface reuse now exist.
 - The legacy reduced still-picture directional fixture now decodes successfully through the public reader.
-- The next practical public decode gaps are no longer directional intra itself, but broader unreconstructed features such as richer chroma residual coverage, broader palette coverage, `intrabc`, broader inter motion compensation, and postfilter stages.
+- The next practical public decode gaps are no longer directional intra itself, but broader unreconstructed features such as richer chroma residual coverage, broader palette coverage, broader `intrabc` / inter motion compensation coverage, and higher-fidelity super-resolution / postfilter behavior.
 
 ### Current Progress Snapshot
 
 - `Track A`: complete
 - `Track B`: complete
-- `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset with larger `32/64`-axis residual support, the first real inter residual integration coverage, and a first single-reference plus average-compound fixed-filter plus block-resolved `SWITCHABLE` inter path
-- `Track D`: not started
+- `Track C`: in progress, first-pixel baseline widened into the first real parsed-stream plus synthetic `I422/I444` subset with larger `32/64`-axis residual support, the first real inter residual integration coverage, a first single-reference plus average-compound fixed-filter plus block-resolved `SWITCHABLE` inter path, a first key/intra horizontal super-resolution subset, and a first synthetic same-frame `intrabc` copy subset
+- `Track D`: complete for the current supported subset
 - `Track E`: complete
 - `Track F`: complete
 - `Track G`: complete
@@ -101,7 +102,7 @@ Everything else expands from that baseline after correctness is stable.
 - `Av1ImageReader` continues to accept only `BufferedInput`.
 - Runtime code must continue to have no runtime dependency outside `java.base`.
 - The decoder remains correctness-first and serial-first throughout this plan.
-- Reference slots store post-filter, pre-grain surfaces. Film grain is applied only to final presentation output.
+- Reference slots store post-filter, post-super-resolution, pre-grain surfaces. Film grain is applied only to final presentation output.
 - The upstream dav1d baseline commit remains fixed until the first end-to-end decoder is complete.
 - Parallel decoding is deferred until after the serial output path is correct.
 
@@ -198,7 +199,7 @@ Write scope:
 
 Goal: create decoded planes from block syntax and residuals.
 
-Status: in progress. First-pixel baseline, broader `32/64`-axis `DCT_DCT` residual support, the first real inter residual integration path, and the first block-resolved `SWITCHABLE` inter path are in place.
+Status: in progress. First-pixel baseline, broader `32/64`-axis `DCT_DCT` residual support, the first real inter residual integration path, the first block-resolved `SWITCHABLE` inter path, the first key/intra horizontal super-resolution subset, and the first synthetic same-frame `intrabc` copy subset are in place.
 
 Scope:
 
@@ -207,8 +208,8 @@ Scope:
 - Implement dequantization and inverse transforms.
 - Implement intra prediction.
 - Implement inter prediction and motion compensation.
-- Implement `intrabc`, richer palette coverage and real palette fixtures, richer intra prediction, and inter pixel application.
-- Implement super-resolution upscaling.
+- Expand `intrabc` beyond the first synthetic same-frame copy subset, richer palette coverage and real palette fixtures, richer intra prediction, and inter pixel application.
+- Expand super-resolution upscaling beyond the current key/intra horizontal subset.
 - Implement reference-surface refresh and reuse.
 
 Execution order inside the track:
@@ -246,6 +247,8 @@ Completed within this track already:
 - minimal synthetic `I422/I444` key/intra reconstruction and `ArgbIntFrame` output coverage, including zero-residual chroma prediction, the first synthetic chroma residual paths, and stored-surface `show_existing_frame` public output coverage
 - the first real parsed-stream `I422/I444` still-picture public-output subset, including direct first-pixel decode and immediate `show_existing_frame` round-trips on refreshed supported surfaces
 - a first inter/reference reconstruction subset that consumes stored reference surfaces through single-reference and average-compound prediction with integer-copy plus the current fixed-filter subpel sampling path (`BILINEAR`, fixed `EIGHT_TAP_*`, and block-resolved `SWITCHABLE`), including synthetic reconstruction tests, residual-overlay coverage, one larger-residual real inter integration path without zero-residual normalization, the first real parsed-stream fixed-filter integration coverage up through the current `TX_64X64` / `TX_32X32` fixture geometry, and synthetic/integration switchable directional-filter coverage
+- a first key/intra super-resolution subset that horizontally upscales reconstructed planes into the stored post-super-resolution domain for later reuse and presentation output
+- a first synthetic same-frame `intrabc` subset that copies already reconstructed `I400/I420/I422/I444` samples with one resolved integer-aligned motion vector, plus focused rejection coverage for fractional same-frame vectors and chroma-misaligned `I420` same-frame vectors
 
 Immediate next steps inside this track:
 
@@ -253,6 +256,8 @@ Immediate next steps inside this track:
 - fuller chroma transform-layout and coefficient coverage beyond the current `I420/I422` uniform visible-grid path
 - broader real bitstream-driven palette coverage and palette edge-case coverage beyond the current single wider-chroma palette fixture, including one dedicated direct parsed wider-chroma palette stream
 - broader inter motion compensation beyond the current single-reference plus average-compound integer-copy and fixed-filter/block-resolved-switchable subpel subset, including richer motion compensation and direct public-stream coverage for real parsed inter fixtures
+- broader `intrabc` coverage beyond the current synthetic same-frame integer-aligned copy subset, including parsed-stream fixtures and any richer motion-vector/filtering behavior required by real streams
+- broader super-resolution support beyond the current key/intra horizontal subset, especially inter super-resolution and higher-fidelity AV1 resampling behavior
 - stable real bitstream multi-tile first-pixel fixtures, so the widened serial multi-tile path is covered by deterministic corpus samples instead of only synthetic runtime state
 - broader real parsed-stream `I422/I444` fixtures, including richer residual and non-gray paths, so the widened wider-chroma subset is covered by deterministic corpus samples instead of only the current minimal still-picture/runtime state
 
@@ -269,7 +274,7 @@ Dependency:
 
 Goal: implement the full decoder output pipeline after reconstruction.
 
-Status: not started.
+Status: complete for the current supported subset.
 
 Scope:
 
@@ -289,6 +294,17 @@ Exit criteria:
 - Postfilter stages run in decoder order.
 - Grain application is controlled by `Av1DecoderConfig.applyFilmGrain`.
 
+Already complete in this track:
+
+- `org.glavo.avif.internal.av1.postfilter` now exists.
+- `FramePostprocessor` now runs loop filter -> CDEF -> restoration in decoder order for the current supported subset.
+- The current loop filter / CDEF / restoration subset is intentionally conservative and currently preserves samples exactly, while freezing the stage-ordering and reference-surface-storage contract.
+- `FilmGrainSynthesizer` now applies a deterministic current grain subset at presentation time for `I400/I420/I422/I444` and `8/10/12-bit`.
+- `Av1ImageReader` now stores post-filter, post-super-resolution, pre-grain reference surfaces and applies grain only to presentation output when `applyFilmGrain=true`.
+- Focused postfilter and public-reader regressions now lock the stage ordering and deterministic grain behavior.
+
+This track is now closed. Remaining image-quality and spec-fidelity refinement for postfilter and grain behavior belongs to later coverage work, not to the baseline Track D contract.
+
 Write scope:
 
 - New `src/main/java/org/glavo/avif/internal/av1/postfilter/**`
@@ -296,7 +312,7 @@ Write scope:
 
 Dependencies:
 
-- Requires Track B and Track C to be complete enough for stable plane and grain inputs.
+- Required Track B and enough of Track C to stabilize decoded-plane inputs.
 
 ### Track E: Output Conversion
 
@@ -376,7 +392,7 @@ Already complete in this track:
 
 This track is now closed. Remaining output behavior work belongs to other tracks:
 
-- film-grain-aware final presentation still belongs to Track D
+- film-grain-aware final presentation is already handled by Track D; any later quality/fidelity expansion should follow that track's ownership
 - broader inter/reference pixel decode still belongs to Track C
 - future feature-matrix regression expansion should follow the owning implementation track
 
@@ -557,6 +573,7 @@ Status:
 - partially started
 - minimal `show_existing_frame` output reuse is now wired for already reconstructed stored surfaces
 - minimal inter/reference pixel decode is now started inside the reconstruction core for single-reference plus average-compound prediction with integer-copy and the current fixed-filter/block-resolved-switchable subpel path backed by stored reference surfaces, and the current real inter fixture now crosses the reconstruction boundary without zero-residual normalization, but broader parsed-stream inter output still stops at richer motion-compensation and direct public-stream coverage gaps
+- a first synthetic same-frame `intrabc` copy path now also exists for already decoded `I400/I420/I422/I444` samples with integer-aligned motion vectors, but broader parsed-stream `intrabc` coverage is still missing
 
 ### M4: Full Presentation Pipeline
 
@@ -574,7 +591,9 @@ Acceptance:
 
 Status:
 
-- not started
+- in progress
+- Track D baseline is complete for the current supported subset, with deterministic postfilter stage ordering and presentation-only film grain now covered by focused tests.
+- This milestone remains open until Track F completion and Track G feature-matrix expansion lock the broader public presentation matrix.
 
 ### M5: Coverage Closure
 

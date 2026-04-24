@@ -155,6 +155,89 @@ final class FrameReconstructorTest {
         assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 128);
     }
 
+    /// Verifies that the current minimal super-resolution subset horizontally upsamples one
+    /// reconstructed luma plane from the coded width to the upscaled width.
+    @Test
+    void reconstructsSuperResolvedI400KeyFrameByHorizontallyUpscalingLuma() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        int[] lumaPaletteColors = new int[]{32, 224};
+        int[][] lumaPaletteIndices = new int[][]{
+                {0, 0, 1, 1},
+                {0, 0, 1, 1},
+                {0, 0, 1, 1},
+                {0, 0, 1, 1}
+        };
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        position,
+                        size,
+                        false,
+                        LumaIntraPredictionMode.DC,
+                        null,
+                        null,
+                        0,
+                        0,
+                        lumaPaletteColors,
+                        new int[0],
+                        new int[0],
+                        packPaletteIndices(lumaPaletteIndices),
+                        new byte[0],
+                        0,
+                        0
+                ),
+                createTransformLayout(position, size, PixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 8, 4);
+        FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.KEY, 4, 8, 4);
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertEquals(8, planes.codedWidth());
+        assertEquals(8, planes.renderWidth());
+        assertEquals(4, planes.codedHeight());
+        assertPlaneEquals(
+                planes.lumaPlane(),
+                new int[][]{
+                        expectedHorizontallyUpscaledRow(new int[]{32, 32, 224, 224}, 8),
+                        expectedHorizontallyUpscaledRow(new int[]{32, 32, 224, 224}, 8),
+                        expectedHorizontallyUpscaledRow(new int[]{32, 32, 224, 224}, 8),
+                        expectedHorizontallyUpscaledRow(new int[]{32, 32, 224, 224}, 8)
+                }
+        );
+    }
+
+    /// Verifies that the current minimal super-resolution subset horizontally upsamples chroma
+    /// planes to their post-super-resolution widths in the current `I420` key/intra subset.
+    @Test
+    void reconstructsSuperResolvedI420IntraFrameByHorizontallyUpscalingChromaPlanes() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
+                createTransformLayout(position, size, PixelFormat.I420),
+                createResidualLayout(position, size, true)
+        );
+
+        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I420, 8, 4);
+        FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.INTRA, 4, 8, 4);
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)
+        );
+
+        assertTrue(planes.hasChroma());
+        assertEquals(8, planes.codedWidth());
+        assertEquals(8, planes.renderWidth());
+        assertEquals(4, planes.codedHeight());
+        assertPlaneFilled(planes.lumaPlane(), 8, 4, 128);
+        assertPlaneFilled(requirePlane(planes.chromaUPlane()), 4, 2, 128);
+        assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 2, 128);
+    }
+
     /// Verifies that one `I400` luma palette block reconstructs the stored palette raster without
     /// requiring any chroma planes.
     @Test
@@ -1242,6 +1325,247 @@ final class FrameReconstructorTest {
         });
     }
 
+    /// Verifies that the current minimal `intrabc` subset copies already reconstructed luma
+    /// samples from an earlier same-frame block when the motion vector stays integer-aligned.
+    @Test
+    void reconstructsIntrabcI400BlockFromPreviouslyDecodedSamples() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        int[][] lumaPaletteIndices = new int[][]{
+                {0, 1, 0, 1},
+                {1, 0, 1, 0},
+                {0, 1, 0, 1},
+                {1, 0, 1, 0}
+        };
+        TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 0),
+                        size,
+                        false,
+                        LumaIntraPredictionMode.DC,
+                        null,
+                        null,
+                        0,
+                        0,
+                        new int[]{32, 224},
+                        new int[0],
+                        new int[0],
+                        packPaletteIndices(lumaPaletteIndices),
+                        new byte[0],
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 0), size, true)
+        );
+        TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntrabcBlockHeader(new BlockPosition(1, 0), size, false, new MotionVector(0, -16)),
+                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(1, 0), size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        int[][] expectedSourceSamples = expandPaletteRaster(new int[]{32, 224}, lumaPaletteIndices);
+        assertPlaneBlockEquals(planes.lumaPlane(), 0, 0, expectedSourceSamples);
+        assertPlaneBlockEquals(planes.lumaPlane(), 4, 0, expectedSourceSamples);
+    }
+
+    /// Verifies that the current minimal `intrabc` subset also copies chroma samples in the
+    /// current `I420` path when the motion vector stays integer-aligned for both luma and chroma.
+    @Test
+    void reconstructsIntrabcI420BlockFromPreviouslyDecodedSamples() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 1, 1},
+                {1, 0, 0, 0}
+        };
+        TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 0),
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        new int[]{40, 180},
+                        new int[]{200, 60},
+                        new byte[0],
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I420),
+                createResidualLayout(new BlockPosition(0, 0), size, true)
+        );
+        TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
+                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I420),
+                createResidualLayout(new BlockPosition(1, 0), size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 0, 4, 4, 128);
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 4, 128);
+        int[][] expectedChromaU = expandPaletteRaster(new int[]{40, 180}, new int[][]{
+                {0, 1},
+                {1, 0}
+        });
+        int[][] expectedChromaV = expandPaletteRaster(new int[]{200, 60}, new int[][]{
+                {0, 1},
+                {1, 0}
+        });
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 0, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 2, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 0, 0, expectedChromaV);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 2, 0, expectedChromaV);
+    }
+
+    /// Verifies that the current minimal `intrabc` subset also copies full-resolution chroma
+    /// samples in the current `I444` path when the motion vector stays integer-aligned.
+    @Test
+    void reconstructsIntrabcI444BlockFromPreviouslyDecodedSamples() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 0, 1},
+                {1, 0, 1, 0},
+                {0, 0, 1, 1},
+                {1, 1, 0, 0}
+        };
+        TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 0),
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        new int[]{24, 176},
+                        new int[]{220, 60},
+                        new byte[0],
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I444),
+                createResidualLayout(new BlockPosition(0, 0), size, true)
+        );
+        TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
+                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I444),
+                createResidualLayout(new BlockPosition(1, 0), size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I444, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 0, 4, 4, 128);
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 4, 128);
+        int[][] expectedChromaU = expandPaletteRaster(new int[]{24, 176}, chromaPaletteIndices);
+        int[][] expectedChromaV = expandPaletteRaster(new int[]{220, 60}, chromaPaletteIndices);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 0, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 4, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 0, 0, expectedChromaV);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 4, 0, expectedChromaV);
+    }
+
+    /// Verifies that the current minimal `intrabc` subset also copies half-width full-height
+    /// chroma samples in the current `I422` path when the motion vector stays integer-aligned.
+    @Test
+    void reconstructsIntrabcI422BlockFromPreviouslyDecodedSamples() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        int[][] chromaPaletteIndices = new int[][]{
+                {0, 1, 1, 1},
+                {1, 0, 0, 0},
+                {0, 0, 0, 0},
+                {1, 1, 1, 1}
+        };
+        TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        new BlockPosition(0, 0),
+                        size,
+                        true,
+                        LumaIntraPredictionMode.DC,
+                        UvIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        new int[]{36, 180},
+                        new int[]{208, 72},
+                        new byte[0],
+                        packPaletteIndices(chromaPaletteIndices),
+                        0,
+                        0
+                ),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I422),
+                createResidualLayout(new BlockPosition(0, 0), size, true)
+        );
+        TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
+                createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
+                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I422),
+                createResidualLayout(new BlockPosition(1, 0), size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(PixelFormat.I422, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                new ReferenceSurfaceSnapshot[0]
+        );
+
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 0, 4, 4, 128);
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 4, 128);
+        int[][] expectedChromaU = expandPaletteRaster(new int[]{36, 180}, new int[][]{
+                {0, 1},
+                {1, 0},
+                {0, 0},
+                {1, 1}
+        });
+        int[][] expectedChromaV = expandPaletteRaster(new int[]{208, 72}, new int[][]{
+                {0, 1},
+                {1, 0},
+                {0, 0},
+                {1, 1}
+        });
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 0, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 2, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 0, 0, expectedChromaV);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 2, 0, expectedChromaV);
+    }
+
+    /// Verifies that fractional `intrabc` motion vectors are still rejected by the current same-frame copy subset.
+    @Test
+    void rejectsIntrabcBlockWithFractionalMotionVector() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createIntrabcBlockHeader(new BlockPosition(0, 0), size, false, new MotionVector(0, -14)),
+                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createResidualLayout(new BlockPosition(0, 0), size, true)
+        );
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> new FrameReconstructor().reconstruct(
+                        createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, leaf),
+                        new ReferenceSurfaceSnapshot[0]
+                )
+        );
+        assertEquals("intrabc reconstruction currently requires integer-aligned luma motion vectors", exception.getMessage());
+    }
+
     /// Verifies that one monochrome compound-reference inter block averages two stored reference
     /// surfaces when both motion vectors stay integer-aligned.
     @Test
@@ -2036,6 +2360,21 @@ final class FrameReconstructorTest {
     ) {
         SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
         FrameHeader frameHeader = createFrameHeader(frameType, width, height);
+        return createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, roots);
+    }
+
+    /// Creates one synthetic structural frame-decode result for reconstruction tests with explicit
+    /// sequence and frame headers.
+    ///
+    /// @param sequenceHeader the sequence header exposed through the frame assembly
+    /// @param frameHeader the frame header exposed through the frame assembly
+    /// @param roots the top-level tile roots for tile `0`
+    /// @return one synthetic structural frame-decode result
+    private static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader,
+            TilePartitionTreeReader.Node... roots
+    ) {
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
@@ -2274,6 +2613,86 @@ final class FrameReconstructorTest {
                 0xFF,
                 new FrameHeader.FrameSize(width, width, height, width, height),
                 new FrameHeader.SuperResolutionInfo(false, width),
+                false,
+                true,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                ),
+                new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                true,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                FrameHeader.TransformMode.LARGEST,
+                false,
+                false
+        );
+    }
+
+    /// Creates one minimal key/intra frame header that enables horizontal super-resolution.
+    ///
+    /// @param frameType the frame type to expose
+    /// @param codedWidth the coded width after downscaling
+    /// @param upscaledWidth the stored width after super-resolution upscaling
+    /// @param height the coded frame height
+    /// @return one minimal key/intra frame header with super-resolution enabled
+    private static FrameHeader createSuperResolvedFrameHeader(
+            FrameType frameType,
+            int codedWidth,
+            int upscaledWidth,
+            int height
+    ) {
+        return new FrameHeader(
+                0,
+                0,
+                false,
+                0,
+                0,
+                0,
+                frameType,
+                true,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                7,
+                0,
+                0xFF,
+                new FrameHeader.FrameSize(codedWidth, upscaledWidth, height, upscaledWidth, height),
+                new FrameHeader.SuperResolutionInfo(true, 9),
                 false,
                 true,
                 new FrameHeader.TilingInfo(
@@ -2726,6 +3145,54 @@ final class FrameReconstructorTest {
                 0,
                 null,
                 null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
+
+    /// Creates one `intrabc` block header for reconstruction tests.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param motionVector the resolved same-frame copy motion vector
+    /// @return one `intrabc` block header
+    private static TileBlockHeaderReader.BlockHeader createIntrabcBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            MotionVector motionVector
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                hasChroma,
+                false,
+                false,
+                false,
+                true,
+                false,
+                -1,
+                -1,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(motionVector),
+                null,
+                false,
+                0,
+                LumaIntraPredictionMode.DC,
+                hasChroma ? UvIntraPredictionMode.DC : null,
                 0,
                 0,
                 new int[0],
@@ -3281,6 +3748,34 @@ final class FrameReconstructorTest {
                 assertEquals(firstDelta, reconstructed.sample(x + column, y + row) - baseline.sample(x + column, y + row));
             }
         }
+    }
+
+    /// Returns the expected horizontally upscaled row produced by the current linear super-resolution helper.
+    ///
+    /// @param sourceRow the coded-width source row
+    /// @param targetWidth the upscaled row width
+    /// @return the expected horizontally upscaled row
+    private static int[] expectedHorizontallyUpscaledRow(int[] sourceRow, int targetWidth) {
+        if (sourceRow.length == 0) {
+            throw new IllegalArgumentException("sourceRow must not be empty");
+        }
+        int[] upscaledRow = new int[targetWidth];
+        if (sourceRow.length == 1) {
+            for (int x = 0; x < targetWidth; x++) {
+                upscaledRow[x] = sourceRow[0];
+            }
+            return upscaledRow;
+        }
+        for (int x = 0; x < targetWidth; x++) {
+            long sourcePositionFixed = ((long) x * (sourceRow.length - 1) << 12) / (targetWidth - 1);
+            int sourceIndex0 = (int) (sourcePositionFixed >> 12);
+            int sourceIndex1 = Math.min(sourceIndex0 + 1, sourceRow.length - 1);
+            int fraction = (int) (sourcePositionFixed & 0x0FFF);
+            upscaledRow[x] =
+                    ((sourceRow[sourceIndex0] * (0x1000 - fraction)) + (sourceRow[sourceIndex1] * fraction) + 0x0800)
+                            >> 12;
+        }
+        return upscaledRow;
     }
 
     /// Returns one guaranteed-present decoded plane after a non-null assertion.

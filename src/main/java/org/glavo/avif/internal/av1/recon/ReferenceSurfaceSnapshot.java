@@ -23,7 +23,7 @@ import java.util.Objects;
 
 /// Immutable reference-surface snapshot stored for later frame reuse.
 ///
-/// The stored planes represent post-filter, pre-grain image state.
+/// The stored planes represent post-filter, post-super-resolution, pre-grain image state.
 @NotNullByDefault
 public final class ReferenceSurfaceSnapshot {
     /// The frame header that owns this reference surface.
@@ -32,14 +32,14 @@ public final class ReferenceSurfaceSnapshot {
     /// The structural frame-decode result associated with the stored surface.
     private final FrameSyntaxDecodeResult frameSyntaxDecodeResult;
 
-    /// The stored post-filter, pre-grain decoded planes.
+    /// The stored post-filter, post-super-resolution, pre-grain decoded planes.
     private final DecodedPlanes decodedPlanes;
 
     /// Creates one immutable reference-surface snapshot.
     ///
     /// @param frameHeader the frame header that owns this reference surface
     /// @param frameSyntaxDecodeResult the structural frame-decode result associated with the stored surface
-    /// @param decodedPlanes the stored post-filter, pre-grain decoded planes
+    /// @param decodedPlanes the stored post-filter, post-super-resolution, pre-grain decoded planes
     public ReferenceSurfaceSnapshot(
             FrameHeader frameHeader,
             FrameSyntaxDecodeResult frameSyntaxDecodeResult,
@@ -67,9 +67,9 @@ public final class ReferenceSurfaceSnapshot {
         return frameSyntaxDecodeResult;
     }
 
-    /// Returns the stored post-filter, pre-grain decoded planes.
+    /// Returns the stored post-filter, post-super-resolution, pre-grain decoded planes.
     ///
-    /// @return the stored post-filter, pre-grain decoded planes
+    /// @return the stored post-filter, post-super-resolution, pre-grain decoded planes
     public DecodedPlanes decodedPlanes() {
         return decodedPlanes;
     }

@@ -36,6 +36,7 @@ import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
+import org.glavo.avif.internal.av1.postfilter.FilmGrainSynthesizer;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
@@ -711,13 +712,15 @@ final class Av1ImageReaderTest {
         });
     }
 
-    /// Verifies that enabling film grain synthesis rejects `show_existing_frame` output when the
-    /// referenced slot carries film grain.
+    /// Verifies that enabling film grain synthesis now exposes one grain-applied
+    /// `show_existing_frame` output when the referenced slot carries film grain.
     ///
     /// @throws Exception if synthetic reference-state injection fails
     @Test
-    void readFrameRejectsFilmGrainBearingShowExistingFrameWhenFilmGrainIsEnabled() throws Exception {
+    void readFrameReturnsFilmGrainBearingShowExistingFrameWhenFilmGrainIsEnabled() throws Exception {
         InjectedReferenceState referenceState = createFilmGrainBearingReferenceStateFromSupportedStillPicture();
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
         byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
         Av1DecoderConfig config = Av1DecoderConfig.builder().applyFilmGrain(true).build();
 
@@ -729,11 +732,10 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject film-grain-bearing reference state", exception);
             }
 
-            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-            assertEquals(DecodeStage.OUTPUT_CONVERSION, exception.stage());
-            assertEquals("Film grain synthesis is not implemented yet", exception.getMessage());
+            DecodedFrame decodedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesGrainAppliedReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.readFrame());
         });
     }
 
@@ -1903,6 +1905,38 @@ final class Av1ImageReaderTest {
         }
     }
 
+    /// Asserts that one decoded still-picture frame exactly matches one stored reconstructed
+    /// reference surface after deterministic film-grain synthesis.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param referenceSurfaceSnapshot the stored reconstructed reference surface that should be grain-applied
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertStillPictureFrameMatchesGrainAppliedReferenceSurface(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot,
+            long expectedPresentationIndex
+    ) {
+        assertNotNull(decodedFrame);
+        DecodedPlanes synthesizedPlanes = new FilmGrainSynthesizer().apply(
+                referenceSurfaceSnapshot.decodedPlanes(),
+                referenceSurfaceSnapshot.frameHeader()
+        );
+        assertDecodedStillPictureFrameMetadata(
+                decodedFrame,
+                synthesizedPlanes.bitDepth(),
+                synthesizedPlanes.pixelFormat(),
+                referenceSurfaceSnapshot.frameHeader().frameType(),
+                expectedPresentationIndex
+        );
+        if (synthesizedPlanes.bitDepth() == 8) {
+            assertTrue(decodedFrame instanceof ArgbIntFrame);
+            assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(synthesizedPlanes), ((ArgbIntFrame) decodedFrame).pixels());
+        } else {
+            assertTrue(decodedFrame instanceof ArgbLongFrame);
+            assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(synthesizedPlanes), ((ArgbLongFrame) decodedFrame).pixels());
+        }
+    }
+
     /// Asserts that the reader returned one still-picture frame filled with one constant pixel.
     ///
     /// @param decodedFrame the decoded frame returned by the public reader
@@ -2176,7 +2210,7 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
-        writeReducedStillPictureColorConfig(writer, pixelFormat);
+        writeReducedStillPictureColorConfig(writer, pixelFormat, false);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -2198,11 +2232,16 @@ final class Av1ImageReaderTest {
     }
 
     /// Writes the reduced still-picture color-configuration bits for the requested public chroma
-    /// layout.
+    /// layout and one explicit film grain capability flag.
     ///
     /// @param writer the destination bit writer
     /// @param pixelFormat the requested public chroma layout
-    private static void writeReducedStillPictureColorConfig(BitWriter writer, PixelFormat pixelFormat) {
+    /// @param filmGrainPresent whether the sequence header should advertise film grain support
+    private static void writeReducedStillPictureColorConfig(
+            BitWriter writer,
+            PixelFormat pixelFormat,
+            boolean filmGrainPresent
+    ) {
         switch (pixelFormat) {
             case I420 -> {
                 writer.writeFlag(false);
@@ -2211,7 +2250,7 @@ final class Av1ImageReaderTest {
                 writer.writeFlag(true);
                 writer.writeBits(1, 2);
                 writer.writeFlag(true);
-                writer.writeFlag(false);
+                writer.writeFlag(filmGrainPresent);
             }
             case I422 -> {
                 writer.writeFlag(false);
@@ -2219,14 +2258,14 @@ final class Av1ImageReaderTest {
                 writer.writeFlag(false);
                 writer.writeFlag(true);
                 writer.writeFlag(true);
-                writer.writeFlag(false);
+                writer.writeFlag(filmGrainPresent);
             }
             case I444 -> {
                 writer.writeFlag(false);
                 writer.writeFlag(false);
                 writer.writeFlag(true);
                 writer.writeFlag(true);
-                writer.writeFlag(false);
+                writer.writeFlag(filmGrainPresent);
             }
             case I400 -> throw new IllegalArgumentException(
                     "Reduced still-picture fixture expects I420, I422, or I444: " + pixelFormat
@@ -2248,6 +2287,17 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the requested public chroma layout
     /// @return one non-reduced still-picture-compatible sequence header payload
     private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat) {
+        return fullSequenceHeaderPayload(pixelFormat, false);
+    }
+
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// `show_existing_frame` while exposing the requested `8-bit` public chroma layout and
+    /// caller-selected film grain capability.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @param filmGrainPresent whether frame headers in the stream may signal film grain
+    /// @return one non-reduced still-picture-compatible sequence header payload
+    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, boolean filmGrainPresent) {
         BitWriter writer = new BitWriter();
         writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
         writer.writeFlag(false);
@@ -2280,7 +2330,49 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
-        writeReducedStillPictureColorConfig(writer, pixelFormat);
+        writeReducedStillPictureColorConfig(writer, pixelFormat, filmGrainPresent);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates one non-reduced still-picture-compatible `I420` sequence header payload that
+    /// enables both `show_existing_frame` and explicit film grain signaling.
+    ///
+    /// @return one non-reduced still-picture-compatible `I420` sequence header payload with film grain enabled
+    private static byte[] fullSequenceHeaderPayloadForFilmGrainStillPicture() {
+        BitWriter writer = new BitWriter();
+        writer.writeBits(reducedStillPictureProfile(PixelFormat.I420), 3);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 5);
+        writer.writeBits(0, 12);
+        writer.writeBits(3, 3);
+        writer.writeBits(1, 2);
+        writer.writeFlag(false);
+        writer.writeBits(5, 4);
+        writer.writeBits(5, 4);
+        writer.writeBits(63, 6);
+        writer.writeBits(63, 6);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(1, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -2349,6 +2441,38 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one non-reduced still-picture-compatible combined frame payload whose direct output
+    /// frame carries explicit film grain.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the frame header
+    /// @param filmGrain the normalized film grain state to encode in the frame header
+    /// @return one non-reduced still-picture-compatible combined frame payload with film grain
+    private static byte[] fullStillPictureCombinedFramePayloadWithFilmGrain(
+            byte[] tileGroupPayload,
+            FrameHeader.FilmGrainParams filmGrain
+    ) {
+        BitWriter writer = new BitWriter();
+        writeFullStillPictureFrameHeaderBitsBeforeFilmGrain(writer);
+        writeSupportedStillPictureFilmGrainBits(writer, filmGrain);
+        writer.padToByteBoundary();
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
+    /// Creates one supported still-picture stream whose direct combined-frame output carries one
+    /// deterministic visible film grain configuration.
+    ///
+    /// @return one supported still-picture stream with deterministic visible film grain
+    private static byte[] supportedStillPictureFilmGrainDirectStream() {
+        return concat(
+                obu(1, fullSequenceHeaderPayloadForFilmGrainStillPicture()),
+                obu(6, fullStillPictureCombinedFramePayloadWithFilmGrain(
+                        SUPPORTED_SINGLE_TILE_PAYLOAD,
+                        minimalFilmGrainParams(0x1234)
+                ))
+        );
+    }
+
     /// Creates a minimal single-tile tile-group payload.
     ///
     /// @return a minimal single-tile tile-group payload
@@ -2381,6 +2505,15 @@ final class Av1ImageReaderTest {
     ///
     /// @param writer the destination bit writer
     private static void writeFullStillPictureFrameHeaderBits(BitWriter writer) {
+        writeFullStillPictureFrameHeaderBitsBeforeFilmGrain(writer);
+        writer.writeFlag(false);
+    }
+
+    /// Writes one non-reduced still-picture-compatible key frame header syntax up to but not
+    /// including the final `apply_grain` flag.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeFullStillPictureFrameHeaderBitsBeforeFilmGrain(BitWriter writer) {
         writer.writeFlag(false);
         writer.writeBits(0, 2);
         writer.writeFlag(true);
@@ -2396,7 +2529,85 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
-        writer.writeFlag(false);
+    }
+
+    /// Writes one explicit still-picture film grain syntax block compatible with the current
+    /// `8-bit I420` combined-frame fixture.
+    ///
+    /// @param writer the destination bit writer
+    /// @param filmGrain the normalized film grain state to encode
+    private static void writeSupportedStillPictureFilmGrainBits(
+            BitWriter writer,
+            FrameHeader.FilmGrainParams filmGrain
+    ) {
+        writer.writeFlag(filmGrain.applyGrain());
+        if (!filmGrain.applyGrain()) {
+            return;
+        }
+        if (!filmGrain.updated()) {
+            throw new IllegalArgumentException("Still-picture film grain fixture requires one explicit updated parameter set");
+        }
+
+        writer.writeBits(filmGrain.grainSeed(), 16);
+
+        FrameHeader.FilmGrainPoint[] yPoints = filmGrain.yPoints();
+        writer.writeBits(yPoints.length, 4);
+        writeFilmGrainPoints(writer, yPoints);
+        writer.writeFlag(filmGrain.chromaScalingFromLuma());
+        if (!filmGrain.chromaScalingFromLuma() && yPoints.length > 0) {
+            FrameHeader.FilmGrainPoint[] cbPoints = filmGrain.cbPoints();
+            FrameHeader.FilmGrainPoint[] crPoints = filmGrain.crPoints();
+            writer.writeBits(cbPoints.length, 4);
+            writeFilmGrainPoints(writer, cbPoints);
+            writer.writeBits(crPoints.length, 4);
+            writeFilmGrainPoints(writer, crPoints);
+        }
+
+        writer.writeBits(filmGrain.scalingShift() - 8, 2);
+        writer.writeBits(filmGrain.arCoeffLag(), 2);
+        writeFilmGrainCoefficients(writer, filmGrain.arCoefficientsY());
+        if (filmGrain.chromaScalingFromLuma() || filmGrain.cbPoints().length > 0) {
+            writeFilmGrainCoefficients(writer, filmGrain.arCoefficientsCb());
+        }
+        if (filmGrain.chromaScalingFromLuma() || filmGrain.crPoints().length > 0) {
+            writeFilmGrainCoefficients(writer, filmGrain.arCoefficientsCr());
+        }
+        writer.writeBits(filmGrain.arCoeffShift() - 6, 2);
+        writer.writeBits(filmGrain.grainScaleShift(), 2);
+        if (filmGrain.cbPoints().length > 0) {
+            writer.writeBits(filmGrain.cbMult() + 128L, 8);
+            writer.writeBits(filmGrain.cbLumaMult() + 128L, 8);
+            writer.writeBits(filmGrain.cbOffset() + 256L, 9);
+        }
+        if (filmGrain.crPoints().length > 0) {
+            writer.writeBits(filmGrain.crMult() + 128L, 8);
+            writer.writeBits(filmGrain.crLumaMult() + 128L, 8);
+            writer.writeBits(filmGrain.crOffset() + 256L, 9);
+        }
+        writer.writeFlag(filmGrain.overlapEnabled());
+        writer.writeFlag(filmGrain.clipToRestrictedRange());
+    }
+
+    /// Writes one normalized film grain scaling-point array.
+    ///
+    /// @param writer the destination bit writer
+    /// @param points the normalized film grain scaling points to encode
+    private static void writeFilmGrainPoints(BitWriter writer, FrameHeader.FilmGrainPoint[] points) {
+        for (FrameHeader.FilmGrainPoint point : points) {
+            writer.writeBits(point.value(), 8);
+            writer.writeBits(point.scaling(), 8);
+        }
+    }
+
+    /// Writes one normalized film grain coefficient array with the AV1 `+128` storage bias
+    /// restored.
+    ///
+    /// @param writer the destination bit writer
+    /// @param coefficients the normalized coefficient array to encode
+    private static void writeFilmGrainCoefficients(BitWriter writer, int[] coefficients) {
+        for (int coefficient : coefficients) {
+            writer.writeBits(coefficient + 128L, 8);
+        }
     }
 
     /// Creates one minimal normalized film grain state that matches
@@ -2410,15 +2621,18 @@ final class Av1ImageReaderTest {
                 grainSeed,
                 true,
                 -1,
-                new FrameHeader.FilmGrainPoint[0],
-                false,
+                new FrameHeader.FilmGrainPoint[]{
+                        new FrameHeader.FilmGrainPoint(0, 24),
+                        new FrameHeader.FilmGrainPoint(255, 96)
+                },
+                true,
                 new FrameHeader.FilmGrainPoint[0],
                 new FrameHeader.FilmGrainPoint[0],
                 8,
                 0,
                 new int[0],
-                new int[0],
-                new int[0],
+                new int[]{0},
+                new int[]{0},
                 6,
                 0,
                 0,

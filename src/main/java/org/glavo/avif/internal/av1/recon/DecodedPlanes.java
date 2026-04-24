@@ -24,7 +24,8 @@ import java.util.Objects;
 /// Immutable decoded-plane snapshot produced after reconstruction and post-filtering.
 ///
 /// This contract sits between reconstruction and public output conversion. Stored planes represent
-/// the post-filter, pre-grain image state.
+/// the post-filter, post-super-resolution, pre-grain image state in the current stored-surface
+/// domain.
 @NotNullByDefault
 public final class DecodedPlanes {
     /// The decoded bit depth.
@@ -33,10 +34,10 @@ public final class DecodedPlanes {
     /// The chroma layout of the decoded planes.
     private final PixelFormat pixelFormat;
 
-    /// The coded luma width in samples.
+    /// The stored luma width in samples.
     private final int codedWidth;
 
-    /// The coded luma height in samples.
+    /// The stored luma height in samples.
     private final int codedHeight;
 
     /// The presentation render width.
@@ -58,8 +59,8 @@ public final class DecodedPlanes {
     ///
     /// @param bitDepth the decoded bit depth
     /// @param pixelFormat the chroma layout of the decoded planes
-    /// @param codedWidth the coded luma width in samples
-    /// @param codedHeight the coded luma height in samples
+    /// @param codedWidth the stored luma width in samples
+    /// @param codedHeight the stored luma height in samples
     /// @param renderWidth the presentation render width
     /// @param renderHeight the presentation render height
     /// @param lumaPlane the decoded luma plane
@@ -123,16 +124,16 @@ public final class DecodedPlanes {
         return pixelFormat;
     }
 
-    /// Returns the coded luma width in samples.
+    /// Returns the stored luma width in samples.
     ///
-    /// @return the coded luma width in samples
+    /// @return the stored luma width in samples
     public int codedWidth() {
         return codedWidth;
     }
 
-    /// Returns the coded luma height in samples.
+    /// Returns the stored luma height in samples.
     ///
-    /// @return the coded luma height in samples
+    /// @return the stored luma height in samples
     public int codedHeight() {
         return codedHeight;
     }
