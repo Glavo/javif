@@ -502,6 +502,26 @@ final class Av1ImageReaderTest {
         assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(true);
     }
 
+    /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
+    /// when the same stream first refreshes parsed reference state with one preceding key frame.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForStandaloneRealParsedInterFrameBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+            throws IOException {
+        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(false);
+    }
+
+    /// Verifies that one combined real parsed inter frame reconstructs through the public reader
+    /// when the same stream first refreshes parsed reference state with one preceding key frame.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsArgbIntFrameForCombinedRealParsedInterFrameBackedByParsedPrimaryReferenceSurfaceAndInjectedParserMetadata()
+            throws IOException {
+        assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(true);
+    }
+
 
     /// Verifies that tile-group OBUs are rejected when no standalone or combined frame header is active.
     @Test
@@ -1079,6 +1099,29 @@ final class Av1ImageReaderTest {
                     referenceState.referenceSurfaceSnapshot()
             );
         }
+    }
+
+    /// Returns one copy of the supplied injected reference state whose stored surface snapshot keeps
+    /// the injected parser metadata but reuses the caller-supplied parsed decoded planes.
+    ///
+    /// @param referenceState the injected reference state to copy
+    /// @param referenceSurfaceSnapshot the parsed stored reference surface whose decoded planes should be preserved
+    /// @return one copy of the supplied injected reference state with a replacement surface snapshot
+    private static InjectedReferenceState withReferenceSurface(
+            InjectedReferenceState referenceState,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot
+    ) {
+        ReferenceSurfaceSnapshot wrappedSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                referenceState.frameHeader(),
+                referenceState.syntaxResult(),
+                referenceSurfaceSnapshot.decodedPlanes()
+        );
+        return new InjectedReferenceState(
+                referenceState.sequenceHeader(),
+                referenceState.frameHeader(),
+                referenceState.syntaxResult(),
+                wrappedSurfaceSnapshot
+        );
     }
 
     /// Creates one synthetic non-reduced `I420` sequence header compatible with parsed inter-frame
@@ -1716,6 +1759,60 @@ final class Av1ImageReaderTest {
             assertSame(primaryReferenceState.frameHeader(), reader.referenceFrameHeader(0));
             assertSame(primaryReferenceState.syntaxResult(), reader.referenceFrameSyntaxResult(0));
             assertSame(primaryReferenceSurfaceSnapshot, reader.referenceSurfaceSnapshot(0));
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Asserts that one real parsed inter frame reconstructs through the public reader when the
+    /// same stream first decodes one parsed key frame that provides the primary stored reference
+    /// surface and the remaining parser-visible inter metadata is injected immediately afterward.
+    ///
+    /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    private static void assertRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurfaceAndInjectedParserMetadata(
+            boolean combined
+    ) throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload()),
+                obu(6, fullStillPictureCombinedFramePayload(PALETTE_BLOCK_TILE_PAYLOAD)),
+                combined
+                        ? obu(6, combinedInterFramePayload(INTER_BLOCK_TILE_PAYLOAD))
+                        : concat(
+                        obu(3, interFrameHeaderPayload()),
+                        obu(4, INTER_BLOCK_TILE_PAYLOAD)
+                )
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame referenceFrame = reader.readFrame();
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            ReferenceSurfaceSnapshot parsedPrimaryReferenceSurface =
+                    Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "parsed primary reference surface");
+            assertStillPictureFrameMatchesReferenceSurface(referenceFrame, parsedPrimaryReferenceSurface, 0);
+
+            InjectedReferenceState[] referenceStates = createInterReferenceStatesForRealParsedInterFrame();
+            referenceStates[0] = withReferenceSurface(referenceStates[0], parsedPrimaryReferenceSurface);
+            injectInterReferenceStates(reader, referenceStates);
+
+            ReferenceSurfaceSnapshot[] referenceSurfaceSlots = new ReferenceSurfaceSnapshot[8];
+            for (int i = 0; i < referenceStates.length; i++) {
+                referenceSurfaceSlots[i] = referenceStates[i].referenceSurfaceSnapshot();
+            }
+
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxResult =
+                    Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
+            ReferenceSurfaceSnapshot expectedOutputSnapshot = new ReferenceSurfaceSnapshot(
+                    syntaxResult.assembly().frameHeader(),
+                    syntaxResult,
+                    new FrameReconstructor().reconstruct(syntaxResult, referenceSurfaceSlots)
+            );
+
+            assertFirstDecodedLeafIsInter(syntaxResult);
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 1);
+            assertSame(referenceStates[0].frameHeader(), reader.referenceFrameHeader(0));
+            assertSame(referenceStates[0].syntaxResult(), reader.referenceFrameSyntaxResult(0));
+            assertSame(referenceStates[0].referenceSurfaceSnapshot(), reader.referenceSurfaceSnapshot(0));
             assertNull(reader.readFrame());
         });
     }
@@ -2556,6 +2653,18 @@ final class Av1ImageReaderTest {
         assertFalse(firstLeaf.header().intra());
         assertFalse(firstLeaf.header().compoundReference());
         assertEquals(0, firstLeaf.header().referenceFrame0());
+    }
+
+    /// Captures every currently populated reference-surface slot from one reader.
+    ///
+    /// @param reader the reader whose stored reference surfaces should be copied
+    /// @return one array containing every currently populated reference-surface slot
+    private static ReferenceSurfaceSnapshot[] capturedReferenceSurfaceSlots(Av1ImageReader reader) {
+        ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
+        for (int i = 0; i < slots.length; i++) {
+            slots[i] = Objects.requireNonNull(reader.referenceSurfaceSnapshot(i), "reference surface slot " + i);
+        }
+        return slots;
     }
 
     /// Asserts that every refreshed reference slot stores structural state for the same decoded frame.
