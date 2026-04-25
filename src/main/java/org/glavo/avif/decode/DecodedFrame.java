@@ -43,20 +43,22 @@ public sealed class DecodedFrame permits ArgbIntFrame, ArgbLongFrame {
     /// The zero-based presentation index of the frame.
     private final long presentationIndex;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
-    private volatile @Nullable @Unmodifiable IntBuffer intPixels;
+    private @Nullable
+    @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
-    private volatile @Nullable @Unmodifiable LongBuffer longPixels;
+    private @Nullable
+    @Unmodifiable LongBuffer longPixels;
 
     /// Creates a decoded frame from packed `int` ARGB pixels.
     ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
+    /// @param width             the output frame width in pixels
+    /// @param height            the output frame height in pixels
+    /// @param bitDepth          the decoded bit depth
+    /// @param pixelFormat       the chroma layout
+    /// @param frameType         the AV1 frame type
+    /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
-    /// @param pixels the packed non-premultiplied ARGB pixels
+    /// @param pixels            the packed non-premultiplied ARGB pixels
     public DecodedFrame(
             int width,
             int height,
@@ -73,14 +75,14 @@ public sealed class DecodedFrame permits ArgbIntFrame, ArgbLongFrame {
 
     /// Creates a decoded frame from packed `long` ARGB pixels.
     ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
+    /// @param width             the output frame width in pixels
+    /// @param height            the output frame height in pixels
+    /// @param bitDepth          the decoded bit depth
+    /// @param pixelFormat       the chroma layout
+    /// @param frameType         the AV1 frame type
+    /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
-    /// @param pixels the packed non-premultiplied ARGB pixels
+    /// @param pixels            the packed non-premultiplied ARGB pixels
     public DecodedFrame(
             int width,
             int height,
@@ -100,14 +102,14 @@ public sealed class DecodedFrame permits ArgbIntFrame, ArgbLongFrame {
     /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
     /// immutable storage or storage they will never mutate after construction.
     ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
+    /// @param width             the output frame width in pixels
+    /// @param height            the output frame height in pixels
+    /// @param bitDepth          the decoded bit depth
+    /// @param pixelFormat       the chroma layout
+    /// @param frameType         the AV1 frame type
+    /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
-    /// @param pixels the packed non-premultiplied ARGB pixels
+    /// @param pixels            the packed non-premultiplied ARGB pixels
     public DecodedFrame(
             int width,
             int height,
@@ -127,14 +129,14 @@ public sealed class DecodedFrame permits ArgbIntFrame, ArgbLongFrame {
     /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
     /// immutable storage or storage they will never mutate after construction.
     ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
+    /// @param width             the output frame width in pixels
+    /// @param height            the output frame height in pixels
+    /// @param bitDepth          the decoded bit depth
+    /// @param pixelFormat       the chroma layout
+    /// @param frameType         the AV1 frame type
+    /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
-    /// @param pixels the packed non-premultiplied ARGB pixels
+    /// @param pixels            the packed non-premultiplied ARGB pixels
     public DecodedFrame(
             int width,
             int height,
@@ -151,15 +153,15 @@ public sealed class DecodedFrame permits ArgbIntFrame, ArgbLongFrame {
 
     /// Creates a decoded frame descriptor with one available pixel representation.
     ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
+    /// @param width             the output frame width in pixels
+    /// @param height            the output frame height in pixels
+    /// @param bitDepth          the decoded bit depth
+    /// @param pixelFormat       the chroma layout
+    /// @param frameType         the AV1 frame type
+    /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
-    /// @param intPixels packed `int` pixels, or `null`
-    /// @param longPixels packed `long` pixels, or `null`
+    /// @param intPixels         packed `int` pixels, or `null`
+    /// @param longPixels        packed `long` pixels, or `null`
     private DecodedFrame(
             int width,
             int height,
@@ -255,13 +257,7 @@ public sealed class DecodedFrame permits ArgbIntFrame, ArgbLongFrame {
     public @UnmodifiableView IntBuffer intPixelBuffer() {
         IntBuffer pixels = intPixels;
         if (pixels == null) {
-            synchronized (this) {
-                pixels = intPixels;
-                if (pixels == null) {
-                    pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
-                    intPixels = pixels;
-                }
-            }
+            intPixels = pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
         }
         return pixels.slice();
     }
@@ -287,13 +283,7 @@ public sealed class DecodedFrame permits ArgbIntFrame, ArgbLongFrame {
     public @UnmodifiableView LongBuffer longPixelBuffer() {
         LongBuffer pixels = longPixels;
         if (pixels == null) {
-            synchronized (this) {
-                pixels = longPixels;
-                if (pixels == null) {
-                    pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
-                    longPixels = pixels;
-                }
-            }
+            longPixels = pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
         }
         return pixels.slice();
     }

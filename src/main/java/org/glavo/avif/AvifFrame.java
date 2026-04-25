@@ -40,18 +40,20 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     /// The zero-based frame index.
     private final int frameIndex;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
-    private volatile @Nullable @Unmodifiable IntBuffer intPixels;
+    private @Nullable
+    @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
-    private volatile @Nullable @Unmodifiable LongBuffer longPixels;
+    private @Nullable
+    @Unmodifiable LongBuffer longPixels;
 
     /// Creates an AVIF frame from packed `int` ARGB pixels.
     ///
-    /// @param width the frame width in pixels
-    /// @param height the frame height in pixels
-    /// @param bitDepth the decoded bit depth
+    /// @param width       the frame width in pixels
+    /// @param height      the frame height in pixels
+    /// @param bitDepth    the decoded bit depth
     /// @param pixelFormat the decoded AV1 chroma sampling layout
-    /// @param frameIndex the zero-based frame index
-    /// @param pixels packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
+    /// @param frameIndex  the zero-based frame index
+    /// @param pixels      packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
     public AvifFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, int[] pixels) {
         this(width, height, bitDepth, pixelFormat, frameIndex,
                 PixelBuffers.immutableIntPixels(Objects.requireNonNull(pixels, "pixels")), null);
@@ -59,12 +61,12 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
 
     /// Creates an AVIF frame from packed `long` ARGB pixels.
     ///
-    /// @param width the frame width in pixels
-    /// @param height the frame height in pixels
-    /// @param bitDepth the decoded bit depth
+    /// @param width       the frame width in pixels
+    /// @param height      the frame height in pixels
+    /// @param bitDepth    the decoded bit depth
     /// @param pixelFormat the decoded AV1 chroma sampling layout
-    /// @param frameIndex the zero-based frame index
-    /// @param pixels packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
+    /// @param frameIndex  the zero-based frame index
+    /// @param pixels      packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
     public AvifFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, long[] pixels) {
         this(width, height, bitDepth, pixelFormat, frameIndex,
                 null, PixelBuffers.immutableLongPixels(Objects.requireNonNull(pixels, "pixels")));
@@ -75,12 +77,12 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
     /// immutable storage or storage they will never mutate after construction.
     ///
-    /// @param width the frame width in pixels
-    /// @param height the frame height in pixels
-    /// @param bitDepth the decoded bit depth
+    /// @param width       the frame width in pixels
+    /// @param height      the frame height in pixels
+    /// @param bitDepth    the decoded bit depth
     /// @param pixelFormat the decoded AV1 chroma sampling layout
-    /// @param frameIndex the zero-based frame index
-    /// @param pixels packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
+    /// @param frameIndex  the zero-based frame index
+    /// @param pixels      packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
     public AvifFrame(
             int width,
             int height,
@@ -97,12 +99,12 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
     /// immutable storage or storage they will never mutate after construction.
     ///
-    /// @param width the frame width in pixels
-    /// @param height the frame height in pixels
-    /// @param bitDepth the decoded bit depth
+    /// @param width       the frame width in pixels
+    /// @param height      the frame height in pixels
+    /// @param bitDepth    the decoded bit depth
     /// @param pixelFormat the decoded AV1 chroma sampling layout
-    /// @param frameIndex the zero-based frame index
-    /// @param pixels packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
+    /// @param frameIndex  the zero-based frame index
+    /// @param pixels      packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
     public AvifFrame(
             int width,
             int height,
@@ -116,13 +118,13 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
 
     /// Creates a decoded AVIF frame descriptor with one available pixel representation.
     ///
-    /// @param width the frame width in pixels
-    /// @param height the frame height in pixels
-    /// @param bitDepth the decoded bit depth
+    /// @param width       the frame width in pixels
+    /// @param height      the frame height in pixels
+    /// @param bitDepth    the decoded bit depth
     /// @param pixelFormat the decoded AV1 chroma sampling layout
-    /// @param frameIndex the zero-based frame index
-    /// @param intPixels packed `int` pixels, or `null`
-    /// @param longPixels packed `long` pixels, or `null`
+    /// @param frameIndex  the zero-based frame index
+    /// @param intPixels   packed `int` pixels, or `null`
+    /// @param longPixels  packed `long` pixels, or `null`
     private AvifFrame(
             int width,
             int height,
@@ -200,13 +202,7 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     public @UnmodifiableView IntBuffer intPixelBuffer() {
         IntBuffer pixels = intPixels;
         if (pixels == null) {
-            synchronized (this) {
-                pixels = intPixels;
-                if (pixels == null) {
-                    pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
-                    intPixels = pixels;
-                }
-            }
+            intPixels = pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
         }
         return pixels.slice();
     }
@@ -232,13 +228,7 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     public @UnmodifiableView LongBuffer longPixelBuffer() {
         LongBuffer pixels = longPixels;
         if (pixels == null) {
-            synchronized (this) {
-                pixels = longPixels;
-                if (pixels == null) {
-                    pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
-                    longPixels = pixels;
-                }
-            }
+            longPixels = pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
         }
         return pixels.slice();
     }
