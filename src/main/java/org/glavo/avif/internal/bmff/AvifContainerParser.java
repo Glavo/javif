@@ -45,6 +45,8 @@ public final class AvifContainerParser {
     private static final String XMP_CONTENT_TYPE = "application/rdf+xml";
     /// The maximum gain-map metadata version supported by this parser.
     private static final int SUPPORTED_GAIN_MAP_METADATA_VERSION = 0;
+    /// Internal marker for an indefinite track duration.
+    private static final long INDEFINITE_TRACK_DURATION = -1L;
 
     /// The source bytes.
     private final byte @Unmodifiable [] source;
@@ -1218,7 +1220,8 @@ public final class AvifContainerParser {
                 "Depth sequence"
         );
         int ts = s.mediaTimescale > 0 ? s.mediaTimescale : 30;
-        long dur = s.mediaDuration > 0 ? s.mediaDuration : colorPayloads.sampleCount;
+        long dur = sequenceDuration(s, colorPayloads);
+        int repetitionCount = sequenceRepetitionCount(s);
         AvifImageInfo info = new AvifImageInfo(
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
@@ -1240,13 +1243,85 @@ public final class AvifContainerParser {
                 -1,
                 -1,
                 -1,
-                meta.moovAuxiliaryTypes.toArray(String[]::new));
+                meta.moovAuxiliaryTypes.toArray(String[]::new),
+                null,
+                null,
+                repetitionCount);
         return new AvifContainer(info,
                 colorPayloads.payloads,
                 alphaPayloads,
                 depthPayloads,
                 colorPayloads.frameDeltas,
                 colorPayloads.sampleCount, ts, dur);
+    }
+
+    /// Resolves and validates the total sequence duration.
+    ///
+    /// @param track the parsed color track state
+    /// @param payloads the extracted color sample payloads
+    /// @return the reconciled duration in media timescale units
+    /// @throws AvifDecodeException if the advertised duration conflicts with per-frame durations
+    private static long sequenceDuration(MoovState track, SequencePayloads payloads) throws AvifDecodeException {
+        long frameDurationSum = frameDurationSum(payloads.frameDeltas);
+        if (track.editListRepeating && track.editListSegmentDuration != frameDurationSum) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Color sequence edit-list duration does not match frame durations: "
+                            + track.editListSegmentDuration + " != " + frameDurationSum,
+                    null
+            );
+        }
+        if (track.mediaDuration == 0) {
+            return frameDurationSum;
+        }
+        if (track.mediaDuration != frameDurationSum) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Color sequence media duration does not match frame durations: "
+                            + track.mediaDuration + " != " + frameDurationSum,
+                    null
+            );
+        }
+        return track.mediaDuration;
+    }
+
+    /// Resolves the animated-sequence repetition count from a parsed edit list.
+    ///
+    /// @param track the parsed color track state
+    /// @return the public repetition-count value
+    /// @throws AvifDecodeException if a repeating edit list has an invalid track duration
+    private static int sequenceRepetitionCount(MoovState track) throws AvifDecodeException {
+        if (!track.editListSeen) {
+            return AvifImageInfo.REPETITION_COUNT_UNKNOWN;
+        }
+        if (!track.editListRepeating) {
+            return 0;
+        }
+        if (track.trackDuration == INDEFINITE_TRACK_DURATION) {
+            return AvifImageInfo.REPETITION_COUNT_INFINITE;
+        }
+        if (track.trackDuration == 0) {
+            throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Invalid repeating edit-list track duration", null);
+        }
+        long segmentDuration = track.editListSegmentDuration;
+        long repetitionCount = (track.trackDuration / segmentDuration)
+                + (track.trackDuration % segmentDuration != 0 ? 1 : 0)
+                - 1;
+        return repetitionCount > Integer.MAX_VALUE
+                ? AvifImageInfo.REPETITION_COUNT_INFINITE
+                : (int) repetitionCount;
+    }
+
+    /// Sums per-frame duration deltas.
+    ///
+    /// @param frameDeltas the frame duration deltas
+    /// @return the total duration
+    private static long frameDurationSum(int @Unmodifiable [] frameDeltas) {
+        long sum = 0;
+        for (int frameDelta : frameDeltas) {
+            sum += frameDelta;
+        }
+        return sum;
     }
 
     /// Extracts sample payloads and frame deltas from one AVIS track.
@@ -1421,11 +1496,19 @@ public final class AvifContainerParser {
 
     /// Parses a `trak` box and extracts video track metadata.
     private void parseMoovTrack(BoxInput input) throws AvifDecodeException {
+        boolean edtsSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
                 case "tkhd" -> parseMoovTkhd(payload);
+                case "edts" -> {
+                    if (edtsSeen) {
+                        throw parseFailed("Box[trak] contains a duplicate unique box of type 'edts'", child.offset());
+                    }
+                    edtsSeen = true;
+                    parseMoovEdts(payload);
+                }
                 case "mdia" -> parseMoovMdia(payload);
                 default -> {}
             }
@@ -1443,7 +1526,7 @@ public final class AvifContainerParser {
         }
         input.readU32();
         input.skip(4);
-        input.skip(fb.version == 1 ? 8 : 4);
+        meta.moovState.trackDuration = fb.version == 1 ? readTrackDuration64(input) : readTrackDuration32(input);
         input.skip(52);
         long w = input.readU32();
         long h = input.readU32();
@@ -1455,6 +1538,51 @@ public final class AvifContainerParser {
         if (height > 0 && meta.moovState.height == 0) {
             meta.moovState.height = height;
         }
+    }
+
+    /// Parses an `edts` box for AVIS edit-list metadata.
+    private void parseMoovEdts(BoxInput input) throws AvifDecodeException {
+        boolean elstSeen = false;
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            if ("elst".equals(child.type())) {
+                if (elstSeen) {
+                    throw parseFailed("More than one [elst] box was found", child.offset());
+                }
+                elstSeen = true;
+                BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
+                parseMoovElst(payload);
+            }
+            input.skipBoxPayload(child);
+        }
+        if (!elstSeen) {
+            throw parseFailed("Box[edts] contains no [elst] box", input.offset());
+        }
+    }
+
+    /// Parses an `elst` box for AVIS repetition metadata.
+    private void parseMoovElst(BoxInput input) throws AvifDecodeException {
+        FullBox fb = readFullBox(input);
+        meta.moovState.editListSeen = true;
+        if ((fb.flags & 1) == 0) {
+            meta.moovState.editListRepeating = false;
+            return;
+        }
+        if (fb.version != 0 && fb.version != 1) {
+            throw parseFailed("Box[elst] has an unsupported version: " + fb.version, input.offset() - 4);
+        }
+        int entryCount = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        if (entryCount != 1) {
+            throw parseFailed("Box[elst] contains an entry_count != 1: " + entryCount, input.offset() - 4);
+        }
+        long segmentDuration = fb.version == 1 ? input.readU64() : input.readU32();
+        if (segmentDuration == 0) {
+            throw parseFailed("Box[elst] has a zero segment_duration", input.offset() - (fb.version == 1 ? 8 : 4));
+        }
+        input.skip(fb.version == 1 ? 8 : 4);
+        input.skip(4);
+        meta.moovState.editListRepeating = true;
+        meta.moovState.editListSegmentDuration = segmentDuration;
     }
 
     /// Parses a `mdia` box to reach the media information and sample table.
@@ -1584,6 +1712,12 @@ public final class AvifContainerParser {
         for (int i = 0; i < n; i++) {
             int sc = checkedU32ToInt(input.readU32(), input.offset() - 4);
             int sd = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            if (sc <= 0) {
+                throw parseFailed("stts sample_count must be positive", input.offset() - 8);
+            }
+            if (sd <= 0) {
+                throw parseFailed("stts sample_delta must be positive", input.offset() - 4);
+            }
             for (int j = 0; j < sc; j++) meta.moovState.sampleDeltas.add(sd);
         }
     }
@@ -2126,6 +2260,33 @@ public final class AvifContainerParser {
         };
     }
 
+    /// Reads a 32-bit track duration while preserving the indefinite-duration marker.
+    ///
+    /// @param input the input to read from
+    /// @return the parsed duration, or `INDEFINITE_TRACK_DURATION`
+    /// @throws AvifDecodeException if the input is truncated
+    private static long readTrackDuration32(BoxInput input) throws AvifDecodeException {
+        long value = input.readU32();
+        return value == 0xFFFF_FFFFL ? INDEFINITE_TRACK_DURATION : value;
+    }
+
+    /// Reads a 64-bit track duration while preserving the indefinite-duration marker.
+    ///
+    /// @param input the input to read from
+    /// @return the parsed duration, or `INDEFINITE_TRACK_DURATION`
+    /// @throws AvifDecodeException if the input is truncated or the value exceeds the supported range
+    private static long readTrackDuration64(BoxInput input) throws AvifDecodeException {
+        long high = input.readU32();
+        long low = input.readU32();
+        if (high == 0xFFFF_FFFFL && low == 0xFFFF_FFFFL) {
+            return INDEFINITE_TRACK_DURATION;
+        }
+        if ((high & 0x8000_0000L) != 0) {
+            throw parseFailed("64-bit track duration exceeds supported range", input.offset() - 8);
+        }
+        return (high << 32) | low;
+    }
+
     /// Validates an `iloc` variable integer field size.
     ///
     /// @param byteCount the byte count to validate
@@ -2375,6 +2536,14 @@ public final class AvifContainerParser {
         private int mediaTimescale;
         /// The parsed image sequence media duration.
         private long mediaDuration;
+        /// The parsed track duration from `tkhd`.
+        private long trackDuration;
+        /// Whether an edit list was parsed for this track.
+        private boolean editListSeen;
+        /// Whether the edit list signals repetition semantics.
+        private boolean editListRepeating;
+        /// The edit-list segment duration for repeating tracks.
+        private long editListSegmentDuration;
         /// The parsed AV1 sequence header OBU, or `null` before an AV1 track is found.
         private byte @Nullable [] seqHeaderObu;
         /// The AVIS auxiliary track type, or `null` for the selected color track.
@@ -2411,6 +2580,10 @@ public final class AvifContainerParser {
             iccProfile = other.iccProfile == null ? null : other.iccProfile.clone();
             mediaTimescale = other.mediaTimescale;
             mediaDuration = other.mediaDuration;
+            trackDuration = other.trackDuration;
+            editListSeen = other.editListSeen;
+            editListRepeating = other.editListRepeating;
+            editListSegmentDuration = other.editListSegmentDuration;
             seqHeaderObu = other.seqHeaderObu == null ? null : other.seqHeaderObu.clone();
             auxiliaryType = other.auxiliaryType;
             sampleDeltas.clear();

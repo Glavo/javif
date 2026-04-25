@@ -16,6 +16,7 @@
 package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
@@ -577,12 +578,69 @@ final class AvifImageReaderTest {
         assertMinimalAvisSequence(minimalAvisSequenceWithSplitChunks(true));
     }
 
+    /// Verifies that AVIS media duration falls back to summed frame durations when `mdhd` omits it.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceDurationFromFrameDeltasWhenMediaDurationIsMissing() throws IOException {
+        assertMinimalAvisSequence(minimalAvisSequenceWithSplitChunks(false, 3, 1, 0, 1));
+    }
+
+    /// Verifies that a non-repeating AVIS edit list is reflected in sequence metadata.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceWithNonRepeatingEditList() throws IOException {
+        assertMinimalAvisSequence(
+                minimalAvisSequenceWithEditList(3, false, 3),
+                0
+        );
+    }
+
+    /// Verifies that a repeating AVIS edit list is reflected in sequence metadata.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceWithRepeatingEditList() throws IOException {
+        assertMinimalAvisSequence(minimalAvisSequenceWithEditList(6, true, 3), 1);
+    }
+
     /// Verifies that malformed AVIS timing tables are rejected.
     @Test
     void rejectsAnimatedSequenceWithIncompleteTimingTable() {
         AvifDecodeException exception = assertThrows(
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 2, 1))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that AVIS media duration must match summed frame durations.
+    @Test
+    void rejectsAnimatedSequenceWithMismatchedMediaDuration() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 3, 1, 2, 1))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that zero AVIS frame durations are rejected.
+    @Test
+    void rejectsAnimatedSequenceWithZeroFrameDuration() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 3, 1, 3, 0))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that repeating AVIS edit-list duration must match summed frame durations.
+    @Test
+    void rejectsAnimatedSequenceWithMismatchedEditListDuration() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithEditList(6, true, 2))
         );
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
@@ -681,6 +739,15 @@ final class AvifImageReaderTest {
     /// @param bytes the sequence bytes
     /// @throws IOException if the sequence cannot be read or decoded
     private static void assertMinimalAvisSequence(byte[] bytes) throws IOException {
+        assertMinimalAvisSequence(bytes, AvifImageInfo.REPETITION_COUNT_UNKNOWN);
+    }
+
+    /// Asserts the synthetic minimal AVIS sequence.
+    ///
+    /// @param bytes the sequence bytes
+    /// @param expectedRepetitionCount the expected sequence repetition count
+    /// @throws IOException if the sequence cannot be read or decoded
+    private static void assertMinimalAvisSequence(byte[] bytes, int expectedRepetitionCount) throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(bytes)) {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
@@ -689,6 +756,7 @@ final class AvifImageReaderTest {
             assertEquals(3, info.frameCount());
             assertEquals(30, info.mediaTimescale());
             assertEquals(3, info.mediaDuration());
+            assertEquals(expectedRepetitionCount, info.repetitionCount());
 
             List<AvifFrame> frames = reader.readAllFrames();
             assertEquals(3, frames.size());
@@ -1423,7 +1491,7 @@ final class AvifImageReaderTest {
     /// @param useCo64 whether to encode chunk offsets with `co64`
     /// @return the complete AVIS test file bytes
     private static byte[] minimalAvisSequenceWithSplitChunks(boolean useCo64) {
-        return minimalAvisSequenceWithSplitChunks(useCo64, 3, 1);
+        return minimalAvisSequenceWithSplitChunks(useCo64, 3, 1, 3, 1);
     }
 
     /// Creates a minimal AVIS sequence with configurable timing and sample-to-chunk tables.
@@ -1437,6 +1505,76 @@ final class AvifImageReaderTest {
             int timingSampleCount,
             int firstStscChunk
     ) {
+        return minimalAvisSequenceWithSplitChunks(useCo64, timingSampleCount, firstStscChunk, 3, 1);
+    }
+
+    /// Creates a minimal AVIS sequence with configurable duration and sample tables.
+    ///
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithSplitChunks(
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta
+    ) {
+        return minimalAvisSequenceWithSplitChunks(
+                useCo64,
+                timingSampleCount,
+                firstStscChunk,
+                mediaDuration,
+                sampleDelta,
+                mediaDuration,
+                null
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with an edit list.
+    ///
+    /// @param trackDuration the duration written to `tkhd`
+    /// @param repeating whether the edit list signals repetition semantics
+    /// @param editListSegmentDuration the edit-list segment duration
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithEditList(
+            int trackDuration,
+            boolean repeating,
+            int editListSegmentDuration
+    ) {
+        return minimalAvisSequenceWithSplitChunks(
+                false,
+                3,
+                1,
+                3,
+                1,
+                trackDuration,
+                editListBox(repeating, editListSegmentDuration)
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with configurable track and edit-list metadata.
+    ///
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param trackDuration the duration written to `tkhd`
+    /// @param editList the optional `edts` box
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithSplitChunks(
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
+            int trackDuration,
+            byte @Nullable [] editList
+    ) {
         byte[] sample0 = av1StillPicturePayload();
         byte[] sample1 = av1StillPicturePayload();
         byte[] sample2 = av1StillPicturePayload();
@@ -1449,6 +1587,10 @@ final class AvifImageReaderTest {
                 useCo64,
                 timingSampleCount,
                 firstStscChunk,
+                mediaDuration,
+                sampleDelta,
+                trackDuration,
+                editList,
                 sample0.length,
                 sample1.length,
                 sample2.length
@@ -1460,6 +1602,10 @@ final class AvifImageReaderTest {
                 useCo64,
                 timingSampleCount,
                 firstStscChunk,
+                mediaDuration,
+                sampleDelta,
+                trackDuration,
+                editList,
                 sample0.length,
                 sample1.length,
                 sample2.length
@@ -1473,6 +1619,10 @@ final class AvifImageReaderTest {
     /// @param useCo64 whether to encode chunk offsets with `co64`
     /// @param timingSampleCount the sample count covered by `stts`
     /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param trackDuration the duration written to `tkhd`
+    /// @param editList the optional `edts` box
     /// @param sampleSizes the sample sizes
     /// @return the `moov` box bytes
     private static byte[] minimalAvisMoovBox(
@@ -1480,18 +1630,31 @@ final class AvifImageReaderTest {
             boolean useCo64,
             int timingSampleCount,
             int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
+            int trackDuration,
+            byte @Nullable [] editList,
             int... sampleSizes
     ) {
         return box(
                 "moov",
-                box("trak", trackHeaderBox(), mediaBox(chunkOffsets, useCo64, timingSampleCount, firstStscChunk, sampleSizes))
+                box("trak", trackHeaderBox(trackDuration), editList == null ? new byte[0] : editList, mediaBox(
+                        chunkOffsets,
+                        useCo64,
+                        timingSampleCount,
+                        firstStscChunk,
+                        mediaDuration,
+                        sampleDelta,
+                        sampleSizes
+                ))
         );
     }
 
     /// Creates a minimal AVIS track header.
     ///
+    /// @param trackDuration the duration written to `tkhd`
     /// @return the `tkhd` box bytes
-    private static byte[] trackHeaderBox() {
+    private static byte[] trackHeaderBox(int trackDuration) {
         return fullBox(
                 "tkhd",
                 0,
@@ -1499,10 +1662,31 @@ final class AvifImageReaderTest {
                 new byte[8],
                 u32(1),
                 u32(0),
-                u32(3),
+                u32(trackDuration),
                 new byte[52],
                 u32(64 << 16),
                 u32(64 << 16)
+        );
+    }
+
+    /// Creates a minimal AVIS edit list.
+    ///
+    /// @param repeating whether the edit list signals repetition semantics
+    /// @param segmentDuration the edit-list segment duration
+    /// @return the `edts` box bytes
+    private static byte[] editListBox(boolean repeating, int segmentDuration) {
+        return box(
+                "edts",
+                fullBox(
+                        "elst",
+                        0,
+                        repeating ? 1 : 0,
+                        u32(1),
+                        u32(segmentDuration),
+                        u32(0),
+                        u16(1),
+                        u16(0)
+                )
         );
     }
 
@@ -1512,6 +1696,8 @@ final class AvifImageReaderTest {
     /// @param useCo64 whether to encode chunk offsets with `co64`
     /// @param timingSampleCount the sample count covered by `stts`
     /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
     /// @param sampleSizes the sample sizes
     /// @return the `mdia` box bytes
     private static byte[] mediaBox(
@@ -1519,20 +1705,30 @@ final class AvifImageReaderTest {
             boolean useCo64,
             int timingSampleCount,
             int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
             int... sampleSizes
     ) {
         return box(
                 "mdia",
-                mediaHeaderBox(),
-                box("minf", sampleTableBox(chunkOffsets, useCo64, timingSampleCount, firstStscChunk, sampleSizes))
+                mediaHeaderBox(mediaDuration),
+                box("minf", sampleTableBox(
+                        chunkOffsets,
+                        useCo64,
+                        timingSampleCount,
+                        firstStscChunk,
+                        sampleDelta,
+                        sampleSizes
+                ))
         );
     }
 
     /// Creates a minimal AVIS media header.
     ///
+    /// @param mediaDuration the duration written to `mdhd`
     /// @return the `mdhd` box bytes
-    private static byte[] mediaHeaderBox() {
-        return fullBox("mdhd", 0, 0, u32(0), u32(0), u32(30), u32(3), u16(0), u16(0));
+    private static byte[] mediaHeaderBox(int mediaDuration) {
+        return fullBox("mdhd", 0, 0, u32(0), u32(0), u32(30), u32(mediaDuration), u16(0), u16(0));
     }
 
     /// Creates a minimal AVIS sample table.
@@ -1541,6 +1737,7 @@ final class AvifImageReaderTest {
     /// @param useCo64 whether to encode chunk offsets with `co64`
     /// @param timingSampleCount the sample count covered by `stts`
     /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param sampleDelta the constant sample delta written to `stts`
     /// @param sampleSizes the sample sizes
     /// @return the `stbl` box bytes
     private static byte[] sampleTableBox(
@@ -1548,12 +1745,13 @@ final class AvifImageReaderTest {
             boolean useCo64,
             int timingSampleCount,
             int firstStscChunk,
+            int sampleDelta,
             int... sampleSizes
     ) {
         return box(
                 "stbl",
                 sampleDescriptionBox(),
-                timeToSampleBox(timingSampleCount),
+                timeToSampleBox(timingSampleCount, sampleDelta),
                 sampleToChunkBox(firstStscChunk),
                 chunkOffsetBox(chunkOffsets, useCo64),
                 sampleSizeBox(sampleSizes)
@@ -1577,9 +1775,10 @@ final class AvifImageReaderTest {
     /// Creates a constant frame-duration sample table.
     ///
     /// @param sampleCount the sample count
+    /// @param sampleDelta the constant sample delta
     /// @return the `stts` box bytes
-    private static byte[] timeToSampleBox(int sampleCount) {
-        return fullBox("stts", 0, 0, u32(1), u32(sampleCount), u32(1));
+    private static byte[] timeToSampleBox(int sampleCount, int sampleDelta) {
+        return fullBox("stts", 0, 0, u32(1), u32(sampleCount), u32(sampleDelta));
     }
 
     /// Creates a sample-to-chunk table with one sample in the first chunk and two in the second.

@@ -27,6 +27,11 @@ import java.util.Objects;
 /// Immutable metadata for one parsed AVIF image.
 @NotNullByDefault
 public final class AvifImageInfo {
+    /// Repetition count value used when an animated sequence has no edit list.
+    public static final int REPETITION_COUNT_UNKNOWN = -1;
+    /// Repetition count value used when an animated sequence repeats indefinitely.
+    public static final int REPETITION_COUNT_INFINITE = -2;
+
     /// The display width in pixels.
     private final int width;
     /// The display height in pixels.
@@ -45,6 +50,8 @@ public final class AvifImageInfo {
     private final int mediaTimescale;
     /// The total media duration in media timescale units, or zero when absent.
     private final long mediaDuration;
+    /// The repetition count for animated sequences.
+    private final int repetitionCount;
     /// Per-frame durations in media timescale units.
     private final int @Unmodifiable [] frameDurations;
     /// The clean-aperture crop x coordinate, or -1 when absent.
@@ -397,6 +404,89 @@ public final class AvifImageInfo {
             AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
             @Nullable AvifGainMapInfo gainMapInfo
     ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                pixelFormat,
+                alphaPresent,
+                animated,
+                frameCount,
+                colorInfo,
+                iccProfile,
+                exif,
+                xmp,
+                mediaTimescale,
+                mediaDuration,
+                frameDurations,
+                cleanApertureCropX,
+                cleanApertureCropY,
+                cleanApertureCropWidth,
+                cleanApertureCropHeight,
+                rotationCode,
+                mirrorAxis,
+                auxiliaryImageTypes,
+                auxiliaryImages,
+                gainMapInfo,
+                REPETITION_COUNT_UNKNOWN
+        );
+    }
+
+    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, gain-map metadata,
+    /// and sequence repetition metadata.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
+    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
+    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
+    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
+    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
+    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
+    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
+    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
+    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
+    /// @param repetitionCount the animated-sequence repetition count, `REPETITION_COUNT_UNKNOWN`, or
+    /// `REPETITION_COUNT_INFINITE`
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
+            int mediaTimescale,
+            long mediaDuration,
+            int @Nullable [] frameDurations,
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight,
+            int rotationCode,
+            int mirrorAxis,
+            String @Nullable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
+            @Nullable AvifGainMapInfo gainMapInfo,
+            int repetitionCount
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -423,6 +513,11 @@ public final class AvifImageInfo {
         if (mirrorAxis < -1 || mirrorAxis > 1) {
             throw new IllegalArgumentException("mirrorAxis must be -1, 0, or 1: " + mirrorAxis);
         }
+        if (repetitionCount < 0
+                && repetitionCount != REPETITION_COUNT_UNKNOWN
+                && repetitionCount != REPETITION_COUNT_INFINITE) {
+            throw new IllegalArgumentException("Invalid repetition count: " + repetitionCount);
+        }
 
         int @Unmodifiable [] checkedFrameDurations = immutableFrameDurations(frameDurations);
         if (checkedFrameDurations.length != 0 && checkedFrameDurations.length != frameCount) {
@@ -440,6 +535,7 @@ public final class AvifImageInfo {
         this.frameCount = frameCount;
         this.mediaTimescale = mediaTimescale;
         this.mediaDuration = mediaDuration;
+        this.repetitionCount = repetitionCount;
         this.frameDurations = checkedFrameDurations;
         this.cleanApertureCropX = cleanApertureCropX;
         this.cleanApertureCropY = cleanApertureCropY;
@@ -525,6 +621,17 @@ public final class AvifImageInfo {
     /// @return the total media duration, or zero when absent
     public long mediaDuration() {
         return mediaDuration;
+    }
+
+    /// Returns the animated-sequence repetition count.
+    ///
+    /// A non-negative value is the number of repetitions after the first playback. Zero means the
+    /// sequence should play once. `REPETITION_COUNT_UNKNOWN` means the container did not expose an
+    /// edit list, and `REPETITION_COUNT_INFINITE` means the sequence repeats indefinitely.
+    ///
+    /// @return the repetition count, `REPETITION_COUNT_UNKNOWN`, or `REPETITION_COUNT_INFINITE`
+    public int repetitionCount() {
+        return repetitionCount;
     }
 
     /// Returns per-frame durations for animated sequences.
