@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.bmff;
 
+import org.glavo.avif.AvifAuxiliaryImageInfo;
 import org.glavo.avif.AvifColorInfo;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifDecodeException;
@@ -178,7 +179,8 @@ public final class AvifContainerParser {
                 transformParams[3],
                 transformParams[4],
                 transformParams[5],
-                auxiliaryImageTypes(primaryItem.id)
+                null,
+                auxiliaryImages(primaryItem.id)
         );
 
         return new AvifContainer(info, payload, alphaPayload,
@@ -218,7 +220,8 @@ public final class AvifContainerParser {
                 transforms[3],
                 transforms[4],
                 transforms[5],
-                auxiliaryImageTypes(gridItem.id)
+                null,
+                auxiliaryImages(gridItem.id)
         );
 
         return new AvifContainer(info, colorGrid.cellPayloads,
@@ -1507,7 +1510,7 @@ public final class AvifContainerParser {
         for (Item item : meta.items.values()) {
             if (item.auxForId == itemId || (masterItem != null && masterItem.auxForId == item.id)) {
                 AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
-                if (aux != null && "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha".equals(aux.type)) {
+                if (aux != null && AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(aux.type)) {
                     return item;
                 }
             }
@@ -1515,22 +1518,37 @@ public final class AvifContainerParser {
         return null;
     }
 
-    /// Returns auxiliary image type strings associated with one master image item.
+    /// Returns auxiliary image descriptors associated with one master image item.
     ///
     /// @param itemId the master image item id
-    /// @return auxiliary image type strings
-    private String[] auxiliaryImageTypes(int itemId) {
+    /// @return auxiliary image descriptors
+    private AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages(int itemId) {
         Item masterItem = meta.item(itemId);
-        ArrayList<String> types = new ArrayList<>();
+        ArrayList<AvifAuxiliaryImageInfo> images = new ArrayList<>();
         for (Item item : meta.items.values()) {
             if (item.auxForId == itemId || (masterItem != null && masterItem.auxForId == item.id)) {
                 AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
-                if (aux != null && !types.contains(aux.type)) {
-                    types.add(aux.type);
+                if (aux != null) {
+                    images.add(auxiliaryImageInfo(item, aux));
                 }
             }
         }
-        return types.toArray(String[]::new);
+        return images.toArray(AvifAuxiliaryImageInfo[]::new);
+    }
+
+    /// Creates a public auxiliary image descriptor from one parsed item.
+    ///
+    /// @param item the auxiliary item
+    /// @param auxiliaryType the parsed auxiliary image type
+    /// @return an auxiliary image descriptor
+    private static AvifAuxiliaryImageInfo auxiliaryImageInfo(Item item, AuxiliaryType auxiliaryType) {
+        @Nullable ImageSpatialExtents ispe = item.firstProperty(ImageSpatialExtents.class);
+        @Nullable Av1Config av1Config = item.firstProperty(Av1Config.class);
+        int width = ispe != null ? ispe.width : -1;
+        int height = ispe != null ? ispe.height : -1;
+        @Nullable AvifBitDepth bitDepth = av1Config != null ? AvifBitDepth.fromBits(av1Config.bitDepth()) : null;
+        @Nullable AvifPixelFormat pixelFormat = av1Config != null ? av1Config.pixelFormat() : null;
+        return new AvifAuxiliaryImageInfo(item.id, auxiliaryType.type, item.type, width, height, bitDepth, pixelFormat);
     }
 
     /// Merges item extents into one contiguous payload.

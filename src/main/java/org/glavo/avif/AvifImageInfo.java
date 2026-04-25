@@ -61,6 +61,8 @@ public final class AvifImageInfo {
     private final int mirrorAxis;
     /// Auxiliary image type strings associated with the primary image.
     private final String @Unmodifiable [] auxiliaryImageTypes;
+    /// Auxiliary image descriptors associated with the primary image.
+    private final AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages;
     /// The parsed color information, or `null`.
     private final @Nullable AvifColorInfo colorInfo;
     /// The embedded ICC profile payload, or `null`.
@@ -240,6 +242,80 @@ public final class AvifImageInfo {
             int mirrorAxis,
             String @Nullable [] auxiliaryImageTypes
     ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                pixelFormat,
+                alphaPresent,
+                animated,
+                frameCount,
+                colorInfo,
+                iccProfile,
+                exif,
+                xmp,
+                mediaTimescale,
+                mediaDuration,
+                frameDurations,
+                cleanApertureCropX,
+                cleanApertureCropY,
+                cleanApertureCropWidth,
+                cleanApertureCropHeight,
+                rotationCode,
+                mirrorAxis,
+                auxiliaryImageTypes,
+                null
+        );
+    }
+
+    /// Creates image metadata with embedded metadata payloads, sequence timing, transforms, and auxiliary metadata.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
+    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
+    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
+    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
+    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
+    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
+    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
+    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
+            int mediaTimescale,
+            long mediaDuration,
+            int @Nullable [] frameDurations,
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight,
+            int rotationCode,
+            int mirrorAxis,
+            String @Nullable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -290,7 +366,11 @@ public final class AvifImageInfo {
         this.cleanApertureCropHeight = cleanApertureCropHeight;
         this.rotationCode = rotationCode;
         this.mirrorAxis = mirrorAxis;
-        this.auxiliaryImageTypes = immutableAuxiliaryImageTypes(auxiliaryImageTypes);
+        AvifAuxiliaryImageInfo @Unmodifiable [] checkedAuxiliaryImages = immutableAuxiliaryImages(auxiliaryImages);
+        this.auxiliaryImageTypes = auxiliaryImageTypes != null
+                ? immutableAuxiliaryImageTypes(auxiliaryImageTypes)
+                : auxiliaryImageTypesFromDescriptors(checkedAuxiliaryImages);
+        this.auxiliaryImages = checkedAuxiliaryImages;
         this.colorInfo = colorInfo;
         this.iccProfile = immutableBytes(iccProfile);
         this.exif = immutableBytes(exif);
@@ -447,6 +527,15 @@ public final class AvifImageInfo {
         return auxiliaryImageTypes.clone();
     }
 
+    /// Returns auxiliary image descriptors associated with the primary image.
+    ///
+    /// The returned array includes alpha auxiliary images when present.
+    ///
+    /// @return auxiliary image descriptors associated with the primary image
+    public AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages() {
+        return auxiliaryImages.clone();
+    }
+
     /// Returns the parsed color information.
     ///
     /// @return the parsed color information, or `null`
@@ -519,6 +608,51 @@ public final class AvifImageInfo {
             Objects.requireNonNull(auxiliaryImageType, "auxiliaryImageTypes element");
         }
         return result;
+    }
+
+    /// Creates immutable storage for auxiliary image descriptors.
+    ///
+    /// @param auxiliaryImages the source auxiliary image descriptors, or `null`
+    /// @return immutable auxiliary image descriptor storage
+    private static AvifAuxiliaryImageInfo @Unmodifiable [] immutableAuxiliaryImages(
+            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages
+    ) {
+        if (auxiliaryImages == null || auxiliaryImages.length == 0) {
+            return new AvifAuxiliaryImageInfo[0];
+        }
+        AvifAuxiliaryImageInfo[] result = auxiliaryImages.clone();
+        for (AvifAuxiliaryImageInfo auxiliaryImage : result) {
+            Objects.requireNonNull(auxiliaryImage, "auxiliaryImages element");
+        }
+        return result;
+    }
+
+    /// Creates auxiliary image type storage from auxiliary image descriptors.
+    ///
+    /// @param auxiliaryImages the auxiliary image descriptors
+    /// @return auxiliary image type storage
+    private static String @Unmodifiable [] auxiliaryImageTypesFromDescriptors(
+            AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages
+    ) {
+        if (auxiliaryImages.length == 0) {
+            return new String[0];
+        }
+        String[] result = new String[auxiliaryImages.length];
+        int size = 0;
+        for (AvifAuxiliaryImageInfo auxiliaryImage : auxiliaryImages) {
+            String type = auxiliaryImage.auxiliaryType();
+            boolean seen = false;
+            for (int i = 0; i < size; i++) {
+                if (result[i].equals(type)) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                result[size++] = type;
+            }
+        }
+        return Arrays.copyOf(result, size);
     }
 
     /// Returns whether clean-aperture parameters represent an absent property.

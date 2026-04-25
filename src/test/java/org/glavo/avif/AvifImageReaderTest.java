@@ -51,7 +51,7 @@ final class AvifImageReaderTest {
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
 
     /// The alpha auxiliary image type URN used by AVIF alpha items.
-    private static final String AUXILIARY_ALPHA_TYPE = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha";
+    private static final String AUXILIARY_ALPHA_TYPE = AvifAuxiliaryImageInfo.ALPHA_TYPE;
 
     /// The smallest still-image fixture copied from libavif's test data into test resources.
     private static final String LIBAVIF_WHITE_1X1_FIXTURE = "libavif-test-data/white_1x1.avif";
@@ -399,15 +399,48 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that a clap clean-aperture transform is exposed and applied.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameAppliesCleanApertureTransform() throws IOException {
+        byte[] bytes = minimalAvifWithProperty("clap", cleanAperturePropertyPayload(32, 16, 8, 4));
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.hasCleanApertureCrop());
+            assertEquals(8, info.cleanApertureCropX());
+            assertEquals(4, info.cleanApertureCropY());
+            assertEquals(32, info.cleanApertureCropWidth());
+            assertEquals(16, info.cleanApertureCropHeight());
+            assertEquals(-1, info.rotationCode());
+            assertEquals(-1, info.mirrorAxis());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(32, frame.width());
+            assertEquals(16, frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Builds a minimal AVIF with a transform property on the primary item.
     ///
     /// @param transformType the transform property type
     /// @param transformValue the single-byte transform value
     /// @return the AVIF container bytes
     private static byte[] minimalAvifWithTransform(String transformType, byte transformValue) {
+        return minimalAvifWithProperty(transformType, new byte[]{transformValue});
+    }
+
+    /// Builds a minimal AVIF with one property on the primary item.
+    ///
+    /// @param propertyType the property box type
+    /// @param propertyPayload the property payload bytes
+    /// @return the AVIF container bytes
+    private static byte[] minimalAvifWithProperty(String propertyType, byte[] propertyPayload) {
         byte[] av1Payload = av1StillPicturePayload();
         byte[] ftyp = fileTypeBox();
-        byte[] transform = box(transformType, new byte[]{transformValue});
+        byte[] transform = box(propertyType, propertyPayload);
         byte[] iprpBox = box("iprp",
                 box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty(), transform),
                 fullBox("ipma", 0, 0,
@@ -424,6 +457,22 @@ final class AvifImageReaderTest {
                 handlerBox(), primaryItemBox(), iloc, itemInfoBox(), iprpBox
         );
         return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
+    /// Creates a `clap` property payload.
+    ///
+    /// @param width the clean-aperture width
+    /// @param height the clean-aperture height
+    /// @param x the clean-aperture x coordinate
+    /// @param y the clean-aperture y coordinate
+    /// @return the `clap` property payload bytes
+    private static byte[] cleanAperturePropertyPayload(int width, int height, int x, int y) {
+        return concat(
+                u32(width), u32(1),
+                u32(height), u32(1),
+                u32(x), u32(1),
+                u32(y), u32(1)
+        );
     }
 
     /// Creates an iloc box with placeholder (zero) offsets.
@@ -473,6 +522,19 @@ final class AvifImageReaderTest {
             assertTrue(contains(auxiliaryImageTypes, AUXILIARY_ALPHA_TYPE));
             auxiliaryImageTypes[0] = "mutated";
             assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
+            AvifAuxiliaryImageInfo[] auxiliaryImages = info.auxiliaryImages();
+            assertEquals(1, auxiliaryImages.length);
+            AvifAuxiliaryImageInfo auxiliaryImage = auxiliaryImages[0];
+            assertTrue(auxiliaryImage.itemId() > 0);
+            assertEquals(AUXILIARY_ALPHA_TYPE, auxiliaryImage.auxiliaryType());
+            assertEquals("av01", auxiliaryImage.itemType());
+            assertTrue(auxiliaryImage.isAlpha());
+            assertTrue(auxiliaryImage.width() > 0);
+            assertTrue(auxiliaryImage.height() > 0);
+            assertNotNull(auxiliaryImage.bitDepth());
+            assertNotNull(auxiliaryImage.pixelFormat());
+            auxiliaryImages[0] = new AvifAuxiliaryImageInfo(999, "test", "mime", -1, -1, null, null);
+            assertEquals(auxiliaryImage.itemId(), info.auxiliaryImages()[0].itemId());
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -497,6 +559,17 @@ final class AvifImageReaderTest {
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
             assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
+            AvifAuxiliaryImageInfo[] auxiliaryImages = info.auxiliaryImages();
+            assertEquals(1, auxiliaryImages.length);
+            AvifAuxiliaryImageInfo auxiliaryImage = auxiliaryImages[0];
+            assertEquals(2, auxiliaryImage.itemId());
+            assertEquals(AUXILIARY_ALPHA_TYPE, auxiliaryImage.auxiliaryType());
+            assertEquals("av01", auxiliaryImage.itemType());
+            assertTrue(auxiliaryImage.isAlpha());
+            assertEquals(64, auxiliaryImage.width());
+            assertEquals(64, auxiliaryImage.height());
+            assertEquals(AvifBitDepth.EIGHT_BITS, auxiliaryImage.bitDepth());
+            assertEquals(AvifPixelFormat.I400, auxiliaryImage.pixelFormat());
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
