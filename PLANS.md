@@ -27,8 +27,10 @@ references, missing required properties, and essential unknown property rejectio
 
 **Known gaps:**
 - AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
-- AVIS image sequences (avis brand + `moov` box) are detected and rejected with a clear
-  diagnostic. Full `moov`/track/sample-table parsing is deferred.
+- AVIS image sequences: `moov`/track/sample-table parsing works (frame count, dimensions,
+  timing metadata). Full per-sample AV1 decode is deferred (sample payloads use length-prefixed
+  OBU format not yet handled).
+- Grid and transform composition: 8-bit only; 10/12-bit deferred.
 
 ## Remaining Work
 
