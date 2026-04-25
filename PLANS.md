@@ -16,7 +16,10 @@ sequential playback state, and public metadata exposes sequence timescale,
 duration, per-frame durations, primary-image transform properties, and auxiliary
 image type strings. Auxiliary image metadata is also exposed through structured
 descriptors that include item id, auxiliary type, item type, dimensions, bit
-depth, and pixel format when available.
+depth, and pixel format when available. The public reader can also expose raw
+decoded color planes for non-grid still images and AVIS frames, and image
+metadata now includes `tmap` gain-map descriptors when the `tmap` brand and
+preferred `altr` relationship are present.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -46,9 +49,9 @@ behavior where the feature is in scope.
 - Implement full color management: apply ICC profiles, transfer functions,
   nclx primaries/transfer/matrix handling, range conversion, and display-ready
   RGB adaptation across 8/10/12-bit inputs.
-- Decide the public API scope for gain maps and depth images. If included,
-  parse and expose their metadata and decoded planes instead of only validating
-  primary-image decode behavior.
+- Decode gain-map and depth-image planes through public APIs. Gain-map container
+  descriptors are exposed, but gain-map pixel decoding, tone mapping, and depth
+  image descriptors are still pending.
 - Improve AVIS support beyond random access: timing accuracy validation, alpha
   sequences, and multi-sample edge cases.
 - Add incremental/streaming input behavior instead of requiring the full source
@@ -58,10 +61,11 @@ behavior where the feature is in scope.
 
 ### Public API And Metadata
 
-- Expose remaining image metadata, especially gain/depth descriptors and decoded
-  auxiliary planes where they belong in the public API.
-- Provide explicit output choices for raw planes, display-converted RGB, and
-  high-bit-depth buffers without unnecessary copies.
+- Expose remaining image metadata, especially depth descriptors and decoded
+  auxiliary or gain-map planes where they belong in the public API.
+- Complete explicit output choices for grid raw planes, decoded auxiliary
+  planes, display-converted RGB, and high-bit-depth buffers without unnecessary
+  copies.
 - Review alpha semantics, premultiplication metadata, and buffer immutability
   annotations across all public APIs.
 

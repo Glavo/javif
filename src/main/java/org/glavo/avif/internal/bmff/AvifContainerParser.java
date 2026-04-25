@@ -20,6 +20,7 @@ import org.glavo.avif.AvifColorInfo;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
+import org.glavo.avif.AvifGainMapInfo;
 import org.glavo.avif.AvifImageInfo;
 import org.glavo.avif.AvifPixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -42,6 +43,8 @@ import java.util.Set;
 public final class AvifContainerParser {
     /// The MIME content type used by AVIF XMP metadata items.
     private static final String XMP_CONTENT_TYPE = "application/rdf+xml";
+    /// The maximum gain-map metadata version supported by this parser.
+    private static final int SUPPORTED_GAIN_MAP_METADATA_VERSION = 0;
 
     /// The source bytes.
     private final byte @Unmodifiable [] source;
@@ -51,6 +54,8 @@ public final class AvifContainerParser {
     private boolean compatibleFileTypeSeen;
     /// Whether an `avis` brand was parsed.
     private boolean avisBrandSeen;
+    /// Whether a `tmap` compatible brand was parsed.
+    private boolean tmapBrandSeen;
 
     /// Creates an AVIF container parser.
     ///
@@ -180,7 +185,8 @@ public final class AvifContainerParser {
                 transformParams[4],
                 transformParams[5],
                 null,
-                auxiliaryImages(primaryItem.id)
+                auxiliaryImages(primaryItem.id),
+                gainMapInfo(primaryItem.id)
         );
 
         return new AvifContainer(info, payload, alphaPayload,
@@ -221,7 +227,8 @@ public final class AvifContainerParser {
                 transforms[4],
                 transforms[5],
                 null,
-                auxiliaryImages(gridItem.id)
+                auxiliaryImages(gridItem.id),
+                gainMapInfo(gridItem.id)
         );
 
         return new AvifContainer(info, colorGrid.cellPayloads,
@@ -662,16 +669,19 @@ public final class AvifContainerParser {
 
         boolean hasAvif = "avif".equals(majorBrand);
         boolean hasAvis = "avis".equals(majorBrand);
+        boolean hasTmap = "tmap".equals(majorBrand);
         while (input.remaining() >= 4) {
             String brand = input.readFourCc();
             hasAvif |= "avif".equals(brand);
             hasAvis |= "avis".equals(brand);
+            hasTmap |= "tmap".equals(brand);
         }
         if (input.remaining() != 0) {
             throw parseFailed("ftyp compatible brands length is not divisible by four", input.offset());
         }
         compatibleFileTypeSeen = hasAvif || hasAvis;
         avisBrandSeen = hasAvis;
+        tmapBrandSeen = hasTmap;
     }
 
     /// Parses a root `meta` box.
@@ -715,6 +725,10 @@ public final class AvifContainerParser {
                 case "iref" -> {
                     unique(uniqueBoxes, "iref", child.offset());
                     parseItemReference(payload);
+                }
+                case "grpl" -> {
+                    unique(uniqueBoxes, "grpl", child.offset());
+                    parseGroupsList(payload);
                 }
                 case "idat" -> {
                     unique(uniqueBoxes, "idat", child.offset());
@@ -1501,6 +1515,26 @@ public final class AvifContainerParser {
         }
     }
 
+    /// Parses a `grpl` box.
+    ///
+    /// @param input the box payload input
+    /// @throws AvifDecodeException if the box is malformed
+    private void parseGroupsList(BoxInput input) throws AvifDecodeException {
+        while (input.hasRemaining()) {
+            BoxHeader group = input.readBoxHeader();
+            BoxInput payload = input.slice(group.payloadOffset(), group.payloadSize());
+            readFullBox(payload);
+            int groupId = checkedU32ToInt(payload.readU32(), payload.offset() - 4);
+            int entityCount = checkedU32ToInt(payload.readU32(), payload.offset() - 4);
+            int[] entityIds = new int[entityCount];
+            for (int i = 0; i < entityCount; i++) {
+                entityIds[i] = checkedU32ToInt(payload.readU32(), payload.offset() - 4);
+            }
+            meta.entityGroups.add(new EntityGroup(group.type(), groupId, entityIds));
+            input.skipBoxPayload(group);
+        }
+    }
+
     /// Finds the alpha auxiliary item for the supplied master image item id.
     ///
     /// @param itemId the master image item id
@@ -1549,6 +1583,143 @@ public final class AvifContainerParser {
         @Nullable AvifBitDepth bitDepth = av1Config != null ? AvifBitDepth.fromBits(av1Config.bitDepth()) : null;
         @Nullable AvifPixelFormat pixelFormat = av1Config != null ? av1Config.pixelFormat() : null;
         return new AvifAuxiliaryImageInfo(item.id, auxiliaryType.type, item.type, width, height, bitDepth, pixelFormat);
+    }
+
+    /// Returns the gain-map descriptor associated with one base image item.
+    ///
+    /// @param baseItemId the base image item id
+    /// @return the gain-map descriptor, or `null`
+    /// @throws AvifDecodeException if the `tmap` metadata payload is malformed
+    private @Nullable AvifGainMapInfo gainMapInfo(int baseItemId) throws AvifDecodeException {
+        if (!tmapBrandSeen) {
+            return null;
+        }
+        for (Item item : meta.items.values()) {
+            if (!"tmap".equals(item.type) || item.hasUnsupportedEssentialProperty) {
+                continue;
+            }
+            if (item.dimgCellIds.size() != 2) {
+                continue;
+            }
+            int referencedBaseItemId = item.dimgCellIds.get(0);
+            int gainMapItemId = item.dimgCellIds.get(1);
+            if (referencedBaseItemId != baseItemId || gainMapItemId == baseItemId) {
+                continue;
+            }
+            if (!isPreferredAlternativeTo(item.id, baseItemId)) {
+                continue;
+            }
+            Item gainMapItem = meta.item(gainMapItemId);
+            if (gainMapItem == null || gainMapItem.hasUnsupportedEssentialProperty) {
+                return null;
+            }
+
+            ToneMapMetadataVersions versions = toneMapMetadataVersions(item);
+            ItemDimensions toneMappedDimensions = itemDimensions(item);
+            ItemDimensions gainMapDimensions = itemDimensions(gainMapItem);
+            @Nullable Av1Config gainMapAv1Config = itemAv1Config(gainMapItem);
+            @Nullable AvifBitDepth gainMapBitDepth = gainMapAv1Config != null
+                    ? AvifBitDepth.fromBits(gainMapAv1Config.bitDepth())
+                    : null;
+            @Nullable AvifPixelFormat gainMapPixelFormat = gainMapAv1Config != null
+                    ? gainMapAv1Config.pixelFormat()
+                    : null;
+
+            return new AvifGainMapInfo(
+                    item.id,
+                    baseItemId,
+                    gainMapItemId,
+                    item.type,
+                    gainMapItem.type,
+                    toneMappedDimensions.width,
+                    toneMappedDimensions.height,
+                    gainMapDimensions.width,
+                    gainMapDimensions.height,
+                    gainMapBitDepth,
+                    gainMapPixelFormat,
+                    versions.version,
+                    versions.minimumVersion,
+                    versions.writerVersion,
+                    versions.supported()
+            );
+        }
+        return null;
+    }
+
+    /// Parses only the version fields from one `tmap` metadata payload.
+    ///
+    /// @param item the `tmap` item
+    /// @return parsed `tmap` metadata version fields
+    /// @throws AvifDecodeException if the payload is malformed
+    private ToneMapMetadataVersions toneMapMetadataVersions(Item item) throws AvifDecodeException {
+        byte[] payload = mergeItemExtents(item);
+        if (payload.length < 5) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "tmap item payload is too short: " + item.id,
+                    null
+            );
+        }
+        BoxInput input = new BoxInput(payload);
+        int version = input.readU8();
+        int minimumVersion = input.readU16();
+        int writerVersion = input.readU16();
+        return new ToneMapMetadataVersions(version, minimumVersion, writerVersion);
+    }
+
+    /// Returns image dimensions from an item's `ispe` property.
+    ///
+    /// @param item the image item
+    /// @return known or unknown item dimensions
+    private static ItemDimensions itemDimensions(Item item) {
+        @Nullable ImageSpatialExtents ispe = item.firstProperty(ImageSpatialExtents.class);
+        return ispe != null ? new ItemDimensions(ispe.width, ispe.height) : ItemDimensions.UNKNOWN;
+    }
+
+    /// Returns the AV1 configuration for an image item or a representative grid cell.
+    ///
+    /// @param item the item to inspect
+    /// @return the AV1 configuration, or `null`
+    private @Nullable Av1Config itemAv1Config(Item item) {
+        @Nullable Av1Config av1Config = item.firstProperty(Av1Config.class);
+        if (av1Config != null) {
+            return av1Config;
+        }
+        if (!"grid".equals(item.type)) {
+            return null;
+        }
+        for (int cellId : item.dimgCellIds) {
+            Item cell = meta.item(cellId);
+            if (cell != null) {
+                av1Config = cell.firstProperty(Av1Config.class);
+                if (av1Config != null) {
+                    return av1Config;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Returns whether one entity id is a preferred alternative to another.
+    ///
+    /// @param preferredId the entity id that must appear first
+    /// @param alternativeId the entity id that must appear after `preferredId`
+    /// @return whether `preferredId` is a preferred alternative to `alternativeId`
+    private boolean isPreferredAlternativeTo(int preferredId, int alternativeId) {
+        for (EntityGroup group : meta.entityGroups) {
+            if (!"altr".equals(group.type)) {
+                continue;
+            }
+            boolean preferredSeen = false;
+            for (int entityId : group.entityIds) {
+                if (entityId == preferredId) {
+                    preferredSeen = true;
+                } else if (entityId == alternativeId) {
+                    return preferredSeen;
+                }
+            }
+        }
+        return false;
     }
 
     /// Merges item extents into one contiguous payload.
@@ -1690,6 +1861,80 @@ public final class AvifContainerParser {
         );
     }
 
+    /// Parsed item dimensions, or an unknown marker.
+    @NotNullByDefault
+    private static final class ItemDimensions {
+        /// Unknown item dimensions.
+        private static final ItemDimensions UNKNOWN = new ItemDimensions(-1, -1);
+
+        /// The item width in pixels, or -1 when unknown.
+        private final int width;
+        /// The item height in pixels, or -1 when unknown.
+        private final int height;
+
+        /// Creates item dimensions.
+        ///
+        /// @param width the item width in pixels, or -1 when unknown
+        /// @param height the item height in pixels, or -1 when unknown
+        private ItemDimensions(int width, int height) {
+            this.width = width;
+            this.height = height;
+        }
+    }
+
+    /// Parsed `tmap` metadata version fields.
+    @NotNullByDefault
+    private static final class ToneMapMetadataVersions {
+        /// The metadata version field.
+        private final int version;
+        /// The minimum supported metadata version field.
+        private final int minimumVersion;
+        /// The writer metadata version field.
+        private final int writerVersion;
+
+        /// Creates parsed `tmap` metadata version fields.
+        ///
+        /// @param version the metadata version field
+        /// @param minimumVersion the minimum supported metadata version field
+        /// @param writerVersion the writer metadata version field
+        private ToneMapMetadataVersions(int version, int minimumVersion, int writerVersion) {
+            this.version = version;
+            this.minimumVersion = minimumVersion;
+            this.writerVersion = writerVersion;
+        }
+
+        /// Returns whether this implementation supports these metadata version fields.
+        ///
+        /// @return whether this implementation supports these metadata version fields
+        private boolean supported() {
+            return version == 0
+                    && minimumVersion <= SUPPORTED_GAIN_MAP_METADATA_VERSION
+                    && writerVersion >= minimumVersion;
+        }
+    }
+
+    /// Parsed BMFF entity group.
+    @NotNullByDefault
+    private static final class EntityGroup {
+        /// The grouping type.
+        private final String type;
+        /// The group id.
+        private final int groupId;
+        /// The entity ids in group order.
+        private final int @Unmodifiable [] entityIds;
+
+        /// Creates a parsed entity group.
+        ///
+        /// @param type the grouping type
+        /// @param groupId the group id
+        /// @param entityIds the entity ids in group order
+        private EntityGroup(String type, int groupId, int[] entityIds) {
+            this.type = Objects.requireNonNull(type, "type");
+            this.groupId = groupId;
+            this.entityIds = entityIds.clone();
+        }
+    }
+
     /// Mutable parser state for one root `meta` box.
     @NotNullByDefault
     private static final class MetaState {
@@ -1699,6 +1944,8 @@ public final class AvifContainerParser {
         private final Map<Integer, Item> items = new HashMap<>();
         /// Parsed item properties from `ipco`.
         private final List<Property> properties = new ArrayList<>();
+        /// Parsed entity groups from `grpl`.
+        private final List<EntityGroup> entityGroups = new ArrayList<>();
         /// The optional `idat` payload for construction method 1.
         private @Nullable byte[] idat;
         /// The parsed AVIS moov state.

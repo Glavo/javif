@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
+import java.nio.ShortBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -83,6 +84,21 @@ final class AvifImageReaderTest {
     /// An animated 8bpc AVIS image sequence fixture copied from libavif's test data.
     private static final String LIBAVIF_ANIMATED_FIXTURE = "libavif-test-data/colors-animated-8bpc.avif";
 
+    /// A gain-map fixture copied from libavif's test data.
+    private static final String LIBAVIF_GAINMAP_FIXTURE = "libavif-test-data/seine_sdr_gainmap_srgb.avif";
+
+    /// A gain-map fixture without the `tmap` compatible brand.
+    private static final String LIBAVIF_GAINMAP_NO_TMAP_BRAND_FIXTURE =
+            "libavif-test-data/seine_sdr_gainmap_notmapbrand.avif";
+
+    /// A gain-map fixture where the `altr` group does not make the `tmap` item preferred.
+    private static final String LIBAVIF_GAINMAP_WRONG_ALTR_FIXTURE =
+            "libavif-test-data/seine_hdr_gainmap_wrongaltr.avif";
+
+    /// A gain-map fixture with an unsupported `tmap` metadata version.
+    private static final String LIBAVIF_UNSUPPORTED_GAINMAP_VERSION_FIXTURE =
+            "libavif-test-data/unsupported_gainmap_version.avif";
+
     /// Loads a test resource into a byte array.
     ///
     /// @param resourceName the classpath resource name
@@ -135,6 +151,50 @@ final class AvifImageReaderTest {
             assertEquals(OPAQUE_MID_GRAY, pixels[0]);
             assertEquals(OPAQUE_MID_GRAY, pixels[pixels.length - 1]);
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that raw decoded color planes are exposed for a still image.
+    ///
+    /// @throws IOException if the reader cannot decode the test stream
+    @Test
+    void readRawColorPlanesExposesMinimalStillImagePlanes() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage())) {
+            AvifPlanes planes = reader.readRawColorPlanes(0);
+
+            assertEquals(AvifBitDepth.EIGHT_BITS, planes.bitDepth());
+            assertEquals(AvifPixelFormat.I420, planes.pixelFormat());
+            assertEquals(64, planes.codedWidth());
+            assertEquals(64, planes.codedHeight());
+            assertEquals(64, planes.renderWidth());
+            assertEquals(64, planes.renderHeight());
+            assertTrue(planes.hasChroma());
+
+            AvifPlane luma = planes.lumaPlane();
+            assertEquals(64, luma.width());
+            assertEquals(64, luma.height());
+            assertEquals(64, luma.stride());
+            assertEquals(128, luma.sample(0, 0));
+            assertEquals(128, luma.sample(63, 63));
+
+            ShortBuffer lumaBuffer = luma.sampleBuffer();
+            assertTrue(lumaBuffer.isReadOnly());
+            assertEquals(64 * 64, lumaBuffer.remaining());
+            assertEquals(128, lumaBuffer.get(0) & 0xFFFF);
+
+            short[] lumaSamples = luma.samples();
+            assertEquals(64 * 64, lumaSamples.length);
+            lumaSamples[0] = 0;
+            assertEquals(128, luma.sample(0, 0));
+
+            AvifPlane chromaU = planes.chromaUPlane();
+            AvifPlane chromaV = planes.chromaVPlane();
+            assertNotNull(chromaU);
+            assertNotNull(chromaV);
+            assertEquals(32, chromaU.width());
+            assertEquals(32, chromaU.height());
+            assertEquals(32, chromaV.width());
+            assertEquals(32, chromaV.height());
         }
     }
 
@@ -258,6 +318,67 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that a libavif gain-map fixture exposes its `tmap` association metadata.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openParsesGainMapFixtureInfo() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_FIXTURE))) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+
+            assertNotNull(gainMapInfo);
+            assertEquals(2, gainMapInfo.toneMappedImageItemId());
+            assertEquals(1, gainMapInfo.baseImageItemId());
+            assertEquals(3, gainMapInfo.gainMapImageItemId());
+            assertEquals("tmap", gainMapInfo.toneMappedItemType());
+            assertEquals("av01", gainMapInfo.gainMapItemType());
+            assertEquals(400, gainMapInfo.toneMappedWidth());
+            assertEquals(300, gainMapInfo.toneMappedHeight());
+            assertTrue(gainMapInfo.gainMapWidth() > 0);
+            assertTrue(gainMapInfo.gainMapHeight() > 0);
+            assertNotNull(gainMapInfo.gainMapBitDepth());
+            assertNotNull(gainMapInfo.gainMapPixelFormat());
+            assertEquals(0, gainMapInfo.metadataVersion());
+            assertEquals(0, gainMapInfo.metadataMinimumVersion());
+            assertEquals(0, gainMapInfo.metadataWriterVersion());
+            assertTrue(gainMapInfo.metadataSupported());
+        }
+    }
+
+    /// Verifies that a `tmap` item is ignored when the `tmap` compatible brand is absent.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openIgnoresGainMapWithoutTmapBrand() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_NO_TMAP_BRAND_FIXTURE))) {
+            assertNull(reader.info().gainMapInfo());
+        }
+    }
+
+    /// Verifies that a `tmap` item is ignored when it is not a preferred alternative.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openIgnoresGainMapWithoutPreferredAlternative() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_WRONG_ALTR_FIXTURE))) {
+            assertNull(reader.info().gainMapInfo());
+        }
+    }
+
+    /// Verifies that unsupported gain-map metadata versions are exposed as unsupported descriptors.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openExposesUnsupportedGainMapMetadataVersion() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_UNSUPPORTED_GAINMAP_VERSION_FIXTURE))) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+
+            assertNotNull(gainMapInfo);
+            assertEquals(99, gainMapInfo.metadataVersion());
+            assertFalse(gainMapInfo.metadataSupported());
+        }
+    }
+
     /// Verifies that a progressive idat fixture parses and decodes through the reader.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
@@ -348,6 +469,34 @@ final class AvifImageReaderTest {
 
             AvifFrame secondRandom = reader.readFrame(1);
             assertEquals(1, secondRandom.frameIndex());
+
+            AvifFrame secondSequential = reader.readFrame();
+            assertNotNull(secondSequential);
+            assertEquals(1, secondSequential.frameIndex());
+        }
+    }
+
+    /// Verifies that indexed raw-plane AVIS sequence reads do not disturb sequential playback state.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawColorPlanesRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
+            AvifPlanes fourth = reader.readRawColorPlanes(3);
+            assertEquals(AvifBitDepth.EIGHT_BITS, fourth.bitDepth());
+            assertEquals(AvifPixelFormat.I420, fourth.pixelFormat());
+            assertEquals(150, fourth.codedWidth());
+            assertEquals(150, fourth.codedHeight());
+            assertEquals(150, fourth.renderWidth());
+            assertEquals(150, fourth.renderHeight());
+
+            AvifFrame firstSequential = reader.readFrame();
+            assertNotNull(firstSequential);
+            assertEquals(0, firstSequential.frameIndex());
+
+            AvifPlanes second = reader.readRawColorPlanes(1);
+            assertEquals(150, second.lumaPlane().width());
+            assertEquals(150, second.lumaPlane().height());
 
             AvifFrame secondSequential = reader.readFrame();
             assertNotNull(secondSequential);
@@ -502,6 +651,17 @@ final class AvifImageReaderTest {
             assertTrue(frame.width() > 0);
             assertTrue(frame.height() > 0);
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that grid raw-plane composition has an explicit unsupported-feature boundary.
+    ///
+    /// @throws IOException if the fixture cannot be read
+    @Test
+    void readRawColorPlanesRejectsGridFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_SOFA_GRID_1X5_FIXTURE))) {
+            AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> reader.readRawColorPlanes(0));
+            assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
         }
     }
 

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.internal.av1.recon;
+package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
@@ -23,31 +23,41 @@ import java.nio.ShortBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Immutable snapshot of one decoded image plane.
+/// Immutable raw decoded AVIF image plane.
 ///
-/// Samples are stored as unsigned values in the low bits of each `short`. `stride` is measured in
+/// Samples are unsigned values stored in the low bits of each `short`. `stride` is measured in
 /// samples, not bytes.
 @NotNullByDefault
-public final class DecodedPlane {
+public final class AvifPlane {
     /// The plane width in samples.
     private final int width;
-
     /// The plane height in samples.
     private final int height;
-
-    /// The sample stride of one plane row.
+    /// The plane row stride in samples.
     private final int stride;
+    /// The immutable row-major sample storage.
+    private final @Unmodifiable ShortBuffer samples;
 
-    /// The stored unsigned sample values in row-major order.
-    private final short @Unmodifiable [] samples;
-
-    /// Creates one immutable decoded-plane snapshot.
+    /// Creates one immutable decoded plane from an array.
     ///
     /// @param width the plane width in samples
     /// @param height the plane height in samples
-    /// @param stride the sample stride of one plane row
-    /// @param samples the stored unsigned sample values in row-major order
-    public DecodedPlane(int width, int height, int stride, short[] samples) {
+    /// @param stride the plane row stride in samples
+    /// @param samples the unsigned plane samples in row-major order
+    public AvifPlane(int width, int height, int stride, short[] samples) {
+        this(width, height, stride, immutableSamples(Objects.requireNonNull(samples, "samples")));
+    }
+
+    /// Creates one immutable decoded plane from a buffer.
+    ///
+    /// The sample buffer is stored as a read-only slice without copying. Callers must only pass
+    /// immutable storage or storage they will never mutate after construction.
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param stride the plane row stride in samples
+    /// @param samples the unsigned plane samples in row-major order
+    public AvifPlane(int width, int height, int stride, @Unmodifiable ShortBuffer samples) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -61,14 +71,14 @@ public final class DecodedPlane {
         if (requiredLength > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("plane storage is too large");
         }
-
+        ShortBuffer checkedSamples = Objects.requireNonNull(samples, "samples").slice().asReadOnlyBuffer();
+        if (checkedSamples.remaining() != (int) requiredLength) {
+            throw new IllegalArgumentException("samples length does not match stride * height");
+        }
         this.width = width;
         this.height = height;
         this.stride = stride;
-        this.samples = Arrays.copyOf(Objects.requireNonNull(samples, "samples"), samples.length);
-        if (this.samples.length != (int) requiredLength) {
-            throw new IllegalArgumentException("samples length does not match stride * height");
-        }
+        this.samples = checkedSamples;
     }
 
     /// Returns the plane width in samples.
@@ -85,25 +95,28 @@ public final class DecodedPlane {
         return height;
     }
 
-    /// Returns the sample stride of one plane row.
+    /// Returns the plane row stride in samples.
     ///
-    /// @return the sample stride of one plane row
+    /// @return the plane row stride in samples
     public int stride() {
         return stride;
     }
 
-    /// Returns the stored unsigned sample values in row-major order.
+    /// Returns a copy of the unsigned plane samples.
     ///
-    /// @return the stored unsigned sample values in row-major order
+    /// @return a copy of the unsigned plane samples
     public short @Unmodifiable [] samples() {
-        return Arrays.copyOf(samples, samples.length);
+        ShortBuffer buffer = samples.slice();
+        short[] result = new short[buffer.remaining()];
+        buffer.get(result);
+        return result;
     }
 
-    /// Returns a read-only view of the stored unsigned sample values.
+    /// Returns a read-only view of the unsigned plane samples.
     ///
-    /// @return a read-only view of the stored unsigned sample values
+    /// @return a read-only view of the unsigned plane samples
     public @UnmodifiableView ShortBuffer sampleBuffer() {
-        return ShortBuffer.wrap(samples).asReadOnlyBuffer();
+        return samples.slice();
     }
 
     /// Returns one unsigned sample value.
@@ -118,6 +131,14 @@ public final class DecodedPlane {
         if (y < 0 || y >= height) {
             throw new IndexOutOfBoundsException("y out of range: " + y);
         }
-        return samples[y * stride + x] & 0xFFFF;
+        return samples.get(y * stride + x) & 0xFFFF;
+    }
+
+    /// Creates immutable sample storage from an array.
+    ///
+    /// @param samples the source samples
+    /// @return immutable sample storage
+    private static @Unmodifiable ShortBuffer immutableSamples(short[] samples) {
+        return ShortBuffer.wrap(Arrays.copyOf(samples, samples.length)).asReadOnlyBuffer();
     }
 }

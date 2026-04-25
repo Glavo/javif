@@ -63,6 +63,8 @@ public final class AvifImageInfo {
     private final String @Unmodifiable [] auxiliaryImageTypes;
     /// Auxiliary image descriptors associated with the primary image.
     private final AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages;
+    /// The gain-map descriptor associated with the primary image, or `null`.
+    private final @Nullable AvifGainMapInfo gainMapInfo;
     /// The parsed color information, or `null`.
     private final @Nullable AvifColorInfo colorInfo;
     /// The embedded ICC profile payload, or `null`.
@@ -292,6 +294,7 @@ public final class AvifImageInfo {
     /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
     /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
     /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
+    @SuppressWarnings("checkstyle:ParameterNumber")
     public AvifImageInfo(
             int width,
             int height,
@@ -315,6 +318,84 @@ public final class AvifImageInfo {
             int mirrorAxis,
             String @Nullable [] auxiliaryImageTypes,
             AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages
+    ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                pixelFormat,
+                alphaPresent,
+                animated,
+                frameCount,
+                colorInfo,
+                iccProfile,
+                exif,
+                xmp,
+                mediaTimescale,
+                mediaDuration,
+                frameDurations,
+                cleanApertureCropX,
+                cleanApertureCropY,
+                cleanApertureCropWidth,
+                cleanApertureCropHeight,
+                rotationCode,
+                mirrorAxis,
+                auxiliaryImageTypes,
+                auxiliaryImages,
+                null
+        );
+    }
+
+    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, and gain-map metadata.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
+    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
+    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
+    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
+    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
+    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
+    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
+    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
+    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
+            int mediaTimescale,
+            long mediaDuration,
+            int @Nullable [] frameDurations,
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight,
+            int rotationCode,
+            int mirrorAxis,
+            String @Nullable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
+            @Nullable AvifGainMapInfo gainMapInfo
     ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
@@ -371,6 +452,7 @@ public final class AvifImageInfo {
                 ? immutableAuxiliaryImageTypes(auxiliaryImageTypes)
                 : auxiliaryImageTypesFromDescriptors(checkedAuxiliaryImages);
         this.auxiliaryImages = checkedAuxiliaryImages;
+        this.gainMapInfo = gainMapInfo;
         this.colorInfo = colorInfo;
         this.iccProfile = immutableBytes(iccProfile);
         this.exif = immutableBytes(exif);
@@ -534,6 +616,17 @@ public final class AvifImageInfo {
     /// @return auxiliary image descriptors associated with the primary image
     public AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages() {
         return auxiliaryImages.clone();
+    }
+
+    /// Returns the gain-map descriptor associated with the primary image.
+    ///
+    /// The returned descriptor is present only when the file advertises the `tmap` brand and the
+    /// `tmap` item is the preferred alternative to the primary image item. The descriptor does not
+    /// imply that gain-map pixels have been decoded or applied.
+    ///
+    /// @return the gain-map descriptor, or `null`
+    public @Nullable AvifGainMapInfo gainMapInfo() {
+        return gainMapInfo;
     }
 
     /// Returns the parsed color information.

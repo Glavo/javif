@@ -258,6 +258,40 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
+    /// Reads raw decoded color planes for the frame at the supplied index.
+    ///
+    /// The returned planes expose the decoded AV1 color image before AVIF auxiliary alpha
+    /// composition and before AVIF item transforms such as `clap`, `irot`, and `imir`.
+    /// Grid-derived raw plane composition is not implemented.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return raw decoded color planes
+    /// @throws IOException if the frame cannot be decoded
+    public AvifPlanes readRawColorPlanes(int frameIndex) throws IOException {
+        ensureOpen();
+        if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        if (container.isGrid()) {
+            throw unsupported("Raw color planes for grid-derived AVIF images are not implemented", null);
+        }
+        if (container.isSequence()) {
+            return readSequenceRawColorPlanes(frameIndex);
+        }
+        if (frameIndex != 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.UNSUPPORTED_FEATURE,
+                    "Indexed AVIF raw plane decoding beyond the primary still image is not implemented in this slice",
+                    null
+            );
+        }
+        ByteBuffer primaryPayload = container.primaryItemPayload();
+        if (primaryPayload == null) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item payload is missing", null);
+        }
+        return decodeRawColorPlanes(primaryPayload, "Primary AV1 item");
+    }
+
     /// Decodes the next frame from an image sequence using the persistent sequential AV1 reader.
     ///
     /// @param frameIndex the zero-based frame index
@@ -299,6 +333,75 @@ public final class AvifImageReader implements AutoCloseable {
         } catch (IOException e) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, e.getMessage(), null, e);
         }
+    }
+
+    /// Decodes raw color planes for one image-sequence frame without mutating sequential playback state.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return raw decoded color planes
+    /// @throws IOException if decoding fails
+    private AvifPlanes readSequenceRawColorPlanes(int frameIndex) throws IOException {
+        @Unmodifiable ByteBuffer @Nullable [] payloads = container.samplePayloads();
+        if (payloads == null || frameIndex >= payloads.length) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        try (Av1ImageReader rawReader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffers(payloads),
+                config.av1DecoderConfig()
+        )) {
+            for (int index = 0; index <= frameIndex; index++) {
+                DecodedFrame decodedFrame = rawReader.readFrame();
+                if (decodedFrame == null) {
+                    throw new AvifDecodeException(
+                            AvifErrorCode.AV1_DECODE_FAILED,
+                            "Sequence ended before frame " + frameIndex,
+                            null
+                    );
+                }
+            }
+            return lastRawColorPlanes(rawReader, "Sequence frame");
+        } catch (AvifDecodeException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+        }
+    }
+
+    /// Decodes one AV1 payload and returns raw color planes.
+    ///
+    /// @param payload the AV1 payload to decode
+    /// @param label the diagnostic label for failures
+    /// @return raw decoded color planes
+    /// @throws IOException if decoding fails
+    private AvifPlanes decodeRawColorPlanes(@Unmodifiable ByteBuffer payload, String label) throws IOException {
+        try (Av1ImageReader rawReader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(payload),
+                config.av1DecoderConfig()
+        )) {
+            DecodedFrame decodedFrame = rawReader.readFrame();
+            if (decodedFrame == null) {
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " produced no frame", null);
+            }
+            return lastRawColorPlanes(rawReader, label);
+        } catch (AvifDecodeException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+        }
+    }
+
+    /// Returns the last decoded raw color planes from one AV1 reader.
+    ///
+    /// @param reader the AV1 reader
+    /// @param label the diagnostic label for failures
+    /// @return raw decoded color planes
+    /// @throws AvifDecodeException if the reader has no decoded plane snapshot
+    private static AvifPlanes lastRawColorPlanes(Av1ImageReader reader, String label) throws AvifDecodeException {
+        DecodedPlanes planes = reader.lastPlanes();
+        if (planes == null) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " planes are not available", null);
+        }
+        return AvifPlanes.fromDecodedPlanes(planes);
     }
 
     /// Decodes one image-sequence frame without mutating the persistent sequential AV1 reader.
