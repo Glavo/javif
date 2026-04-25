@@ -3883,12 +3883,12 @@ public final class FrameReconstructor {
             );
             InverseTransformer.addResidualBlock(
                     lumaPlane,
-                residualUnit.position().x4() << 2,
-                residualUnit.position().y4() << 2,
-                residualUnit.size(),
-                residualUnit.visibleWidthPixels(),
-                residualUnit.visibleHeightPixels(),
-                residualSamples
+                    residualUnit.position().x4() << 2,
+                    residualUnit.position().y4() << 2,
+                    residualUnit.size(),
+                    residualUnit.visibleWidthPixels(),
+                    residualUnit.visibleHeightPixels(),
+                    residualSamples
             );
         }
     }

@@ -8,6 +8,9 @@ basic AVIS sequences, and embedded ICC, Exif, and XMP metadata exposure with no
 runtime dependency beyond `java.base`. Reconstruction now uses frame-local
 partition-tree views for full-frame output and postfilters, and has a regression
 fixture for a left-edge Paeth corruption case in libavif `draw_points_idat.avif`.
+Residual reconstruction applies AV1 luma/chroma quantization matrices, handles
+extended coefficient token magnitudes, and has focused coverage for larger
+`I420` and `I444` chroma-transform fixtures.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF

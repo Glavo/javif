@@ -98,14 +98,14 @@ final class FrameReconstructorIntegrationTest {
 
     /// The top-left `8x8` luma block produced by the current legacy directional still-picture fixture.
     private static final int @Unmodifiable [] @Unmodifiable [] LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8 = {
-            {127, 128, 128, 128, 128, 128, 128, 128},
-            {126, 126, 126, 126, 128, 128, 128, 128},
-            {128, 128, 127, 126, 129, 129, 129, 129},
-            {130, 132, 134, 134, 128, 128, 128, 128},
-            {134, 128, 128, 128, 128, 128, 128, 128},
-            {132, 128, 129, 129, 128, 128, 128, 128},
-            {132, 130, 127, 129, 128, 128, 128, 128},
-            {132, 132, 128, 131, 128, 128, 128, 129}
+            {128, 128, 128, 127, 130, 128, 128, 128},
+            {123, 123, 122, 122, 128, 129, 129, 129},
+            {129, 128, 129, 127, 129, 129, 129, 129},
+            {132, 132, 141, 138, 128, 128, 128, 128},
+            {140, 131, 126, 129, 128, 128, 128, 128},
+            {137, 129, 127, 128, 128, 127, 128, 128},
+            {135, 134, 125, 132, 128, 128, 129, 129},
+            {134, 136, 127, 134, 128, 128, 129, 129}
     };
 
     /// Verifies that one monochrome all-zero intra leaf reconstructs to midpoint DC samples.
@@ -2246,9 +2246,9 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(2, decodedLeaf.transformLayout().visibleWidth4());
         assertEquals(2, decodedLeaf.transformLayout().visibleHeight4());
         assertEquals(TransformSize.TX_8X8, decodedLeaf.transformLayout().chromaTransformSize());
-        assertTrue(
-                hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaUUnits())
-                        || hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaVUnits())
+        assertFalse(
+                allResidualUnitsZero(decodedLeaf.residualLayout().chromaUUnits())
+                        && allResidualUnitsZero(decodedLeaf.residualLayout().chromaVUnits())
         );
         assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
                 createAssembly(AvifPixelFormat.I444, new byte[0], codedWidth, codedHeight, transformMode),
@@ -4008,8 +4008,8 @@ final class FrameReconstructorIntegrationTest {
 
     /// Asserts the stable legacy directional still-picture reconstruction oracle.
     ///
-    /// The current first directional path perturbs the top-left luma region while the chroma
-    /// planes remain midpoint-gray.
+    /// The current first directional path perturbs the top-left luma region and its visible
+    /// chroma-V residual while chroma-U stays midpoint-gray.
     ///
     /// @param decodedPlanes the reconstructed planes returned by the frame reconstructor
     private static void assertLegacyDirectionalStillPicturePlanes(DecodedPlanes decodedPlanes) {
@@ -4021,7 +4021,17 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(64, decodedPlanes.renderHeight());
         assertPlaneBlockEquals(decodedPlanes.lumaPlane(), 0, 0, LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8);
         assertPlaneBlockFilledWith(decodedPlanes.chromaUPlane(), 0, 0, 4, 4, 128);
-        assertPlaneBlockFilledWith(decodedPlanes.chromaVPlane(), 0, 0, 4, 4, 128);
+        assertPlaneBlockEquals(
+                decodedPlanes.chromaVPlane(),
+                0,
+                0,
+                new int[][]{
+                        {128, 127, 126, 127},
+                        {127, 126, 125, 126},
+                        {127, 127, 126, 128},
+                        {126, 125, 124, 126}
+                }
+        );
     }
 
     /// Asserts one rectangular plane block against expected sample values.

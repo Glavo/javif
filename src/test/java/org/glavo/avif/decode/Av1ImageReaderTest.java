@@ -120,14 +120,14 @@ final class Av1ImageReaderTest {
     /// The stable top-left `8x8` ARGB block produced by the current legacy directional
     /// still-picture payload.
     private static final int @Unmodifiable [] @Unmodifiable [] LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8 = {
-            {0xFF7F7F7F, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
-            {0xFF7E7E7E, 0xFF7E7E7E, 0xFF7E7E7E, 0xFF7E7E7E, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
-            {0xFF808080, 0xFF808080, 0xFF7F7F7F, 0xFF7E7E7E, 0xFF818181, 0xFF818181, 0xFF818181, 0xFF818181},
-            {0xFF828282, 0xFF848484, 0xFF868686, 0xFF868686, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
-            {0xFF868686, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
-            {0xFF848484, 0xFF808080, 0xFF818181, 0xFF818181, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
-            {0xFF848484, 0xFF828282, 0xFF7F7F7F, 0xFF818181, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
-            {0xFF848484, 0xFF848484, 0xFF808080, 0xFF838383, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF818181}
+            {0xFF808080, 0xFF808080, 0xFF7F8180, 0xFF7E807F, 0xFF7F8382, 0xFF7D8180, 0xFF7F8180, 0xFF7F8180},
+            {0xFF7B7B7B, 0xFF7B7B7B, 0xFF797B7A, 0xFF797B7A, 0xFF7D8180, 0xFF7E8281, 0xFF808281, 0xFF808281},
+            {0xFF808281, 0xFF7F8180, 0xFF7E8281, 0xFF7C807F, 0xFF7D8381, 0xFF7D8381, 0xFF7E8281, 0xFF7E8281},
+            {0xFF838584, 0xFF838584, 0xFF8A8E8D, 0xFF878B8A, 0xFF7C8280, 0xFF7C8280, 0xFF7D8180, 0xFF7D8180},
+            {0xFF8B8D8C, 0xFF828483, 0xFF7D7F7E, 0xFF808281, 0xFF7D8180, 0xFF7D8180, 0xFF808080, 0xFF808080},
+            {0xFF888A89, 0xFF808281, 0xFF7E807F, 0xFF7F8180, 0xFF7D8180, 0xFF7C807F, 0xFF808080, 0xFF808080},
+            {0xFF848887, 0xFF838786, 0xFF797F7D, 0xFF808684, 0xFF7A8380, 0xFF7A8380, 0xFF7E8281, 0xFF7E8281},
+            {0xFF838786, 0xFF858988, 0xFF7B817F, 0xFF828886, 0xFF7A8380, 0xFF7A8380, 0xFF7E8281, 0xFF7E8281}
     };
 
     /// Verifies that an empty stream returns end-of-stream instead of failing.
@@ -3134,7 +3134,7 @@ final class Av1ImageReaderTest {
         assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes), decodedFrame.longPixels());
     }
 
-    /// Asserts that the reader returned one legacy directional opaque gray still-picture frame.
+    /// Asserts that the reader returned one legacy directional still-picture frame.
     ///
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
