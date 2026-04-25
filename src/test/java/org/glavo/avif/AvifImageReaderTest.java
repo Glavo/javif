@@ -75,6 +75,10 @@ final class AvifImageReaderTest {
     private static final Path LIBAVIF_SOFA_GRID_1X5_FIXTURE =
             Path.of("external", "libavif", "tests", "data", "sofa_grid1x5_420.avif");
 
+    /// A progressive still-image fixture using idat.
+    private static final Path LIBAVIF_PROGRESSIVE_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "draw_points_idat_progressive.avif");
+
     /// Verifies that the primary AV1 item payload is decoded through the migrated AV1 decoder.
     ///
     /// @throws IOException if the reader cannot decode the test stream
@@ -193,6 +197,24 @@ final class AvifImageReaderTest {
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
+        }
+    }
+
+    /// Verifies that a progressive idat fixture parses and decodes through the reader.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameDecodesProgressiveFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_PROGRESSIVE_FIXTURE)) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.width() > 0);
+            assertTrue(info.height() > 0);
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertNull(reader.readFrame());
         }
     }
 

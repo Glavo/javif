@@ -2,10 +2,11 @@
 
 ## Status
 
-The primary still-image, alpha auxiliary, and grid derived image paths are implemented.
+The primary still-image, alpha, grid, and progressive image paths are implemented.
 `org.glavo.avif` is exported and provides a reader API that parses an AVIF container,
-extracts primary, alpha, and grid cell AV1 item payloads, and decodes them through the
-migrated `org.glavo.avif.decode` AV1 reader.
+extracts AV1 item payloads, and decodes them through the migrated
+`org.glavo.avif.decode` AV1 reader. Layered/scalable images with operating points are
+detected and rejected with stable diagnostics.
 
 Implemented:
 
@@ -14,8 +15,9 @@ Implemented:
 - Immutable public models for decoder configuration, image info, color info, decoded frames, and
   decode errors.
 - A bounded big-endian BMFF parser for `ftyp`, root `meta`, `hdlr`, `pitm`, `iloc`, `iinf/infe`,
-  `iprp/ipco/ipma`, `iref`, `idat`, `ispe`, `av1C`, `colr nclx`, and `auxC`.
-- Property parsing for `pixi`, `pasp`, `clap`, `irot`, and `imir`.
+  `iprp/ipco/ipma`, `iref` (with `auxl`, `dimg`, and `prog` reference types), `idat`,
+  `ispe`, `av1C`, `colr nclx`, and `auxC`.
+- Property parsing for `pixi`, `pasp`, `clap`, `irot`, `imir`, and `a1op`.
 - Transform application for `clap` (cropping), `irot` (rotation), and `imir` (mirror) applied
   post-decode to the output canvas (8-bit frames only).
 - Primary `av01` item extraction from file-backed extents and `idat` construction-method extents.
@@ -30,22 +32,18 @@ Implemented:
 - Synthetic AVIF tests covering minimal still-image metadata parsing, primary AV1 item decoding,
   alpha decoding, parser error paths, grid composition, and irot rotation transforms.
 - Real libavif fixture tests for `white_1x1.avif`, `extended_pixi.avif`, `colors_sdr_srgb.avif`,
-  `paris_icc_exif_xmp.avif`, `abc_color_irot_alpha_NOirot.avif`, and `sofa_grid1x5_420.avif`.
+   `paris_icc_exif_xmp.avif`, `abc_color_irot_alpha_NOirot.avif`, `sofa_grid1x5_420.avif`,
+   and `draw_points_idat_progressive.avif`.
 - Known gap: AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
 
 ## Remaining Work
 
-1. Add progressive and layered still images.
-   - Parse item references and properties that describe progressive/layered AVIF still images.
-   - Expose deterministic frame ordering for layers while keeping `info()` accurate.
-   - Reject unsupported layering modes with stable diagnostics.
-
-3. Add AVIS image sequences.
+1. Add AVIS image sequences.
    - Parse `moov`, tracks, sample tables, sync samples, durations, and sample dependencies.
    - Decode sequential and indexed frames using nearest-keyframe state.
    - Expose frame count, animation status, and timing metadata in the public API.
 
-4. Improve AV1 integration for AVIF composition.
+2. Improve AV1 integration for AVIF composition.
    - Add an internal path that exposes postprocessed planes before ARGB packing.
    - Reuse that plane path for alpha, grid, and transform composition.
    - Keep public AV1 reader behavior unchanged.

@@ -102,6 +102,13 @@ public final class AvifContainerParser {
             return parseGridContainer(primaryItem);
         }
 
+        if (hasLayeredStructure(primaryItem)) {
+            throw unsupported(
+                    "Layered/scalable AVIF images with operating points are not implemented in this slice",
+                    null
+            );
+        }
+
         ImageSpatialExtents ispe = primaryItem.firstProperty(ImageSpatialExtents.class);
         if (ispe == null) {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Primary AV1 item is missing ispe", null);
@@ -318,6 +325,30 @@ public final class AvifContainerParser {
         }
 
         return new int[]{clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis};
+    }
+
+    /// Returns whether the item has a layered progressive structure.
+    ///
+    /// @param item the primary item
+    /// @return whether the item has a layered progressive structure
+    private boolean hasLayeredStructure(Item item) {
+        OperatingPoint primaryOp = item.firstProperty(OperatingPoint.class);
+        for (int depId : item.progDeps) {
+            Item depItem = meta.item(depId);
+            if (depItem != null) {
+                OperatingPoint depOp = depItem.firstProperty(OperatingPoint.class);
+                if (primaryOp != null && depOp != null && depOp.operatingPoint != primaryOp.operatingPoint) {
+                    return true;
+                }
+                if (primaryOp == null && depOp != null) {
+                    return true;
+                }
+                if (depItem.firstProperty(OperatingPoint.class) != null && primaryOp == null) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// Computes grid output width from cell ispe dimensions.
@@ -655,6 +686,7 @@ public final class AvifContainerParser {
             case "clap" -> parseClap(input);
             case "irot" -> parseIrot(input);
             case "imir" -> parseImir(input);
+            case "a1op" -> parseA1op(input);
             default -> new OpaqueProperty(header.type());
         };
     }
@@ -841,6 +873,20 @@ public final class AvifContainerParser {
         return new ImageMirror(axis);
     }
 
+    /// Parses an `a1op` property.
+    ///
+    /// @param input the property payload input
+    /// @return the parsed property
+    /// @throws AvifDecodeException if the property is malformed
+    private static OperatingPoint parseA1op(BoxInput input) throws AvifDecodeException {
+        readFullBox(input);
+        int operatingPoint = input.readU8();
+        if (operatingPoint > 31) {
+            throw parseFailed("a1op operating point exceeds maximum", input.offset() - 1);
+        }
+        return new OperatingPoint(operatingPoint);
+    }
+
     /// Parses an `ipma` box.
     ///
     /// @param input the box payload input
@@ -903,6 +949,9 @@ public final class AvifContainerParser {
                 if ("dimg".equals(reference.type())) {
                     toItem.dimgForId = fromItem.id;
                     fromItem.dimgCellIds.add(toItem.id);
+                }
+                if ("prog".equals(reference.type())) {
+                    fromItem.progDeps.add(toItem.id);
                 }
             }
             input.skipBoxPayload(reference);
@@ -1114,6 +1163,8 @@ public final class AvifContainerParser {
         private int dimgForId;
         /// The dimg cell item ids for a grid item, in row-major order.
         private final List<Integer> dimgCellIds = new ArrayList<>();
+        /// The progressive dependency item ids from `prog` references.
+        private final List<Integer> progDeps = new ArrayList<>();
 
         /// Creates item parser state.
         ///
@@ -1178,7 +1229,7 @@ public final class AvifContainerParser {
 
     /// Marker interface for parsed item properties.
     @NotNullByDefault
-    private sealed interface Property permits ImageSpatialExtents, Av1Config, ColorProperty, AuxiliaryType, OpaqueProperty, PixelInformation, PixelAspectRatio, CleanAperture, ImageRotation, ImageMirror {
+    private sealed interface Property permits ImageSpatialExtents, Av1Config, ColorProperty, AuxiliaryType, OpaqueProperty, PixelInformation, PixelAspectRatio, CleanAperture, ImageRotation, ImageMirror, OperatingPoint {
     }
 
     /// Parsed `ispe` item property.
@@ -1419,6 +1470,20 @@ public final class AvifContainerParser {
         /// @param axis the mirror axis
         private ImageMirror(int axis) {
             this.axis = axis;
+        }
+    }
+
+    /// Parsed `a1op` item property.
+    @NotNullByDefault
+    private static final class OperatingPoint implements Property {
+        /// The operating point index.
+        private final int operatingPoint;
+
+        /// Creates an operating point property.
+        ///
+        /// @param operatingPoint the operating point index
+        private OperatingPoint(int operatingPoint) {
+            this.operatingPoint = operatingPoint;
         }
     }
 }
