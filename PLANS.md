@@ -2,64 +2,70 @@
 
 ## Status
 
-The AV1 decoder is the baseline decode engine. The next phase is to add an AVIF container layer in
-`org.glavo.avif`, using the existing `org.glavo.avif.decode` implementation for AV1 OBU decoding.
+The first AVIF still-image slice is implemented. `org.glavo.avif` is exported and provides a
+reader API that parses a primary AV1 image item from a BMFF AVIF container, extracts its payload,
+and decodes it through the migrated `org.glavo.avif.decode` AV1 reader.
 
-## Scope
+Implemented:
 
-- Support AV1-backed AVIF still images, alpha auxiliary images, image grids, progressive/layered
-  still images, and AVIS image sequences.
-- Expose a reader-style public API from `org.glavo.avif`.
-- Keep runtime dependencies limited to `java.base`.
-- Explicitly reject unsupported features with stable errors instead of producing partial or
-  approximate output.
+- Public reader entry points for `byte[]`, `ByteBuffer`, `InputStream`, `ReadableByteChannel`, and
+  `Path`.
+- Immutable public models for decoder configuration, image info, color info, decoded frames, and
+  decode errors.
+- A bounded big-endian BMFF parser for `ftyp`, root `meta`, `hdlr`, `pitm`, `iloc`, `iinf/infe`,
+  `iprp/ipco/ipma`, `iref`, `idat`, `ispe`, `av1C`, `colr nclx`, and `auxC`.
+- Primary `av01` item extraction from file-backed extents and `idat` construction-method extents.
+- A simple still-image decode path that returns `AvifIntFrame` or `AvifLongFrame`.
+- Synthetic AVIF tests covering minimal still-image metadata parsing and primary AV1 item decoding.
+- A real libavif `white_1x1.avif` fixture test covering metadata parsing and the public read-frame
+  path.
 
-Out of scope for this phase:
+## Remaining Work
 
-- AV2 decoding.
-- AVIF encoding.
-- Java ImageIO integration.
-- Experimental minimized image boxes (`mif3` / `mini`).
+1. Harden the primary still-image path against real libavif fixtures.
+   - Add parser tests for truncation, overflow, duplicate unique boxes, invalid references, missing
+     required properties, and unsupported essential properties.
+   - Expand real still-image fixture coverage beyond `white_1x1.avif` and fix compatibility gaps in
+     currently parsed boxes.
+   - Add support for `pixi`, `pasp`, `clap`, `irot`, and `imir` metadata needed by common files.
+   - Track the current AV1 `I444` pixel-accuracy gap separately from AVIF container coverage.
 
-## Public API
+2. Add alpha auxiliary images.
+   - Resolve `auxl` references from the primary image to alpha items.
+   - Decode alpha AV1 payloads independently.
+   - Combine color and alpha planes into non-premultiplied ARGB output.
 
-- Add `AvifImageReader` with factory methods for `byte[]`, `ByteBuffer`, `InputStream`,
-  `ReadableByteChannel`, and `Path`.
-- Add sequential and indexed frame access: `info()`, `readFrame()`, `readFrame(int index)`, and
-  `readAllFrames()`.
-- Add immutable output models for image info, frame timing, color metadata, transforms, and ARGB
-  frame data.
-- Reuse `Av1DecoderConfig` internally through an AVIF-level configuration object.
+3. Add derived image support.
+   - Parse and validate `grid` item payloads.
+   - Decode grid cell items and compose the final canvas.
+   - Apply clean-aperture, pixel-aspect-ratio, rotation, and mirror transforms in the final output.
 
-## Implementation Work
+4. Add progressive and layered still images.
+   - Parse item references and properties that describe progressive/layered AVIF still images.
+   - Expose deterministic frame ordering for layers while keeping `info()` accurate.
+   - Reject unsupported layering modes with stable diagnostics.
 
-- Add a big-endian BMFF parser for box headers, bounds checks, top-level `ftyp`, `meta`, `moov`,
-  `mdat`, and nested AVIF/AVIS boxes.
-- Port libavif's primary item path for `pitm`, `iloc`, `iinf/infe`, `iprp/ipco/ipma`, `iref`,
-  `idat`, `ispe`, `pixi`, `av1C`, `auxC`, `colr`, `pasp`, `clap`, `irot`, `imir`, and `grid`.
-- Extract item extents and track samples into self-delimited AV1 OBU samples consumable by
-  `Av1ImageReader`.
-- Refactor the AV1 reader internally so AVIF can obtain postprocessed `DecodedPlanes`, not only
-  public opaque ARGB frames.
-- Compose color, alpha, grids, and transforms into final non-premultiplied ARGB output.
-- Parse AVIS tracks, sample tables, frame timing, sync samples, and nearest-keyframe seek state.
-- Preserve metadata needed by callers: dimensions, bit depth, pixel format, color information,
-  alpha presence, frame count, timing, and transform flags.
+5. Add AVIS image sequences.
+   - Parse `moov`, tracks, sample tables, sync samples, durations, and sample dependencies.
+   - Decode sequential and indexed frames using nearest-keyframe state.
+   - Expose frame count, animation status, and timing metadata in the public API.
+
+6. Improve AV1 integration for AVIF composition.
+   - Add an internal path that exposes postprocessed planes before ARGB packing.
+   - Reuse that plane path for alpha, grid, and transform composition.
+   - Keep public AV1 reader behavior unchanged.
 
 ## Validation
 
-- Add BMFF parser unit tests for valid boxes, truncation, overflow, duplicate unique boxes, and
-  unsupported essential properties.
-- Add synthetic AVIF fixtures that wrap existing raw AV1 OBU streams for still image, alpha, grid,
-  progressive, and malformed metadata paths.
-- Add integration tests with selected `external/libavif/tests/data/*.avif` fixtures covering real
-  still images, alpha, grid, and animation.
-- Verify with `./gradlew -g .gradle-user-home compileJava compileTestJava test`.
+- Focused checks:
+  `./gradlew -g .gradle-user-home test --tests org.glavo.avif.AvifImageReaderTest`
+- Full checks:
+  `./gradlew -g .gradle-user-home compileJava compileTestJava test`
 
 ## Completion Criteria
 
-- `org.glavo.avif` is exported and provides a stable public reader API.
 - Common AVIF still, alpha, grid, progressive, and animated AV1 files decode through the Java AV1
   engine.
-- Unsupported container or codec features fail predictably with clear diagnostics.
+- Unsupported AVIF features fail predictably with `AvifDecodeException` and stable error codes.
+- Runtime code keeps depending only on `java.base`.
 - The full Gradle validation command passes with workspace-local Gradle user home.
