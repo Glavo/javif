@@ -1,52 +1,65 @@
-# AV1 Remaining Work Plan
+# AVIF Support Plan
 
 ## Status
 
-The public decoder supports a bounded real AV1 subset and must fail unsupported syntax with a
-stable `NOT_IMPLEMENTED` boundary rather than producing approximate output.
+The AV1 decoder is the baseline decode engine. The next phase is to add an AVIF container layer in
+`org.glavo.avif`, using the existing `org.glavo.avif.decode` implementation for AV1 OBU decoding.
 
-Current supported areas:
+## Scope
 
-- OBU input, visible `KEY` / `INTRA` still-picture output, `I400/I420/I422/I444` layouts, and
-  `8-bit -> ArgbIntFrame` plus `10/12-bit -> ArgbLongFrame` output.
-- Key/intra reconstruction, palette paths, transform-type residuals, chroma residuals, clipped
-  frame edges, multi-tile still-picture fixtures, and horizontal super-resolution.
-- Stored-surface `show_existing_frame`, reference refresh/reuse, reference syntax metadata
-  preservation, temporal-motion inheritance/projection, and the current bounded inter subset.
-- Self-contained public-reader fixtures for parsed still, inter, `intrabc`, high-bit-depth,
-  multi-tile, super-resolution, and reference-reuse paths.
-- Postfilter order is reconstruction -> loop filter -> CDEF -> restoration -> reference surface;
-  active loop filtering, CDEF, decoded loop-restoration units, WIENER/SGRPROJ restoration, and
-  presentation-only film grain are covered.
+- Support AV1-backed AVIF still images, alpha auxiliary images, image grids, progressive/layered
+  still images, and AVIS image sequences.
+- Expose a reader-style public API from `org.glavo.avif`.
+- Keep runtime dependencies limited to `java.base`.
+- Explicitly reject unsupported features with stable errors instead of producing partial or
+  approximate output.
 
-## Decode Boundary
+Out of scope for this phase:
 
-No active decode boundary is currently listed. Add entries here only for intentional stable
-`NOT_IMPLEMENTED` boundaries, not transient bugs.
+- AV2 decoding.
+- AVIF encoding.
+- Java ImageIO integration.
+- Experimental minimized image boxes (`mif3` / `mini`).
 
-## Contracts To Preserve
+## Public API
 
-- `DecodedPlanes`: reconstructed Y/U/V planes before ARGB conversion.
-- `TransformLayout`: luma units plus shared U/V chroma transform units in bitstream order.
-- `ResidualLayout`: luma and chroma residual units with explicit transform types.
-- `RestorationUnitMap`: decoded per-plane loop-restoration units and coefficients.
-- `ReferenceSurfaceSnapshot`: frame header, syntax result, decoded planes, final tile CDF snapshots,
-  and projected temporal-motion state for reference reuse.
-- `FilmGrainParams`: normalized film grain parameters inside `FrameHeader`.
+- Add `AvifImageReader` with factory methods for `byte[]`, `ByteBuffer`, `InputStream`,
+  `ReadableByteChannel`, and `Path`.
+- Add sequential and indexed frame access: `info()`, `readFrame()`, `readFrame(int index)`, and
+  `readAllFrames()`.
+- Add immutable output models for image info, frame timing, color metadata, transforms, and ARGB
+  frame data.
+- Reuse `Av1DecoderConfig` internally through an AVIF-level configuration object.
 
-## Remaining Work
+## Implementation Work
 
-No planned remaining work is currently listed. Future work should be added only when a stable
-decode boundary, missing fixture class, or major unsupported AV1 area is identified.
-
-## Completion Criteria
-
-The current phase is complete: the supported real-stream subset produces stable `DecodedPlanes`,
-refreshes and reuses reference surfaces correctly, covers combined postfilter/reference fixtures,
-and keeps unsupported syntax explicit instead of silently approximating it.
+- Add a big-endian BMFF parser for box headers, bounds checks, top-level `ftyp`, `meta`, `moov`,
+  `mdat`, and nested AVIF/AVIS boxes.
+- Port libavif's primary item path for `pitm`, `iloc`, `iinf/infe`, `iprp/ipco/ipma`, `iref`,
+  `idat`, `ispe`, `pixi`, `av1C`, `auxC`, `colr`, `pasp`, `clap`, `irot`, `imir`, and `grid`.
+- Extract item extents and track samples into self-delimited AV1 OBU samples consumable by
+  `Av1ImageReader`.
+- Refactor the AV1 reader internally so AVIF can obtain postprocessed `DecodedPlanes`, not only
+  public opaque ARGB frames.
+- Compose color, alpha, grids, and transforms into final non-premultiplied ARGB output.
+- Parse AVIS tracks, sample tables, frame timing, sync samples, and nearest-keyframe seek state.
+- Preserve metadata needed by callers: dimensions, bit depth, pixel format, color information,
+  alpha presence, frame count, timing, and transform flags.
 
 ## Validation
 
-Every decoder capability needs the narrowest stable test that proves it: exact-oracle unit tests
-when possible, synthetic integration tests when isolation is required, and real public-reader
-fixtures when the feature is intended to work from public input.
+- Add BMFF parser unit tests for valid boxes, truncation, overflow, duplicate unique boxes, and
+  unsupported essential properties.
+- Add synthetic AVIF fixtures that wrap existing raw AV1 OBU streams for still image, alpha, grid,
+  progressive, and malformed metadata paths.
+- Add integration tests with selected `external/libavif/tests/data/*.avif` fixtures covering real
+  still images, alpha, grid, and animation.
+- Verify with `./gradlew -g .gradle-user-home compileJava compileTestJava test`.
+
+## Completion Criteria
+
+- `org.glavo.avif` is exported and provides a stable public reader API.
+- Common AVIF still, alpha, grid, progressive, and animated AV1 files decode through the Java AV1
+  engine.
+- Unsupported container or codec features fail predictably with clear diagnostics.
+- The full Gradle validation command passes with workspace-local Gradle user home.
