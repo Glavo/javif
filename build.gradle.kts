@@ -79,6 +79,39 @@ tasks.test {
     testLogging.showStandardStreams = true
 }
 
+val dav1dCommit = "c5726277ffa8764665ea08f865e46912a41f2309"
+val libavifCommit = "b54eac58daf563e9150cc6abce7631ac71b999aa"
+val libavifZip = layout.buildDirectory.file("downloads/libavif-$libavifCommit.zip")
+
+val downloadLibavif by tasks.registering(de.undercouch.gradle.tasks.download.Download::class) {
+    src("https://github.com/AOMediaCodec/libavif/archive/$libavifCommit.zip")
+    dest(libavifZip)
+    overwrite(false)
+}
+
+tasks.processTestResources {
+    dependsOn(downloadLibavif)
+
+    from(zipTree(libavifZip)) {
+        includeEmptyDirs = false
+
+        val rootDirName = "libavif-$libavifCommit"
+        val dataDir = listOf(rootDirName, "tests", "data")
+
+        eachFile {
+            val pathSegments = relativePath.segments.toList()
+            if (pathSegments.size > 3 && pathSegments.subList(0, 3) == dataDir) {
+                relativePath = RelativePath(
+                    true,
+                    *(listOf("libavif-test-data") + pathSegments.subList(3, pathSegments.size)).toTypedArray(),
+                )
+            } else {
+                exclude()
+            }
+        }
+    }
+}
+
 tasks.jacocoTestReport {
     dependsOn(tasks.test)
     reports {
@@ -87,7 +120,6 @@ tasks.jacocoTestReport {
         html.required.set(true)
     }
 }
-
 
 tasks.withType<Javadoc> {
     (options as StandardJavadocDocletOptions).also {

@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.file.Path;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -48,41 +48,49 @@ final class AvifImageReaderTest {
     /// The expected packed opaque gray pixel produced by the supported still-picture payload.
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
 
-    /// The smallest still-image fixture from libavif's test data.
-    private static final Path LIBAVIF_WHITE_1X1_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "white_1x1.avif");
+    /// The smallest still-image fixture copied from libavif's test data into test resources.
+    private static final String LIBAVIF_WHITE_1X1_FIXTURE = "libavif-test-data/white_1x1.avif";
 
-    /// A still-image fixture that uses an extended `pixi` property.
-    private static final Path LIBAVIF_EXTENDED_PIXI_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "extended_pixi.avif");
+    /// A still-image fixture copied from libavif's test data that uses an extended `pixi` property.
+    private static final String LIBAVIF_EXTENDED_PIXI_FIXTURE = "libavif-test-data/extended_pixi.avif";
 
-    /// A basic SDR sRGB still-image fixture.
-    private static final Path LIBAVIF_COLORS_SDR_SRGB_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "colors_sdr_srgb.avif");
+    /// A basic SDR sRGB still-image fixture copied from libavif's test data.
+    private static final String LIBAVIF_COLORS_SDR_SRGB_FIXTURE = "libavif-test-data/colors_sdr_srgb.avif";
 
-    /// A still-image fixture with embedded ICC, Exif, and XMP metadata.
-    private static final Path LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "paris_icc_exif_xmp.avif");
+    /// A still-image fixture copied from libavif's test data with embedded ICC, Exif, and XMP metadata.
+    private static final String LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE =
+            "libavif-test-data/paris_icc_exif_xmp.avif";
 
-    /// A fixture with a color item and an alpha auxiliary item.
-    private static final Path LIBAVIF_ALPHA_NO_IROT_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "abc_color_irot_alpha_NOirot.avif");
+    /// A fixture copied from libavif's test data with a color item and an alpha auxiliary item.
+    private static final String LIBAVIF_ALPHA_NO_IROT_FIXTURE =
+            "libavif-test-data/abc_color_irot_alpha_NOirot.avif";
 
-    /// A fixture with an alpha auxiliary item missing ispe.
-    private static final Path LIBAVIF_ALPHA_NOISPE_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "alpha_noispe.avif");
+    /// A fixture copied from libavif's test data with an alpha auxiliary item missing ispe.
+    private static final String LIBAVIF_ALPHA_NOISPE_FIXTURE = "libavif-test-data/alpha_noispe.avif";
 
-    /// A 1x5 grid image fixture.
-    private static final Path LIBAVIF_SOFA_GRID_1X5_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "sofa_grid1x5_420.avif");
+    /// A 1x5 grid image fixture copied from libavif's test data.
+    private static final String LIBAVIF_SOFA_GRID_1X5_FIXTURE = "libavif-test-data/sofa_grid1x5_420.avif";
 
-    /// A progressive still-image fixture using idat.
-    private static final Path LIBAVIF_PROGRESSIVE_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "draw_points_idat_progressive.avif");
+    /// A progressive still-image fixture copied from libavif's test data using idat.
+    private static final String LIBAVIF_PROGRESSIVE_FIXTURE =
+            "libavif-test-data/draw_points_idat_progressive.avif";
 
-    /// An animated 8bpc AVIS image sequence fixture.
-    private static final Path LIBAVIF_ANIMATED_FIXTURE =
-            Path.of("external", "libavif", "tests", "data", "colors-animated-8bpc.avif");
+    /// An animated 8bpc AVIS image sequence fixture copied from libavif's test data.
+    private static final String LIBAVIF_ANIMATED_FIXTURE = "libavif-test-data/colors-animated-8bpc.avif";
+
+    /// Loads a test resource into a byte array.
+    ///
+    /// @param resourceName the classpath resource name
+    /// @return the full resource contents
+    /// @throws IOException if the resource cannot be read
+    private static byte[] testResourceBytes(String resourceName) throws IOException {
+        try (InputStream input = AvifImageReaderTest.class.getClassLoader().getResourceAsStream(resourceName)) {
+            if (input == null) {
+                throw new AssertionError("Missing test resource: " + resourceName);
+            }
+            return input.readAllBytes();
+        }
+    }
 
     /// Verifies that the primary AV1 item payload is decoded through the migrated AV1 decoder.
     ///
@@ -113,7 +121,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or parsed
     @Test
     void openParsesLibavifWhiteFixtureInfo() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_WHITE_1X1_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE))) {
             AvifImageInfo info = reader.info();
 
             assertEquals(1, info.width());
@@ -131,7 +139,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameDecodesLibavifWhiteFixture() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_WHITE_1X1_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE))) {
             AvifFrame frame = reader.readFrame();
 
             assertTrue(frame instanceof AvifIntFrame);
@@ -153,7 +161,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or parsed
     @Test
     void openParsesExtendedPixiFixtureInfo() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_EXTENDED_PIXI_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_EXTENDED_PIXI_FIXTURE))) {
             AvifImageInfo info = reader.info();
 
             assertTrue(info.width() > 0);
@@ -170,7 +178,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameDecodesColorsSdrSrgbFixture() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_COLORS_SDR_SRGB_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_COLORS_SDR_SRGB_FIXTURE))) {
             AvifImageInfo info = reader.info();
 
             assertTrue(info.width() > 0);
@@ -193,7 +201,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or parsed
     @Test
     void openParsesParisIccExifXmpFixtureInfo() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE))) {
             AvifImageInfo info = reader.info();
 
             assertTrue(info.width() > 0);
@@ -210,7 +218,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameDecodesProgressiveFixture() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_PROGRESSIVE_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_PROGRESSIVE_FIXTURE))) {
             AvifImageInfo info = reader.info();
             assertTrue(info.width() > 0);
             assertTrue(info.height() > 0);
@@ -228,7 +236,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readsAnimatedSequenceAllFrames() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_ANIMATED_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
             assertEquals(5, info.frameCount());
@@ -309,7 +317,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameDecodesGrid1x5Fixture() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_SOFA_GRID_1X5_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_SOFA_GRID_1X5_FIXTURE))) {
             AvifImageInfo info = reader.info();
             assertTrue(info.width() > 0);
             assertTrue(info.height() > 0);
@@ -328,7 +336,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readsAlphaFixtureGracefully() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_ALPHA_NO_IROT_FIXTURE)) {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ALPHA_NO_IROT_FIXTURE))) {
             AvifImageInfo info = reader.info();
 
             assertTrue(info.width() > 0);
@@ -371,14 +379,19 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that an alpha auxiliary item missing ispe is rejected.
+    /// Verifies that a libavif fixture named for a missing alpha ispe parses through the public reader.
     ///
-    /// @throws IOException if an unexpected error occurs
+    /// @throws IOException if the fixture cannot be read or parsed
     @Test
-    void rejectsAlphaMissingIspe() throws IOException {
-        byte[] bytes = syntheticAlphaAvifWithoutIspe();
-        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
-        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    void openParsesAlphaNoIspeFixtureInfo() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ALPHA_NOISPE_FIXTURE))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.width() > 0);
+            assertTrue(info.height() > 0);
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+        }
     }
 
     /// Verifies that truncated ispe payload is rejected.
@@ -615,70 +628,6 @@ final class AvifImageReaderTest {
         int colorOffset = ftyp.length + metaSize + mdatHeaderSize;
         int alphaOffset = colorOffset + colorPayload.length;
         byte[] meta = buildDualItemMeta(colorOffset, colorPayload.length, alphaOffset, alphaPayload.length);
-        return concat(ftyp, meta, box("mdat", concat(colorPayload, alphaPayload)));
-    }
-
-    /// Creates a synthetic AVIF with alpha missing ispe on the alpha item.
-    ///
-    /// @return the complete AVIF test file bytes
-    private static byte[] syntheticAlphaAvifWithoutIspe() {
-        byte[] colorPayload = av1StillPicturePayload();
-        byte[] alphaPayload = av1StillPicturePayload();
-        byte[] ftyp = fileTypeBox();
-        int mdatHeaderSize = 8;
-
-        // Build meta without ipma first to measure size
-        byte[] placeholderMeta = fullBox("meta", 0, 0,
-                handlerBox(), primaryItemBox());
-        int placeholderSize = placeholderMeta.length;
-        int colorOffset = ftyp.length + placeholderSize + mdatHeaderSize;
-        int alphaOffset = colorOffset + colorPayload.length;
-
-        // Build iprp with ispe ONLY on color item (no ispe on alpha)
-        byte[] iprp = box("iprp",
-                box("ipco",
-                        imageSpatialExtentsProperty(),
-                        av1ConfigProperty(),
-                        colorProperty(),
-                        monochromeAv1ConfigProperty(),
-                        auxCAlphaProperty()
-                ),
-                fullBox("ipma", 0, 0,
-                        u32(2),
-                        u16(1),
-                        new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03},
-                        u16(2),
-                        new byte[]{2, (byte) 0x84, (byte) 0x85}
-                )
-        );
-
-        byte[] iloc = fullBox("iloc", 0, 0,
-                new byte[]{0x44, 0x40},
-                u16(2),
-                u16(1),
-                u16(0),
-                u32(0),
-                u16(1),
-                u32(colorOffset),
-                u32(colorPayload.length),
-                u16(2),
-                u16(0),
-                u32(0),
-                u16(1),
-                u32(alphaOffset),
-                u32(alphaPayload.length)
-        );
-
-        byte[] iinf = fullBox("iinf", 0, 0,
-                u16(2),
-                fullBox("infe", 2, 0, u16(1), u16(0), fourCc("av01"), new byte[]{0}),
-                fullBox("infe", 2, 0, u16(2), u16(0), fourCc("av01"), new byte[]{0})
-        );
-
-        byte[] iref = refBox(1, 2);
-
-        byte[] meta = fullBox("meta", 0, 0,
-                handlerBox(), primaryItemBox(), iloc, iinf, iprp, iref);
         return concat(ftyp, meta, box("mdat", concat(colorPayload, alphaPayload)));
     }
 
