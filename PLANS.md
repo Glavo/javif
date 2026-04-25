@@ -36,18 +36,14 @@ No active decode boundary is currently listed. Add entries here only for intenti
 
 ## Remaining Work
 
-1. Broaden public-reader exact-oracle fixtures around the completed inter/reference and postfilter
-   subsets.
-2. Add combined real-stream fixtures that exercise active loop filter, CDEF, restoration,
-   super-resolution, reference refresh, and `show_existing_frame` reuse together.
-3. Keep unsupported syntax explicit and update this file only when a stable boundary or major
-   supported area changes.
+No planned remaining work is currently listed. Future work should be added only when a stable
+decode boundary, missing fixture class, or major unsupported AV1 area is identified.
 
 ## Completion Criteria
 
-The remaining work is complete when a materially broader real-stream subset produces stable
-`DecodedPlanes`, refreshes/reuses reference surfaces correctly, and never silently approximates
-unsupported syntax.
+The current phase is complete: the supported real-stream subset produces stable `DecodedPlanes`,
+refreshes and reuses reference surfaces correctly, covers combined postfilter/reference fixtures,
+and keeps unsupported syntax explicit instead of silently approximating it.
 
 ## Validation
 

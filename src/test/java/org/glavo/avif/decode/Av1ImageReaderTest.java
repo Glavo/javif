@@ -20,6 +20,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.BlockNeighborContext;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
 import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
@@ -80,6 +81,12 @@ final class Av1ImageReaderTest {
     /// gray `ArgbIntFrame` without relying on runtime brute-force search.
     private static final byte[] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    };
+
+    /// One fixed tile payload that decodes an active luma Wiener restoration unit before the
+    /// current all-zero key-frame block syntax.
+    private static final byte[] ACTIVE_WIENER_RESTORATION_TILE_PAYLOAD = new byte[]{
+            0x4E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
     /// One deterministic real tile payload whose first visible `8x8` key-frame leaf uses both luma
@@ -416,6 +423,42 @@ final class Av1ImageReaderTest {
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), PixelFormat.I420, 1);
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that one public-reader stream can combine active postfilters, horizontal
+    /// super-resolution, reference refresh, and combined `show_existing_frame` reuse without
+    /// losing the decoded restoration metadata or stored post-filter surface.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameReturnsStoredReferenceSurfaceForActivePostfilterSuperResolvedShowExistingFrame() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSuperResolvedRestorationSequenceHeaderPayload(PixelFormat.I400)),
+                obu(6, fullActivePostfilterSuperResolvedStillPictureCombinedFramePayload(
+                        ACTIVE_WIENER_RESTORATION_TILE_PAYLOAD
+                )),
+                obu(6, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame firstFrame = reader.readFrame();
+            FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(firstSyntaxResult);
+            FrameHeader firstFrameHeader = firstSyntaxResult.assembly().frameHeader();
+            assertActivePostfilterSuperResolvedHeader(firstFrameHeader);
+            assertDecodedActiveWienerRestorationUnit(firstSyntaxResult);
+            assertReferenceStateStoredForLastSyntaxResult(reader);
+
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                    Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface");
+            assertStillPictureFrameMatchesReferenceSurface(firstFrame, referenceSurfaceSnapshot, 0);
+
+            DecodedFrame reusedFrame = reader.readFrame();
+            assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 1);
             assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
@@ -2089,6 +2132,44 @@ final class Av1ImageReaderTest {
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         });
+    }
+
+    /// Asserts that one parsed frame header keeps every postfilter and geometry flag required by
+    /// the combined public-reader postfilter fixture.
+    ///
+    /// @param frameHeader the parsed frame header to inspect
+    private static void assertActivePostfilterSuperResolvedHeader(FrameHeader frameHeader) {
+        assertTrue(frameHeader.superResolution().enabled());
+        assertFalse(frameHeader.allLossless());
+        assertEquals(57, frameHeader.frameSize().codedWidth());
+        assertEquals(64, frameHeader.frameSize().upscaledWidth());
+        assertEquals(12, frameHeader.loopFilter().levelY()[0]);
+        assertEquals(0, frameHeader.loopFilter().levelY()[1]);
+        assertEquals(6, frameHeader.cdef().damping());
+        assertEquals(0, frameHeader.cdef().bits());
+        assertArrayEquals(new int[]{60}, frameHeader.cdef().yStrengths());
+        assertEquals(FrameHeader.RestorationType.WIENER, frameHeader.restoration().types()[0]);
+        assertEquals(6, frameHeader.restoration().unitSizeLog2Y());
+    }
+
+    /// Asserts that structural decoding captured the active luma Wiener restoration unit used by
+    /// the combined public-reader postfilter fixture.
+    ///
+    /// @param syntaxDecodeResult the decoded structural frame result to inspect
+    private static void assertDecodedActiveWienerRestorationUnit(FrameSyntaxDecodeResult syntaxDecodeResult) {
+        RestorationUnitMap restorationUnitMap = syntaxDecodeResult.restorationUnitMap();
+        assertEquals(1, restorationUnitMap.columns(0));
+        assertEquals(1, restorationUnitMap.rows(0));
+        assertEquals(0, restorationUnitMap.columns(1));
+        assertEquals(0, restorationUnitMap.rows(1));
+        assertEquals(0, restorationUnitMap.columns(2));
+        assertEquals(0, restorationUnitMap.rows(2));
+
+        RestorationUnit unit = restorationUnitMap.unit(0, 0, 0);
+        assertNotNull(unit);
+        assertEquals(FrameHeader.RestorationType.WIENER, unit.type());
+        assertArrayEquals(new int[]{3, -7, 15}, unit.wienerCoefficients()[0]);
+        assertArrayEquals(new int[]{3, -6, 31}, unit.wienerCoefficients()[1]);
     }
 
     /// Asserts that one real parsed high-bit-depth still-picture decode in the requested additional
@@ -4027,6 +4108,46 @@ final class Av1ImageReaderTest {
         return writer.toByteArray();
     }
 
+    /// Creates one non-reduced still-picture-compatible sequence header payload that enables
+    /// frame super-resolution, CDEF, and loop restoration.
+    ///
+    /// @param pixelFormat the requested public chroma layout
+    /// @return one non-reduced still-picture-compatible sequence header payload with postfilters enabled
+    private static byte[] fullSuperResolvedRestorationSequenceHeaderPayload(PixelFormat pixelFormat) {
+        BitWriter writer = new BitWriter();
+        writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 5);
+        writer.writeBits(0, 12);
+        writer.writeBits(3, 3);
+        writer.writeBits(1, 2);
+        writer.writeFlag(false);
+        writer.writeBits(5, 4);
+        writer.writeBits(5, 4);
+        writer.writeBits(63, 6);
+        writer.writeBits(63, 6);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writeReducedStillPictureColorConfig(writer, pixelFormat, 8, false);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
 
     /// Creates one non-reduced still-picture-compatible `I420` sequence header payload that
     /// enables both `show_existing_frame` and explicit film grain signaling.
@@ -4250,6 +4371,19 @@ final class Av1ImageReaderTest {
     private static byte[] fullSuperResolvedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
         BitWriter writer = new BitWriter();
         writeFullSuperResolvedStillPictureFrameHeaderBits(writer);
+        writer.padToByteBoundary();
+        writer.writeBytes(tileGroupPayload);
+        return writer.toByteArray();
+    }
+
+    /// Creates one non-reduced still-picture-compatible combined frame payload that enables active
+    /// loop filtering, CDEF, luma Wiener restoration, and frame super-resolution.
+    ///
+    /// @param tileGroupPayload the tile-group payload appended after the frame header
+    /// @return one non-reduced still-picture-compatible active-postfilter combined frame payload
+    private static byte[] fullActivePostfilterSuperResolvedStillPictureCombinedFramePayload(byte[] tileGroupPayload) {
+        BitWriter writer = new BitWriter();
+        writeFullActivePostfilterSuperResolvedStillPictureFrameHeaderBits(writer);
         writer.padToByteBoundary();
         writer.writeBytes(tileGroupPayload);
         return writer.toByteArray();
@@ -4555,6 +4689,39 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+    }
+
+    /// Writes one non-reduced still-picture-compatible key frame header syntax with active luma
+    /// loop filtering, active luma CDEF, active luma Wiener restoration, and super-resolution.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeFullActivePostfilterSuperResolvedStillPictureFrameHeaderBits(BitWriter writer) {
+        writer.writeFlag(false);
+        writer.writeBits(0, 2);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(0, 3);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeBits(8, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(12, 6);
+        writer.writeBits(0, 6);
+        writer.writeBits(0, 3);
+        writer.writeFlag(false);
+        writer.writeBits(3, 2);
+        writer.writeBits(0, 2);
+        writer.writeBits(60, 6);
+        writer.writeBits(2, 2);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
