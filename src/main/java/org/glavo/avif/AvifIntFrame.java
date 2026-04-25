@@ -18,7 +18,9 @@ package org.glavo.avif;
 import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
+import java.nio.IntBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -26,7 +28,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class AvifIntFrame extends AvifFrame {
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
-    private final int @Unmodifiable [] pixels;
+    private final @Unmodifiable IntBuffer pixels;
 
     /// Creates an `int`-backed AVIF frame.
     ///
@@ -38,13 +40,51 @@ public final class AvifIntFrame extends AvifFrame {
     /// @param pixels packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
     public AvifIntFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, int[] pixels) {
         super(width, height, bitDepth, pixelFormat, frameIndex);
-        this.pixels = Arrays.copyOf(Objects.requireNonNull(pixels, "pixels"), pixels.length);
+        this.pixels = immutablePixels(Objects.requireNonNull(pixels, "pixels"));
+    }
+
+    /// Creates an `int`-backed AVIF frame from immutable pixel storage.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param frameIndex the zero-based frame index
+    /// @param pixels packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
+    AvifIntFrame(
+            int width,
+            int height,
+            int bitDepth,
+            PixelFormat pixelFormat,
+            int frameIndex,
+            @Unmodifiable IntBuffer pixels
+    ) {
+        super(width, height, bitDepth, pixelFormat, frameIndex);
+        this.pixels = Objects.requireNonNull(pixels, "pixels").slice().asReadOnlyBuffer();
     }
 
     /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
     ///
     /// @return packed non-premultiplied ARGB pixels
     public int[] pixels() {
-        return Arrays.copyOf(pixels, pixels.length);
+        IntBuffer buffer = pixelBuffer();
+        int[] result = new int[buffer.remaining()];
+        buffer.get(result);
+        return result;
+    }
+
+    /// Returns a read-only view of packed non-premultiplied ARGB pixels.
+    ///
+    /// @return a read-only view of packed non-premultiplied ARGB pixels
+    public @UnmodifiableView IntBuffer pixelBuffer() {
+        return pixels.slice();
+    }
+
+    /// Creates immutable storage for pixel arrays.
+    ///
+    /// @param pixels the source pixels
+    /// @return immutable pixel storage
+    private static @Unmodifiable IntBuffer immutablePixels(int[] pixels) {
+        return IntBuffer.wrap(Arrays.copyOf(pixels, pixels.length)).asReadOnlyBuffer();
     }
 }

@@ -33,7 +33,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -226,15 +227,19 @@ public final class AvifImageReader implements AutoCloseable {
         if (container.isGrid()) {
             return readGridFrame(frameIndex);
         }
+        ByteBuffer primaryPayload = container.primaryItemPayload();
+        if (primaryPayload == null) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item payload is missing", null);
+        }
         try (Av1ImageReader colorReader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(container.primaryItemPayload()).order(ByteOrder.LITTLE_ENDIAN)),
+                new BufferedInput.OfByteBuffer(primaryPayload),
                 config.av1DecoderConfig()
         )) {
             DecodedFrame colorFrame = colorReader.readFrame();
             if (colorFrame == null) {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item produced no frame", null);
             }
-            byte @Nullable [] alphaPayload = container.alphaItemPayload();
+            ByteBuffer alphaPayload = container.alphaItemPayload();
             AvifFrame rawFrame;
             if (alphaPayload != null) {
                 rawFrame = adaptFrameWithAlpha(colorFrame, alphaPayload, frameIndex);
@@ -255,7 +260,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the decoded frame
     /// @throws IOException if decoding fails
     private AvifFrame readSequenceFrame(int frameIndex) throws IOException {
-        byte @Unmodifiable [] @Nullable [] payloads = container.samplePayloads();
+        @Unmodifiable ByteBuffer @Nullable [] payloads = container.samplePayloads();
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
@@ -264,13 +269,8 @@ public final class AvifImageReader implements AutoCloseable {
                     "Random-access sequence decoding is not implemented in this slice", null);
         }
         if (sequenceAv1Reader == null) {
-            ByteArrayOutputStream concat = new ByteArrayOutputStream();
-            for (byte[] p : payloads) {
-                concat.writeBytes(Objects.requireNonNull(p));
-            }
             sequenceAv1Reader = Av1ImageReader.open(
-                    new BufferedInput.OfByteBuffer(
-                            ByteBuffer.wrap(concat.toByteArray()).order(ByteOrder.LITTLE_ENDIAN)),
+                    new BufferedInput.OfByteBuffers(payloads),
                     config.av1DecoderConfig()
             );
             sequenceAv1FrameIndex = 0;
@@ -300,19 +300,19 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the composed frame
     /// @throws IOException if decoding fails
     private AvifFrame readGridFrame(int frameIndex) throws IOException {
-        byte @Unmodifiable [] @Nullable [] cellPayloads = container.gridCellPayloads();
+        @Unmodifiable ByteBuffer @Nullable [] cellPayloads = container.gridCellPayloads();
         if (cellPayloads == null || cellPayloads.length == 0) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cell payloads", null);
         }
         int cellCount = cellPayloads.length;
         DecodedFrame[] cellFrames = new DecodedFrame[cellCount];
         for (int i = 0; i < cellCount; i++) {
-            byte[] payload = cellPayloads[i];
+            ByteBuffer payload = cellPayloads[i];
             if (payload == null) {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid cell payload is null: " + i, null);
             }
             try (Av1ImageReader cellReader = Av1ImageReader.open(
-                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)),
+                    new BufferedInput.OfByteBuffer(payload),
                     config.av1DecoderConfig()
             )) {
                 DecodedFrame cellFrame = cellReader.readFrame();
@@ -377,7 +377,7 @@ public final class AvifImageReader implements AutoCloseable {
             for (int col = 0; col < columns; col++) {
                 int cellIndex = row * columns + col;
                 ArgbIntFrame cellFrame = (ArgbIntFrame) cellFrames[cellIndex];
-                int[] cellPixels = cellFrame.pixels();
+                IntBuffer cellPixels = cellFrame.pixelBuffer();
                 int cellWidth = cellFrame.width();
                 int cellHeight = cellFrame.height();
                 maxCellHeight = Math.max(maxCellHeight, cellHeight);
@@ -390,7 +390,9 @@ public final class AvifImageReader implements AutoCloseable {
                     int destRow = yOffset + cy;
                     int destCol = cellX;
                     int srcRow = cy * cellWidth;
-                    System.arraycopy(cellPixels, srcRow, canvas, destRow * outputWidth + destCol, cellWidth);
+                    for (int cx = 0; cx < cellWidth; cx++) {
+                        canvas[destRow * outputWidth + destCol + cx] = cellPixels.get(srcRow + cx);
+                    }
                 }
             }
             yOffset += maxCellHeight;
@@ -441,7 +443,11 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the transformed frame, or the same frame when no transforms are present
     private AvifFrame applyTransforms(AvifFrame frame) {
         if (frame instanceof AvifIntFrame intFrame) {
-            int[] pixels = intFrame.pixels();
+            if (!container.hasClapCrop() && container.rotationCode() <= 0 && container.mirrorAxis() < 0) {
+                return frame;
+            }
+
+            int[] pixels = intBufferToArray(intFrame.pixelBuffer());
             int width = intFrame.width();
             int height = intFrame.height();
 
@@ -470,10 +476,8 @@ public final class AvifImageReader implements AutoCloseable {
                 pixels = applyMirrorInt(pixels, width, height, mirror);
             }
 
-            if (pixels != intFrame.pixels()) {
-                return new AvifIntFrame(width, height, intFrame.bitDepth(),
-                        intFrame.pixelFormat(), intFrame.frameIndex(), pixels);
-            }
+            return new AvifIntFrame(width, height, intFrame.bitDepth(),
+                    intFrame.pixelFormat(), intFrame.frameIndex(), pixels);
         }
         return frame;
     }
@@ -584,7 +588,7 @@ public final class AvifImageReader implements AutoCloseable {
                     intFrame.bitDepth(),
                     intFrame.pixelFormat(),
                     frameIndex,
-                    intFrame.pixels()
+                    intFrame.pixelBuffer()
             );
         }
         if (frame instanceof ArgbLongFrame longFrame) {
@@ -594,7 +598,7 @@ public final class AvifImageReader implements AutoCloseable {
                     longFrame.bitDepth(),
                     longFrame.pixelFormat(),
                     frameIndex,
-                    longFrame.pixels()
+                    longFrame.pixelBuffer()
             );
         }
         throw new IllegalArgumentException("Unsupported decoded frame class: " + frame.getClass().getName());
@@ -607,9 +611,11 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frameIndex the zero-based AVIF frame index
     /// @return the combined AVIF frame
     /// @throws IOException if the alpha payload cannot be decoded
-    private AvifFrame adaptFrameWithAlpha(DecodedFrame colorFrame, byte[] alphaPayload, int frameIndex) throws IOException {
+    private AvifFrame adaptFrameWithAlpha(
+            DecodedFrame colorFrame, @Unmodifiable ByteBuffer alphaPayload, int frameIndex
+    ) throws IOException {
         try (Av1ImageReader alphaReader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(alphaPayload).order(ByteOrder.LITTLE_ENDIAN)),
+                new BufferedInput.OfByteBuffer(alphaPayload),
                 config.av1DecoderConfig()
         )) {
             DecodedFrame alphaFrame = alphaReader.readFrame();
@@ -641,7 +647,7 @@ public final class AvifImageReader implements AutoCloseable {
     private static AvifIntFrame combineIntPlaneAlpha(
             ArgbIntFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
     ) {
-        int[] colorPixels = color.pixels();
+        IntBuffer colorPixels = color.pixelBuffer();
         int width = color.width();
         int height = color.height();
         DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
@@ -657,7 +663,7 @@ public final class AvifImageReader implements AutoCloseable {
                     alpha8 = (alphaSample * 255 + maxSample / 2) / maxSample;
                 }
                 int i = y * width + x;
-                combined[i] = (colorPixels[i] & 0x00FFFFFF) | (alpha8 << 24);
+                combined[i] = (colorPixels.get(i) & 0x00FFFFFF) | (alpha8 << 24);
             }
         }
         return new AvifIntFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
@@ -667,7 +673,7 @@ public final class AvifImageReader implements AutoCloseable {
     private static AvifLongFrame combineLongPlaneAlpha(
             ArgbLongFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
     ) {
-        long[] colorPixels = color.pixels();
+        LongBuffer colorPixels = color.pixelBuffer();
         int width = color.width();
         int height = color.height();
         DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
@@ -684,7 +690,7 @@ public final class AvifImageReader implements AutoCloseable {
                     alpha16 = alphaSample;
                 }
                 int i = y * width + x;
-                combined[i] = (colorPixels[i] & 0x0000FFFF_FFFFFFFFL) | ((alpha16 & maxSampleL) << 48);
+                combined[i] = (colorPixels.get(i) & 0x0000FFFF_FFFFFFFFL) | ((alpha16 & maxSampleL) << 48);
             }
         }
         return new AvifLongFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
@@ -697,6 +703,17 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return an unsupported-feature exception
     private static AvifDecodeException unsupported(String message, @Nullable Long offset) {
         return new AvifDecodeException(AvifErrorCode.UNSUPPORTED_FEATURE, message, offset);
+    }
+
+    /// Copies remaining integers from a buffer into an array.
+    ///
+    /// @param buffer the source buffer
+    /// @return an array containing the buffer's remaining integers
+    private static int[] intBufferToArray(IntBuffer buffer) {
+        IntBuffer source = buffer.slice();
+        int[] result = new int[source.remaining()];
+        source.get(result);
+        return result;
     }
 
     /// Copies remaining bytes from a buffer into a byte array.

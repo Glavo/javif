@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -107,6 +108,12 @@ final class AvifImageReaderTest {
             assertEquals(8, intFrame.bitDepth());
             assertEquals(PixelFormat.I420, intFrame.pixelFormat());
             assertEquals(0, intFrame.frameIndex());
+
+            IntBuffer pixelBuffer = intFrame.pixelBuffer();
+            assertTrue(pixelBuffer.isReadOnly());
+            assertEquals(64 * 64, pixelBuffer.remaining());
+            assertEquals(OPAQUE_MID_GRAY, pixelBuffer.get(0));
+            assertEquals(OPAQUE_MID_GRAY, pixelBuffer.get(pixelBuffer.limit() - 1));
 
             int[] pixels = intFrame.pixels();
             assertEquals(64 * 64, pixels.length);

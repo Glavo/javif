@@ -24,6 +24,8 @@ import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.util.Objects;
 
 /// Internal entry points for converting `DecodedPlanes` into opaque ARGB output.
@@ -172,7 +174,7 @@ public final class ArgbOutput {
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),
                 checkedMetadata.presentationIndex(),
-                pixels
+                IntBuffer.wrap(pixels).asReadOnlyBuffer()
         );
     }
 
@@ -315,7 +317,7 @@ public final class ArgbOutput {
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),
                 checkedMetadata.presentationIndex(),
-                pixels
+                LongBuffer.wrap(pixels).asReadOnlyBuffer()
         );
     }
 

@@ -19,7 +19,10 @@ import org.glavo.avif.AvifImageInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -29,13 +32,13 @@ public final class AvifContainer {
     /// The parsed image metadata.
     private final AvifImageInfo info;
     /// The primary image AV1 OBU payload, or `null` for grid images.
-    private final byte @Nullable @Unmodifiable [] primaryItemPayload;
+    private final @Nullable @Unmodifiable ByteBuffer primaryItemPayload;
     /// The alpha auxiliary image AV1 OBU payload, or `null` when absent.
-    private final byte @Nullable @Unmodifiable [] alphaItemPayload;
+    private final @Nullable @Unmodifiable ByteBuffer alphaItemPayload;
     /// Whether this is a grid derived image.
     private final boolean isGrid;
     /// Grid cell AV1 OBU payloads in row-major order, or `null`.
-    private final byte @Nullable @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads;
+    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] gridCellPayloads;
     /// Grid row count.
     private final int gridRows;
     /// Grid column count.
@@ -61,7 +64,7 @@ public final class AvifContainer {
     /// Whether this is an AVIS image sequence.
     private final boolean isSequence;
     /// The AV1 OBU payloads for each sample in order.
-    private final byte @Nullable @Unmodifiable [] @Nullable @Unmodifiable [] samplePayloads;
+    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] samplePayloads;
     /// The frame duration deltas in media timescale units.
     private final int @Unmodifiable [] frameDeltas;
     /// The number of samples.
@@ -108,12 +111,9 @@ public final class AvifContainer {
             int rotationCode, int mirrorAxis
     ) {
         this.info = Objects.requireNonNull(info, "info");
-        this.primaryItemPayload = Arrays.copyOf(
-                Objects.requireNonNull(primaryItemPayload, "primaryItemPayload"),
-                primaryItemPayload.length
-        );
+        this.primaryItemPayload = immutablePayload(Objects.requireNonNull(primaryItemPayload, "primaryItemPayload"));
         this.alphaItemPayload = alphaItemPayload != null
-                ? Arrays.copyOf(alphaItemPayload, alphaItemPayload.length)
+                ? immutablePayload(alphaItemPayload)
                 : null;
         this.isGrid = false;
         this.gridCellPayloads = null;
@@ -155,7 +155,7 @@ public final class AvifContainer {
         this.primaryItemPayload = null;
         this.alphaItemPayload = null;
         this.isGrid = true;
-        this.gridCellPayloads = gridCellPayloads.clone();
+        this.gridCellPayloads = immutablePayloads(gridCellPayloads);
         this.gridRows = gridRows;
         this.gridColumns = gridColumns;
         this.gridOutputWidth = gridOutputWidth;
@@ -195,7 +195,7 @@ public final class AvifContainer {
         this.rotationCode = -1;
         this.mirrorAxis = -1;
         this.isSequence = true;
-        this.samplePayloads = samplePayloads.clone();
+        this.samplePayloads = immutablePayloads(samplePayloads);
         this.frameDeltas = frameDeltas.clone();
         this.sampleCount = sampleCount;
         this.mediaTimescale = mediaTimescale;
@@ -212,21 +212,21 @@ public final class AvifContainer {
     /// Returns the primary image AV1 OBU payload.
     ///
     /// @return the primary image AV1 OBU payload, or `null` for grid images
-    public byte @Nullable [] primaryItemPayload() {
+    public @Nullable @UnmodifiableView ByteBuffer primaryItemPayload() {
         if (primaryItemPayload == null) {
             return null;
         }
-        return Arrays.copyOf(primaryItemPayload, primaryItemPayload.length);
+        return payloadView(primaryItemPayload);
     }
 
     /// Returns the alpha auxiliary image AV1 OBU payload.
     ///
     /// @return the alpha auxiliary image AV1 OBU payload, or `null`
-    public byte @Nullable [] alphaItemPayload() {
+    public @Nullable @UnmodifiableView ByteBuffer alphaItemPayload() {
         if (alphaItemPayload == null) {
             return null;
         }
-        return Arrays.copyOf(alphaItemPayload, alphaItemPayload.length);
+        return payloadView(alphaItemPayload);
     }
 
     /// Returns whether this is a grid derived image.
@@ -239,11 +239,11 @@ public final class AvifContainer {
     /// Returns the grid cell AV1 OBU payloads in row-major order.
     ///
     /// @return the grid cell AV1 OBU payloads, or `null`
-    public byte @Nullable @Unmodifiable [] @Nullable [] gridCellPayloads() {
+    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] gridCellPayloads() {
         if (gridCellPayloads == null) {
             return null;
         }
-        return gridCellPayloads.clone();
+        return payloadViews(gridCellPayloads);
     }
 
     /// Returns the grid row count.
@@ -333,11 +333,11 @@ public final class AvifContainer {
     /// Returns the AV1 OBU payloads for each sample in order.
     ///
     /// @return the AV1 OBU payloads, or `null`
-    public byte @Nullable @Unmodifiable [] @Nullable [] samplePayloads() {
+    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] samplePayloads() {
         if (samplePayloads == null) {
             return null;
         }
-        return samplePayloads.clone();
+        return payloadViews(samplePayloads);
     }
 
     /// Returns the number of samples.
@@ -352,5 +352,52 @@ public final class AvifContainer {
     /// @return the frame duration deltas
     public int @Unmodifiable [] frameDeltas() {
         return frameDeltas.clone();
+    }
+
+    /// Creates immutable storage for one payload.
+    ///
+    /// @param payload the source payload bytes
+    /// @return immutable little-endian payload storage
+    private static @Unmodifiable ByteBuffer immutablePayload(byte[] payload) {
+        return ByteBuffer
+                .wrap(Arrays.copyOf(payload, payload.length))
+                .asReadOnlyBuffer()
+                .order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    /// Creates immutable storage for payload arrays.
+    ///
+    /// @param payloads the source payload arrays
+    /// @return immutable little-endian payload storage
+    private static @Unmodifiable ByteBuffer @Unmodifiable [] immutablePayloads(
+            byte @Unmodifiable [] @Unmodifiable [] payloads
+    ) {
+        ByteBuffer[] result = new ByteBuffer[payloads.length];
+        for (int i = 0; i < payloads.length; i++) {
+            result[i] = immutablePayload(Objects.requireNonNull(payloads[i], "payloads[" + i + "]"));
+        }
+        return result;
+    }
+
+    /// Returns an immutable view over one stored payload.
+    ///
+    /// @param payload the stored payload
+    /// @return a little-endian payload view
+    private static @UnmodifiableView ByteBuffer payloadView(@Unmodifiable ByteBuffer payload) {
+        return payload.slice().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    /// Returns immutable views over stored payloads.
+    ///
+    /// @param payloads the stored payload buffers
+    /// @return little-endian payload views
+    private static @UnmodifiableView ByteBuffer @Unmodifiable [] payloadViews(
+            @Unmodifiable ByteBuffer @Unmodifiable [] payloads
+    ) {
+        ByteBuffer[] result = new ByteBuffer[payloads.length];
+        for (int i = 0; i < payloads.length; i++) {
+            result[i] = payloadView(payloads[i]);
+        }
+        return result;
     }
 }

@@ -17,7 +17,9 @@ package org.glavo.avif.decode;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
+import java.nio.LongBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -25,7 +27,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class ArgbLongFrame extends DecodedFrame {
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format.
-    private final long @Unmodifiable [] pixels;
+    private final @Unmodifiable LongBuffer pixels;
 
     /// Creates a decoded `long`-backed ARGB frame.
     ///
@@ -48,13 +50,58 @@ public final class ArgbLongFrame extends DecodedFrame {
             long[] pixels
     ) {
         super(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex);
-        this.pixels = Arrays.copyOf(Objects.requireNonNull(pixels, "pixels"), pixels.length);
+        this.pixels = immutablePixels(Objects.requireNonNull(pixels, "pixels"));
+    }
+
+    /// Creates a decoded `long`-backed ARGB frame from immutable pixel storage.
+    ///
+    /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
+    /// immutable storage or storage they will never mutate after construction.
+    ///
+    /// @param width the output frame width in pixels
+    /// @param height the output frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the chroma layout
+    /// @param frameType the AV1 frame type
+    /// @param visible whether the frame is visible
+    /// @param presentationIndex the zero-based presentation index
+    /// @param pixels the packed non-premultiplied ARGB pixels
+    public ArgbLongFrame(
+            int width,
+            int height,
+            int bitDepth,
+            PixelFormat pixelFormat,
+            FrameType frameType,
+            boolean visible,
+            long presentationIndex,
+            @Unmodifiable LongBuffer pixels
+    ) {
+        super(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex);
+        this.pixels = Objects.requireNonNull(pixels, "pixels").slice().asReadOnlyBuffer();
     }
 
     /// Returns packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format.
     ///
     /// @return the packed ARGB pixels
     public long[] pixels() {
-        return Arrays.copyOf(pixels, pixels.length);
+        LongBuffer buffer = pixelBuffer();
+        long[] result = new long[buffer.remaining()];
+        buffer.get(result);
+        return result;
+    }
+
+    /// Returns a read-only view of packed non-premultiplied ARGB pixels.
+    ///
+    /// @return a read-only view of packed non-premultiplied ARGB pixels
+    public @UnmodifiableView LongBuffer pixelBuffer() {
+        return pixels.slice();
+    }
+
+    /// Creates immutable storage for pixel arrays.
+    ///
+    /// @param pixels the source pixels
+    /// @return immutable pixel storage
+    private static @Unmodifiable LongBuffer immutablePixels(long[] pixels) {
+        return LongBuffer.wrap(Arrays.copyOf(pixels, pixels.length)).asReadOnlyBuffer();
     }
 }

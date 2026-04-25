@@ -42,6 +42,7 @@ final class OutputFrameFactoryTest {
 
         assertTrue(frame instanceof ArgbIntFrame);
         assertEquals(1, ((ArgbIntFrame) frame).pixels().length);
+        assertTrue(((ArgbIntFrame) frame).pixelBuffer().isReadOnly());
         assertFrameMetadata(frame, 8, PixelFormat.I400, FrameType.KEY, false, 5L);
     }
 
@@ -65,10 +66,12 @@ final class OutputFrameFactoryTest {
 
         assertTrue(tenBitFrame instanceof ArgbLongFrame);
         assertEquals(1, ((ArgbLongFrame) tenBitFrame).pixels().length);
+        assertTrue(((ArgbLongFrame) tenBitFrame).pixelBuffer().isReadOnly());
         assertFrameMetadata(tenBitFrame, 10, PixelFormat.I400, FrameType.INTRA, true, 8L);
 
         assertTrue(twelveBitFrame instanceof ArgbLongFrame);
         assertEquals(1, ((ArgbLongFrame) twelveBitFrame).pixels().length);
+        assertTrue(((ArgbLongFrame) twelveBitFrame).pixelBuffer().isReadOnly());
         assertFrameMetadata(twelveBitFrame, 12, PixelFormat.I400, FrameType.INTRA, false, 9L);
     }
 
@@ -86,6 +89,7 @@ final class OutputFrameFactoryTest {
 
         assertTrue(frame instanceof ArgbLongFrame);
         assertEquals(1, ((ArgbLongFrame) frame).pixels().length);
+        assertTrue(((ArgbLongFrame) frame).pixelBuffer().isReadOnly());
         assertFrameMetadata(frame, 12, PixelFormat.I400, FrameType.SWITCH, true, 12L);
     }
 

@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.io;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.Closeable;
 import java.io.EOFException;
@@ -500,6 +501,61 @@ public sealed abstract class BufferedInput implements Closeable {
             }
 
             buffer.position(buffer.position() + Math.toIntExact(len));
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+    }
+
+    /// `BufferedInput` backed by a sequence of existing `ByteBuffer` instances.
+    ///
+    /// The wrapper copies only into its reusable staging buffer as scalar reads require data.
+    /// It does not concatenate the source buffers into a separate byte array or byte buffer.
+    public static final class OfByteBuffers extends BufferedInput {
+        /// Source buffers read in order.
+        private final ByteBuffer[] sources;
+        /// Index of the source buffer currently being consumed.
+        private int sourceIndex;
+
+        /// Creates a buffered view of the supplied byte buffers.
+        ///
+        /// @param buffers the buffers to read in order, starting at each buffer's current position
+        public OfByteBuffers(@Unmodifiable ByteBuffer @Unmodifiable [] buffers) {
+            super();
+            Objects.requireNonNull(buffers, "buffers");
+            this.sources = new ByteBuffer[buffers.length];
+            for (int i = 0; i < buffers.length; i++) {
+                this.sources[i] = Objects.requireNonNull(buffers[i], "buffers[" + i + "]")
+                        .slice()
+                        .order(ByteOrder.LITTLE_ENDIAN);
+            }
+        }
+
+        @Override
+        protected void fillBuffer(int required) throws IOException {
+            ByteBuffer target = prepareForFill(required);
+            try {
+                while (target.position() < required && sourceIndex < sources.length) {
+                    ByteBuffer source = sources[sourceIndex];
+                    if (!source.hasRemaining()) {
+                        sourceIndex++;
+                        continue;
+                    }
+
+                    int chunk = Math.min(target.remaining(), source.remaining());
+                    int sourceLimit = source.limit();
+                    source.limit(source.position() + chunk);
+                    try {
+                        target.put(source);
+                    } finally {
+                        source.limit(sourceLimit);
+                    }
+                }
+            } finally {
+                target.flip();
+            }
         }
 
         @Override

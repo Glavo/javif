@@ -69,6 +69,24 @@ final class BufferedInputTest {
         }
     }
 
+    /// Verifies that little-endian primitive reads cross `ByteBuffer` source boundaries.
+    ///
+    /// @throws IOException if the test input cannot be read
+    @Test
+    void readsLittleEndianPrimitivesFromByteBuffers() throws IOException {
+        byte[] bytes = sampleBytes();
+        ByteBuffer[] buffers = new ByteBuffer[]{
+                readOnlyLittleEndian(Arrays.copyOfRange(bytes, 0, 1)),
+                readOnlyLittleEndian(Arrays.copyOfRange(bytes, 1, 7)),
+                readOnlyLittleEndian(Arrays.copyOfRange(bytes, 7, 10)),
+                readOnlyLittleEndian(Arrays.copyOfRange(bytes, 10, bytes.length))
+        };
+
+        try (BufferedInput input = new BufferedInput.OfByteBuffers(buffers)) {
+            assertPrimitiveReads(input);
+        }
+    }
+
     /// Verifies that `readByteArray(int)` refills across internal buffer boundaries.
     ///
     /// @throws IOException if the test input cannot be read
@@ -151,6 +169,33 @@ final class BufferedInputTest {
         assertEquals(limitBefore, source.limit());
     }
 
+    /// Verifies that wrapping multiple `ByteBuffer` instances does not mutate caller-visible state.
+    ///
+    /// @throws IOException if the test input cannot be read
+    @Test
+    void byteBuffersWrapperDoesNotMutateSourceBufferPositionsOrLimits() throws IOException {
+        ByteBuffer first = ByteBuffer.wrap(new byte[]{1, 2, 3, 4}).order(ByteOrder.LITTLE_ENDIAN);
+        first.position(1);
+        first.limit(3);
+        ByteBuffer second = ByteBuffer.wrap(new byte[]{5, 6, 7, 8}).order(ByteOrder.LITTLE_ENDIAN);
+        second.position(0);
+        second.limit(2);
+
+        int firstPositionBefore = first.position();
+        int firstLimitBefore = first.limit();
+        int secondPositionBefore = second.position();
+        int secondLimitBefore = second.limit();
+
+        try (BufferedInput input = new BufferedInput.OfByteBuffers(new ByteBuffer[]{first, second})) {
+            assertArrayEquals(new byte[]{2, 3, 5, 6}, input.readByteArray(4));
+        }
+
+        assertEquals(firstPositionBefore, first.position());
+        assertEquals(firstLimitBefore, first.limit());
+        assertEquals(secondPositionBefore, second.position());
+        assertEquals(secondLimitBefore, second.limit());
+    }
+
     /// Verifies that zero-length operations are accepted.
     ///
     /// @throws IOException if the test input cannot be read
@@ -187,6 +232,14 @@ final class BufferedInputTest {
             bytes[i] = (byte) (i + 1);
         }
         return bytes;
+    }
+
+    /// Creates a read-only little-endian buffer over the supplied bytes.
+    ///
+    /// @param bytes the source bytes
+    /// @return a read-only little-endian buffer
+    private static ByteBuffer readOnlyLittleEndian(byte[] bytes) {
+        return ByteBuffer.wrap(bytes).asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
     }
 
     /// Asserts the primitive values read from the supplied input.

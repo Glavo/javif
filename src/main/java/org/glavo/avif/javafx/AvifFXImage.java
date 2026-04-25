@@ -26,7 +26,6 @@ import org.glavo.avif.AvifIntFrame;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
-import java.nio.IntBuffer;
 import java.util.List;
 
 /// JavaFX image adapter for decoded AVIF content.
@@ -120,7 +119,7 @@ public final class AvifFXImage extends WritableImage {
                         intFrame.width(),
                         intFrame.height(),
                         PixelFormat.getIntArgbInstance(),
-                        IntBuffer.wrap(intFrame.pixels()),
+                        intFrame.pixelBuffer(),
                         intFrame.width()
                 );
             }
