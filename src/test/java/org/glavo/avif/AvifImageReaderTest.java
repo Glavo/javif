@@ -227,18 +227,22 @@ final class AvifImageReaderTest {
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void readsAnimatedSequenceFirstFrame() throws IOException {
+    void readsAnimatedSequenceAllFrames() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_ANIMATED_FIXTURE)) {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
             assertEquals(5, info.frameCount());
-            assertEquals(150, info.width());
-            assertEquals(150, info.height());
 
-            AvifFrame frame = reader.readFrame();
-            assertNotNull(frame);
-            assertEquals(150, frame.width());
-            assertEquals(150, frame.height());
+            List<AvifFrame> frames = reader.readAllFrames();
+            assertEquals(5, frames.size());
+            assertNull(reader.readFrame());
+
+            for (int i = 0; i < 5; i++) {
+                AvifFrame f = frames.get(i);
+                assertEquals(150, f.width());
+                assertEquals(150, f.height());
+                assertEquals(i, f.frameIndex());
+            }
         }
     }
 

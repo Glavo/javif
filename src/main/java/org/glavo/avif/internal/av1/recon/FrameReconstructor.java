@@ -3077,9 +3077,10 @@ public final class FrameReconstructor {
             int[] filter
     ) {
         long filtered = 0;
+        int clampedY = clamp(sourceY, 0, referencePlane.height() - 1);
         for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
             int sourceX = clamp(sourceX0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.width() - 1);
-            filtered += (long) filter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+            filtered += (long) filter[tapIndex] * referencePlane.sample(sourceX, clampedY);
         }
         return filtered;
     }
@@ -3098,9 +3099,10 @@ public final class FrameReconstructor {
             int[] filter
     ) {
         long filtered = 0;
+        int clampedX = clamp(sourceX, 0, referencePlane.width() - 1);
         for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
             int sourceY = clamp(sourceY0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.height() - 1);
-            filtered += (long) filter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+            filtered += (long) filter[tapIndex] * referencePlane.sample(clampedX, sourceY);
         }
         return filtered;
     }
