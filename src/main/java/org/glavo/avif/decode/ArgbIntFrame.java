@@ -24,28 +24,6 @@ import java.nio.IntBuffer;
 /// Decoded frame backed by packed `int` ARGB pixels.
 @NotNullByDefault
 public final class ArgbIntFrame extends DecodedFrame {
-    /// Creates a decoded `int`-backed ARGB frame.
-    ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
-    /// @param presentationIndex the zero-based presentation index
-    /// @param pixels the packed non-premultiplied ARGB pixels
-    public ArgbIntFrame(
-            int width,
-            int height,
-            int bitDepth,
-            PixelFormat pixelFormat,
-            FrameType frameType,
-            boolean visible,
-            long presentationIndex,
-            int[] pixels
-    ) {
-        super(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex, pixels);
-    }
 
     /// Creates a decoded `int`-backed ARGB frame from immutable pixel storage.
     ///
