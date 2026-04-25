@@ -19,6 +19,7 @@ import org.glavo.avif.decode.ArgbIntFrame;
 import org.glavo.avif.decode.ArgbLongFrame;
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.DecodedFrame;
+import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
 import org.glavo.avif.internal.io.BufferedInput;
@@ -213,6 +214,9 @@ public final class AvifImageReader implements AutoCloseable {
                     null
             );
         }
+        if (container.isGrid()) {
+            return readGridFrame(frameIndex);
+        }
         try (Av1ImageReader colorReader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(container.primaryItemPayload()).order(ByteOrder.LITTLE_ENDIAN)),
                 config.av1DecoderConfig()
@@ -231,6 +235,111 @@ public final class AvifImageReader implements AutoCloseable {
         } catch (IOException exception) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
         }
+    }
+
+    /// Decodes grid cell items and composes the final canvas.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return the composed frame
+    /// @throws IOException if decoding fails
+    private AvifFrame readGridFrame(int frameIndex) throws IOException {
+        byte @Unmodifiable [] @Nullable [] cellPayloads = container.gridCellPayloads();
+        if (cellPayloads == null || cellPayloads.length == 0) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cell payloads", null);
+        }
+        int cellCount = cellPayloads.length;
+        DecodedFrame[] cellFrames = new DecodedFrame[cellCount];
+        for (int i = 0; i < cellCount; i++) {
+            byte[] payload = cellPayloads[i];
+            if (payload == null) {
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid cell payload is null: " + i, null);
+            }
+            try (Av1ImageReader cellReader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)),
+                    config.av1DecoderConfig()
+            )) {
+                DecodedFrame cellFrame = cellReader.readFrame();
+                if (cellFrame == null) {
+                    throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid cell produced no frame: " + i, null);
+                }
+                cellFrames[i] = cellFrame;
+            } catch (AvifDecodeException exception) {
+                throw exception;
+            } catch (IOException exception) {
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+            }
+        }
+        return composeGridFrames(cellFrames, container.gridRows(), container.gridColumns(),
+                container.gridOutputWidth(), container.gridOutputHeight(), frameIndex);
+    }
+
+    /// Composes decoded grid cell frames into a single canvas.
+    ///
+    /// @param cellFrames the decoded cell frames in row-major order
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the output width
+    /// @param outputHeight the output height
+    /// @param frameIndex the zero-based frame index
+    /// @return the composed frame
+    private static AvifFrame composeGridFrames(
+            DecodedFrame[] cellFrames, int rows, int columns,
+            int outputWidth, int outputHeight, int frameIndex
+    ) throws AvifDecodeException {
+        if (cellFrames.length == 0) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cells", null);
+        }
+        DecodedFrame firstCell = cellFrames[0];
+        if (firstCell instanceof ArgbIntFrame) {
+            return composeGridIntFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
+        }
+        if (firstCell instanceof ArgbLongFrame) {
+            throw unsupported("Grid composition for 10/12-bit frames is not implemented in this slice", null);
+        }
+        throw unsupported("Unsupported grid cell frame class: " + firstCell.getClass().getName(), null);
+    }
+
+    /// Composes 8-bit grid cell frames into a single canvas.
+    ///
+    /// @param cellFrames the decoded 8-bit cell frames
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the output width
+    /// @param outputHeight the output height
+    /// @param frameIndex the zero-based frame index
+    /// @return the composed frame
+    private static AvifIntFrame composeGridIntFrames(
+            DecodedFrame[] cellFrames, int rows, int columns,
+            int outputWidth, int outputHeight, int frameIndex
+    ) {
+        int[] canvas = new int[outputWidth * outputHeight];
+        int yOffset = 0;
+        for (int row = 0; row < rows; row++) {
+            int maxCellHeight = 0;
+            for (int col = 0; col < columns; col++) {
+                int cellIndex = row * columns + col;
+                ArgbIntFrame cellFrame = (ArgbIntFrame) cellFrames[cellIndex];
+                int[] cellPixels = cellFrame.pixels();
+                int cellWidth = cellFrame.width();
+                int cellHeight = cellFrame.height();
+                maxCellHeight = Math.max(maxCellHeight, cellHeight);
+                int cellX = 0;
+                for (int prevCol = 0; prevCol < col; prevCol++) {
+                    ArgbIntFrame prevFrame = (ArgbIntFrame) cellFrames[row * columns + prevCol];
+                    cellX += prevFrame.width();
+                }
+                for (int cy = 0; cy < cellHeight; cy++) {
+                    int destRow = yOffset + cy;
+                    int destCol = cellX;
+                    int srcRow = cy * cellWidth;
+                    System.arraycopy(cellPixels, srcRow, canvas, destRow * outputWidth + destCol, cellWidth);
+                }
+            }
+            yOffset += maxCellHeight;
+        }
+        PixelFormat fmt = ((ArgbIntFrame) cellFrames[0]).pixelFormat();
+        return new AvifIntFrame(outputWidth, outputHeight,
+                cellFrames[0].bitDepth(), fmt, frameIndex, canvas);
     }
 
     /// Reads all decoded frames.

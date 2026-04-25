@@ -94,11 +94,12 @@ public final class AvifContainerParser {
         if (primaryItem == null || primaryItem.hasUnsupportedEssentialProperty) {
             throw new AvifDecodeException(AvifErrorCode.MISSING_IMAGE_ITEM, "Primary item is not usable", null);
         }
-        if (!"av01".equals(primaryItem.type)) {
-            if ("grid".equals(primaryItem.type)) {
-                throw unsupported("AVIF image grids are not implemented in this slice", null);
-            }
+        if (!"av01".equals(primaryItem.type) && !"grid".equals(primaryItem.type)) {
             throw unsupported("Unsupported primary item type: " + primaryItem.type, null);
+        }
+
+        if ("grid".equals(primaryItem.type)) {
+            return parseGridContainer(primaryItem);
         }
 
         ImageSpatialExtents ispe = primaryItem.firstProperty(ImageSpatialExtents.class);
@@ -149,6 +150,210 @@ public final class AvifContainerParser {
                 primaryItem.firstProperty(AvifColorInfo.class)
         );
         return new AvifContainer(info, payload, alphaPayload);
+    }
+
+    /// Parses a grid derived image container.
+    ///
+    /// @param gridItem the primary grid item
+    /// @return the parsed AVIF container
+    /// @throws AvifDecodeException if the grid is malformed or unsupported
+    private AvifContainer parseGridContainer(Item gridItem) throws AvifDecodeException {
+        byte[] gridPayload = mergeItemExtents(gridItem);
+        BoxInput input = new BoxInput(gridPayload);
+        int version = input.readU8();
+        int flags = input.readU8();
+        if (version != 0) {
+            throw unsupported("Unsupported grid version: " + version, null);
+        }
+        if (flags != 0) {
+            throw parseFailed("grid flags must be zero", 1);
+        }
+        int columnsMinusOne = input.readU8();
+        int rowsMinusOne = input.readU8();
+        int rows = rowsMinusOne + 1;
+        int columns = columnsMinusOne + 1;
+        if (rows <= 0 || columns <= 0) {
+            throw parseFailed("grid dimensions must be positive", 2);
+        }
+
+        int outputWidth = -1;
+        int outputHeight = -1;
+        if (input.remaining() >= 4) {
+            outputWidth = input.readU16();
+            outputHeight = input.readU16();
+            if (outputWidth <= 0 || outputHeight <= 0) {
+                throw parseFailed("grid output dimensions must be positive", input.offset());
+            }
+        }
+
+        int expectedCellCount = rows * columns;
+        List<Integer> cellIds = gridItem.dimgCellIds;
+        if (cellIds.size() != expectedCellCount) {
+            throw parseFailed(
+                    "grid dimg cell count mismatch: expected " + expectedCellCount + " but got " + cellIds.size(),
+                    0
+            );
+        }
+
+        ImageSpatialExtents representativeIspe = null;
+        Av1Config representativeAv1C = null;
+        List<byte[]> cellPayloads = new ArrayList<>(expectedCellCount);
+
+        for (int i = 0; i < expectedCellCount; i++) {
+            int cellId = cellIds.get(i);
+            Item cellItem = meta.item(cellId);
+            if (cellItem == null) {
+                throw parseFailed("grid dimg cell item not found: " + cellId, 0);
+            }
+            if (!"av01".equals(cellItem.type)) {
+                throw unsupported("Unsupported grid cell item type: " + cellItem.type, null);
+            }
+            if (cellItem.hasUnsupportedEssentialProperty) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.MISSING_IMAGE_ITEM,
+                        "Grid cell item is not usable: " + cellId,
+                        null
+                );
+            }
+            ImageSpatialExtents cellIspe = cellItem.firstProperty(ImageSpatialExtents.class);
+            if (cellIspe == null) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.BMFF_PARSE_FAILED,
+                        "Grid cell item is missing ispe: " + cellId,
+                        null
+                );
+            }
+            Av1Config cellAv1C = cellItem.firstProperty(Av1Config.class);
+            if (cellAv1C == null) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.BMFF_PARSE_FAILED,
+                        "Grid cell item is missing av1C: " + cellId,
+                        null
+                );
+            }
+            if (representativeIspe == null) {
+                representativeIspe = cellIspe;
+                representativeAv1C = cellAv1C;
+            }
+            cellPayloads.add(mergeItemExtents(cellItem));
+        }
+
+        assert representativeIspe != null;
+        assert representativeAv1C != null;
+
+        if (outputWidth < 0) {
+            outputWidth = computeGridOutputWidth(rows, columns, cellIds);
+        }
+        if (outputHeight < 0) {
+            outputHeight = computeGridOutputHeight(rows, columns, cellIds);
+        }
+
+        boolean alphaPresent = hasGridAlpha(gridItem.id, cellIds);
+
+        AvifImageInfo info = new AvifImageInfo(
+                outputWidth,
+                outputHeight,
+                representativeAv1C.bitDepth(),
+                representativeAv1C.pixelFormat(),
+                alphaPresent,
+                false,
+                1,
+                gridItem.firstProperty(AvifColorInfo.class)
+        );
+
+        byte[][] payloads = cellPayloads.toArray(byte[][]::new);
+        return new AvifContainer(info, payloads, rows, columns, outputWidth, outputHeight);
+    }
+
+    /// Computes grid output width from cell ispe dimensions.
+    ///
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param cellIds the cell item ids in row-major order
+    /// @return the computed output width
+    /// @throws AvifDecodeException if cells in the same column have different widths
+    private int computeGridOutputWidth(int rows, int columns, List<Integer> cellIds) throws AvifDecodeException {
+        int[] columnWidths = new int[columns];
+        for (int col = 0; col < columns; col++) {
+            int cellIndex = col;
+            Item cellItem = meta.requireItem(cellIds.get(cellIndex));
+            ImageSpatialExtents ispe = cellItem.firstProperty(ImageSpatialExtents.class);
+            assert ispe != null;
+            columnWidths[col] = ispe.width;
+        }
+        for (int row = 1; row < rows; row++) {
+            for (int col = 0; col < columns; col++) {
+                int cellIndex = row * columns + col;
+                Item cellItem = meta.requireItem(cellIds.get(cellIndex));
+                ImageSpatialExtents ispe = cellItem.firstProperty(ImageSpatialExtents.class);
+                assert ispe != null;
+                if (ispe.width != columnWidths[col]) {
+                    throw unsupported(
+                            "Grid cell width mismatch in column " + col + " is not implemented in this slice",
+                            null
+                    );
+                }
+            }
+        }
+        int totalWidth = 0;
+        for (int col = 0; col < columns; col++) {
+            totalWidth = checkedU32ToInt(checkedAdd(totalWidth, columnWidths[col], 0), 0);
+        }
+        return totalWidth;
+    }
+
+    /// Computes grid output height from cell ispe dimensions.
+    ///
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param cellIds the cell item ids in row-major order
+    /// @return the computed output height
+    /// @throws AvifDecodeException if cells in the same row have different heights
+    private int computeGridOutputHeight(int rows, int columns, List<Integer> cellIds) throws AvifDecodeException {
+        int[] rowHeights = new int[rows];
+        for (int row = 0; row < rows; row++) {
+            int cellIndex = row * columns;
+            Item cellItem = meta.requireItem(cellIds.get(cellIndex));
+            ImageSpatialExtents ispe = cellItem.firstProperty(ImageSpatialExtents.class);
+            assert ispe != null;
+            rowHeights[row] = ispe.height;
+        }
+        for (int row = 1; row < rows; row++) {
+            for (int col = 0; col < columns; col++) {
+                int cellIndex = row * columns + col;
+                Item cellItem = meta.requireItem(cellIds.get(cellIndex));
+                ImageSpatialExtents ispe = cellItem.firstProperty(ImageSpatialExtents.class);
+                assert ispe != null;
+                if (ispe.height != rowHeights[row]) {
+                    throw unsupported(
+                            "Grid cell height mismatch in row " + row + " is not implemented in this slice",
+                            null
+                    );
+                }
+            }
+        }
+        int totalHeight = 0;
+        for (int row = 0; row < rows; row++) {
+            totalHeight = checkedU32ToInt(checkedAdd(totalHeight, rowHeights[row], 0), 0);
+        }
+        return totalHeight;
+    }
+
+    /// Returns whether a grid image has alpha auxiliary images.
+    ///
+    /// @param gridItemId the grid item id
+    /// @param cellIds the grid cell item ids
+    /// @return whether alpha is present
+    private boolean hasGridAlpha(int gridItemId, List<Integer> cellIds) {
+        for (Item item : meta.items.values()) {
+            if (item.auxForId == gridItemId) {
+                AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
+                if (aux != null && "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha".equals(aux.type)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// Parses an `ftyp` box.
@@ -640,6 +845,10 @@ public final class AvifContainerParser {
                 if ("auxl".equals(reference.type())) {
                     toItem.auxForId = fromItem.id;
                 }
+                if ("dimg".equals(reference.type())) {
+                    toItem.dimgForId = fromItem.id;
+                    fromItem.dimgCellIds.add(toItem.id);
+                }
             }
             input.skipBoxPayload(reference);
         }
@@ -846,6 +1055,10 @@ public final class AvifContainerParser {
         private boolean hasUnsupportedEssentialProperty;
         /// The master image item id for auxiliary items.
         private int auxForId;
+        /// The grid item id for dimg cell items, or 0.
+        private int dimgForId;
+        /// The dimg cell item ids for a grid item, in row-major order.
+        private final List<Integer> dimgCellIds = new ArrayList<>();
 
         /// Creates item parser state.
         ///

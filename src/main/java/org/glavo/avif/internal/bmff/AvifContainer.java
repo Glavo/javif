@@ -28,12 +28,24 @@ import java.util.Objects;
 public final class AvifContainer {
     /// The parsed image metadata.
     private final AvifImageInfo info;
-    /// The primary image AV1 OBU payload.
-    private final byte @Unmodifiable [] primaryItemPayload;
+    /// The primary image AV1 OBU payload, or `null` for grid images.
+    private final byte @Nullable @Unmodifiable [] primaryItemPayload;
     /// The alpha auxiliary image AV1 OBU payload, or `null` when absent.
     private final byte @Nullable @Unmodifiable [] alphaItemPayload;
+    /// Whether this is a grid derived image.
+    private final boolean isGrid;
+    /// Grid cell AV1 OBU payloads in row-major order, or `null`.
+    private final byte @Nullable @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads;
+    /// Grid row count.
+    private final int gridRows;
+    /// Grid column count.
+    private final int gridColumns;
+    /// Grid output width, or -1 if to be computed from cells.
+    private final int gridOutputWidth;
+    /// Grid output height, or -1 if to be computed from cells.
+    private final int gridOutputHeight;
 
-    /// Creates parsed AVIF container data without an alpha image.
+    /// Creates parsed AVIF container data without an alpha image or grid.
     ///
     /// @param info the parsed image metadata
     /// @param primaryItemPayload the primary image AV1 OBU payload
@@ -55,6 +67,46 @@ public final class AvifContainer {
         this.alphaItemPayload = alphaItemPayload != null
                 ? Arrays.copyOf(alphaItemPayload, alphaItemPayload.length)
                 : null;
+        this.isGrid = false;
+        this.gridCellPayloads = null;
+        this.gridRows = 0;
+        this.gridColumns = 0;
+        this.gridOutputWidth = 0;
+        this.gridOutputHeight = 0;
+    }
+
+    /// Creates parsed AVIF container data for a grid derived image.
+    ///
+    /// @param info the parsed image metadata
+    /// @param gridCellPayloads the grid cell AV1 OBU payloads in row-major order
+    /// @param gridRows the grid row count
+    /// @param gridColumns the grid column count
+    /// @param gridOutputWidth the grid output width, or -1
+    /// @param gridOutputHeight the grid output height, or -1
+    public AvifContainer(
+            AvifImageInfo info,
+            byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
+            int gridRows,
+            int gridColumns,
+            int gridOutputWidth,
+            int gridOutputHeight
+    ) {
+        this.info = Objects.requireNonNull(info, "info");
+        Objects.requireNonNull(gridCellPayloads, "gridCellPayloads");
+        if (gridRows <= 0) {
+            throw new IllegalArgumentException("gridRows <= 0: " + gridRows);
+        }
+        if (gridColumns <= 0) {
+            throw new IllegalArgumentException("gridColumns <= 0: " + gridColumns);
+        }
+        this.primaryItemPayload = null;
+        this.alphaItemPayload = null;
+        this.isGrid = true;
+        this.gridCellPayloads = gridCellPayloads.clone();
+        this.gridRows = gridRows;
+        this.gridColumns = gridColumns;
+        this.gridOutputWidth = gridOutputWidth;
+        this.gridOutputHeight = gridOutputHeight;
     }
 
     /// Returns the parsed image metadata.
@@ -66,8 +118,11 @@ public final class AvifContainer {
 
     /// Returns the primary image AV1 OBU payload.
     ///
-    /// @return the primary image AV1 OBU payload
-    public byte[] primaryItemPayload() {
+    /// @return the primary image AV1 OBU payload, or `null` for grid images
+    public byte @Nullable [] primaryItemPayload() {
+        if (primaryItemPayload == null) {
+            return null;
+        }
         return Arrays.copyOf(primaryItemPayload, primaryItemPayload.length);
     }
 
@@ -79,5 +134,50 @@ public final class AvifContainer {
             return null;
         }
         return Arrays.copyOf(alphaItemPayload, alphaItemPayload.length);
+    }
+
+    /// Returns whether this is a grid derived image.
+    ///
+    /// @return whether this is a grid derived image
+    public boolean isGrid() {
+        return isGrid;
+    }
+
+    /// Returns the grid cell AV1 OBU payloads in row-major order.
+    ///
+    /// @return the grid cell AV1 OBU payloads, or `null`
+    public byte @Nullable @Unmodifiable [] @Nullable [] gridCellPayloads() {
+        if (gridCellPayloads == null) {
+            return null;
+        }
+        return gridCellPayloads.clone();
+    }
+
+    /// Returns the grid row count.
+    ///
+    /// @return the grid row count
+    public int gridRows() {
+        return gridRows;
+    }
+
+    /// Returns the grid column count.
+    ///
+    /// @return the grid column count
+    public int gridColumns() {
+        return gridColumns;
+    }
+
+    /// Returns the grid output width.
+    ///
+    /// @return the grid output width, or -1 if to be computed
+    public int gridOutputWidth() {
+        return gridOutputWidth;
+    }
+
+    /// Returns the grid output height.
+    ///
+    /// @return the grid output height, or -1 if to be computed
+    public int gridOutputHeight() {
+        return gridOutputHeight;
     }
 }

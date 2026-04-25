@@ -71,6 +71,10 @@ final class AvifImageReaderTest {
     private static final Path LIBAVIF_ALPHA_NOISPE_FIXTURE =
             Path.of("external", "libavif", "tests", "data", "alpha_noispe.avif");
 
+    /// A 1x5 grid image fixture.
+    private static final Path LIBAVIF_SOFA_GRID_1X5_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "sofa_grid1x5_420.avif");
+
     /// Verifies that metadata can be parsed from a minimal AVIF primary image item.
     ///
     /// @throws IOException if the reader cannot consume the test stream
@@ -214,6 +218,25 @@ final class AvifImageReaderTest {
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
+        }
+    }
+
+    /// Verifies that a 1x5 grid fixture decodes through the public reader.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameDecodesGrid1x5Fixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_SOFA_GRID_1X5_FIXTURE)) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.width() > 0);
+            assertTrue(info.height() > 0);
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(info.width(), frame.width());
+            assertEquals(info.height(), frame.height());
+            assertNull(reader.readFrame());
         }
     }
 

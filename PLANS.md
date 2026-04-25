@@ -2,10 +2,10 @@
 
 ## Status
 
-The primary still-image path is hardened and alpha auxiliary images are supported.
+The primary still-image, alpha auxiliary, and grid derived image paths are implemented.
 `org.glavo.avif` is exported and provides a reader API that parses an AVIF container,
-extracts primary and alpha AV1 item payloads, and decodes them through the migrated
-`org.glavo.avif.decode` AV1 reader.
+extracts primary, alpha, and grid cell AV1 item payloads, and decodes them through the
+migrated `org.glavo.avif.decode` AV1 reader.
 
 Implemented:
 
@@ -21,21 +21,24 @@ Implemented:
 - A simple still-image decode path that returns `AvifIntFrame` or `AvifLongFrame`.
 - Alpha auxiliary image support: resolves `auxl` references, decodes alpha AV1 payloads
   independently, and combines color and alpha planes into non-premultiplied ARGB output.
+- Grid derived image support: resolves `dimg` references, decodes grid cell AV1 payloads, and
+  composes the final canvas from row-major ordered cells (8-bit output only; 10/12-bit grid
+  composition is deferred).
 - Parser robustness tests covering truncation, overflow, duplicate unique boxes, invalid references,
   missing required properties, and essential unknown property rejection.
 - Synthetic AVIF tests covering minimal still-image metadata parsing, primary AV1 item decoding,
   alpha decoding, and parser error paths.
 - Real libavif fixture tests for `white_1x1.avif`, `extended_pixi.avif`, `colors_sdr_srgb.avif`,
-  `paris_icc_exif_xmp.avif`, and `abc_color_irot_alpha_NOirot.avif`.
+  `paris_icc_exif_xmp.avif`, `abc_color_irot_alpha_NOirot.avif`, and `sofa_grid1x5_420.avif`.
 - Known gap: AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
 
 ## Remaining Work
 
-1. Add derived image support.
-   - Parse and validate `grid` item payloads.
-   - Decode grid cell items and compose the final canvas.
-   - Apply clean-aperture, pixel-aspect-ratio, rotation, and mirror transforms in the final output
-     (property parsing for these already exists).
+1. Apply clean-aperture, pixel-aspect-ratio, rotation, and mirror transforms in the final output
+   (property parsing for these already exists).
+   - Apply `clap` cropping after grid composition or primary decode.
+   - Apply `irot` rotation and `imir` mirror to the final canvas.
+   - Expose `pasp` pixel aspect ratio through the metadata API.
 
 2. Add progressive and layered still images.
    - Parse item references and properties that describe progressive/layered AVIF still images.
