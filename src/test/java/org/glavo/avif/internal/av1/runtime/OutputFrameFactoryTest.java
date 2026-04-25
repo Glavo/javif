@@ -20,6 +20,7 @@ import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -72,6 +73,31 @@ final class OutputFrameFactoryTest {
         assertEquals(1, twelveBitFrame.longPixels().length);
         assertTrue(twelveBitFrame.longPixelBuffer().isReadOnly());
         assertFrameMetadata(twelveBitFrame, 12, AvifPixelFormat.I400, FrameType.INTRA, false, 9L);
+    }
+
+    /// Verifies that sequence color range metadata is used when creating public frames.
+    @Test
+    void createFrameUsesSequenceColorConfigForOutputTransform() {
+        DecodedPlanes decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 16);
+        SequenceHeader.ColorConfig colorConfig = new SequenceHeader.ColorConfig(
+                8,
+                true,
+                true,
+                1,
+                13,
+                6,
+                false,
+                AvifPixelFormat.I400,
+                0,
+                true,
+                true,
+                false
+        );
+        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x00);
+
+        DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, colorConfig, frameHeader, true, 0L);
+
+        assertEquals(0xFF00_0000, frame.intPixels()[0]);
     }
 
     /// Verifies that stored reference surfaces are exposed through the existing-frame path as visible output.

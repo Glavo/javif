@@ -474,6 +474,7 @@ public final class Av1ImageReader implements AutoCloseable {
         lastPlanes = presentationPlanes;
         return OutputFrameFactory.createFrame(
                 presentationPlanes,
+                storedSyntaxDecodeResult.assembly().sequenceHeader().colorConfig(),
                 frameHeader,
                 frameHeader.showFrame(),
                 nextPresentationIndex++
@@ -640,7 +641,13 @@ public final class Av1ImageReader implements AutoCloseable {
             );
         }
         DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
-        return OutputFrameFactory.createFrame(presentationPlanes, referencedFrameHeader, true, nextPresentationIndex++);
+        return OutputFrameFactory.createFrame(
+                presentationPlanes,
+                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig(),
+                referencedFrameHeader,
+                true,
+                nextPresentationIndex++
+        );
     }
 
     /// Applies presentation-only output filters such as film grain.

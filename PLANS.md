@@ -18,6 +18,9 @@ postprocessed decoded planes for composition. Runtime dependency is `java.base` 
 - Reference types: `auxl`, `dimg`, `prog`
 - Properties: `ispe`, `av1C`, `colr nclx`, `auxC`, `pixi`, `pasp`, `clap`, `irot`, `imir`, `a1op`
 - Transforms applied post-decode: `clap` (crop), `irot` (rotate), `imir` (mirror) — 8-bit only
+- AV1 output color conversion uses explicit sequence matrix/range metadata for RGB identity,
+  `BT.709`, `BT.601`, `SMPTE 240M`, and `BT.2020` non-constant-luminance signals; unspecified
+  matrix coefficients keep the legacy `BT.601` full-range fallback.
 - Postprocessed decoded planes exposed via `Av1ImageReader.lastPlanes()` for direct plane access
 - AV1 inter-frame warped motion boundary clamp fixed (`horizontalInterpolate`/`verticalInterpolate`)
 
@@ -31,6 +34,8 @@ plus synthetic still-image, alpha, grid, and irot tests.
 
 **Known gaps:**
 - AV1 `I444` pixel-accuracy tracked separately from AVIF container coverage.
+- ICC profiles, transfer-function conversion, and full color-management/display adaptation are not
+  implemented; decoded ARGB output currently applies only AV1/nclx-style matrix and range handling.
 - Grid and transform composition: 8-bit only; 10/12-bit deferred (planes exposed for future use).
 
 ## Validation
