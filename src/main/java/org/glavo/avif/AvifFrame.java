@@ -16,13 +16,19 @@
 package org.glavo.avif;
 
 import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.internal.PixelBuffers;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.util.Objects;
 
 /// Base class for decoded AVIF frame output.
 @NotNullByDefault
-public abstract sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
+public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     /// The frame width in pixels.
     private final int width;
     /// The frame height in pixels.
@@ -33,20 +39,109 @@ public abstract sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     private final PixelFormat pixelFormat;
     /// The zero-based frame index.
     private final int frameIndex;
+    /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
+    private volatile @Nullable @Unmodifiable IntBuffer intPixels;
+    /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
+    private volatile @Nullable @Unmodifiable LongBuffer longPixels;
 
-    /// Creates a decoded AVIF frame descriptor.
+    /// Creates an AVIF frame from packed `int` ARGB pixels.
     ///
     /// @param width the frame width in pixels
     /// @param height the frame height in pixels
     /// @param bitDepth the decoded bit depth
     /// @param pixelFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex the zero-based frame index
-    protected AvifFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex) {
+    /// @param pixels packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
+    public AvifFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, int[] pixels) {
+        this(width, height, bitDepth, pixelFormat, frameIndex,
+                PixelBuffers.immutableIntPixels(Objects.requireNonNull(pixels, "pixels")), null);
+    }
+
+    /// Creates an AVIF frame from packed `long` ARGB pixels.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param frameIndex the zero-based frame index
+    /// @param pixels packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
+    public AvifFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, long[] pixels) {
+        this(width, height, bitDepth, pixelFormat, frameIndex,
+                null, PixelBuffers.immutableLongPixels(Objects.requireNonNull(pixels, "pixels")));
+    }
+
+    /// Creates an AVIF frame from a packed `int` ARGB pixel buffer.
+    ///
+    /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
+    /// immutable storage or storage they will never mutate after construction.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param frameIndex the zero-based frame index
+    /// @param pixels packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
+    public AvifFrame(
+            int width,
+            int height,
+            int bitDepth,
+            PixelFormat pixelFormat,
+            int frameIndex,
+            @Unmodifiable IntBuffer pixels
+    ) {
+        this(width, height, bitDepth, pixelFormat, frameIndex, PixelBuffers.immutableIntPixels(pixels), null);
+    }
+
+    /// Creates an AVIF frame from a packed `long` ARGB pixel buffer.
+    ///
+    /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
+    /// immutable storage or storage they will never mutate after construction.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param frameIndex the zero-based frame index
+    /// @param pixels packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
+    public AvifFrame(
+            int width,
+            int height,
+            int bitDepth,
+            PixelFormat pixelFormat,
+            int frameIndex,
+            @Unmodifiable LongBuffer pixels
+    ) {
+        this(width, height, bitDepth, pixelFormat, frameIndex, null, PixelBuffers.immutableLongPixels(pixels));
+    }
+
+    /// Creates a decoded AVIF frame descriptor with one available pixel representation.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param frameIndex the zero-based frame index
+    /// @param intPixels packed `int` pixels, or `null`
+    /// @param longPixels packed `long` pixels, or `null`
+    private AvifFrame(
+            int width,
+            int height,
+            int bitDepth,
+            PixelFormat pixelFormat,
+            int frameIndex,
+            @Nullable @Unmodifiable IntBuffer intPixels,
+            @Nullable @Unmodifiable LongBuffer longPixels
+    ) {
+        if (intPixels == null && longPixels == null) {
+            throw new IllegalArgumentException("At least one pixel representation is required");
+        }
         this.width = width;
         this.height = height;
         this.bitDepth = bitDepth;
         this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         this.frameIndex = frameIndex;
+        this.intPixels = intPixels;
+        this.longPixels = longPixels;
     }
 
     /// Returns the frame width in pixels.
@@ -82,5 +177,91 @@ public abstract sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     /// @return the zero-based frame index
     public int frameIndex() {
         return frameIndex;
+    }
+
+    /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
+    ///
+    /// If this frame was constructed from `long` pixels, the returned data is created lazily by
+    /// reducing each unsigned 16-bit channel to 8 bits with rounding.
+    ///
+    /// @return packed non-premultiplied ARGB pixels
+    public int[] intPixels() {
+        IntBuffer buffer = intPixelBuffer();
+        int[] result = new int[buffer.remaining()];
+        buffer.get(result);
+        return result;
+    }
+
+    /// Returns a read-only view of packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
+    ///
+    /// If this frame was constructed from `long` pixels, the buffer is created lazily and cached.
+    ///
+    /// @return a read-only view of packed non-premultiplied ARGB pixels
+    public @UnmodifiableView IntBuffer intPixelBuffer() {
+        IntBuffer pixels = intPixels;
+        if (pixels == null) {
+            synchronized (this) {
+                pixels = intPixels;
+                if (pixels == null) {
+                    pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
+                    intPixels = pixels;
+                }
+            }
+        }
+        return pixels.slice();
+    }
+
+    /// Returns packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format.
+    ///
+    /// If this frame was constructed from `int` pixels, the returned data is created lazily by
+    /// expanding each unsigned 8-bit channel to 16 bits.
+    ///
+    /// @return packed non-premultiplied ARGB pixels
+    public long[] longPixels() {
+        LongBuffer buffer = longPixelBuffer();
+        long[] result = new long[buffer.remaining()];
+        buffer.get(result);
+        return result;
+    }
+
+    /// Returns a read-only view of packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format.
+    ///
+    /// If this frame was constructed from `int` pixels, the buffer is created lazily and cached.
+    ///
+    /// @return a read-only view of packed non-premultiplied ARGB pixels
+    public @UnmodifiableView LongBuffer longPixelBuffer() {
+        LongBuffer pixels = longPixels;
+        if (pixels == null) {
+            synchronized (this) {
+                pixels = longPixels;
+                if (pixels == null) {
+                    pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
+                    longPixels = pixels;
+                }
+            }
+        }
+        return pixels.slice();
+    }
+
+    /// Returns the cached `int` pixels or throws if they are unavailable.
+    ///
+    /// @return the cached `int` pixels
+    private @Unmodifiable IntBuffer requireIntPixels() {
+        IntBuffer pixels = intPixels;
+        if (pixels == null) {
+            throw new IllegalStateException("Int pixels are unavailable");
+        }
+        return pixels;
+    }
+
+    /// Returns the cached `long` pixels or throws if they are unavailable.
+    ///
+    /// @return the cached `long` pixels
+    private @Unmodifiable LongBuffer requireLongPixels() {
+        LongBuffer pixels = longPixels;
+        if (pixels == null) {
+            throw new IllegalStateException("Long pixels are unavailable");
+        }
+        return pixels;
     }
 }

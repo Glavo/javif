@@ -112,15 +112,15 @@ public final class AvifFXImage extends WritableImage {
     private void renderFrame(int frameIndex) {
         if (frameIndex != renderedFrameIndex) {
             AvifFrame frame = frames.get(frameIndex);
-            if (frame instanceof AvifIntFrame intFrame) {
+            if (frame.bitDepth() == 8) {
                 getPixelWriter().setPixels(
                         0,
                         0,
-                        intFrame.width(),
-                        intFrame.height(),
+                        frame.width(),
+                        frame.height(),
                         PixelFormat.getIntArgbInstance(),
-                        intFrame.pixelBuffer(),
-                        intFrame.width()
+                        frame.intPixelBuffer(),
+                        frame.width()
                 );
             }
             renderedFrameIndex = frameIndex;

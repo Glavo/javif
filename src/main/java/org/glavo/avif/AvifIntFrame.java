@@ -21,15 +21,10 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.UnmodifiableView;
 
 import java.nio.IntBuffer;
-import java.util.Arrays;
-import java.util.Objects;
 
 /// Decoded AVIF frame backed by packed `int` ARGB pixels.
 @NotNullByDefault
 public final class AvifIntFrame extends AvifFrame {
-    /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
-    private final @Unmodifiable IntBuffer pixels;
-
     /// Creates an `int`-backed AVIF frame.
     ///
     /// @param width the frame width in pixels
@@ -39,8 +34,7 @@ public final class AvifIntFrame extends AvifFrame {
     /// @param frameIndex the zero-based frame index
     /// @param pixels packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
     public AvifIntFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, int[] pixels) {
-        super(width, height, bitDepth, pixelFormat, frameIndex);
-        this.pixels = immutablePixels(Objects.requireNonNull(pixels, "pixels"));
+        super(width, height, bitDepth, pixelFormat, frameIndex, pixels);
     }
 
     /// Creates an `int`-backed AVIF frame from immutable pixel storage.
@@ -59,32 +53,20 @@ public final class AvifIntFrame extends AvifFrame {
             int frameIndex,
             @Unmodifiable IntBuffer pixels
     ) {
-        super(width, height, bitDepth, pixelFormat, frameIndex);
-        this.pixels = Objects.requireNonNull(pixels, "pixels").slice().asReadOnlyBuffer();
+        super(width, height, bitDepth, pixelFormat, frameIndex, pixels);
     }
 
     /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
     ///
     /// @return packed non-premultiplied ARGB pixels
     public int[] pixels() {
-        IntBuffer buffer = pixelBuffer();
-        int[] result = new int[buffer.remaining()];
-        buffer.get(result);
-        return result;
+        return intPixels();
     }
 
     /// Returns a read-only view of packed non-premultiplied ARGB pixels.
     ///
     /// @return a read-only view of packed non-premultiplied ARGB pixels
     public @UnmodifiableView IntBuffer pixelBuffer() {
-        return pixels.slice();
-    }
-
-    /// Creates immutable storage for pixel arrays.
-    ///
-    /// @param pixels the source pixels
-    /// @return immutable pixel storage
-    private static @Unmodifiable IntBuffer immutablePixels(int[] pixels) {
-        return IntBuffer.wrap(Arrays.copyOf(pixels, pixels.length)).asReadOnlyBuffer();
+        return intPixelBuffer();
     }
 }

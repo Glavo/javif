@@ -15,8 +15,6 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.ArgbIntFrame;
-import org.glavo.avif.decode.ArgbLongFrame;
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.PixelFormat;
@@ -348,13 +346,13 @@ public final class AvifImageReader implements AutoCloseable {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cells", null);
         }
         DecodedFrame firstCell = cellFrames[0];
-        if (firstCell instanceof ArgbIntFrame) {
+        if (firstCell.bitDepth() == 8) {
             return composeGridIntFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
         }
-        if (firstCell instanceof ArgbLongFrame) {
+        if (firstCell.bitDepth() == 10 || firstCell.bitDepth() == 12) {
             throw unsupported("Grid composition for 10/12-bit frames is not implemented in this slice", null);
         }
-        throw unsupported("Unsupported grid cell frame class: " + firstCell.getClass().getName(), null);
+        throw unsupported("Unsupported grid cell bit depth: " + firstCell.bitDepth(), null);
     }
 
     /// Composes 8-bit grid cell frames into a single canvas.
@@ -376,14 +374,14 @@ public final class AvifImageReader implements AutoCloseable {
             int maxCellHeight = 0;
             for (int col = 0; col < columns; col++) {
                 int cellIndex = row * columns + col;
-                ArgbIntFrame cellFrame = (ArgbIntFrame) cellFrames[cellIndex];
-                IntBuffer cellPixels = cellFrame.pixelBuffer();
+                DecodedFrame cellFrame = cellFrames[cellIndex];
+                IntBuffer cellPixels = cellFrame.intPixelBuffer();
                 int cellWidth = cellFrame.width();
                 int cellHeight = cellFrame.height();
                 maxCellHeight = Math.max(maxCellHeight, cellHeight);
                 int cellX = 0;
                 for (int prevCol = 0; prevCol < col; prevCol++) {
-                    ArgbIntFrame prevFrame = (ArgbIntFrame) cellFrames[row * columns + prevCol];
+                    DecodedFrame prevFrame = cellFrames[row * columns + prevCol];
                     cellX += prevFrame.width();
                 }
                 for (int cy = 0; cy < cellHeight; cy++) {
@@ -397,7 +395,7 @@ public final class AvifImageReader implements AutoCloseable {
             }
             yOffset += maxCellHeight;
         }
-        PixelFormat fmt = ((ArgbIntFrame) cellFrames[0]).pixelFormat();
+        PixelFormat fmt = cellFrames[0].pixelFormat();
         return new AvifIntFrame(outputWidth, outputHeight,
                 cellFrames[0].bitDepth(), fmt, frameIndex, canvas);
     }
@@ -442,14 +440,14 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frame the raw decoded frame
     /// @return the transformed frame, or the same frame when no transforms are present
     private AvifFrame applyTransforms(AvifFrame frame) {
-        if (frame instanceof AvifIntFrame intFrame) {
+        if (frame.bitDepth() == 8) {
             if (!container.hasClapCrop() && container.rotationCode() <= 0 && container.mirrorAxis() < 0) {
                 return frame;
             }
 
-            int[] pixels = intBufferToArray(intFrame.pixelBuffer());
-            int width = intFrame.width();
-            int height = intFrame.height();
+            int[] pixels = intBufferToArray(frame.intPixelBuffer());
+            int width = frame.width();
+            int height = frame.height();
 
             if (container.hasClapCrop()) {
                 int[] cropped = applyClapCropInt(pixels, width, height,
@@ -476,8 +474,8 @@ public final class AvifImageReader implements AutoCloseable {
                 pixels = applyMirrorInt(pixels, width, height, mirror);
             }
 
-            return new AvifIntFrame(width, height, intFrame.bitDepth(),
-                    intFrame.pixelFormat(), intFrame.frameIndex(), pixels);
+            return new AvifIntFrame(width, height, frame.bitDepth(),
+                    frame.pixelFormat(), frame.frameIndex(), pixels);
         }
         return frame;
     }
@@ -581,27 +579,27 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frameIndex the zero-based AVIF frame index
     /// @return an AVIF public frame
     private static AvifFrame adaptFrame(DecodedFrame frame, int frameIndex) {
-        if (frame instanceof ArgbIntFrame intFrame) {
+        if (frame.bitDepth() == 8) {
             return new AvifIntFrame(
-                    intFrame.width(),
-                    intFrame.height(),
-                    intFrame.bitDepth(),
-                    intFrame.pixelFormat(),
+                    frame.width(),
+                    frame.height(),
+                    frame.bitDepth(),
+                    frame.pixelFormat(),
                     frameIndex,
-                    intFrame.pixelBuffer()
+                    frame.intPixelBuffer()
             );
         }
-        if (frame instanceof ArgbLongFrame longFrame) {
+        if (frame.bitDepth() == 10 || frame.bitDepth() == 12) {
             return new AvifLongFrame(
-                    longFrame.width(),
-                    longFrame.height(),
-                    longFrame.bitDepth(),
-                    longFrame.pixelFormat(),
+                    frame.width(),
+                    frame.height(),
+                    frame.bitDepth(),
+                    frame.pixelFormat(),
                     frameIndex,
-                    longFrame.pixelBuffer()
+                    frame.longPixelBuffer()
             );
         }
-        throw new IllegalArgumentException("Unsupported decoded frame class: " + frame.getClass().getName());
+        throw new IllegalArgumentException("Unsupported decoded bit depth: " + frame.bitDepth());
     }
 
     /// Decodes an alpha auxiliary AV1 payload and combines it with a decoded color frame.
@@ -629,13 +627,13 @@ public final class AvifImageReader implements AutoCloseable {
             if (alphaPlanes == null) {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha planes not available", null);
             }
-            if (colorFrame instanceof ArgbIntFrame colorInt) {
-                return combineIntPlaneAlpha(colorInt, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
+            if (colorFrame.bitDepth() == 8) {
+                return combineIntPlaneAlpha(colorFrame, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
             }
-            if (colorFrame instanceof ArgbLongFrame colorLong) {
-                return combineLongPlaneAlpha(colorLong, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
+            if (colorFrame.bitDepth() == 10 || colorFrame.bitDepth() == 12) {
+                return combineLongPlaneAlpha(colorFrame, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
             }
-            throw unsupported("Alpha and color frame pixel formats do not match", null);
+            throw unsupported("Unsupported alpha color frame bit depth: " + colorFrame.bitDepth(), null);
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -645,9 +643,9 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Combines alpha from raw luma plane into an 8-bit color frame.
     private static AvifIntFrame combineIntPlaneAlpha(
-            ArgbIntFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
+            DecodedFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
     ) {
-        IntBuffer colorPixels = color.pixelBuffer();
+        IntBuffer colorPixels = color.intPixelBuffer();
         int width = color.width();
         int height = color.height();
         DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
@@ -671,9 +669,9 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Combines alpha from raw luma plane into a 10/12-bit color frame.
     private static AvifLongFrame combineLongPlaneAlpha(
-            ArgbLongFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
+            DecodedFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
     ) {
-        LongBuffer colorPixels = color.pixelBuffer();
+        LongBuffer colorPixels = color.longPixelBuffer();
         int width = color.width();
         int height = color.height();
         DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
