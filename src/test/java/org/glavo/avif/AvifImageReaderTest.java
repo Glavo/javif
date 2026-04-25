@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -226,11 +227,16 @@ final class AvifImageReaderTest {
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void animatedSequenceIsRejectedWithClearDiagnostic() {
-        AvifDecodeException ex = assertThrows(AvifDecodeException.class,
-                () -> AvifImageReader.open(LIBAVIF_ANIMATED_FIXTURE));
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, ex.code());
-        assertTrue(ex.getMessage().contains("AVIS"), "message should mention AVIS");
+    void openParsesAnimatedSequenceMetadata() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_ANIMATED_FIXTURE)) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.animated());
+            assertEquals(5, info.frameCount());
+            assertEquals(150, info.width());
+            assertEquals(150, info.height());
+            assertEquals(8, info.bitDepth());
+            assertEquals(PixelFormat.I420, info.pixelFormat());
+        }
     }
 
     /// Verifies that an irot rotation transform is applied to the decoded frame.

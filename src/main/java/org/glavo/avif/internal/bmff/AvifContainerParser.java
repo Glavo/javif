@@ -73,7 +73,10 @@ public final class AvifContainerParser {
             switch (header.type()) {
                 case "ftyp" -> parseFileType(payload);
                 case "meta" -> parseMeta(header, payload);
-                case "moov" -> avisBrandSeen = true;
+                case "moov" -> {
+                    avisBrandSeen = true;
+                    parseMoov(payload);
+                }
                 default -> {
                 }
             }
@@ -84,11 +87,7 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.INVALID_FTYP, "Missing AVIF-compatible ftyp box", 0L);
         }
         if (avisBrandSeen) {
-            throw unsupported(
-                    "AVIS image sequences are recognized but full sequence decoding is not yet implemented. " +
-                    "The file is an animated AVIF with one or more image sequence tracks.",
-                    null
-            );
+            return parseSequenceImage();
         }
         if (meta.primaryItemId == 0) {
             throw new AvifDecodeException(AvifErrorCode.MISSING_IMAGE_ITEM, "Primary item is not specified", null);
@@ -891,6 +890,300 @@ public final class AvifContainerParser {
         return new OperatingPoint(operatingPoint);
     }
 
+    /// Creates an AVIF container from parsed sequence data.
+    private AvifContainer parseSequenceImage() throws AvifDecodeException {
+        MoovState s = meta.moovState;
+        if (s.sampleSizes.isEmpty()) {
+            throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Sequence has no samples", null);
+        }
+        if (s.seqHeaderObu == null) {
+            throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Sequence is missing av1C sequence header", null);
+        }
+        int sampleCount = s.sampleSizes.size();
+        int chunkOff = s.chunkOffsets.isEmpty() ? 0 : s.chunkOffsets.get(0);
+        int bytesOff = 0;
+        List<byte[]> payloads = new ArrayList<>(sampleCount);
+        List<Integer> deltas = new ArrayList<>(sampleCount);
+        for (int i = 0; i < sampleCount; i++) {
+            int sz = s.sampleSizes.get(i);
+            long off = (long) chunkOff + bytesOff;
+            if (off + sz > source.length)
+                throw new AvifDecodeException(AvifErrorCode.TRUNCATED_DATA, "Sample outside source: " + i, off);
+            byte[] sampleData = new byte[sz];
+            System.arraycopy(source, (int) off, sampleData, 0, sz);
+            byte[] data = new byte[s.seqHeaderObu.length + sampleData.length];
+            System.arraycopy(s.seqHeaderObu, 0, data, 0, s.seqHeaderObu.length);
+            System.arraycopy(sampleData, 0, data, s.seqHeaderObu.length, sampleData.length);
+            payloads.add(data);
+            bytesOff += sz;
+            deltas.add(i < s.sampleDeltas.size() ? s.sampleDeltas.get(i) : 1);
+        }
+        int ts = s.mediaTimescale > 0 ? s.mediaTimescale : 30;
+        long dur = s.mediaDuration > 0 ? s.mediaDuration : sampleCount;
+        AvifImageInfo info = new AvifImageInfo(
+                s.width > 0 ? s.width : 1,
+                s.height > 0 ? s.height : 1,
+                s.bitDepth > 0 ? s.bitDepth : 8,
+                s.pixelFormat != null ? s.pixelFormat : PixelFormat.I420, false, true, sampleCount, s.colr);
+        return new AvifContainer(info,
+                payloads.toArray(byte[][]::new),
+                deltas.stream().mapToInt(Integer::intValue).toArray(),
+                sampleCount, ts, dur);
+    }
+
+    /// Parses a `moov` box for AVIS image sequences.
+    ///
+    /// Navigates to the sample table inside the first video track and extracts frame metadata.
+    ///
+    /// @param input the moov box payload
+    /// @throws AvifDecodeException if the box is malformed
+    private void parseMoov(BoxInput input) throws AvifDecodeException {
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            if ("trak".equals(child.type())) {
+                BoxInput trakPayload = input.slice(child.payloadOffset(), child.payloadSize());
+                parseMoovTrack(trakPayload);
+            }
+            input.skipBoxPayload(child);
+        }
+    }
+
+    /// Parses a `trak` box and extracts video track metadata.
+    private void parseMoovTrack(BoxInput input) throws AvifDecodeException {
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
+            switch (child.type()) {
+                case "tkhd" -> parseMoovTkhd(payload);
+                case "mdia" -> parseMoovMdia(payload);
+                default -> {}
+            }
+            input.skipBoxPayload(child);
+        }
+    }
+
+    /// Parses a `tkhd` box for track dimensions.
+    private void parseMoovTkhd(BoxInput input) throws AvifDecodeException {
+        FullBox fb = readFullBox(input);
+        if (fb.version == 1) {
+            input.skip(16);
+        } else {
+            input.skip(8);
+        }
+        input.readU32();
+        input.skip(4);
+        if (fb.version == 1) {
+            input.readU64();
+        } else {
+            input.readU32();
+        }
+        input.skip(52);
+        long w = input.readU32();
+        long h = input.readU32();
+        int width = checkedU32ToInt(w >>> 16, input.offset());
+        int height = checkedU32ToInt(h >>> 16, input.offset());
+        if (width > 0 && meta.moovState.width == 0) {
+            meta.moovState.width = width;
+        }
+        if (height > 0 && meta.moovState.height == 0) {
+            meta.moovState.height = height;
+        }
+    }
+
+    /// Parses a `mdia` box to reach the media information and sample table.
+    private void parseMoovMdia(BoxInput input) throws AvifDecodeException {
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
+            switch (child.type()) {
+                case "mdhd" -> parseMoovMdhd(payload);
+                case "minf" -> parseMoovMinf(payload);
+                default -> {}
+            }
+            input.skipBoxPayload(child);
+        }
+    }
+
+    /// Parses an `mdhd` box for media timescale and duration.
+    private void parseMoovMdhd(BoxInput input) throws AvifDecodeException {
+        FullBox fb = readFullBox(input);
+        if (fb.version == 1) {
+            input.skip(16);
+        } else {
+            input.skip(8);
+        }
+        int timescale = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        long duration = fb.version == 1 ? input.readU64() : input.readU32();
+        meta.moovState.mediaTimescale = timescale;
+        meta.moovState.mediaDuration = duration;
+    }
+
+    /// Parses a `minf` box to reach the sample table.
+    private void parseMoovMinf(BoxInput input) throws AvifDecodeException {
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            if ("stbl".equals(child.type())) {
+                BoxInput stblPayload = input.slice(child.payloadOffset(), child.payloadSize());
+                parseMoovStbl(stblPayload);
+            }
+            input.skipBoxPayload(child);
+        }
+    }
+
+    /// Parses a `stbl` (sample table) box and extracts all available sample metadata.
+    private void parseMoovStbl(BoxInput input) throws AvifDecodeException {
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
+            switch (child.type()) {
+                case "stsd" -> parseMoovStsd(payload);
+                case "stts" -> parseMoovStts(payload);
+                case "stco" -> parseMoovStco(payload);
+                case "stsz" -> parseMoovStsz(payload);
+                case "stss" -> parseMoovStss(payload);
+                default -> {}
+            }
+            input.skipBoxPayload(child);
+        }
+    }
+
+    /// Parses `stsd` and extracts the av01 sample entry with av1C config.
+    private void parseMoovStsd(BoxInput input) throws AvifDecodeException {
+        readFullBox(input);
+        int entryCount = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        for (int i = 0; i < Math.min(entryCount, 1); i++) {
+            BoxHeader entry = input.readBoxHeader();
+            if ("av01".equals(entry.type())) {
+                BoxInput av01i = input.slice(entry.payloadOffset(), entry.payloadSize());
+                parseMoovAv01Entry(av01i);
+            }
+            input.skipBoxPayload(entry);
+        }
+    }
+
+    /// Extracts av1C and colr from an av01 sample entry.
+    private void parseMoovAv01Entry(BoxInput input) throws AvifDecodeException {
+        input.skip(24);
+        int w = input.readU16();
+        int h = input.readU16();
+        if (w > 0 && meta.moovState.width == 0) meta.moovState.width = w;
+        if (h > 0 && meta.moovState.height == 0) meta.moovState.height = h;
+        input.skip(50);
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
+            switch (child.type()) {
+                case "av1C" -> {
+                    int av1cPos = payload.offset();
+                    Av1Config c = parseAv1C(payload);
+                    meta.moovState.bitDepth = c.bitDepth();
+                    meta.moovState.pixelFormat = c.pixelFormat();
+                    meta.moovState.seqHeaderObu = c.seqHeaderObu(
+                            meta.moovState.width > 0 ? meta.moovState.width : 150,
+                            meta.moovState.height > 0 ? meta.moovState.height : 150
+                    );
+                }
+                case "colr" -> {
+                    Property p = parseColr(payload);
+                    if (p instanceof ColorProperty cp) meta.moovState.colr = cp.colorInfo;
+                }
+                default -> {}
+            }
+            input.skipBoxPayload(child);
+        }
+    }
+
+    /// Parses `stts` for sample timing deltas.
+    private void parseMoovStts(BoxInput input) throws AvifDecodeException {
+        input.skip(4);
+        int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        for (int i = 0; i < n; i++) {
+            int sc = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            int sd = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            for (int j = 0; j < sc; j++) meta.moovState.sampleDeltas.add(sd);
+        }
+    }
+
+    /// Parses `stco` for chunk offsets.
+    private void parseMoovStco(BoxInput input) throws AvifDecodeException {
+        input.skip(4);
+        int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        for (int i = 0; i < n; i++)
+            meta.moovState.chunkOffsets.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
+    }
+
+    /// Parses `stsz` for sample sizes.
+    private void parseMoovStsz(BoxInput input) throws AvifDecodeException {
+        input.skip(4);
+        int ss = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int sc = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        if (ss == 0) {
+            for (int i = 0; i < sc; i++)
+                meta.moovState.sampleSizes.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
+        } else {
+            for (int i = 0; i < sc; i++) meta.moovState.sampleSizes.add(ss);
+        }
+    }
+
+    /// Parses `stss` for sync sample indices.
+    private void parseMoovStss(BoxInput input) throws AvifDecodeException {
+        input.skip(4);
+        int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        for (int i = 0; i < n; i++)
+            meta.moovState.syncSamples.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
+    }
+
+    /// Extracts the SEQUENCE_HEADER OBU bytes from av1C config OBUs.
+    private static byte @Nullable [] buildSequenceObu(byte[] configObus) {
+        int i = 0;
+        while (i < configObus.length) {
+            if (i >= configObus.length) break;
+            int obuHeader = Byte.toUnsignedInt(configObus[i]);
+            int obuType = (obuHeader >>> 3) & 0x1F;
+            boolean hasSize = (obuHeader & 2) != 0;
+            int obuSize = 0;
+            if (hasSize) {
+                int sizeOffset = i + 1;
+                obuSize = readLeb128Int(configObus, sizeOffset);
+                int lebSize = leb128ByteCount(configObus, sizeOffset);
+                int obuEnd = i + 1 + lebSize + obuSize;
+                if (obuType == 1 && obuEnd <= configObus.length) {
+                    int totalSize = 1 + lebSize + obuSize;
+                    byte[] result = new byte[totalSize];
+                    System.arraycopy(configObus, i, result, 0, totalSize);
+                    return result;
+                }
+                i = obuEnd;
+            } else {
+                break;
+            }
+        }
+        return null;
+    }
+
+    /// Reads a LEB128 unsigned integer from a byte array.
+    private static int readLeb128Int(byte[] data, int offset) {
+        int value = 0;
+        int shift = 0;
+        for (int i = 0; i < 5; i++) {
+            int b = Byte.toUnsignedInt(data[offset + i]);
+            value |= (b & 0x7F) << shift;
+            if ((b & 0x80) == 0) break;
+            shift += 7;
+        }
+        return value;
+    }
+
+    /// Returns the byte count of a LEB128-encoded value.
+    private static int leb128ByteCount(byte[] data, int offset) {
+        int count = 0;
+        for (int i = 0; i < 5; i++) {
+            count++;
+            if ((Byte.toUnsignedInt(data[offset + i]) & 0x80) == 0) break;
+        }
+        return count;
+    }
+
     /// Parses an `ipma` box.
     ///
     /// @param input the box payload input
@@ -1128,6 +1421,8 @@ public final class AvifContainerParser {
         private final List<Property> properties = new ArrayList<>();
         /// The optional `idat` payload for construction method 1.
         private @Nullable byte[] idat;
+        /// The parsed AVIS moov state.
+        private final MoovState moovState = new MoovState();
 
         /// Returns an existing item or creates a new one.
         ///
@@ -1144,6 +1439,23 @@ public final class AvifContainerParser {
         private @Nullable Item item(int itemId) {
             return items.get(itemId);
         }
+    }
+
+    /// Mutable parser state for AVIS moov parsing.
+    @NotNullByDefault
+    private static final class MoovState {
+        private int width;
+        private int height;
+        private int bitDepth;
+        private @Nullable PixelFormat pixelFormat;
+        private @Nullable AvifColorInfo colr;
+        private int mediaTimescale;
+        private long mediaDuration;
+        private byte @Nullable [] seqHeaderObu;
+        private final List<Integer> sampleDeltas = new ArrayList<>();
+        private final List<Integer> chunkOffsets = new ArrayList<>();
+        private final List<Integer> sampleSizes = new ArrayList<>();
+        private final List<Integer> syncSamples = new ArrayList<>();
     }
 
     /// Mutable parser state for one item.
@@ -1325,6 +1637,97 @@ public final class AvifContainerParser {
                 return PixelFormat.I422;
             }
             return PixelFormat.I444;
+        }
+
+        /// Constructs a minimal AV1 SEQUENCE_HEADER OBU from this configuration.
+        ///
+        /// @param width the image width
+        /// @param height the image height
+        /// @return the SEQUENCE_HEADER OBU bytes ready for decoding
+        private byte @Unmodifiable [] seqHeaderObu(int width, int height) {
+            byte[] payload = reducedStillSeqHdrPayload(width, height);
+            ByteArrayOutputStream obu = new ByteArrayOutputStream();
+            obu.write((1 << 3) | (1 << 1));
+            writeLeb128(obu, payload.length);
+            obu.writeBytes(payload);
+            return obu.toByteArray();
+        }
+
+        /// Builds the payload portion of a reduced still-picture SEQUENCE_HEADER.
+        private byte[] reducedStillSeqHdrPayload(int frameWidth, int frameHeight) {
+            int mfw = frameWidth - 1;
+            int mfh = frameHeight - 1;
+            int fb = 32 - Integer.numberOfLeadingZeros(mfw);
+            if (fb < 1) fb = 1;
+            int fh = 32 - Integer.numberOfLeadingZeros(mfh);
+            if (fh < 1) fh = 1;
+            SeqBitWriter w = new SeqBitWriter();
+            w.bits(0, 3);
+            w.flag(true);
+            w.flag(true);
+            w.bits(0, 3);
+            w.bits(0, 5);
+            w.bits(fb, 4);
+            w.bits(fh, 4);
+            w.bits(mfw, fb + 1);
+            w.bits(mfh, fh + 1);
+            w.flag(false);
+            w.flag(true);
+            w.flag(true);
+            w.flag(false);
+            w.flag(true);
+            w.flag(true);
+            w.flag(false);
+            if (monochrome) {
+                w.flag(true);
+                w.flag(false);
+                w.flag(true);
+                w.flag(true);
+            } else {
+                w.flag(false);
+                w.flag(false);
+                w.flag(false);
+                w.bits(1, 2);
+                w.flag(true);
+                w.flag(true);
+            }
+            w.flag(false);
+            w.trail();
+            return w.toBytes();
+        }
+    }
+
+    /// Writes a LEB128 unsigned value to the stream.
+    private static void writeLeb128(ByteArrayOutputStream out, int value) {
+        int v = value;
+        do {
+            int b = v & 0x7F;
+            v >>>= 7;
+            if (v != 0) b |= 0x80;
+            out.write(b);
+        } while (v != 0);
+    }
+
+    /// Minimal MSB-first bit writer for sequence header construction.
+    @NotNullByDefault
+    private static final class SeqBitWriter {
+        private final ByteArrayOutputStream out = new ByteArrayOutputStream();
+        private int cur;
+        private int cnt;
+
+        private void flag(boolean v) { bit(v ? 1 : 0); }
+        private void bits(long v, int w) {
+            for (int b = w - 1; b >= 0; b--) bit((int) ((v >>> b) & 1L));
+        }
+        private void trail() { bit(1); while (cnt != 0) bit(0); }
+
+        private void bit(int b) {
+            cur = (cur << 1) | (b & 1);
+            if (++cnt == 8) { out.write(cur); cur = 0; cnt = 0; }
+        }
+        private byte[] toBytes() {
+            if (cnt > 0) throw new IllegalStateException("not byte aligned");
+            return out.toByteArray();
         }
     }
 
