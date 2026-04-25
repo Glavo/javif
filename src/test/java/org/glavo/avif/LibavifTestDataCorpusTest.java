@@ -109,7 +109,7 @@ final class LibavifTestDataCorpusTest {
 
     /// Verifies that every copied libavif AVIF resource has an explicit test expectation.
     ///
-    /// @throws IOException if the resource directory cannot be walked
+    /// @throws IOException        if the resource directory cannot be walked
     /// @throws URISyntaxException if the resource root URL is invalid
     @Test
     void allAvifResourcesHaveExplicitExpectations() throws IOException, URISyntaxException {
@@ -166,7 +166,7 @@ final class LibavifTestDataCorpusTest {
     /// Asserts parsed AVIF metadata.
     ///
     /// @param expected the expected metadata
-    /// @param actual the actual metadata
+    /// @param actual   the actual metadata
     private static void assertInfo(ExpectedInfo expected, AvifImageInfo actual) {
         assertEquals(expected.width, actual.width());
         assertEquals(expected.height, actual.height());
@@ -179,9 +179,9 @@ final class LibavifTestDataCorpusTest {
 
     /// Asserts a decoded frame against expected image metadata.
     ///
-    /// @param expected the expected metadata
+    /// @param expected   the expected metadata
     /// @param frameIndex the expected frame index
-    /// @param actual the decoded frame
+    /// @param actual     the decoded frame
     private static void assertFrame(ExpectedInfo expected, int frameIndex, AvifFrame actual) {
         assertTrue(actual.width() > 0);
         assertTrue(actual.height() > 0);
@@ -193,7 +193,7 @@ final class LibavifTestDataCorpusTest {
     /// Lists copied libavif AVIF resources.
     ///
     /// @return sorted AVIF resource names
-    /// @throws IOException if the resource directory cannot be walked
+    /// @throws IOException        if the resource directory cannot be walked
     /// @throws URISyntaxException if the resource root URL is invalid
     private static List<String> avifResourceNames() throws IOException, URISyntaxException {
         URL resource = LibavifTestDataCorpusTest.class.getClassLoader().getResource(TEST_DATA_ROOT);
@@ -228,13 +228,13 @@ final class LibavifTestDataCorpusTest {
     /// Creates a corpus case that must parse and decode successfully.
     ///
     /// @param resourceName the classpath resource name
-    /// @param width the expected width
-    /// @param height the expected height
-    /// @param bitDepth the expected bit depth
-    /// @param pixelFormat the expected pixel format
+    /// @param width        the expected width
+    /// @param height       the expected height
+    /// @param bitDepth     the expected bit depth
+    /// @param pixelFormat  the expected pixel format
     /// @param alphaPresent whether alpha is expected
-    /// @param animated whether animation is expected
-    /// @param frameCount the expected frame count
+    /// @param animated     whether animation is expected
+    /// @param frameCount   the expected frame count
     /// @return the corpus case
     private static CorpusCase decode(
             String resourceName,
@@ -256,14 +256,14 @@ final class LibavifTestDataCorpusTest {
 
     /// Creates a corpus case that must parse but fail during frame decode.
     ///
-    /// @param resourceName the classpath resource name
-    /// @param width the expected width
-    /// @param height the expected height
-    /// @param bitDepth the expected bit depth
-    /// @param pixelFormat the expected pixel format
-    /// @param alphaPresent whether alpha is expected
-    /// @param animated whether animation is expected
-    /// @param frameCount the expected frame count
+    /// @param resourceName      the classpath resource name
+    /// @param width             the expected width
+    /// @param height            the expected height
+    /// @param bitDepth          the expected bit depth
+    /// @param pixelFormat       the expected pixel format
+    /// @param alphaPresent      whether alpha is expected
+    /// @param animated          whether animation is expected
+    /// @param frameCount        the expected frame count
     /// @param decodeFailureCode the expected decode failure code
     /// @return the corpus case
     private static CorpusCase decodeFailure(
@@ -287,7 +287,7 @@ final class LibavifTestDataCorpusTest {
 
     /// Creates a corpus case that must fail during container parsing.
     ///
-    /// @param resourceName the classpath resource name
+    /// @param resourceName     the classpath resource name
     /// @param parseFailureCode the expected parse failure code
     /// @return the corpus case
     private static CorpusCase parseFailure(String resourceName, AvifErrorCode parseFailureCode) {
@@ -295,79 +295,28 @@ final class LibavifTestDataCorpusTest {
     }
 
     /// Expected behavior for one libavif AVIF fixture.
+    ///
+    /// @param resourceName      The classpath resource name.
+    /// @param expectedInfo      The expected parsed image info, or `null` when parsing must fail.
+    /// @param parseFailureCode  The expected parse failure code, or `null` when parsing must succeed.
+    /// @param decodeFailureCode The expected frame decode failure code, or `null` when frame decoding must succeed.
     @NotNullByDefault
-    private static final class CorpusCase {
-        /// The classpath resource name.
-        private final String resourceName;
-        /// The expected parsed image info, or `null` when parsing must fail.
-        private final @Nullable ExpectedInfo expectedInfo;
-        /// The expected parse failure code, or `null` when parsing must succeed.
-        private final @Nullable AvifErrorCode parseFailureCode;
-        /// The expected frame decode failure code, or `null` when frame decoding must succeed.
-        private final @Nullable AvifErrorCode decodeFailureCode;
+    private record CorpusCase(String resourceName, @Nullable ExpectedInfo expectedInfo,
+                              @Nullable AvifErrorCode parseFailureCode, @Nullable AvifErrorCode decodeFailureCode) {
 
-        /// Creates a corpus case.
-        ///
-        /// @param resourceName the classpath resource name
-        /// @param expectedInfo the expected parsed image info, or `null`
-        /// @param parseFailureCode the expected parse failure code, or `null`
-        /// @param decodeFailureCode the expected frame decode failure code, or `null`
-        private CorpusCase(
-                String resourceName,
-                @Nullable ExpectedInfo expectedInfo,
-                @Nullable AvifErrorCode parseFailureCode,
-                @Nullable AvifErrorCode decodeFailureCode
-        ) {
-            this.resourceName = resourceName;
-            this.expectedInfo = expectedInfo;
-            this.parseFailureCode = parseFailureCode;
-            this.decodeFailureCode = decodeFailureCode;
-        }
     }
 
     /// Expected parsed image metadata for one libavif AVIF fixture.
+    ///
+    /// @param width        The expected width.
+    /// @param height       The expected height.
+    /// @param bitDepth     The expected bit depth.
+    /// @param pixelFormat  The expected pixel format.
+    /// @param alphaPresent Whether alpha is expected.
+    /// @param animated     Whether animation is expected.
+    /// @param frameCount   The expected frame count.
     @NotNullByDefault
-    private static final class ExpectedInfo {
-        /// The expected width.
-        private final int width;
-        /// The expected height.
-        private final int height;
-        /// The expected bit depth.
-        private final int bitDepth;
-        /// The expected pixel format.
-        private final PixelFormat pixelFormat;
-        /// Whether alpha is expected.
-        private final boolean alphaPresent;
-        /// Whether animation is expected.
-        private final boolean animated;
-        /// The expected frame count.
-        private final int frameCount;
-
-        /// Creates expected parsed image metadata.
-        ///
-        /// @param width the expected width
-        /// @param height the expected height
-        /// @param bitDepth the expected bit depth
-        /// @param pixelFormat the expected pixel format
-        /// @param alphaPresent whether alpha is expected
-        /// @param animated whether animation is expected
-        /// @param frameCount the expected frame count
-        private ExpectedInfo(
-                int width,
-                int height,
-                int bitDepth,
-                PixelFormat pixelFormat,
-                boolean alphaPresent,
-                boolean animated,
-                int frameCount
-        ) {
-            this.width = width;
-            this.height = height;
-            this.bitDepth = bitDepth;
-            this.pixelFormat = pixelFormat;
-            this.alphaPresent = alphaPresent;
-            this.animated = animated;
-            this.frameCount = frameCount;
-        }
+    private record ExpectedInfo(int width, int height, int bitDepth, PixelFormat pixelFormat, boolean alphaPresent,
+                                boolean animated, int frameCount) {
     }
 }
