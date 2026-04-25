@@ -171,6 +171,13 @@ public final class AvifImageInfo {
             throw new IllegalArgumentException("mediaDuration < 0: " + mediaDuration);
         }
 
+        int @Unmodifiable [] checkedFrameDurations = immutableFrameDurations(frameDurations);
+        if (checkedFrameDurations.length != 0 && checkedFrameDurations.length != frameCount) {
+            throw new IllegalArgumentException(
+                    "frameDurations length must match frameCount: " + checkedFrameDurations.length
+            );
+        }
+
         this.width = width;
         this.height = height;
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
@@ -180,7 +187,7 @@ public final class AvifImageInfo {
         this.frameCount = frameCount;
         this.mediaTimescale = mediaTimescale;
         this.mediaDuration = mediaDuration;
-        this.frameDurations = immutableFrameDurations(frameDurations);
+        this.frameDurations = checkedFrameDurations;
         this.colorInfo = colorInfo;
         this.iccProfile = immutableBytes(iccProfile);
         this.exif = immutableBytes(exif);
