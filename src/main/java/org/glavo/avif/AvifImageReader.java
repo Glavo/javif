@@ -295,8 +295,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// Reads raw decoded alpha auxiliary planes for the frame at the supplied index.
     ///
     /// The returned planes expose an alpha auxiliary AV1 image before AVIF item transforms are
-    /// applied. A `null` return value means the frame has no alpha auxiliary image. Alpha AVIS
-    /// sequences are not implemented.
+    /// applied. A `null` return value means the frame has no alpha auxiliary image.
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded alpha auxiliary planes, or `null` when no alpha auxiliary image is present
@@ -310,7 +309,15 @@ public final class AvifImageReader implements AutoCloseable {
             return null;
         }
         if (container.isSequence()) {
-            throw unsupported("Raw alpha planes for AVIS sequences are not implemented", null);
+            @Unmodifiable ByteBuffer @Nullable [] alphaPayloads = container.sequenceAlphaSamplePayloads();
+            if (alphaPayloads == null) {
+                return null;
+            }
+            return alphaPlanesFromDecodedImage(readSequenceRawAuxiliaryPlanes(
+                    frameIndex,
+                    alphaPayloads,
+                    "Alpha sequence frame"
+            ));
         }
         if (frameIndex != 0) {
             throw new AvifDecodeException(
@@ -375,6 +382,53 @@ public final class AvifImageReader implements AutoCloseable {
         throw unsupported("Gain-map item type is not decodable as AV1 planes: " + gainMapInfo.gainMapItemType(), null);
     }
 
+    /// Reads raw decoded depth auxiliary planes for the frame at the supplied index.
+    ///
+    /// The returned planes expose a depth auxiliary AV1 image before AVIF item transforms are
+    /// applied. A `null` return value means the frame has no depth auxiliary image.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return raw decoded depth auxiliary planes, or `null` when no depth auxiliary image is present
+    /// @throws IOException if the depth auxiliary image cannot be decoded
+    public @Nullable AvifPlanes readRawDepthPlanes(int frameIndex) throws IOException {
+        ensureOpen();
+        if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        if (container.isSequence()) {
+            @Unmodifiable ByteBuffer @Nullable [] depthPayloads = container.sequenceDepthSamplePayloads();
+            if (depthPayloads == null) {
+                return null;
+            }
+            return readSequenceRawAuxiliaryPlanes(frameIndex, depthPayloads, "Depth sequence frame");
+        }
+        if (frameIndex != 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.UNSUPPORTED_FEATURE,
+                    "Indexed AVIF depth plane decoding beyond the primary still image is not implemented in this slice",
+                    null
+            );
+        }
+        ByteBuffer depthPayload = container.depthItemPayload();
+        if (depthPayload != null) {
+            return decodeRawColorPlanes(depthPayload, "Depth auxiliary AV1 item");
+        }
+        @Unmodifiable ByteBuffer @Nullable [] depthCellPayloads = container.gridDepthCellPayloads();
+        if (depthCellPayloads != null) {
+            return composeGridRawColorPlanes(
+                    decodeGridRawColorPlanes(depthCellPayloads),
+                    container.gridDepthRows(),
+                    container.gridDepthColumns(),
+                    container.gridDepthOutputWidth(),
+                    container.gridDepthOutputHeight()
+            );
+        }
+        if (!hasAuxiliaryType(container.info(), AvifAuxiliaryImageInfo.DEPTH_TYPE)) {
+            return null;
+        }
+        throw unsupported("Depth auxiliary item type is not decodable as AV1 planes", null);
+    }
+
     /// Decodes the next frame from an image sequence using the persistent sequential AV1 reader.
     ///
     /// @param frameIndex the zero-based frame index
@@ -428,6 +482,39 @@ public final class AvifImageReader implements AutoCloseable {
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
+        return readSequenceRawPlanes(frameIndex, payloads, "Sequence frame");
+    }
+
+    /// Decodes raw planes for one image-sequence auxiliary frame without mutating playback state.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @param payloads the auxiliary sample payloads
+    /// @param label the diagnostic label for failures
+    /// @return raw decoded auxiliary planes
+    /// @throws IOException if decoding fails
+    private AvifPlanes readSequenceRawAuxiliaryPlanes(
+            int frameIndex,
+            @Unmodifiable ByteBuffer @Unmodifiable [] payloads,
+            String label
+    ) throws IOException {
+        if (frameIndex >= payloads.length) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        return readSequenceRawPlanes(frameIndex, payloads, label);
+    }
+
+    /// Decodes raw planes for one image-sequence frame without mutating playback state.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @param payloads the sample payloads
+    /// @param label the diagnostic label for failures
+    /// @return raw decoded planes
+    /// @throws IOException if decoding fails
+    private AvifPlanes readSequenceRawPlanes(
+            int frameIndex,
+            @Unmodifiable ByteBuffer @Unmodifiable [] payloads,
+            String label
+    ) throws IOException {
         try (Av1ImageReader rawReader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffers(payloads),
                 config.av1DecoderConfig()
@@ -442,7 +529,7 @@ public final class AvifImageReader implements AutoCloseable {
                     );
                 }
             }
-            return lastRawColorPlanes(rawReader, "Sequence frame");
+            return lastRawColorPlanes(rawReader, label);
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -570,6 +657,20 @@ public final class AvifImageReader implements AutoCloseable {
                 null,
                 null
         );
+    }
+
+    /// Returns whether image metadata contains one auxiliary image type.
+    ///
+    /// @param info the image metadata
+    /// @param auxiliaryType the auxiliary image type
+    /// @return whether the auxiliary type is present
+    private static boolean hasAuxiliaryType(AvifImageInfo info, String auxiliaryType) {
+        for (String type : info.auxiliaryImageTypes()) {
+            if (auxiliaryType.equals(type)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Composes decoded grid cell raw planes into one canvas.

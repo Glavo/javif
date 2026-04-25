@@ -18,10 +18,11 @@ track type strings for alpha and depth tracks. Auxiliary image metadata is also
 exposed through structured descriptors that include item id, auxiliary type, item
 type, dimensions, bit depth, and pixel format when available. The public reader
 can expose raw decoded color planes for still images, grid-derived still images,
-and AVIS frames, raw luma planes for single alpha auxiliary items and alpha
-grids, and raw gain-map planes for standalone or grid-derived gain-map images.
-Image metadata includes `tmap` gain-map descriptors when the `tmap` brand and
-preferred `altr` relationship are present.
+and AVIS frames; raw alpha planes for single items, grids, and AVIS auxiliary
+tracks; raw depth planes for single items, grids, and AVIS auxiliary tracks; and
+raw gain-map planes for standalone or grid-derived gain-map images. Image
+metadata includes `tmap` gain-map descriptors when the `tmap` brand and preferred
+`altr` relationship are present.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -51,11 +52,11 @@ behavior where the feature is in scope.
 - Implement full color management: apply ICC profiles, transfer functions,
   nclx primaries/transfer/matrix handling, range conversion, and display-ready
   RGB adaptation across 8/10/12-bit inputs.
-- Implement gain-map tone mapping and decode depth-image planes through public
-  APIs. Gain-map container descriptors and raw gain-map plane decoding are now
-  exposed, but tone mapping and depth pixel decoding are still pending.
-- Improve AVIS support beyond random access: timing accuracy validation, alpha
-  sequence plane decoding, and multi-sample edge cases.
+- Implement gain-map tone mapping and display adaptation. Gain-map container
+  descriptors and raw gain-map plane decoding are exposed, but tone mapping is
+  still pending.
+- Improve AVIS support beyond random access: timing accuracy validation and
+  multi-sample edge cases.
 - Add incremental/streaming input behavior instead of requiring the full source
   to be buffered before parsing.
 - Define and test behavior for layered/scalable AVIF and operating-point
@@ -63,10 +64,10 @@ behavior where the feature is in scope.
 
 ### Public API And Metadata
 
-- Expose remaining image metadata, especially structured depth descriptors and
-  decoded depth planes where they belong in the public API.
-- Complete explicit output choices for sequence alpha planes, display-converted
-  RGB, and high-bit-depth buffers without unnecessary copies.
+- Expose remaining image metadata that is not yet represented by typed public
+  descriptors.
+- Complete explicit output choices for display-converted RGB and high-bit-depth
+  buffers without unnecessary copies.
 - Review alpha semantics, premultiplication metadata, and buffer immutability
   annotations across all public APIs.
 

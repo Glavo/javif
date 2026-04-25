@@ -133,32 +133,20 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Primary AV1 item is missing av1C", null);
         }
 
-        boolean alphaPresent = false;
-        byte @Nullable [] alphaPayload = null;
-        Item alphaItem = findAlphaItem(primaryItem.id);
-        if (alphaItem != null) {
-            if (!"av01".equals(alphaItem.type)) {
-                throw unsupported("Unsupported alpha auxiliary item type: " + alphaItem.type, null);
-            }
-            if (alphaItem.hasUnsupportedEssentialProperty) {
-                throw new AvifDecodeException(AvifErrorCode.MISSING_IMAGE_ITEM, "Alpha auxiliary item is not usable", null);
-            }
-            ImageSpatialExtents alphaIspe = alphaItem.firstProperty(ImageSpatialExtents.class);
-            if (alphaIspe == null) {
-                throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Alpha auxiliary item is missing ispe", null);
-            }
-            if (alphaIspe.width != ispe.width || alphaIspe.height != ispe.height) {
-                throw unsupported(
-                        "Alpha auxiliary image with different dimensions than the master image is not implemented in this slice",
-                        null
-                );
-            }
-            if (alphaItem.firstProperty(Av1Config.class) == null) {
-                throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Alpha auxiliary item is missing av1C", null);
-            }
-            alphaPresent = true;
-            alphaPayload = mergeItemExtents(alphaItem);
-        }
+        AuxiliaryPayloads alphaPayloads = parseAuxiliaryPayloads(
+                primaryItem,
+                AvifAuxiliaryImageInfo.ALPHA_TYPE,
+                "Alpha",
+                ispe.width,
+                ispe.height
+        );
+        AuxiliaryPayloads depthPayloads = parseAuxiliaryPayloads(
+                primaryItem,
+                AvifAuxiliaryImageInfo.DEPTH_TYPE,
+                "Depth",
+                ispe.width,
+                ispe.height
+        );
 
         byte[] payload = mergeItemExtents(primaryItem);
         MetadataPayloads metadata = collectMetadataPayloads(primaryItem);
@@ -169,7 +157,7 @@ public final class AvifContainerParser {
                 ispe.height,
                 AvifBitDepth.fromBits(av1Config.bitDepth()),
                 av1Config.pixelFormat(),
-                alphaPresent,
+                alphaPayloads.present(),
                 false,
                 1,
                 primaryItem.firstProperty(AvifColorInfo.class),
@@ -190,7 +178,9 @@ public final class AvifContainerParser {
                 gainMapPayloads.info
         );
 
-        return new AvifContainer(info, payload, alphaPayload,
+        return new AvifContainer(info, payload,
+                alphaPayloads.itemPayload,
+                depthPayloads.itemPayload,
                 gainMapPayloads.itemPayload,
                 gainMapPayloads.gridCellPayloads,
                 gainMapPayloads.gridRows, gainMapPayloads.gridColumns,
@@ -206,7 +196,18 @@ public final class AvifContainerParser {
     /// @throws AvifDecodeException if the grid is malformed or unsupported
     private AvifContainer parseGridContainer(Item gridItem) throws AvifDecodeException {
         GridPayloads colorGrid = parseGridPayloads(gridItem);
-        AlphaPayloads alphaPayloads = parseGridAlphaPayloads(gridItem, colorGrid);
+        AuxiliaryPayloads alphaPayloads = parseGridAuxiliaryPayloads(
+                gridItem,
+                colorGrid,
+                AvifAuxiliaryImageInfo.ALPHA_TYPE,
+                "Alpha"
+        );
+        AuxiliaryPayloads depthPayloads = parseGridAuxiliaryPayloads(
+                gridItem,
+                colorGrid,
+                AvifAuxiliaryImageInfo.DEPTH_TYPE,
+                "Depth"
+        );
         MetadataPayloads metadata = collectMetadataPayloads(gridItem);
         int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
         GainMapPayloads gainMapPayloads = gainMapPayloads(gridItem.id);
@@ -238,8 +239,10 @@ public final class AvifContainerParser {
         );
 
         return new AvifContainer(info, colorGrid.cellPayloads,
-                alphaPayloads.alphaItemPayload,
+                alphaPayloads.itemPayload,
                 alphaPayloads.gridCellPayloads,
+                depthPayloads.itemPayload,
+                depthPayloads.gridCellPayloads,
                 gainMapPayloads.itemPayload,
                 gainMapPayloads.gridCellPayloads,
                 gainMapPayloads.gridRows, gainMapPayloads.gridColumns,
@@ -247,6 +250,8 @@ public final class AvifContainerParser {
                 colorGrid.rows, colorGrid.columns, colorGrid.outputWidth, colorGrid.outputHeight,
                 alphaPayloads.gridRows, alphaPayloads.gridColumns,
                 alphaPayloads.gridOutputWidth, alphaPayloads.gridOutputHeight,
+                depthPayloads.gridRows, depthPayloads.gridColumns,
+                depthPayloads.gridOutputWidth, depthPayloads.gridOutputHeight,
                 transforms[0], transforms[1], transforms[2], transforms[3],
                 transforms[4], transforms[5]);
     }
@@ -360,122 +365,185 @@ public final class AvifContainerParser {
         return new GridPayloads(rows, columns, outputWidth, outputHeight, representativeAv1C, payloads);
     }
 
-    /// Parses alpha auxiliary payloads for a grid color item.
+    /// Parses AV1 auxiliary payloads for a non-grid color item.
+    ///
+    /// @param imageItem the color image item
+    /// @param auxiliaryType the auxiliary image type string
+    /// @param label the diagnostic auxiliary label
+    /// @param expectedWidth the expected auxiliary width
+    /// @param expectedHeight the expected auxiliary height
+    /// @return auxiliary payload data, or empty data when no matching auxiliary image is present
+    /// @throws AvifDecodeException if auxiliary data is malformed or unsupported
+    private AuxiliaryPayloads parseAuxiliaryPayloads(
+            Item imageItem,
+            String auxiliaryType,
+            String label,
+            int expectedWidth,
+            int expectedHeight
+    ) throws AvifDecodeException {
+        Item auxiliaryItem = findAuxiliaryItem(imageItem.id, auxiliaryType);
+        if (auxiliaryItem == null) {
+            return AuxiliaryPayloads.empty();
+        }
+        if (auxiliaryItem.hasUnsupportedEssentialProperty) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.MISSING_IMAGE_ITEM,
+                    label + " auxiliary item is not usable: " + auxiliaryItem.id,
+                    null
+            );
+        }
+        if (!"av01".equals(auxiliaryItem.type)) {
+            throw unsupported("Unsupported " + label + " auxiliary item type: " + auxiliaryItem.type, null);
+        }
+        validateAuxiliaryItemDimensions(auxiliaryItem, label, expectedWidth, expectedHeight);
+        return AuxiliaryPayloads.item(mergeItemExtents(auxiliaryItem));
+    }
+
+    /// Parses auxiliary payloads for a grid color item.
     ///
     /// @param gridItem the color grid item
     /// @param colorGrid the parsed color grid
-    /// @return alpha payload data, or empty data when no alpha is present
-    /// @throws AvifDecodeException if alpha data is malformed or unsupported
-    private AlphaPayloads parseGridAlphaPayloads(Item gridItem, GridPayloads colorGrid) throws AvifDecodeException {
-        Item alphaItem = findAlphaItem(gridItem.id);
-        if (alphaItem != null) {
-            if (alphaItem.hasUnsupportedEssentialProperty) {
+    /// @param auxiliaryType the auxiliary image type string
+    /// @param label the diagnostic auxiliary label
+    /// @return auxiliary payload data, or empty data when no matching auxiliary image is present
+    /// @throws AvifDecodeException if auxiliary data is malformed or unsupported
+    private AuxiliaryPayloads parseGridAuxiliaryPayloads(
+            Item gridItem,
+            GridPayloads colorGrid,
+            String auxiliaryType,
+            String label
+    ) throws AvifDecodeException {
+        Item auxiliaryItem = findAuxiliaryItem(gridItem.id, auxiliaryType);
+        if (auxiliaryItem != null) {
+            if (auxiliaryItem.hasUnsupportedEssentialProperty) {
                 throw new AvifDecodeException(
                         AvifErrorCode.MISSING_IMAGE_ITEM,
-                        "Alpha auxiliary item is not usable: " + alphaItem.id,
+                        label + " auxiliary item is not usable: " + auxiliaryItem.id,
                         null
                 );
             }
-            if ("grid".equals(alphaItem.type)) {
-                GridPayloads alphaGrid = parseGridPayloads(alphaItem);
-                validateAlphaGridDimensions(colorGrid, alphaGrid);
-                return AlphaPayloads.grid(alphaGrid);
+            if ("grid".equals(auxiliaryItem.type)) {
+                GridPayloads auxiliaryGrid = parseGridPayloads(auxiliaryItem);
+                validateAuxiliaryGridDimensions(colorGrid, auxiliaryGrid, label);
+                return AuxiliaryPayloads.grid(auxiliaryGrid);
             }
-            if (!"av01".equals(alphaItem.type)) {
-                throw unsupported("Unsupported alpha auxiliary item type: " + alphaItem.type, null);
+            if (!"av01".equals(auxiliaryItem.type)) {
+                throw unsupported("Unsupported " + label + " auxiliary item type: " + auxiliaryItem.type, null);
             }
-            validateAlphaItemDimensions(alphaItem, colorGrid.outputWidth, colorGrid.outputHeight);
-            return AlphaPayloads.item(mergeItemExtents(alphaItem));
+            validateAuxiliaryItemDimensions(auxiliaryItem, label, colorGrid.outputWidth, colorGrid.outputHeight);
+            return AuxiliaryPayloads.item(mergeItemExtents(auxiliaryItem));
         }
 
-        return parsePerCellGridAlphaPayloads(gridItem, colorGrid);
+        return parsePerCellGridAuxiliaryPayloads(gridItem, colorGrid, auxiliaryType, label);
     }
 
-    /// Parses the legacy grid-alpha shape where each color cell has its own alpha auxiliary item.
+    /// Parses the legacy grid-auxiliary shape where each color cell has its own auxiliary item.
     ///
     /// @param gridItem the color grid item
     /// @param colorGrid the parsed color grid
-    /// @return alpha payload data, or empty data when no complete per-cell alpha set is present
-    /// @throws AvifDecodeException if alpha data is malformed or unsupported
-    private AlphaPayloads parsePerCellGridAlphaPayloads(Item gridItem, GridPayloads colorGrid) throws AvifDecodeException {
+    /// @param auxiliaryType the auxiliary image type string
+    /// @param label the diagnostic auxiliary label
+    /// @return auxiliary payload data, or empty data when no complete per-cell auxiliary set is present
+    /// @throws AvifDecodeException if auxiliary data is malformed or unsupported
+    private AuxiliaryPayloads parsePerCellGridAuxiliaryPayloads(
+            Item gridItem,
+            GridPayloads colorGrid,
+            String auxiliaryType,
+            String label
+    ) throws AvifDecodeException {
         List<Integer> cellIds = gridItem.dimgCellIds;
-        byte[][] alphaCellPayloads = new byte[cellIds.size()][];
+        byte[][] auxiliaryCellPayloads = new byte[cellIds.size()][];
         for (int i = 0; i < cellIds.size(); i++) {
             int cellId = cellIds.get(i);
             Item colorCellItem = meta.requireItem(cellId);
-            Item alphaCellItem = findAlphaItem(cellId);
-            if (alphaCellItem == null) {
-                return AlphaPayloads.empty();
+            Item auxiliaryCellItem = findAuxiliaryItem(cellId, auxiliaryType);
+            if (auxiliaryCellItem == null) {
+                return AuxiliaryPayloads.empty();
             }
-            if (!"av01".equals(alphaCellItem.type)) {
-                throw unsupported("Unsupported per-cell alpha auxiliary item type: " + alphaCellItem.type, null);
+            if (!"av01".equals(auxiliaryCellItem.type)) {
+                throw unsupported(
+                        "Unsupported per-cell " + label + " auxiliary item type: " + auxiliaryCellItem.type,
+                        null
+                );
             }
-            if (alphaCellItem.dimgForId != 0) {
-                throw unsupported("Per-cell alpha auxiliary item is also a derived-image cell: " + alphaCellItem.id, null);
+            if (auxiliaryCellItem.dimgForId != 0) {
+                throw unsupported(
+                        "Per-cell " + label + " auxiliary item is also a derived-image cell: " + auxiliaryCellItem.id,
+                        null
+                );
             }
-            if (alphaCellItem.hasUnsupportedEssentialProperty) {
+            if (auxiliaryCellItem.hasUnsupportedEssentialProperty) {
                 throw new AvifDecodeException(
                         AvifErrorCode.MISSING_IMAGE_ITEM,
-                        "Per-cell alpha auxiliary item is not usable: " + alphaCellItem.id,
+                        "Per-cell " + label + " auxiliary item is not usable: " + auxiliaryCellItem.id,
                         null
                 );
             }
             ImageSpatialExtents colorIspe = colorCellItem.firstProperty(ImageSpatialExtents.class);
             assert colorIspe != null;
-            validateAlphaItemDimensions(alphaCellItem, colorIspe.width, colorIspe.height);
-            alphaCellPayloads[i] = mergeItemExtents(alphaCellItem);
+            validateAuxiliaryItemDimensions(auxiliaryCellItem, label, colorIspe.width, colorIspe.height);
+            auxiliaryCellPayloads[i] = mergeItemExtents(auxiliaryCellItem);
         }
-        return AlphaPayloads.grid(new GridPayloads(
+        return AuxiliaryPayloads.grid(new GridPayloads(
                 colorGrid.rows,
                 colorGrid.columns,
                 colorGrid.outputWidth,
                 colorGrid.outputHeight,
                 colorGrid.representativeAv1C,
-                alphaCellPayloads
+                auxiliaryCellPayloads
         ));
     }
 
-    /// Validates that an alpha grid matches the color grid canvas dimensions.
+    /// Validates that an auxiliary grid matches the color grid canvas dimensions.
     ///
     /// @param colorGrid the color grid
-    /// @param alphaGrid the alpha grid
+    /// @param auxiliaryGrid the auxiliary grid
+    /// @param label the diagnostic auxiliary label
     /// @throws AvifDecodeException if dimensions differ
-    private static void validateAlphaGridDimensions(GridPayloads colorGrid, GridPayloads alphaGrid)
-            throws AvifDecodeException {
-        if (alphaGrid.outputWidth != colorGrid.outputWidth || alphaGrid.outputHeight != colorGrid.outputHeight) {
+    private static void validateAuxiliaryGridDimensions(
+            GridPayloads colorGrid,
+            GridPayloads auxiliaryGrid,
+            String label
+    ) throws AvifDecodeException {
+        if (auxiliaryGrid.outputWidth != colorGrid.outputWidth || auxiliaryGrid.outputHeight != colorGrid.outputHeight) {
             throw unsupported(
-                    "Alpha grid with different dimensions than the master grid is not implemented in this slice",
+                    label + " grid with different dimensions than the master grid is not implemented in this slice",
                     null
             );
         }
     }
 
-    /// Validates one alpha item against the expected output dimensions.
+    /// Validates one auxiliary item against the expected output dimensions.
     ///
-    /// @param alphaItem the alpha item
-    /// @param expectedWidth the expected alpha width
-    /// @param expectedHeight the expected alpha height
+    /// @param auxiliaryItem the auxiliary item
+    /// @param label the diagnostic auxiliary label
+    /// @param expectedWidth the expected auxiliary width
+    /// @param expectedHeight the expected auxiliary height
     /// @throws AvifDecodeException if the item is malformed or has unsupported dimensions
-    private void validateAlphaItemDimensions(Item alphaItem, int expectedWidth, int expectedHeight)
-            throws AvifDecodeException {
-        ImageSpatialExtents alphaIspe = alphaItem.firstProperty(ImageSpatialExtents.class);
-        if (alphaIspe == null) {
+    private void validateAuxiliaryItemDimensions(
+            Item auxiliaryItem,
+            String label,
+            int expectedWidth,
+            int expectedHeight
+    ) throws AvifDecodeException {
+        ImageSpatialExtents auxiliaryIspe = auxiliaryItem.firstProperty(ImageSpatialExtents.class);
+        if (auxiliaryIspe == null) {
             throw new AvifDecodeException(
                     AvifErrorCode.BMFF_PARSE_FAILED,
-                    "Alpha auxiliary item is missing ispe: " + alphaItem.id,
+                    label + " auxiliary item is missing ispe: " + auxiliaryItem.id,
                     null
             );
         }
-        if (alphaIspe.width != expectedWidth || alphaIspe.height != expectedHeight) {
+        if (auxiliaryIspe.width != expectedWidth || auxiliaryIspe.height != expectedHeight) {
             throw unsupported(
-                    "Alpha auxiliary image with different dimensions than the master image is not implemented in this slice",
+                    label + " auxiliary image with different dimensions than the master image is not implemented in this slice",
                     null
             );
         }
-        if (alphaItem.firstProperty(Av1Config.class) == null) {
+        if (auxiliaryItem.firstProperty(Av1Config.class) == null) {
             throw new AvifDecodeException(
                     AvifErrorCode.BMFF_PARSE_FAILED,
-                    "Alpha auxiliary item is missing av1C: " + alphaItem.id,
+                    label + " auxiliary item is missing av1C: " + auxiliaryItem.id,
                     null
             );
         }
@@ -1138,43 +1206,34 @@ public final class AvifContainerParser {
     /// Creates an AVIF container from parsed sequence data.
     private AvifContainer parseSequenceImage() throws AvifDecodeException {
         MoovState s = meta.moovState;
-        if (s.sampleSizes.isEmpty()) {
-            throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Sequence has no samples", null);
-        }
-        int sampleCount = s.sampleSizes.size();
-        int chunkOff = s.chunkOffsets.isEmpty() ? 0 : s.chunkOffsets.get(0);
-        int bytesOff = 0;
-        List<byte[]> payloads = new ArrayList<>(sampleCount);
-        List<Integer> deltas = new ArrayList<>(sampleCount);
-        for (int i = 0; i < sampleCount; i++) {
-            int sz = s.sampleSizes.get(i);
-            long off = (long) chunkOff + bytesOff;
-            if (off + sz > source.length)
-                throw new AvifDecodeException(AvifErrorCode.TRUNCATED_DATA, "Sample outside source: " + i, off);
-            byte[] data = new byte[sz];
-            System.arraycopy(source, (int) off, data, 0, sz);
-            payloads.add(data);
-            bytesOff += sz;
-            deltas.add(i < s.sampleDeltas.size() ? s.sampleDeltas.get(i) : 1);
-        }
+        SequencePayloads colorPayloads = sequencePayloads(s, "Color sequence");
+        byte @Nullable [][] alphaPayloads = sequenceAuxiliaryPayloads(
+                meta.moovAlphaState,
+                colorPayloads.sampleCount,
+                "Alpha sequence"
+        );
+        byte @Nullable [][] depthPayloads = sequenceAuxiliaryPayloads(
+                meta.moovDepthState,
+                colorPayloads.sampleCount,
+                "Depth sequence"
+        );
         int ts = s.mediaTimescale > 0 ? s.mediaTimescale : 30;
-        long dur = s.mediaDuration > 0 ? s.mediaDuration : sampleCount;
-        int[] frameDeltas = deltas.stream().mapToInt(Integer::intValue).toArray();
+        long dur = s.mediaDuration > 0 ? s.mediaDuration : colorPayloads.sampleCount;
         AvifImageInfo info = new AvifImageInfo(
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
                 AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
                 s.pixelFormat != null ? s.pixelFormat : AvifPixelFormat.I420,
-                meta.moovAuxiliaryTypes.contains(AvifAuxiliaryImageInfo.ALPHA_TYPE),
+                alphaPayloads != null,
                 true,
-                sampleCount,
+                colorPayloads.sampleCount,
                 s.colr,
                 s.iccProfile,
                 null,
                 null,
                 ts,
                 dur,
-                frameDeltas,
+                colorPayloads.frameDeltas,
                 -1,
                 -1,
                 -1,
@@ -1183,9 +1242,71 @@ public final class AvifContainerParser {
                 -1,
                 meta.moovAuxiliaryTypes.toArray(String[]::new));
         return new AvifContainer(info,
-                payloads.toArray(byte[][]::new),
-                frameDeltas,
-                sampleCount, ts, dur);
+                colorPayloads.payloads,
+                alphaPayloads,
+                depthPayloads,
+                colorPayloads.frameDeltas,
+                colorPayloads.sampleCount, ts, dur);
+    }
+
+    /// Extracts sample payloads and frame deltas from one AVIS track.
+    ///
+    /// @param track the parsed track state
+    /// @param label the diagnostic label
+    /// @return extracted sample payloads
+    /// @throws AvifDecodeException if sample data is missing or truncated
+    private SequencePayloads sequencePayloads(MoovState track, String label) throws AvifDecodeException {
+        if (track.sampleSizes.isEmpty()) {
+            throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, label + " has no samples", null);
+        }
+        int sampleCount = track.sampleSizes.size();
+        int chunkOff = track.chunkOffsets.isEmpty() ? 0 : track.chunkOffsets.get(0);
+        int bytesOff = 0;
+        byte[][] payloads = new byte[sampleCount][];
+        int[] deltas = new int[sampleCount];
+        for (int i = 0; i < sampleCount; i++) {
+            int size = track.sampleSizes.get(i);
+            long offset = (long) chunkOff + bytesOff;
+            if (offset + size > source.length) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.TRUNCATED_DATA,
+                        label + " sample outside source: " + i,
+                        offset
+                );
+            }
+            byte[] payload = new byte[size];
+            System.arraycopy(source, (int) offset, payload, 0, size);
+            payloads[i] = payload;
+            bytesOff += size;
+            deltas[i] = i < track.sampleDeltas.size() ? track.sampleDeltas.get(i) : 1;
+        }
+        return new SequencePayloads(payloads, deltas, sampleCount);
+    }
+
+    /// Extracts auxiliary sample payloads and validates the sample count.
+    ///
+    /// @param track the parsed auxiliary track state, or `null`
+    /// @param colorSampleCount the color track sample count
+    /// @param label the diagnostic label
+    /// @return extracted auxiliary payloads, or `null`
+    /// @throws AvifDecodeException if the auxiliary sample table is malformed
+    private byte @Nullable [][] sequenceAuxiliaryPayloads(
+            @Nullable MoovState track,
+            int colorSampleCount,
+            String label
+    ) throws AvifDecodeException {
+        if (track == null) {
+            return null;
+        }
+        SequencePayloads payloads = sequencePayloads(track, label);
+        if (payloads.sampleCount != colorSampleCount) {
+            throw unsupported(
+                    label + " sample count does not match color sequence: " + payloads.sampleCount
+                            + " != " + colorSampleCount,
+                    null
+            );
+        }
+        return payloads.payloads;
     }
 
     /// Parses a `moov` box for AVIS image sequences.
@@ -1205,6 +1326,12 @@ public final class AvifContainerParser {
                 MoovState parsedTrack = meta.moovState.copy();
                 if (parsedTrack.auxiliaryType != null && !meta.moovAuxiliaryTypes.contains(parsedTrack.auxiliaryType)) {
                     meta.moovAuxiliaryTypes.add(parsedTrack.auxiliaryType);
+                }
+                if (AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(parsedTrack.auxiliaryType) && meta.moovAlphaState == null) {
+                    meta.moovAlphaState = parsedTrack;
+                }
+                if (AvifAuxiliaryImageInfo.DEPTH_TYPE.equals(parsedTrack.auxiliaryType) && meta.moovDepthState == null) {
+                    meta.moovDepthState = parsedTrack;
                 }
                 if (selectedTrack.seqHeaderObu != null
                         || parsedTrack.seqHeaderObu == null
@@ -1573,16 +1700,17 @@ public final class AvifContainerParser {
         }
     }
 
-    /// Finds the alpha auxiliary item for the supplied master image item id.
+    /// Finds an auxiliary item for the supplied master image item id.
     ///
     /// @param itemId the master image item id
-    /// @return the alpha auxiliary item, or `null`
-    private @Nullable Item findAlphaItem(int itemId) {
+    /// @param auxiliaryType the requested auxiliary image type string
+    /// @return the auxiliary item, or `null`
+    private @Nullable Item findAuxiliaryItem(int itemId, String auxiliaryType) {
         Item masterItem = meta.item(itemId);
         for (Item item : meta.items.values()) {
             if (item.auxForId == itemId || (masterItem != null && masterItem.auxForId == item.id)) {
                 AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
-                if (aux != null && AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(aux.type)) {
+                if (aux != null && auxiliaryType.equals(aux.type)) {
                     return item;
                 }
             }
@@ -1974,6 +2102,32 @@ public final class AvifContainerParser {
         }
     }
 
+    /// Extracted AVIS sample payloads for one track.
+    @NotNullByDefault
+    private static final class SequencePayloads {
+        /// The AV1 OBU payloads for each sample in order.
+        private final byte @Unmodifiable [] @Unmodifiable [] payloads;
+        /// The frame duration deltas in media timescale units.
+        private final int @Unmodifiable [] frameDeltas;
+        /// The number of samples.
+        private final int sampleCount;
+
+        /// Creates extracted AVIS sample payloads.
+        ///
+        /// @param payloads the AV1 OBU payloads for each sample in order
+        /// @param frameDeltas the frame duration deltas in media timescale units
+        /// @param sampleCount the number of samples
+        private SequencePayloads(
+                byte @Unmodifiable [] @Unmodifiable [] payloads,
+                int @Unmodifiable [] frameDeltas,
+                int sampleCount
+        ) {
+            this.payloads = Objects.requireNonNull(payloads, "payloads");
+            this.frameDeltas = Objects.requireNonNull(frameDeltas, "frameDeltas");
+            this.sampleCount = sampleCount;
+        }
+    }
+
     /// Parsed `tmap` metadata version fields.
     @NotNullByDefault
     private static final class ToneMapMetadataVersions {
@@ -2040,6 +2194,10 @@ public final class AvifContainerParser {
         private final List<EntityGroup> entityGroups = new ArrayList<>();
         /// Auxiliary image type strings parsed from AVIS auxiliary tracks.
         private final List<String> moovAuxiliaryTypes = new ArrayList<>();
+        /// The parsed AVIS alpha auxiliary track state, or `null`.
+        private @Nullable MoovState moovAlphaState;
+        /// The parsed AVIS depth auxiliary track state, or `null`.
+        private @Nullable MoovState moovDepthState;
         /// The optional `idat` payload for construction method 1.
         private @Nullable byte[] idat;
         /// The parsed AVIS moov state.
@@ -2169,39 +2327,39 @@ public final class AvifContainerParser {
         }
     }
 
-    /// Parsed alpha auxiliary payloads.
+    /// Parsed auxiliary payloads.
     @NotNullByDefault
-    private static final class AlphaPayloads {
-        /// The standalone alpha item payload, or `null`.
-        private final byte @Nullable [] alphaItemPayload;
-        /// The alpha grid cell AV1 OBU payloads in row-major order, or `null`.
+    private static final class AuxiliaryPayloads {
+        /// The standalone auxiliary item payload, or `null`.
+        private final byte @Nullable [] itemPayload;
+        /// The auxiliary grid cell AV1 OBU payloads in row-major order, or `null`.
         private final byte @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads;
-        /// The alpha grid row count.
+        /// The auxiliary grid row count.
         private final int gridRows;
-        /// The alpha grid column count.
+        /// The auxiliary grid column count.
         private final int gridColumns;
-        /// The alpha grid reconstructed output width.
+        /// The auxiliary grid reconstructed output width.
         private final int gridOutputWidth;
-        /// The alpha grid reconstructed output height.
+        /// The auxiliary grid reconstructed output height.
         private final int gridOutputHeight;
 
-        /// Creates parsed alpha payloads.
+        /// Creates parsed auxiliary payloads.
         ///
-        /// @param alphaItemPayload the standalone alpha item payload, or `null`
-        /// @param gridCellPayloads the alpha grid cell AV1 OBU payloads, or `null`
-        /// @param gridRows the alpha grid row count
-        /// @param gridColumns the alpha grid column count
-        /// @param gridOutputWidth the alpha grid reconstructed output width
-        /// @param gridOutputHeight the alpha grid reconstructed output height
-        private AlphaPayloads(
-                byte @Nullable [] alphaItemPayload,
+        /// @param itemPayload the standalone auxiliary item payload, or `null`
+        /// @param gridCellPayloads the auxiliary grid cell AV1 OBU payloads, or `null`
+        /// @param gridRows the auxiliary grid row count
+        /// @param gridColumns the auxiliary grid column count
+        /// @param gridOutputWidth the auxiliary grid reconstructed output width
+        /// @param gridOutputHeight the auxiliary grid reconstructed output height
+        private AuxiliaryPayloads(
+                byte @Nullable [] itemPayload,
                 byte @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads,
                 int gridRows,
                 int gridColumns,
                 int gridOutputWidth,
                 int gridOutputHeight
         ) {
-            this.alphaItemPayload = alphaItemPayload;
+            this.itemPayload = itemPayload;
             this.gridCellPayloads = gridCellPayloads;
             this.gridRows = gridRows;
             this.gridColumns = gridColumns;
@@ -2209,36 +2367,36 @@ public final class AvifContainerParser {
             this.gridOutputHeight = gridOutputHeight;
         }
 
-        /// Creates empty alpha payloads.
+        /// Creates empty auxiliary payloads.
         ///
-        /// @return empty alpha payloads
-        private static AlphaPayloads empty() {
-            return new AlphaPayloads(null, null, 0, 0, 0, 0);
+        /// @return empty auxiliary payloads
+        private static AuxiliaryPayloads empty() {
+            return new AuxiliaryPayloads(null, null, 0, 0, 0, 0);
         }
 
-        /// Creates alpha payloads from one standalone item.
+        /// Creates auxiliary payloads from one standalone item.
         ///
-        /// @param alphaItemPayload the standalone alpha item payload
-        /// @return alpha payloads for the item
-        private static AlphaPayloads item(byte[] alphaItemPayload) {
-            return new AlphaPayloads(Objects.requireNonNull(alphaItemPayload, "alphaItemPayload"),
+        /// @param itemPayload the standalone auxiliary item payload
+        /// @return auxiliary payloads for the item
+        private static AuxiliaryPayloads item(byte[] itemPayload) {
+            return new AuxiliaryPayloads(Objects.requireNonNull(itemPayload, "itemPayload"),
                     null, 0, 0, 0, 0);
         }
 
-        /// Creates alpha payloads from grid data.
+        /// Creates auxiliary payloads from grid data.
         ///
-        /// @param grid the parsed alpha grid
-        /// @return alpha payloads for the grid
-        private static AlphaPayloads grid(GridPayloads grid) {
-            return new AlphaPayloads(null, grid.cellPayloads, grid.rows, grid.columns,
+        /// @param grid the parsed auxiliary grid
+        /// @return auxiliary payloads for the grid
+        private static AuxiliaryPayloads grid(GridPayloads grid) {
+            return new AuxiliaryPayloads(null, grid.cellPayloads, grid.rows, grid.columns,
                     grid.outputWidth, grid.outputHeight);
         }
 
-        /// Returns whether any alpha payload is present.
+        /// Returns whether any auxiliary payload is present.
         ///
-        /// @return whether alpha is present
+        /// @return whether an auxiliary image is present
         private boolean present() {
-            return alphaItemPayload != null || gridCellPayloads != null;
+            return itemPayload != null || gridCellPayloads != null;
         }
     }
 

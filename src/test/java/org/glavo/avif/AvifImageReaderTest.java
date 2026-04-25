@@ -142,6 +142,43 @@ final class AvifImageReaderTest {
         return bytes;
     }
 
+    /// Creates a depth auxiliary fixture by replacing the alpha auxiliary type with the equal-length depth type.
+    ///
+    /// @return an AVIF fixture with a depth auxiliary item
+    /// @throws IOException if the source fixture cannot be read
+    private static byte[] alphaFixtureWithDepthAuxiliaryType() throws IOException {
+        return fixtureWithRewrittenAuxiliaryType(LIBAVIF_ALPHA_NO_IROT_FIXTURE, AUXILIARY_DEPTH_TYPE);
+    }
+
+    /// Creates a depth auxiliary grid fixture by replacing the alpha auxiliary type with the equal-length depth type.
+    ///
+    /// @return an AVIF fixture with a depth auxiliary grid
+    /// @throws IOException if the source fixture cannot be read
+    private static byte[] alphaGridFixtureWithDepthAuxiliaryType() throws IOException {
+        return fixtureWithRewrittenAuxiliaryType(
+                LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE,
+                AUXILIARY_DEPTH_TYPE
+        );
+    }
+
+    /// Rewrites the first alpha auxiliary type string in one fixture.
+    ///
+    /// @param resourceName the source fixture resource name
+    /// @param replacementType the replacement auxiliary type string
+    /// @return a mutated AVIF fixture
+    /// @throws IOException if the source fixture cannot be read
+    private static byte[] fixtureWithRewrittenAuxiliaryType(String resourceName, String replacementType)
+            throws IOException {
+        byte[] bytes = testResourceBytes(resourceName);
+        byte[] alphaType = AUXILIARY_ALPHA_TYPE.getBytes(StandardCharsets.ISO_8859_1);
+        byte[] replacementBytes = replacementType.getBytes(StandardCharsets.ISO_8859_1);
+        assertEquals(alphaType.length, replacementBytes.length);
+        int offset = indexOf(bytes, alphaType);
+        assertTrue(offset >= 0);
+        System.arraycopy(replacementBytes, 0, bytes, offset, replacementBytes.length);
+        return bytes;
+    }
+
     /// Verifies that the primary AV1 item payload is decoded through the migrated AV1 decoder.
     ///
     /// @throws IOException if the reader cannot decode the test stream
@@ -214,6 +251,7 @@ final class AvifImageReaderTest {
             assertEquals(32, chromaV.width());
             assertEquals(32, chromaV.height());
             assertNull(reader.readRawAlphaPlanes(0));
+            assertNull(reader.readRawDepthPlanes(0));
         }
     }
 
@@ -413,6 +451,34 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that a still-image depth auxiliary item can be decoded as raw planes.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawDepthPlanesDecodesStillDepthAuxiliaryItem() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(alphaFixtureWithDepthAuxiliaryType())) {
+            AvifImageInfo info = reader.info();
+            assertFalse(info.alphaPresent());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_DEPTH_TYPE));
+            assertNull(reader.readRawAlphaPlanes(0));
+            AvifAuxiliaryImageInfo[] auxiliaryImages = info.auxiliaryImages();
+            assertEquals(1, auxiliaryImages.length);
+            AvifAuxiliaryImageInfo depthInfo = auxiliaryImages[0];
+            assertEquals(AUXILIARY_DEPTH_TYPE, depthInfo.auxiliaryType());
+
+            AvifPlanes depthPlanes = reader.readRawDepthPlanes(0);
+            assertNotNull(depthPlanes);
+            assertEquals(depthInfo.bitDepth(), depthPlanes.bitDepth());
+            assertEquals(depthInfo.pixelFormat(), depthPlanes.pixelFormat());
+            assertEquals(depthInfo.width(), depthPlanes.codedWidth());
+            assertEquals(depthInfo.height(), depthPlanes.codedHeight());
+            assertEquals(depthInfo.width(), depthPlanes.renderWidth());
+            assertEquals(depthInfo.height(), depthPlanes.renderHeight());
+            assertFalse(depthPlanes.hasChroma());
+            assertTrue(depthPlanes.lumaPlane().sampleBuffer().isReadOnly());
+        }
+    }
+
     /// Verifies that a `tmap` item is ignored when the `tmap` compatible brand is absent.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
@@ -495,7 +561,7 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that AVIS alpha auxiliary tracks are exposed through sequence metadata.
+    /// Verifies that AVIS alpha auxiliary tracks are exposed and decoded as raw planes.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
     @Test
@@ -506,11 +572,22 @@ final class AvifImageReaderTest {
             assertTrue(info.animated());
             assertTrue(info.alphaPresent());
             assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
-            assertThrows(AvifDecodeException.class, () -> reader.readRawAlphaPlanes(0));
+            assertNull(reader.readRawDepthPlanes(0));
+
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertEquals(AvifBitDepth.EIGHT_BITS, alphaPlanes.bitDepth());
+            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertEquals(150, alphaPlanes.codedWidth());
+            assertEquals(150, alphaPlanes.codedHeight());
+            assertEquals(150, alphaPlanes.renderWidth());
+            assertEquals(150, alphaPlanes.renderHeight());
+            assertFalse(alphaPlanes.hasChroma());
+            assertTrue(alphaPlanes.lumaPlane().sampleBuffer().isReadOnly());
         }
     }
 
-    /// Verifies that AVIS depth auxiliary tracks are exposed through sequence metadata.
+    /// Verifies that AVIS depth auxiliary tracks are exposed and decoded as raw planes.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
     @Test
@@ -522,6 +599,17 @@ final class AvifImageReaderTest {
             assertFalse(info.alphaPresent());
             assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_DEPTH_TYPE));
             assertNull(reader.readRawAlphaPlanes(0));
+
+            AvifPlanes depthPlanes = reader.readRawDepthPlanes(0);
+            assertNotNull(depthPlanes);
+            assertEquals(AvifBitDepth.EIGHT_BITS, depthPlanes.bitDepth());
+            assertEquals(AvifPixelFormat.I400, depthPlanes.pixelFormat());
+            assertEquals(150, depthPlanes.codedWidth());
+            assertEquals(150, depthPlanes.codedHeight());
+            assertEquals(150, depthPlanes.renderWidth());
+            assertEquals(150, depthPlanes.renderHeight());
+            assertFalse(depthPlanes.hasChroma());
+            assertTrue(depthPlanes.lumaPlane().sampleBuffer().isReadOnly());
         }
     }
 
@@ -803,6 +891,30 @@ final class AvifImageReaderTest {
             assertEquals(info.width(), alphaPlanes.lumaPlane().width());
             assertEquals(info.height(), alphaPlanes.lumaPlane().height());
             assertTrue(alphaPlanes.lumaPlane().sampleBuffer().isReadOnly());
+        }
+    }
+
+    /// Verifies that a depth grid can be decoded and composed as raw planes.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawDepthPlanesComposesDepthGridFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(alphaGridFixtureWithDepthAuxiliaryType())) {
+            AvifImageInfo info = reader.info();
+            assertFalse(info.alphaPresent());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_DEPTH_TYPE));
+            assertNull(reader.readRawAlphaPlanes(0));
+
+            AvifPlanes depthPlanes = reader.readRawDepthPlanes(0);
+            assertNotNull(depthPlanes);
+            assertEquals(AvifBitDepth.TEN_BITS, depthPlanes.bitDepth());
+            assertEquals(AvifPixelFormat.I400, depthPlanes.pixelFormat());
+            assertEquals(info.width(), depthPlanes.codedWidth());
+            assertEquals(info.height(), depthPlanes.codedHeight());
+            assertEquals(info.width(), depthPlanes.renderWidth());
+            assertEquals(info.height(), depthPlanes.renderHeight());
+            assertFalse(depthPlanes.hasChroma());
+            assertTrue(depthPlanes.lumaPlane().sampleBuffer().isReadOnly());
         }
     }
 

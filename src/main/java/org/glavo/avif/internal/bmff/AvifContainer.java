@@ -35,12 +35,16 @@ public final class AvifContainer {
     private final @Nullable @Unmodifiable ByteBuffer primaryItemPayload;
     /// The alpha auxiliary image AV1 OBU payload, or `null` when absent.
     private final @Nullable @Unmodifiable ByteBuffer alphaItemPayload;
+    /// The depth auxiliary image AV1 OBU payload, or `null` when absent or grid-derived.
+    private final @Nullable @Unmodifiable ByteBuffer depthItemPayload;
     /// Whether this is a grid derived image.
     private final boolean isGrid;
     /// Grid cell AV1 OBU payloads in row-major order, or `null`.
     private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] gridCellPayloads;
     /// Alpha grid cell AV1 OBU payloads in row-major order, or `null`.
     private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] gridAlphaCellPayloads;
+    /// Depth grid cell AV1 OBU payloads in row-major order, or `null`.
+    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] gridDepthCellPayloads;
     /// Grid row count.
     private final int gridRows;
     /// Grid column count.
@@ -57,6 +61,14 @@ public final class AvifContainer {
     private final int gridAlphaOutputWidth;
     /// Alpha grid output height.
     private final int gridAlphaOutputHeight;
+    /// Depth grid row count.
+    private final int gridDepthRows;
+    /// Depth grid column count.
+    private final int gridDepthColumns;
+    /// Depth grid output width.
+    private final int gridDepthOutputWidth;
+    /// Depth grid output height.
+    private final int gridDepthOutputHeight;
     /// The gain-map AV1 OBU payload, or `null` when absent or grid-derived.
     private final @Nullable @Unmodifiable ByteBuffer gainMapItemPayload;
     /// Gain-map grid cell AV1 OBU payloads in row-major order, or `null`.
@@ -87,6 +99,10 @@ public final class AvifContainer {
     private final boolean isSequence;
     /// The AV1 OBU payloads for each sample in order.
     private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] samplePayloads;
+    /// The alpha AV1 OBU payloads for each sequence sample in order, or `null`.
+    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads;
+    /// The depth AV1 OBU payloads for each sequence sample in order, or `null`.
+    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] sequenceDepthSamplePayloads;
     /// The frame duration deltas in media timescale units.
     private final int @Unmodifiable [] frameDeltas;
     /// The number of samples.
@@ -132,7 +148,7 @@ public final class AvifContainer {
             int clapCropWidth, int clapCropHeight,
             int rotationCode, int mirrorAxis
     ) {
-        this(info, primaryItemPayload, alphaItemPayload, null, null, 0, 0, 0, 0,
+        this(info, primaryItemPayload, alphaItemPayload, null, null, null, 0, 0, 0, 0,
                 clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis);
     }
 
@@ -141,6 +157,7 @@ public final class AvifContainer {
     /// @param info the parsed image metadata
     /// @param primaryItemPayload the primary image AV1 OBU payload
     /// @param alphaItemPayload the alpha auxiliary image AV1 OBU payload, or `null`
+    /// @param depthItemPayload the depth auxiliary image AV1 OBU payload, or `null`
     /// @param gainMapItemPayload the gain-map AV1 OBU payload, or `null`
     /// @param gainMapGridCellPayloads the gain-map grid cell AV1 OBU payloads, or `null`
     /// @param gainMapGridRows the gain-map grid row count
@@ -158,6 +175,7 @@ public final class AvifContainer {
             AvifImageInfo info,
             byte[] primaryItemPayload,
             byte @Nullable [] alphaItemPayload,
+            byte @Nullable [] depthItemPayload,
             byte @Nullable [] gainMapItemPayload,
             byte @Unmodifiable [] @Nullable @Unmodifiable [] gainMapGridCellPayloads,
             int gainMapGridRows, int gainMapGridColumns,
@@ -171,6 +189,9 @@ public final class AvifContainer {
         this.alphaItemPayload = alphaItemPayload != null
                 ? immutablePayload(alphaItemPayload)
                 : null;
+        this.depthItemPayload = depthItemPayload != null
+                ? immutablePayload(depthItemPayload)
+                : null;
         if (gainMapItemPayload != null && gainMapGridCellPayloads != null) {
             throw new IllegalArgumentException("gainMapItemPayload and gainMapGridCellPayloads are mutually exclusive");
         }
@@ -181,6 +202,7 @@ public final class AvifContainer {
         this.isGrid = false;
         this.gridCellPayloads = null;
         this.gridAlphaCellPayloads = null;
+        this.gridDepthCellPayloads = null;
         this.gridRows = 0;
         this.gridColumns = 0;
         this.gridOutputWidth = 0;
@@ -189,6 +211,10 @@ public final class AvifContainer {
         this.gridAlphaColumns = 0;
         this.gridAlphaOutputWidth = 0;
         this.gridAlphaOutputHeight = 0;
+        this.gridDepthRows = 0;
+        this.gridDepthColumns = 0;
+        this.gridDepthOutputWidth = 0;
+        this.gridDepthOutputHeight = 0;
         this.gainMapItemPayload = gainMapItemPayload != null
                 ? immutablePayload(gainMapItemPayload)
                 : null;
@@ -207,6 +233,8 @@ public final class AvifContainer {
         this.mirrorAxis = mirrorAxis;
         this.isSequence = false;
         this.samplePayloads = null;
+        this.sequenceAlphaSamplePayloads = null;
+        this.sequenceDepthSamplePayloads = null;
         this.frameDeltas = new int[0];
         this.sampleCount = 0;
         this.mediaTimescale = 0;
@@ -226,8 +254,9 @@ public final class AvifContainer {
             int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight,
             int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
             int rotationCode, int mirrorAxis) {
-        this(info, gridCellPayloads, null, null,
+        this(info, gridCellPayloads, null, null, null, null,
                 gridRows, gridColumns, gridOutputWidth, gridOutputHeight,
+                0, 0, 0, 0,
                 0, 0, 0, 0,
                 clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis);
     }
@@ -239,15 +268,20 @@ public final class AvifContainer {
             byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
             byte @Nullable [] alphaItemPayload,
             byte @Unmodifiable [] @Nullable @Unmodifiable [] gridAlphaCellPayloads,
+            byte @Nullable [] depthItemPayload,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] gridDepthCellPayloads,
             int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight,
             int gridAlphaRows, int gridAlphaColumns, int gridAlphaOutputWidth, int gridAlphaOutputHeight,
+            int gridDepthRows, int gridDepthColumns, int gridDepthOutputWidth, int gridDepthOutputHeight,
             int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
             int rotationCode, int mirrorAxis
     ) {
         this(info, gridCellPayloads, alphaItemPayload, gridAlphaCellPayloads,
+                depthItemPayload, gridDepthCellPayloads,
                 null, null, 0, 0, 0, 0,
                 gridRows, gridColumns, gridOutputWidth, gridOutputHeight,
                 gridAlphaRows, gridAlphaColumns, gridAlphaOutputWidth, gridAlphaOutputHeight,
+                gridDepthRows, gridDepthColumns, gridDepthOutputWidth, gridDepthOutputHeight,
                 clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis);
     }
 
@@ -258,12 +292,15 @@ public final class AvifContainer {
             byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
             byte @Nullable [] alphaItemPayload,
             byte @Unmodifiable [] @Nullable @Unmodifiable [] gridAlphaCellPayloads,
+            byte @Nullable [] depthItemPayload,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] gridDepthCellPayloads,
             byte @Nullable [] gainMapItemPayload,
             byte @Unmodifiable [] @Nullable @Unmodifiable [] gainMapGridCellPayloads,
             int gainMapGridRows, int gainMapGridColumns,
             int gainMapGridOutputWidth, int gainMapGridOutputHeight,
             int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight,
             int gridAlphaRows, int gridAlphaColumns, int gridAlphaOutputWidth, int gridAlphaOutputHeight,
+            int gridDepthRows, int gridDepthColumns, int gridDepthOutputWidth, int gridDepthOutputHeight,
             int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
             int rotationCode, int mirrorAxis
     ) {
@@ -274,6 +311,10 @@ public final class AvifContainer {
         if (gridAlphaCellPayloads != null) {
             if (gridAlphaRows <= 0) throw new IllegalArgumentException("gridAlphaRows <= 0: " + gridAlphaRows);
             if (gridAlphaColumns <= 0) throw new IllegalArgumentException("gridAlphaColumns <= 0: " + gridAlphaColumns);
+        }
+        if (gridDepthCellPayloads != null) {
+            if (gridDepthRows <= 0) throw new IllegalArgumentException("gridDepthRows <= 0: " + gridDepthRows);
+            if (gridDepthColumns <= 0) throw new IllegalArgumentException("gridDepthColumns <= 0: " + gridDepthColumns);
         }
         if (gainMapItemPayload != null && gainMapGridCellPayloads != null) {
             throw new IllegalArgumentException("gainMapItemPayload and gainMapGridCellPayloads are mutually exclusive");
@@ -286,10 +327,16 @@ public final class AvifContainer {
         this.alphaItemPayload = alphaItemPayload != null
                 ? immutablePayload(alphaItemPayload)
                 : null;
+        this.depthItemPayload = depthItemPayload != null
+                ? immutablePayload(depthItemPayload)
+                : null;
         this.isGrid = true;
         this.gridCellPayloads = immutablePayloads(gridCellPayloads);
         this.gridAlphaCellPayloads = gridAlphaCellPayloads != null
                 ? immutablePayloads(gridAlphaCellPayloads)
+                : null;
+        this.gridDepthCellPayloads = gridDepthCellPayloads != null
+                ? immutablePayloads(gridDepthCellPayloads)
                 : null;
         this.gridRows = gridRows;
         this.gridColumns = gridColumns;
@@ -299,6 +346,10 @@ public final class AvifContainer {
         this.gridAlphaColumns = gridAlphaColumns;
         this.gridAlphaOutputWidth = gridAlphaOutputWidth;
         this.gridAlphaOutputHeight = gridAlphaOutputHeight;
+        this.gridDepthRows = gridDepthRows;
+        this.gridDepthColumns = gridDepthColumns;
+        this.gridDepthOutputWidth = gridDepthOutputWidth;
+        this.gridDepthOutputHeight = gridDepthOutputHeight;
         this.gainMapItemPayload = gainMapItemPayload != null
                 ? immutablePayload(gainMapItemPayload)
                 : null;
@@ -317,6 +368,8 @@ public final class AvifContainer {
         this.mirrorAxis = mirrorAxis;
         this.isSequence = false;
         this.samplePayloads = null;
+        this.sequenceAlphaSamplePayloads = null;
+        this.sequenceDepthSamplePayloads = null;
         this.frameDeltas = new int[0];
         this.sampleCount = 0;
         this.mediaTimescale = 0;
@@ -326,14 +379,46 @@ public final class AvifContainer {
     /// Creates parsed AVIF container data for an image sequence.
     public AvifContainer(AvifImageInfo info, byte @Unmodifiable [] @Unmodifiable [] samplePayloads,
             int @Unmodifiable [] frameDeltas, int sampleCount, int mediaTimescale, long mediaDuration) {
+        this(info, samplePayloads, null, null, frameDeltas, sampleCount, mediaTimescale, mediaDuration);
+    }
+
+    /// Creates parsed AVIF container data for an image sequence with optional auxiliary sample payloads.
+    ///
+    /// @param info the parsed image metadata
+    /// @param samplePayloads the AV1 OBU payloads for each color sample in order
+    /// @param sequenceAlphaSamplePayloads the AV1 OBU payloads for each alpha sample in order, or `null`
+    /// @param sequenceDepthSamplePayloads the AV1 OBU payloads for each depth sample in order, or `null`
+    /// @param frameDeltas the frame duration deltas in media timescale units
+    /// @param sampleCount the sample count
+    /// @param mediaTimescale the media timescale
+    /// @param mediaDuration the total media duration
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifContainer(
+            AvifImageInfo info,
+            byte @Unmodifiable [] @Unmodifiable [] samplePayloads,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] sequenceDepthSamplePayloads,
+            int @Unmodifiable [] frameDeltas,
+            int sampleCount,
+            int mediaTimescale,
+            long mediaDuration
+    ) {
         this.info = Objects.requireNonNull(info, "info");
         Objects.requireNonNull(samplePayloads, "samplePayloads");
         Objects.requireNonNull(frameDeltas, "frameDeltas");
+        if (sequenceAlphaSamplePayloads != null && sequenceAlphaSamplePayloads.length != samplePayloads.length) {
+            throw new IllegalArgumentException("sequenceAlphaSamplePayloads length must match samplePayloads length");
+        }
+        if (sequenceDepthSamplePayloads != null && sequenceDepthSamplePayloads.length != samplePayloads.length) {
+            throw new IllegalArgumentException("sequenceDepthSamplePayloads length must match samplePayloads length");
+        }
         this.primaryItemPayload = null;
         this.alphaItemPayload = null;
+        this.depthItemPayload = null;
         this.isGrid = false;
         this.gridCellPayloads = null;
         this.gridAlphaCellPayloads = null;
+        this.gridDepthCellPayloads = null;
         this.gridRows = 0;
         this.gridColumns = 0;
         this.gridOutputWidth = 0;
@@ -342,6 +427,10 @@ public final class AvifContainer {
         this.gridAlphaColumns = 0;
         this.gridAlphaOutputWidth = 0;
         this.gridAlphaOutputHeight = 0;
+        this.gridDepthRows = 0;
+        this.gridDepthColumns = 0;
+        this.gridDepthOutputWidth = 0;
+        this.gridDepthOutputHeight = 0;
         this.gainMapItemPayload = null;
         this.gainMapGridCellPayloads = null;
         this.gainMapGridRows = 0;
@@ -356,6 +445,12 @@ public final class AvifContainer {
         this.mirrorAxis = -1;
         this.isSequence = true;
         this.samplePayloads = immutablePayloads(samplePayloads);
+        this.sequenceAlphaSamplePayloads = sequenceAlphaSamplePayloads != null
+                ? immutablePayloads(sequenceAlphaSamplePayloads)
+                : null;
+        this.sequenceDepthSamplePayloads = sequenceDepthSamplePayloads != null
+                ? immutablePayloads(sequenceDepthSamplePayloads)
+                : null;
         this.frameDeltas = frameDeltas.clone();
         this.sampleCount = sampleCount;
         this.mediaTimescale = mediaTimescale;
@@ -389,6 +484,16 @@ public final class AvifContainer {
         return payloadView(alphaItemPayload);
     }
 
+    /// Returns the depth auxiliary image AV1 OBU payload.
+    ///
+    /// @return the depth auxiliary image AV1 OBU payload, or `null`
+    public @Nullable @UnmodifiableView ByteBuffer depthItemPayload() {
+        if (depthItemPayload == null) {
+            return null;
+        }
+        return payloadView(depthItemPayload);
+    }
+
     /// Returns whether this is a grid derived image.
     ///
     /// @return whether this is a grid derived image
@@ -414,6 +519,16 @@ public final class AvifContainer {
             return null;
         }
         return payloadViews(gridAlphaCellPayloads);
+    }
+
+    /// Returns the depth grid cell AV1 OBU payloads in row-major order.
+    ///
+    /// @return the depth grid cell AV1 OBU payloads, or `null`
+    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] gridDepthCellPayloads() {
+        if (gridDepthCellPayloads == null) {
+            return null;
+        }
+        return payloadViews(gridDepthCellPayloads);
     }
 
     /// Returns the grid row count.
@@ -470,6 +585,34 @@ public final class AvifContainer {
     /// @return the alpha grid output height
     public int gridAlphaOutputHeight() {
         return gridAlphaOutputHeight;
+    }
+
+    /// Returns the depth grid row count.
+    ///
+    /// @return the depth grid row count
+    public int gridDepthRows() {
+        return gridDepthRows;
+    }
+
+    /// Returns the depth grid column count.
+    ///
+    /// @return the depth grid column count
+    public int gridDepthColumns() {
+        return gridDepthColumns;
+    }
+
+    /// Returns the depth grid output width.
+    ///
+    /// @return the depth grid output width
+    public int gridDepthOutputWidth() {
+        return gridDepthOutputWidth;
+    }
+
+    /// Returns the depth grid output height.
+    ///
+    /// @return the depth grid output height
+    public int gridDepthOutputHeight() {
+        return gridDepthOutputHeight;
     }
 
     /// Returns the gain-map AV1 OBU payload.
@@ -584,6 +727,26 @@ public final class AvifContainer {
             return null;
         }
         return payloadViews(samplePayloads);
+    }
+
+    /// Returns the alpha AV1 OBU payloads for each sequence sample in order.
+    ///
+    /// @return the alpha AV1 OBU payloads, or `null`
+    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads() {
+        if (sequenceAlphaSamplePayloads == null) {
+            return null;
+        }
+        return payloadViews(sequenceAlphaSamplePayloads);
+    }
+
+    /// Returns the depth AV1 OBU payloads for each sequence sample in order.
+    ///
+    /// @return the depth AV1 OBU payloads, or `null`
+    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] sequenceDepthSamplePayloads() {
+        if (sequenceDepthSamplePayloads == null) {
+            return null;
+        }
+        return payloadViews(sequenceDepthSamplePayloads);
     }
 
     /// Returns the number of samples.
