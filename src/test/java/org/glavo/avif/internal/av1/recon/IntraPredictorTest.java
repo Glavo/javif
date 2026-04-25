@@ -563,6 +563,49 @@ final class IntraPredictorTest {
         assertBlockEquals(plane, x, y, expected);
     }
 
+    /// Verifies that sequence-enabled intra-edge filtering pre-filters directional top references.
+    @Test
+    void directionalLumaPredictionAppliesIntraEdgeFiltering() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(20, 12, 8);
+        int x = 2;
+        int y = 2;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                200,
+                new int[]{10, 100, 30, 160, 70, 180, 90, 210, 120, 220, 130, 230, 140, 240, 150, 250},
+                new int[]{34, 58, 101, 88, 145, 179, 152, 214}
+        );
+
+        IntraPredictor.predictLuma(plane, x, y, 8, 8, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, 0, true, false);
+
+        assertEquals(60, plane.sample(x, y));
+        assertEquals(80, plane.sample(x + 1, y));
+        assertEquals(80, plane.sample(x, y + 1));
+    }
+
+    /// Verifies that sequence-enabled intra-edge upsampling inserts half-edge samples before
+    /// directional interpolation on small shallow-angle blocks.
+    @Test
+    void directionalLumaPredictionAppliesIntraEdgeUpsampling() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 12, 8);
+        int x = 3;
+        int y = 3;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                20,
+                new int[]{40, 200, 80, 120, 90, 130, 100, 140},
+                new int[]{34, 58, 101, 88, 145, 179, 152, 214}
+        );
+
+        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.VERTICAL_LEFT, 0, true, false);
+
+        assertEquals(115, plane.sample(x, y));
+    }
+
     /// Verifies that directional luma prediction crosses from top references into left references in the mid-angle zone.
     @Test
     void directionalLumaPredictionTransitionsFromTopToLeftReferences() {

@@ -129,6 +129,16 @@ final class IntraPredictor {
             }
     };
 
+    /// The AV1 intra-edge filter kernels indexed by `strength - 1`.
+    private static final int @Unmodifiable [] @Unmodifiable [] INTRA_EDGE_FILTER_KERNELS = {
+            {0, 4, 8, 4, 0},
+            {0, 5, 6, 5, 0},
+            {2, 4, 4, 4, 2}
+    };
+
+    /// The AV1 intra-edge upsampling kernel.
+    private static final int @Unmodifiable [] INTRA_EDGE_UPSAMPLE_KERNEL = {-1, 9, 9, -1};
+
     /// The smooth predictor weights for a width or height of one sample.
     private static final int @Unmodifiable [] SMOOTH_WEIGHTS_1 = {255};
 
@@ -189,6 +199,31 @@ final class IntraPredictor {
             LumaIntraPredictionMode mode,
             int angleDelta
     ) {
+        predictLuma(plane, x, y, width, height, mode, angleDelta, false, false);
+    }
+
+    /// Reconstructs one luma intra-predicted block directly into the destination plane.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param mode the luma intra prediction mode
+    /// @param angleDelta the signed directional angle delta
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    static void predictLuma(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            LumaIntraPredictionMode mode,
+            int angleDelta,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
+    ) {
         predict(
                 plane,
                 x,
@@ -196,7 +231,9 @@ final class IntraPredictor {
                 width,
                 height,
                 checkedPredictionMode(mode, angleDelta),
-                angleDelta
+                angleDelta,
+                intraEdgeFilterEnabled,
+                smoothEdgeReferences
         );
     }
 
@@ -259,7 +296,7 @@ final class IntraPredictor {
                                 + tap[6] * p6
                                 + 8) >> 4;
                         if (blockX + xx < width && stripeY + yy < height) {
-                            plane.setSample(currentX + xx, currentY + yy, predicted);
+                            setSampleIfInside(plane, currentX + xx, currentY + yy, predicted);
                         }
                     }
                 }
@@ -287,7 +324,7 @@ final class IntraPredictor {
             int defaultSample
     ) {
         if (topReferenceY >= 0 && currentX > 0) {
-            return plane.sample(currentX - 1, topReferenceY);
+            return edgeExtendedSample(plane, currentX - 1, topReferenceY);
         }
         return defaultTopLeft(plane, blockX, blockY, defaultSample);
     }
@@ -310,9 +347,9 @@ final class IntraPredictor {
             int defaultSample
     ) {
         if (topReferenceY < 0) {
-            return blockX > 0 ? plane.sample(blockX - 1, blockY) : defaultSample - 1;
+            return blockX > 0 ? edgeExtendedSample(plane, blockX - 1, blockY) : defaultSample - 1;
         }
-        return plane.sample(Math.min(sampleX, plane.width() - 1), topReferenceY);
+        return edgeExtendedSample(plane, sampleX, topReferenceY);
     }
 
     /// Returns one filter-intra left reference sample with AV1 frame-edge fallback.
@@ -333,9 +370,9 @@ final class IntraPredictor {
             int defaultSample
     ) {
         if (leftReferenceX < 0) {
-            return blockY > 0 ? plane.sample(blockX, blockY - 1) : defaultSample + 1;
+            return blockY > 0 ? edgeExtendedSample(plane, blockX, blockY - 1) : defaultSample + 1;
         }
-        return plane.sample(leftReferenceX, Math.min(sampleY, plane.height() - 1));
+        return edgeExtendedSample(plane, leftReferenceX, sampleY);
     }
 
     /// Reconstructs one chroma intra-predicted block directly into the destination plane.
@@ -356,6 +393,31 @@ final class IntraPredictor {
             UvIntraPredictionMode mode,
             int angleDelta
     ) {
+        predictChroma(plane, x, y, width, height, mode, angleDelta, false, false);
+    }
+
+    /// Reconstructs one chroma intra-predicted block directly into the destination plane.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param mode the chroma intra prediction mode
+    /// @param angleDelta the signed directional angle delta
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    static void predictChroma(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            UvIntraPredictionMode mode,
+            int angleDelta,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
+    ) {
         predict(
                 plane,
                 x,
@@ -363,7 +425,9 @@ final class IntraPredictor {
                 width,
                 height,
                 checkedPredictionMode(mode, angleDelta),
-                angleDelta
+                angleDelta,
+                intraEdgeFilterEnabled,
+                smoothEdgeReferences
         );
     }
 
@@ -416,7 +480,7 @@ final class IntraPredictor {
             for (int column = 0; column < width; column++) {
                 int diff = alpha * ac[row * width + column];
                 int predicted = dc + applySign((Math.abs(diff) + 32) >> 6, diff);
-                chromaPlane.setSample(chromaX + column, chromaY + row, predicted);
+                setSampleIfInside(chromaPlane, chromaX + column, chromaY + row, predicted);
             }
         }
     }
@@ -502,6 +566,8 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param mode the supported internal prediction mode
     /// @param angleDelta the signed directional angle delta
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     private static void predict(
             MutablePlaneBuffer plane,
             int x,
@@ -509,7 +575,9 @@ final class IntraPredictor {
             int width,
             int height,
             PredictionMode mode,
-            int angleDelta
+            int angleDelta,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
     ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
@@ -518,12 +586,32 @@ final class IntraPredictor {
             throw new IllegalArgumentException("height <= 0: " + height);
         }
         if (width > MAX_INTRA_PREDICTION_AXIS_SIZE || height > MAX_INTRA_PREDICTION_AXIS_SIZE) {
-            predictLargeBlock(plane, x, y, width, height, mode, angleDelta);
+            predictLargeBlock(
+                    plane,
+                    x,
+                    y,
+                    width,
+                    height,
+                    mode,
+                    angleDelta,
+                    intraEdgeFilterEnabled,
+                    smoothEdgeReferences
+            );
             return;
         }
 
         if (mode.usesDirectionalPrediction(angleDelta)) {
-            predictDirectional(plane, x, y, width, height, mode, angleDelta);
+            predictDirectional(
+                    plane,
+                    x,
+                    y,
+                    width,
+                    height,
+                    mode,
+                    angleDelta,
+                    intraEdgeFilterEnabled,
+                    smoothEdgeReferences
+            );
             return;
         }
 
@@ -564,6 +652,8 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param mode the supported internal prediction mode
     /// @param angleDelta the signed directional angle delta
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     private static void predictLargeBlock(
             MutablePlaneBuffer plane,
             int x,
@@ -571,23 +661,33 @@ final class IntraPredictor {
             int width,
             int height,
             PredictionMode mode,
-            int angleDelta
+            int angleDelta,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
     ) {
         for (int offsetY = 0; offsetY < height; offsetY += MAX_INTRA_PREDICTION_AXIS_SIZE) {
             int subHeight = Math.min(MAX_INTRA_PREDICTION_AXIS_SIZE, height - offsetY);
             for (int offsetX = 0; offsetX < width; offsetX += MAX_INTRA_PREDICTION_AXIS_SIZE) {
                 int subWidth = Math.min(MAX_INTRA_PREDICTION_AXIS_SIZE, width - offsetX);
-                predict(plane, x + offsetX, y + offsetY, subWidth, subHeight, mode, angleDelta);
+                predict(
+                        plane,
+                        x + offsetX,
+                        y + offsetY,
+                        subWidth,
+                        subHeight,
+                        mode,
+                        angleDelta,
+                        intraEdgeFilterEnabled,
+                        smoothEdgeReferences
+                );
             }
         }
     }
 
     /// Reconstructs one directional intra-predicted block.
     ///
-    /// The current implementation follows the AV1 zone-1/2/3 directional interpolation model
-    /// without intra-edge filtering or upsampling. This is sufficient for the current
-    /// reconstruction-capable subset and advances the reader beyond the legacy directional
-    /// boundary.
+    /// The implementation follows the AV1 zone-1/2/3 directional interpolation model and applies
+    /// the sequence-controlled intra-edge filtering or upsampling pre-pass before interpolation.
     ///
     /// @param plane the mutable destination plane
     /// @param x the zero-based horizontal sample coordinate
@@ -596,6 +696,8 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param mode the directional-capable prediction mode
     /// @param angleDelta the signed directional angle delta
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     private static void predictDirectional(
             MutablePlaneBuffer plane,
             int x,
@@ -603,7 +705,9 @@ final class IntraPredictor {
             int width,
             int height,
             PredictionMode mode,
-            int angleDelta
+            int angleDelta,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
     ) {
         int angle = mode.directionalBaseAngle() + 3 * angleDelta;
         if (angle < 0 || angle > 270) {
@@ -620,14 +724,44 @@ final class IntraPredictor {
             return;
         }
         if (angle < 90) {
-            predictDirectionalZone1(plane, x, y, width, height, angle, defaultSample);
+            predictDirectionalZone1(
+                    plane,
+                    x,
+                    y,
+                    width,
+                    height,
+                    angle,
+                    defaultSample,
+                    intraEdgeFilterEnabled,
+                    smoothEdgeReferences
+            );
             return;
         }
         if (angle < 180) {
-            predictDirectionalZone2(plane, x, y, width, height, angle, defaultSample);
+            predictDirectionalZone2(
+                    plane,
+                    x,
+                    y,
+                    width,
+                    height,
+                    angle,
+                    defaultSample,
+                    intraEdgeFilterEnabled,
+                    smoothEdgeReferences
+            );
             return;
         }
-        predictDirectionalZone3(plane, x, y, width, height, angle, defaultSample);
+        predictDirectionalZone3(
+                plane,
+                x,
+                y,
+                width,
+                height,
+                angle,
+                defaultSample,
+                intraEdgeFilterEnabled,
+                smoothEdgeReferences
+        );
     }
 
     /// Reconstructs one zone-1 directional block that projects from the top edge.
@@ -639,6 +773,8 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param angle the absolute AV1 intra prediction angle
     /// @param defaultSample the frame-edge default sample
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     private static void predictDirectionalZone1(
             MutablePlaneBuffer plane,
             int x,
@@ -646,27 +782,70 @@ final class IntraPredictor {
             int width,
             int height,
             int angle,
-            int defaultSample
+            int defaultSample,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
     ) {
-        int[] top = topDirectionalReferences(
+        int availableTopLength = width + Math.min(width, height);
+        int[] topReferences = topDirectionalReferences(
                 plane,
                 x,
                 y,
                 width,
                 height,
                 defaultSample,
-                width + Math.min(width, height)
+                availableTopLength
         );
+        int topLeft = defaultTopLeft(plane, x, y, defaultSample);
         int dx = directionalDerivative(angle >> 1);
-        int maxBase = top.length - 1;
+        int referenceSpan = width + height;
+        int edgeAngle = 90 - angle;
+        int[] top;
+        int maxBase;
+        int baseIncrement;
+        if (intraEdgeFilterEnabled && useDirectionalEdgeUpsample(referenceSpan, edgeAngle, smoothEdgeReferences)) {
+            top = upsampleDirectionalEdge(
+                    topReferences,
+                    topLeft,
+                    referenceSpan,
+                    -1,
+                    availableTopLength,
+                    plane.bitDepth(),
+                    false
+            );
+            dx <<= 1;
+            maxBase = top.length - 1;
+            baseIncrement = 2;
+        } else {
+            int filterStrength = intraEdgeFilterEnabled
+                    ? directionalEdgeFilterStrength(referenceSpan, edgeAngle, smoothEdgeReferences)
+                    : 0;
+            if (filterStrength != 0) {
+                top = filterDirectionalEdge(
+                        topReferences,
+                        topLeft,
+                        referenceSpan,
+                        0,
+                        referenceSpan,
+                        -1,
+                        availableTopLength,
+                        filterStrength
+                );
+                maxBase = referenceSpan - 1;
+            } else {
+                top = topReferences;
+                maxBase = top.length - 1;
+            }
+            baseIncrement = 1;
+        }
         for (int row = 0, xpos = dx; row < height; row++, xpos += dx) {
             int frac = xpos & 0x3E;
-            for (int column = 0, base = xpos >> 6; column < width; column++, base++) {
+            for (int column = 0, base = xpos >> 6; column < width; column++, base += baseIncrement) {
                 if (base < maxBase) {
-                    plane.setSample(x + column, y + row, interpolate(top[base], top[base + 1], frac));
+                    setSampleIfInside(plane, x + column, y + row, interpolate(top[base], top[base + 1], frac));
                 } else {
                     for (int remaining = column; remaining < width; remaining++) {
-                        plane.setSample(x + remaining, y + row, top[maxBase]);
+                        setSampleIfInside(plane, x + remaining, y + row, top[maxBase]);
                     }
                     break;
                 }
@@ -683,6 +862,8 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param angle the absolute AV1 intra prediction angle
     /// @param defaultSample the frame-edge default sample
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     private static void predictDirectionalZone2(
             MutablePlaneBuffer plane,
             int x,
@@ -690,43 +871,101 @@ final class IntraPredictor {
             int width,
             int height,
             int angle,
-            int defaultSample
+            int defaultSample,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
     ) {
-        int[] top = topDirectionalReferences(
+        int[] topReferences = topDirectionalReferences(
                 plane,
                 x,
                 y,
                 width,
                 height,
                 defaultSample,
-                width + Math.min(width, height)
+                width
         );
-        int[] left = leftDirectionalReferences(
+        int[] leftReferences = leftDirectionalReferences(
                 plane,
                 x,
                 y,
                 width,
                 height,
                 defaultSample,
-                height + Math.min(width, height)
+                height
         );
         int topLeft = defaultTopLeft(plane, x, y, defaultSample);
         int dy = directionalDerivative((angle - 90) >> 1);
         int dx = directionalDerivative((180 - angle) >> 1);
-        for (int row = 0, xpos = 64 - dx; row < height; row++, xpos -= dx) {
+        int referenceSpan = width + height;
+        boolean upsampleTop = intraEdgeFilterEnabled
+                && useDirectionalEdgeUpsample(referenceSpan, angle - 90, smoothEdgeReferences);
+        boolean upsampleLeft = intraEdgeFilterEnabled
+                && useDirectionalEdgeUpsample(referenceSpan, 180 - angle, smoothEdgeReferences);
+        int[] topEdge;
+        if (upsampleTop) {
+            topEdge = upsampleDirectionalEdge(
+                    topReferences,
+                    topLeft,
+                    width + 1,
+                    0,
+                    width + 1,
+                    plane.bitDepth(),
+                    true
+            );
+            dx <<= 1;
+        } else {
+            int filterStrength = intraEdgeFilterEnabled
+                    ? directionalEdgeFilterStrength(referenceSpan, angle - 90, smoothEdgeReferences)
+                    : 0;
+            topEdge = edgeWithTopLeft(filterStrength != 0
+                    ? filterDirectionalEdge(topReferences, topLeft, width, 0, width, -1, width, filterStrength)
+                    : topReferences, topLeft);
+        }
+        int[] leftEdge;
+        if (upsampleLeft) {
+            leftEdge = upsampleDirectionalEdge(
+                    leftReferences,
+                    topLeft,
+                    height + 1,
+                    0,
+                    height + 1,
+                    plane.bitDepth(),
+                    true
+            );
+            dy <<= 1;
+        } else {
+            int filterStrength = intraEdgeFilterEnabled
+                    ? directionalEdgeFilterStrength(referenceSpan, 180 - angle, smoothEdgeReferences)
+                    : 0;
+            leftEdge = edgeWithTopLeft(filterStrength != 0
+                    ? filterDirectionalEdge(leftReferences, topLeft, height, 0, height, -1, height, filterStrength)
+                    : leftReferences, topLeft);
+        }
+        int baseIncrementX = 1 + (upsampleTop ? 1 : 0);
+        int leftBaseOffset = 1 + (upsampleLeft ? 1 : 0);
+        for (int row = 0, xpos = (baseIncrementX << 6) - dx; row < height; row++, xpos -= dx) {
             int baseX = xpos >> 6;
             int fracX = xpos & 0x3E;
-            for (int column = 0, ypos = (row << 6) - dy; column < width; column++, baseX++, ypos -= dy) {
+            for (int column = 0, ypos = (row << (6 + (upsampleLeft ? 1 : 0))) - dy;
+                 column < width;
+                 column++, baseX += baseIncrementX, ypos -= dy) {
                 if (baseX >= 0) {
-                    int sample0 = zone2Reference(topLeft, top, left, baseX);
-                    int sample1 = zone2Reference(topLeft, top, left, baseX + 1);
-                    plane.setSample(x + column, y + row, interpolate(sample0, sample1, fracX));
+                    setSampleIfInside(
+                            plane,
+                            x + column,
+                            y + row,
+                            interpolate(edgeSample(topEdge, baseX), edgeSample(topEdge, baseX + 1), fracX)
+                    );
                 } else {
                     int baseY = ypos >> 6;
                     int fracY = ypos & 0x3E;
-                    int sample0 = zone2Reference(topLeft, top, left, -baseY - 1);
-                    int sample1 = zone2Reference(topLeft, top, left, -baseY - 2);
-                    plane.setSample(x + column, y + row, interpolate(sample0, sample1, fracY));
+                    int leftIndex = leftBaseOffset + baseY;
+                    setSampleIfInside(
+                            plane,
+                            x + column,
+                            y + row,
+                            interpolate(edgeSample(leftEdge, leftIndex), edgeSample(leftEdge, leftIndex + 1), fracY)
+                    );
                 }
             }
         }
@@ -741,6 +980,8 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param angle the absolute AV1 intra prediction angle
     /// @param defaultSample the frame-edge default sample
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     private static void predictDirectionalZone3(
             MutablePlaneBuffer plane,
             int x,
@@ -748,27 +989,70 @@ final class IntraPredictor {
             int width,
             int height,
             int angle,
-            int defaultSample
+            int defaultSample,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
     ) {
-        int[] left = leftDirectionalReferences(
+        int availableLeftLength = height + Math.min(width, height);
+        int[] leftReferences = leftDirectionalReferences(
                 plane,
                 x,
                 y,
                 width,
                 height,
                 defaultSample,
-                height + Math.min(width, height)
+                availableLeftLength
         );
+        int topLeft = defaultTopLeft(plane, x, y, defaultSample);
         int dy = directionalDerivative((270 - angle) >> 1);
-        int maxBase = left.length - 1;
+        int referenceSpan = width + height;
+        int edgeAngle = angle - 180;
+        int[] left;
+        int maxBase;
+        int baseIncrement;
+        if (intraEdgeFilterEnabled && useDirectionalEdgeUpsample(referenceSpan, edgeAngle, smoothEdgeReferences)) {
+            left = upsampleDirectionalEdge(
+                    leftReferences,
+                    topLeft,
+                    referenceSpan,
+                    -1,
+                    availableLeftLength,
+                    plane.bitDepth(),
+                    false
+            );
+            dy <<= 1;
+            maxBase = left.length - 1;
+            baseIncrement = 2;
+        } else {
+            int filterStrength = intraEdgeFilterEnabled
+                    ? directionalEdgeFilterStrength(referenceSpan, edgeAngle, smoothEdgeReferences)
+                    : 0;
+            if (filterStrength != 0) {
+                left = filterDirectionalEdge(
+                        leftReferences,
+                        topLeft,
+                        referenceSpan,
+                        0,
+                        referenceSpan,
+                        -1,
+                        availableLeftLength,
+                        filterStrength
+                );
+                maxBase = referenceSpan - 1;
+            } else {
+                left = leftReferences;
+                maxBase = left.length - 1;
+            }
+            baseIncrement = 1;
+        }
         for (int column = 0, ypos = dy; column < width; column++, ypos += dy) {
             int frac = ypos & 0x3E;
-            for (int row = 0, base = ypos >> 6; row < height; row++, base++) {
+            for (int row = 0, base = ypos >> 6; row < height; row++, base += baseIncrement) {
                 if (base < maxBase) {
-                    plane.setSample(x + column, y + row, interpolate(left[base], left[base + 1], frac));
+                    setSampleIfInside(plane, x + column, y + row, interpolate(left[base], left[base + 1], frac));
                 } else {
                     for (int remaining = row; remaining < height; remaining++) {
-                        plane.setSample(x + column, y + remaining, left[maxBase]);
+                        setSampleIfInside(plane, x + column, y + remaining, left[maxBase]);
                     }
                     break;
                 }
@@ -909,7 +1193,7 @@ final class IntraPredictor {
                 int acSum = 0;
                 for (int sampleY = 0; sampleY < verticalSpan; sampleY++) {
                     for (int sampleX = 0; sampleX < horizontalSpan; sampleX++) {
-                        acSum += lumaPlane.sample(sourceX + sampleX, sourceY + sampleY);
+                        acSum += edgeExtendedSample(lumaPlane, sourceX + sampleX, sourceY + sampleY);
                     }
                 }
                 int value = acSum << valueShift;
@@ -934,6 +1218,36 @@ final class IntraPredictor {
         return signedSource < 0 ? -magnitude : magnitude;
     }
 
+    /// Returns one reconstructed sample with right and bottom edge extension.
+    ///
+    /// CFL AC derivation pads the luma block at frame edges by repeating the nearest available
+    /// reconstructed luma samples before subtracting the block average.
+    ///
+    /// @param plane the source luma plane
+    /// @param x the requested horizontal coordinate
+    /// @param y the requested vertical coordinate
+    /// @return one edge-extended source sample
+    private static int edgeExtendedSample(MutablePlaneBuffer plane, int x, int y) {
+        int clampedX = Math.max(0, Math.min(x, plane.width() - 1));
+        int clampedY = Math.max(0, Math.min(y, plane.height() - 1));
+        return plane.sample(clampedX, clampedY);
+    }
+
+    /// Stores one predicted sample when it lies inside the destination plane.
+    ///
+    /// Intra prediction is evaluated over the coded block size. Right and bottom frame-edge blocks
+    /// may therefore generate samples outside the visible plane; AV1 simply clips those writes.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param value the predicted sample value
+    private static void setSampleIfInside(MutablePlaneBuffer plane, int x, int y, int value) {
+        if (x >= 0 && x < plane.width() && y >= 0 && y < plane.height()) {
+            plane.setSample(x, y, value);
+        }
+    }
+
     /// Reconstructs one vertical-predicted block.
     ///
     /// @param plane the mutable destination plane
@@ -952,7 +1266,7 @@ final class IntraPredictor {
     ) {
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
-                plane.setSample(x + column, y + row, top[column]);
+                setSampleIfInside(plane, x + column, y + row, top[column]);
             }
         }
     }
@@ -976,7 +1290,7 @@ final class IntraPredictor {
         for (int row = 0; row < height; row++) {
             int value = left[row];
             for (int column = 0; column < width; column++) {
-                plane.setSample(x + column, y + row, value);
+                setSampleIfInside(plane, x + column, y + row, value);
             }
         }
     }
@@ -1012,7 +1326,7 @@ final class IntraPredictor {
                 int predicted = leftDiff <= topDiff && leftDiff <= topLeftDiff
                         ? leftValue
                         : topDiff <= topLeftDiff ? topValue : topLeft;
-                plane.setSample(x + column, y + row, predicted);
+                setSampleIfInside(plane, x + column, y + row, predicted);
             }
         }
     }
@@ -1045,7 +1359,7 @@ final class IntraPredictor {
                         + (256 - verticalWeights[row]) * bottom
                         + horizontalWeights[column] * left[row]
                         + (256 - horizontalWeights[column]) * right;
-                plane.setSample(x + column, y + row, (predicted + 256) >> 9);
+                setSampleIfInside(plane, x + column, y + row, (predicted + 256) >> 9);
             }
         }
     }
@@ -1074,7 +1388,7 @@ final class IntraPredictor {
             for (int column = 0; column < width; column++) {
                 int predicted = verticalWeights[row] * top[column]
                         + (256 - verticalWeights[row]) * bottom;
-                plane.setSample(x + column, y + row, (predicted + 128) >> 8);
+                setSampleIfInside(plane, x + column, y + row, (predicted + 128) >> 8);
             }
         }
     }
@@ -1103,7 +1417,7 @@ final class IntraPredictor {
             for (int column = 0; column < width; column++) {
                 int predicted = horizontalWeights[column] * left[row]
                         + (256 - horizontalWeights[column]) * right;
-                plane.setSample(x + column, y + row, (predicted + 128) >> 8);
+                setSampleIfInside(plane, x + column, y + row, (predicted + 128) >> 8);
             }
         }
     }
@@ -1214,32 +1528,216 @@ final class IntraPredictor {
         }
     }
 
-    /// Returns one conceptual zone-2 edge sample addressed by signed edge index.
+    /// Returns whether an intra directional edge should be upsampled before interpolation.
     ///
-    /// Index `0` addresses the top-left sample, positive indices address the top edge, and
-    /// negative indices address the left edge.
+    /// @param edgeSpan the sum of the prediction block width and height
+    /// @param edgeAngle the acute angle between the prediction ray and the sampled reference edge
+    /// @param smoothEdgeReferences whether neighboring smooth predictors reduce filtering strength
+    /// @return whether the edge should be upsampled
+    private static boolean useDirectionalEdgeUpsample(int edgeSpan, int edgeAngle, boolean smoothEdgeReferences) {
+        return edgeAngle < 40 && edgeSpan <= (16 >> (smoothEdgeReferences ? 1 : 0));
+    }
+
+    /// Returns the AV1 intra-edge filter strength for one directional edge.
     ///
+    /// @param edgeSpan the sum of the prediction block width and height
+    /// @param edgeAngle the acute angle between the prediction ray and the sampled reference edge
+    /// @param smoothEdgeReferences whether neighboring smooth predictors reduce filtering strength
+    /// @return the filter strength in `[0, 3]`
+    private static int directionalEdgeFilterStrength(int edgeSpan, int edgeAngle, boolean smoothEdgeReferences) {
+        if (smoothEdgeReferences) {
+            if (edgeSpan <= 8) {
+                if (edgeAngle >= 64) {
+                    return 2;
+                }
+                if (edgeAngle >= 40) {
+                    return 1;
+                }
+            } else if (edgeSpan <= 16) {
+                if (edgeAngle >= 48) {
+                    return 2;
+                }
+                if (edgeAngle >= 20) {
+                    return 1;
+                }
+            } else if (edgeSpan <= 24) {
+                if (edgeAngle >= 4) {
+                    return 3;
+                }
+            } else {
+                return 3;
+            }
+        } else {
+            if (edgeSpan <= 8) {
+                if (edgeAngle >= 56) {
+                    return 1;
+                }
+            } else if (edgeSpan <= 16) {
+                if (edgeAngle >= 40) {
+                    return 1;
+                }
+            } else if (edgeSpan <= 24) {
+                if (edgeAngle >= 32) {
+                    return 3;
+                }
+                if (edgeAngle >= 16) {
+                    return 2;
+                }
+                if (edgeAngle >= 8) {
+                    return 1;
+                }
+            } else if (edgeSpan <= 32) {
+                if (edgeAngle >= 32) {
+                    return 3;
+                }
+                if (edgeAngle >= 4) {
+                    return 2;
+                }
+                return 1;
+            } else {
+                return 3;
+            }
+        }
+        return 0;
+    }
+
+    /// Returns a filtered directional reference edge.
+    ///
+    /// The source edge uses conceptual index `-1` for the top-left sample and non-negative indices
+    /// for the top or left samples extending away from it.
+    ///
+    /// @param references the edge references excluding the top-left sample
     /// @param topLeft the top-left reference sample
-    /// @param top the top-edge directional reference buffer
-    /// @param left the left-edge directional reference buffer
-    /// @param index the conceptual signed edge index
-    /// @return one conceptual zone-2 edge sample addressed by signed edge index
-    private static int zone2Reference(int topLeft, int[] top, int[] left, int index) {
-        if (index == 0) {
+    /// @param outputLength the filtered output length
+    /// @param limitFrom the first output index that may be filtered
+    /// @param limitTo the exclusive last output index that may be filtered
+    /// @param from the inclusive source clamp lower bound
+    /// @param to the exclusive source clamp upper bound
+    /// @param strength the AV1 intra-edge filter strength
+    /// @return the filtered directional reference edge
+    private static int[] filterDirectionalEdge(
+            int[] references,
+            int topLeft,
+            int outputLength,
+            int limitFrom,
+            int limitTo,
+            int from,
+            int to,
+            int strength
+    ) {
+        int[] output = new int[outputLength];
+        int[] kernel = INTRA_EDGE_FILTER_KERNELS[strength - 1];
+        int index = 0;
+        for (; index < Math.min(outputLength, limitFrom); index++) {
+            output[index] = directionalEdgeSourceSample(references, topLeft, -1, clamp(index, from, to - 1));
+        }
+        for (; index < Math.min(outputLength, limitTo); index++) {
+            int sum = 0;
+            for (int tap = 0; tap < kernel.length; tap++) {
+                int sourceIndex = clamp(index - 2 + tap, from, to - 1);
+                sum += directionalEdgeSourceSample(references, topLeft, -1, sourceIndex) * kernel[tap];
+            }
+            output[index] = (sum + 8) >> 4;
+        }
+        for (; index < outputLength; index++) {
+            output[index] = directionalEdgeSourceSample(references, topLeft, -1, clamp(index, from, to - 1));
+        }
+        return output;
+    }
+
+    /// Returns an upsampled directional reference edge.
+    ///
+    /// @param references the edge references excluding the top-left sample
+    /// @param topLeft the top-left reference sample
+    /// @param outputEvenCount the number of original even-position samples to expose
+    /// @param from the inclusive source clamp lower bound
+    /// @param to the exclusive source clamp upper bound
+    /// @param bitDepth the decoded sample bit depth
+    /// @param includeTopLeft whether conceptual source index `0` addresses the top-left sample
+    /// @return the upsampled directional reference edge
+    private static int[] upsampleDirectionalEdge(
+            int[] references,
+            int topLeft,
+            int outputEvenCount,
+            int from,
+            int to,
+            int bitDepth,
+            boolean includeTopLeft
+    ) {
+        int[] output = new int[outputEvenCount * 2 - 1];
+        int topLeftIndex = includeTopLeft ? 0 : -1;
+        int maximumSample = (1 << bitDepth) - 1;
+        int index = 0;
+        for (; index < outputEvenCount - 1; index++) {
+            output[index << 1] = directionalEdgeSourceSample(
+                    references,
+                    topLeft,
+                    topLeftIndex,
+                    clamp(index, from, to - 1)
+            );
+            int sum = 0;
+            for (int tap = 0; tap < INTRA_EDGE_UPSAMPLE_KERNEL.length; tap++) {
+                int sourceIndex = clamp(index + tap - 1, from, to - 1);
+                sum += directionalEdgeSourceSample(references, topLeft, topLeftIndex, sourceIndex)
+                        * INTRA_EDGE_UPSAMPLE_KERNEL[tap];
+            }
+            output[(index << 1) + 1] = clamp((sum + 8) >> 4, 0, maximumSample);
+        }
+        output[index << 1] = directionalEdgeSourceSample(
+                references,
+                topLeft,
+                topLeftIndex,
+                clamp(index, from, to - 1)
+        );
+        return output;
+    }
+
+    /// Returns an edge array whose first entry is the top-left reference sample.
+    ///
+    /// @param references the top or left references excluding the top-left sample
+    /// @param topLeft the top-left reference sample
+    /// @return a reference edge with the top-left sample at index `0`
+    private static int[] edgeWithTopLeft(int[] references, int topLeft) {
+        int[] edge = new int[references.length + 1];
+        edge[0] = topLeft;
+        System.arraycopy(references, 0, edge, 1, references.length);
+        return edge;
+    }
+
+    /// Returns one sample from an edge array, extending the outermost entries.
+    ///
+    /// @param edge the edge array to read
+    /// @param index the requested conceptual edge index
+    /// @return the edge sample at the requested index
+    private static int edgeSample(int[] edge, int index) {
+        if (index <= 0) {
+            return edge[0];
+        }
+        if (index >= edge.length) {
+            return edge[edge.length - 1];
+        }
+        return edge[index];
+    }
+
+    /// Returns one conceptual directional-edge source sample.
+    ///
+    /// @param references the edge references excluding the top-left sample
+    /// @param topLeft the top-left reference sample
+    /// @param topLeftIndex the conceptual source index that addresses the top-left sample
+    /// @param index the requested conceptual source index
+    /// @return the requested directional-edge source sample
+    private static int directionalEdgeSourceSample(int[] references, int topLeft, int topLeftIndex, int index) {
+        if (index == topLeftIndex) {
             return topLeft;
         }
-        if (index > 0) {
-            int topIndex = index - 1;
-            if (topIndex >= top.length) {
-                return top[top.length - 1];
-            }
-            return top[topIndex];
+        int referenceIndex = index - topLeftIndex - 1;
+        if (referenceIndex <= 0) {
+            return references[0];
         }
-        int leftIndex = -index - 1;
-        if (leftIndex >= left.length) {
-            return left[left.length - 1];
+        if (referenceIndex >= references.length) {
+            return references[references.length - 1];
         }
-        return left[leftIndex];
+        return references[referenceIndex];
     }
 
     /// Returns one directional interpolation result between two edge samples.
@@ -1263,9 +1761,19 @@ final class IntraPredictor {
     private static void fillBlock(MutablePlaneBuffer plane, int x, int y, int width, int height, int value) {
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
-                plane.setSample(x + column, y + row, value);
+                setSampleIfInside(plane, x + column, y + row, value);
             }
         }
+    }
+
+    /// Clamps one integer to an inclusive range.
+    ///
+    /// @param value the value to clamp
+    /// @param minimum the inclusive lower bound
+    /// @param maximum the inclusive upper bound
+    /// @return the clamped value
+    private static int clamp(int value, int minimum, int maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
     }
 
     /// Returns the smooth-predictor weight array for one supported block dimension.

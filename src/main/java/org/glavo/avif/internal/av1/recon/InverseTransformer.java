@@ -25,10 +25,10 @@ import java.util.Objects;
 
 /// Inverse-transform helper for the residual-producing reconstruction path.
 ///
-/// Exact staged integer kernels are used for the `DCT_DCT` `4` / `8` / `16` subset, while larger
-/// `DCT_DCT` axes and every explicit non-`DCT_DCT` transform type use cached separable synthesis
-/// matrices with the same final AV1-style `>> 3` scaling. It exposes one method that reconstructs
-/// a residual sample block and one method that adds that block into an already predicted plane.
+/// Exact staged integer kernels are used for the most common transform axes, while larger
+/// `DCT_DCT` axes still use cached separable synthesis matrices rescaled to the AV1 integer
+/// transform gain. It exposes one method that reconstructs a residual sample block and one method
+/// that adds that block into an already predicted plane.
 @NotNullByDefault
 final class InverseTransformer {
     /// The AV1 inverse-transform cosine precision.
@@ -190,8 +190,7 @@ final class InverseTransformer {
         if (nonNullTransformType != TransformType.DCT_DCT) {
             return reconstructGenericTransform(
                     nonNullCoefficients,
-                    nonNullTransformSize.widthPixels(),
-                    nonNullTransformSize.heightPixels(),
+                    nonNullTransformSize,
                     nonNullTransformType
             );
         }
@@ -331,10 +330,10 @@ final class InverseTransformer {
             scratchIn[2] = buffer[8 + column];
             scratchIn[3] = buffer[12 + column];
             inverseDct4(scratchIn, scratchOut);
-            output[column] = roundShift(scratchOut[0], 4);
-            output[4 + column] = roundShift(scratchOut[1], 4);
-            output[8 + column] = roundShift(scratchOut[2], 4);
-            output[12 + column] = roundShift(scratchOut[3], 4);
+            output[column] = positiveRoundShift(scratchOut[0], 4);
+            output[4 + column] = positiveRoundShift(scratchOut[1], 4);
+            output[8 + column] = positiveRoundShift(scratchOut[2], 4);
+            output[12 + column] = positiveRoundShift(scratchOut[3], 4);
         }
         return output;
     }
@@ -355,7 +354,7 @@ final class InverseTransformer {
             }
             inverseDct8(scratchIn, scratchOut);
             for (int column = 0; column < 8; column++) {
-                buffer[rowOffset + column] = roundShift(scratchOut[column], 1);
+                buffer[rowOffset + column] = positiveRoundShift(scratchOut[column], 1);
             }
         }
 
@@ -365,7 +364,7 @@ final class InverseTransformer {
             }
             inverseDct8(scratchIn, scratchOut);
             for (int row = 0; row < 8; row++) {
-                output[(row << 3) + column] = roundShift(scratchOut[row], 4);
+                output[(row << 3) + column] = positiveRoundShift(scratchOut[row], 4);
             }
         }
         return output;
@@ -391,7 +390,7 @@ final class InverseTransformer {
             }
             inverseDct16(scratchIn, scratchOut);
             for (int column = 0; column < 16; column++) {
-                buffer[rowOffset + column] = roundShift(scratchOut[column], 2);
+                buffer[rowOffset + column] = positiveRoundShift(scratchOut[column], 2);
             }
         }
 
@@ -401,7 +400,7 @@ final class InverseTransformer {
             }
             inverseDct16(scratchIn, scratchOut);
             for (int row = 0; row < 16; row++) {
-                output[(row << 4) + column] = roundShift(scratchOut[row], 4);
+                output[(row << 4) + column] = positiveRoundShift(scratchOut[row], 4);
             }
         }
         return output;
@@ -438,12 +437,12 @@ final class InverseTransformer {
             for (int column = 0; column < width; column++) {
                 int coefficient = coefficients[rowOffset + column];
                 rowScratchIn[column] = requiresRectangularPrescale
-                        ? roundShift((long) coefficient * 181, 8)
+                        ? positiveRoundShift((long) coefficient * 181, 8)
                         : coefficient;
             }
             inverseDct(rowScratchIn, rowScratchOut, width);
             for (int column = 0; column < width; column++) {
-                buffer[rowOffset + column] = roundShift(rowScratchOut[column], intermediateShift);
+                buffer[rowOffset + column] = positiveRoundShift(rowScratchOut[column], intermediateShift);
             }
         }
 
@@ -453,7 +452,7 @@ final class InverseTransformer {
             }
             inverseDct(columnScratchIn, columnScratchOut, height);
             for (int row = 0; row < height; row++) {
-                output[row * width + column] = roundShift(columnScratchOut[row], 4);
+                output[row * width + column] = positiveRoundShift(columnScratchOut[row], 4);
             }
         }
         return output;
@@ -527,44 +526,49 @@ final class InverseTransformer {
         return orthonormalDenominator / dav1dDenominator;
     }
 
-    /// Reconstructs one non-`DCT_DCT` residual block through cached separable basis matrices.
+    /// Reconstructs one non-`DCT_DCT` residual block through staged one-dimensional kernels.
     ///
     /// @param coefficients the dequantized coefficients in natural raster order
-    /// @param width the transform width in samples
-    /// @param height the transform height in samples
+    /// @param transformSize the transform size to reconstruct
     /// @param transformType the explicit transform type to reconstruct
     /// @return one signed residual sample block in natural raster order
     private static int[] reconstructGenericTransform(
             int[] coefficients,
-            int width,
-            int height,
+            TransformSize transformSize,
             TransformType transformType
     ) {
-        double[][] horizontalBasis = inverseBasis(transformType.horizontalKernel(), width);
-        double[][] verticalBasis = inverseBasis(transformType.verticalKernel(), height);
-        double[] rowBuffer = new double[width * height];
+        int width = transformSize.widthPixels();
+        int height = transformSize.heightPixels();
+        int intermediateShift = intermediateTransformShift(transformSize);
+        boolean requiresRectangularPrescale = width * 2 == height || height * 2 == width;
+        int[] buffer = new int[width * height];
         int[] output = new int[width * height];
+        int[] rowScratchIn = new int[width];
+        int[] rowScratchOut = new int[width];
+        int[] columnScratchIn = new int[height];
+        int[] columnScratchOut = new int[height];
 
         for (int row = 0; row < height; row++) {
             int rowOffset = row * width;
             for (int column = 0; column < width; column++) {
-                double sum = 0.0;
-                double[] basisRow = horizontalBasis[column];
-                for (int frequency = 0; frequency < width; frequency++) {
-                    sum += basisRow[frequency] * coefficients[rowOffset + frequency];
-                }
-                rowBuffer[rowOffset + column] = sum;
+                int coefficient = coefficients[rowOffset + column];
+                rowScratchIn[column] = requiresRectangularPrescale
+                        ? positiveRoundShift((long) coefficient * 181, 8)
+                        : coefficient;
+            }
+            inverseKernel(transformType.horizontalKernel(), rowScratchIn, rowScratchOut, width);
+            for (int column = 0; column < width; column++) {
+                buffer[rowOffset + column] = positiveRoundShift(rowScratchOut[column], intermediateShift);
             }
         }
 
         for (int column = 0; column < width; column++) {
             for (int row = 0; row < height; row++) {
-                double sum = 0.0;
-                double[] basisRow = verticalBasis[row];
-                for (int frequency = 0; frequency < height; frequency++) {
-                    sum += basisRow[frequency] * rowBuffer[frequency * width + column];
-                }
-                output[row * width + column] = saturatedInt(Math.round(sum / 8.0));
+                columnScratchIn[row] = buffer[row * width + column];
+            }
+            inverseKernel(transformType.verticalKernel(), columnScratchIn, columnScratchOut, height);
+            for (int row = 0; row < height; row++) {
+                output[row * width + column] = positiveRoundShift(columnScratchOut[row], 4);
             }
         }
         return output;
@@ -643,6 +647,36 @@ final class InverseTransformer {
             case 32, 64 -> inverseDctLarge(input, output, length);
             default -> throw new IllegalStateException("Unsupported inverse DCT length: " + length);
         }
+    }
+
+    /// Reconstructs one supported one-dimensional inverse transform vector.
+    ///
+    /// @param kernel the one-dimensional kernel to apply
+    /// @param input the dequantized input vector
+    /// @param output the reconstructed output vector
+    /// @param length the vector length in samples
+    private static void inverseKernel(TransformKernel kernel, int[] input, int[] output, int length) {
+        switch (kernel) {
+            case DCT -> inverseDct(input, output, length);
+            case ADST -> inverseAdst(input, output, length);
+            case FLIPADST -> inverseFlipAdst(input, output, length);
+            case IDENTITY -> inverseIdentity(input, output, length);
+            case WHT -> throw new IllegalStateException("WHT uses the dedicated lossless transform path");
+        }
+    }
+
+    /// Returns the size-specific intermediate inverse-transform shift used between the two 1-D
+    /// transform passes.
+    ///
+    /// @param transformSize the transform size
+    /// @return the intermediate shift in bits
+    private static int intermediateTransformShift(TransformSize transformSize) {
+        return switch (transformSize) {
+            case TX_4X4, RTX_4X8, RTX_8X4 -> 0;
+            case RTX_4X16, TX_8X8, RTX_8X16, RTX_16X4, RTX_16X8, RTX_16X32, RTX_32X16,
+                 RTX_32X64, RTX_64X32 -> 1;
+            case RTX_8X32, TX_16X16, TX_32X32, TX_64X64, RTX_32X8, RTX_16X64, RTX_64X16 -> 2;
+        };
     }
 
     /// Reconstructs one one-dimensional `DCT_4` vector.
@@ -816,6 +850,270 @@ final class InverseTransformer {
         }
     }
 
+    /// Reconstructs one supported one-dimensional inverse ADST vector.
+    ///
+    /// @param input the dequantized input vector
+    /// @param output the reconstructed output vector
+    /// @param length the vector length in samples
+    private static void inverseAdst(int[] input, int[] output, int length) {
+        switch (length) {
+            case 4 -> inverseAdst4(input, output);
+            case 8 -> inverseAdst8(input, output);
+            case 16 -> inverseAdst16(input, output);
+            default -> throw new IllegalStateException("Unsupported inverse ADST length: " + length);
+        }
+    }
+
+    /// Reconstructs one supported one-dimensional inverse FLIPADST vector.
+    ///
+    /// @param input the dequantized input vector
+    /// @param output the reconstructed output vector
+    /// @param length the vector length in samples
+    private static void inverseFlipAdst(int[] input, int[] output, int length) {
+        int[] scratch = new int[length];
+        inverseAdst(input, scratch, length);
+        for (int i = 0; i < length; i++) {
+            output[i] = scratch[length - 1 - i];
+        }
+    }
+
+    /// Reconstructs one one-dimensional `ADST_4` vector.
+    ///
+    /// @param input the dequantized `ADST_4` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseAdst4(int[] input, int[] output) {
+        int in0 = input[0];
+        int in1 = input[1];
+        int in2 = input[2];
+        int in3 = input[3];
+
+        output[0] = clip((long) positiveRoundShift(
+                (long) 1321 * in0
+                        + (long) (3803 - 4096) * in2
+                        + (long) (2482 - 4096) * in3
+                        + (long) (3344 - 4096) * in1,
+                12
+        ) + in2 + in3 + in1);
+        output[1] = clip((long) positiveRoundShift(
+                (long) (2482 - 4096) * in0
+                        - (long) 1321 * in2
+                        - (long) (3803 - 4096) * in3
+                        + (long) (3344 - 4096) * in1,
+                12
+        ) + in0 - in3 + in1);
+        output[2] = positiveRoundShift((long) 209 * (in0 - in2 + in3), 8);
+        output[3] = clip((long) positiveRoundShift(
+                (long) (3803 - 4096) * in0
+                        + (long) (2482 - 4096) * in2
+                        - (long) 1321 * in3
+                        - (long) (3344 - 4096) * in1,
+                12
+        ) + in0 + in2 - in1);
+    }
+
+    /// Reconstructs one one-dimensional `ADST_8` vector.
+    ///
+    /// @param input the dequantized `ADST_8` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseAdst8(int[] input, int[] output) {
+        int in0 = input[0];
+        int in1 = input[1];
+        int in2 = input[2];
+        int in3 = input[3];
+        int in4 = input[4];
+        int in5 = input[5];
+        int in6 = input[6];
+        int in7 = input[7];
+
+        int t0a = positiveRoundShift((long) (4076 - 4096) * in7 + (long) 401 * in0, 12) + in7;
+        int t1a = positiveRoundShift((long) 401 * in7 - (long) (4076 - 4096) * in0, 12) - in0;
+        int t2a = positiveRoundShift((long) (3612 - 4096) * in5 + (long) 1931 * in2, 12) + in5;
+        int t3a = positiveRoundShift((long) 1931 * in5 - (long) (3612 - 4096) * in2, 12) - in2;
+        int t4a = positiveRoundShift((long) 1299 * in3 + (long) 1583 * in4, 11);
+        int t5a = positiveRoundShift((long) 1583 * in3 - (long) 1299 * in4, 11);
+        int t6a = positiveRoundShift((long) 1189 * in1 + (long) (3920 - 4096) * in6, 12) + in6;
+        int t7a = positiveRoundShift((long) (3920 - 4096) * in1 - (long) 1189 * in6, 12) + in1;
+
+        int t0 = clip((long) t0a + t4a);
+        int t1 = clip((long) t1a + t5a);
+        int t2 = clip((long) t2a + t6a);
+        int t3 = clip((long) t3a + t7a);
+        int t4 = clip((long) t0a - t4a);
+        int t5 = clip((long) t1a - t5a);
+        int t6 = clip((long) t2a - t6a);
+        int t7 = clip((long) t3a - t7a);
+
+        t4a = positiveRoundShift((long) (3784 - 4096) * t4 + (long) 1567 * t5, 12) + t4;
+        t5a = positiveRoundShift((long) 1567 * t4 - (long) (3784 - 4096) * t5, 12) - t5;
+        t6a = positiveRoundShift((long) (3784 - 4096) * t7 - (long) 1567 * t6, 12) + t7;
+        t7a = positiveRoundShift((long) 1567 * t7 + (long) (3784 - 4096) * t6, 12) + t6;
+
+        output[0] = clip((long) t0 + t2);
+        output[7] = clip(-(long) clip((long) t1 + t3));
+        t2 = clip((long) t0 - t2);
+        t3 = clip((long) t1 - t3);
+        output[1] = clip(-(long) clip((long) t4a + t6a));
+        output[6] = clip((long) t5a + t7a);
+        t6 = clip((long) t4a - t6a);
+        t7 = clip((long) t5a - t7a);
+
+        output[3] = clip(-(long) positiveRoundShift((long) (t2 + t3) * 181, 8));
+        output[4] = positiveRoundShift((long) (t2 - t3) * 181, 8);
+        output[2] = positiveRoundShift((long) (t6 + t7) * 181, 8);
+        output[5] = clip(-(long) positiveRoundShift((long) (t6 - t7) * 181, 8));
+    }
+
+    /// Reconstructs one one-dimensional `ADST_16` vector.
+    ///
+    /// @param input the dequantized `ADST_16` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseAdst16(int[] input, int[] output) {
+        int in0 = input[0];
+        int in1 = input[1];
+        int in2 = input[2];
+        int in3 = input[3];
+        int in4 = input[4];
+        int in5 = input[5];
+        int in6 = input[6];
+        int in7 = input[7];
+        int in8 = input[8];
+        int in9 = input[9];
+        int in10 = input[10];
+        int in11 = input[11];
+        int in12 = input[12];
+        int in13 = input[13];
+        int in14 = input[14];
+        int in15 = input[15];
+
+        int t0 = positiveRoundShift((long) in15 * (4091 - 4096) + (long) in0 * 201, 12) + in15;
+        int t1 = positiveRoundShift((long) in15 * 201 - (long) in0 * (4091 - 4096), 12) - in0;
+        int t2 = positiveRoundShift((long) in13 * (3973 - 4096) + (long) in2 * 995, 12) + in13;
+        int t3 = positiveRoundShift((long) in13 * 995 - (long) in2 * (3973 - 4096), 12) - in2;
+        int t4 = positiveRoundShift((long) in11 * (3703 - 4096) + (long) in4 * 1751, 12) + in11;
+        int t5 = positiveRoundShift((long) in11 * 1751 - (long) in4 * (3703 - 4096), 12) - in4;
+        int t6 = positiveRoundShift((long) in9 * 1645 + (long) in6 * 1220, 11);
+        int t7 = positiveRoundShift((long) in9 * 1220 - (long) in6 * 1645, 11);
+        int t8 = positiveRoundShift((long) in7 * 2751 + (long) in8 * (3035 - 4096), 12) + in8;
+        int t9 = positiveRoundShift((long) in7 * (3035 - 4096) - (long) in8 * 2751, 12) + in7;
+        int t10 = positiveRoundShift((long) in5 * 2106 + (long) in10 * (3513 - 4096), 12) + in10;
+        int t11 = positiveRoundShift((long) in5 * (3513 - 4096) - (long) in10 * 2106, 12) + in5;
+        int t12 = positiveRoundShift((long) in3 * 1380 + (long) in12 * (3857 - 4096), 12) + in12;
+        int t13 = positiveRoundShift((long) in3 * (3857 - 4096) - (long) in12 * 1380, 12) + in3;
+        int t14 = positiveRoundShift((long) in1 * 601 + (long) in14 * (4052 - 4096), 12) + in14;
+        int t15 = positiveRoundShift((long) in1 * (4052 - 4096) - (long) in14 * 601, 12) + in1;
+
+        int t0a = clip((long) t0 + t8);
+        int t1a = clip((long) t1 + t9);
+        int t2a = clip((long) t2 + t10);
+        int t3a = clip((long) t3 + t11);
+        int t4a = clip((long) t4 + t12);
+        int t5a = clip((long) t5 + t13);
+        int t6a = clip((long) t6 + t14);
+        int t7a = clip((long) t7 + t15);
+        int t8a = clip((long) t0 - t8);
+        int t9a = clip((long) t1 - t9);
+        int t10a = clip((long) t2 - t10);
+        int t11a = clip((long) t3 - t11);
+        int t12a = clip((long) t4 - t12);
+        int t13a = clip((long) t5 - t13);
+        int t14a = clip((long) t6 - t14);
+        int t15a = clip((long) t7 - t15);
+
+        t8 = positiveRoundShift((long) t8a * (4017 - 4096) + (long) t9a * 799, 12) + t8a;
+        t9 = positiveRoundShift((long) t8a * 799 - (long) t9a * (4017 - 4096), 12) - t9a;
+        t10 = positiveRoundShift((long) t10a * 2276 + (long) t11a * (3406 - 4096), 12) + t11a;
+        t11 = positiveRoundShift((long) t10a * (3406 - 4096) - (long) t11a * 2276, 12) + t10a;
+        t12 = positiveRoundShift((long) t13a * (4017 - 4096) - (long) t12a * 799, 12) + t13a;
+        t13 = positiveRoundShift((long) t13a * 799 + (long) t12a * (4017 - 4096), 12) + t12a;
+        t14 = positiveRoundShift((long) t15a * 2276 - (long) t14a * (3406 - 4096), 12) - t14a;
+        t15 = positiveRoundShift((long) t15a * (3406 - 4096) + (long) t14a * 2276, 12) + t15a;
+
+        t0 = clip((long) t0a + t4a);
+        t1 = clip((long) t1a + t5a);
+        t2 = clip((long) t2a + t6a);
+        t3 = clip((long) t3a + t7a);
+        t4 = clip((long) t0a - t4a);
+        t5 = clip((long) t1a - t5a);
+        t6 = clip((long) t2a - t6a);
+        t7 = clip((long) t3a - t7a);
+        t8a = clip((long) t8 + t12);
+        t9a = clip((long) t9 + t13);
+        t10a = clip((long) t10 + t14);
+        t11a = clip((long) t11 + t15);
+        t12a = clip((long) t8 - t12);
+        t13a = clip((long) t9 - t13);
+        t14a = clip((long) t10 - t14);
+        t15a = clip((long) t11 - t15);
+
+        t4a = positiveRoundShift((long) t4 * (3784 - 4096) + (long) t5 * 1567, 12) + t4;
+        t5a = positiveRoundShift((long) t4 * 1567 - (long) t5 * (3784 - 4096), 12) - t5;
+        t6a = positiveRoundShift((long) t7 * (3784 - 4096) - (long) t6 * 1567, 12) + t7;
+        t7a = positiveRoundShift((long) t7 * 1567 + (long) t6 * (3784 - 4096), 12) + t6;
+        t12 = positiveRoundShift((long) t12a * (3784 - 4096) + (long) t13a * 1567, 12) + t12a;
+        t13 = positiveRoundShift((long) t12a * 1567 - (long) t13a * (3784 - 4096), 12) - t13a;
+        t14 = positiveRoundShift((long) t15a * (3784 - 4096) - (long) t14a * 1567, 12) + t15a;
+        t15 = positiveRoundShift((long) t15a * 1567 + (long) t14a * (3784 - 4096), 12) + t14a;
+
+        output[0] = clip((long) t0 + t2);
+        output[15] = clip(-(long) clip((long) t1 + t3));
+        t2a = clip((long) t0 - t2);
+        t3a = clip((long) t1 - t3);
+        output[3] = clip(-(long) clip((long) t4a + t6a));
+        output[12] = clip((long) t5a + t7a);
+        t6 = clip((long) t4a - t6a);
+        t7 = clip((long) t5a - t7a);
+        output[1] = clip(-(long) clip((long) t8a + t10a));
+        output[14] = clip((long) t9a + t11a);
+        t10 = clip((long) t8a - t10a);
+        t11 = clip((long) t9a - t11a);
+        output[2] = clip((long) t12 + t14);
+        output[13] = clip(-(long) clip((long) t13 + t15));
+        t14a = clip((long) t12 - t14);
+        t15a = clip((long) t13 - t15);
+
+        output[7] = clip(-(long) positiveRoundShift((long) (t2a + t3a) * 181, 8));
+        output[8] = positiveRoundShift((long) (t2a - t3a) * 181, 8);
+        output[4] = positiveRoundShift((long) (t6 + t7) * 181, 8);
+        output[11] = clip(-(long) positiveRoundShift((long) (t6 - t7) * 181, 8));
+        output[6] = positiveRoundShift((long) (t10 + t11) * 181, 8);
+        output[9] = clip(-(long) positiveRoundShift((long) (t10 - t11) * 181, 8));
+        output[5] = clip(-(long) positiveRoundShift((long) (t14a + t15a) * 181, 8));
+        output[10] = positiveRoundShift((long) (t14a - t15a) * 181, 8);
+    }
+
+    /// Reconstructs one supported one-dimensional inverse identity vector.
+    ///
+    /// @param input the dequantized input vector
+    /// @param output the reconstructed output vector
+    /// @param length the vector length in samples
+    private static void inverseIdentity(int[] input, int[] output, int length) {
+        switch (length) {
+            case 4 -> {
+                for (int i = 0; i < 4; i++) {
+                    int value = input[i];
+                    output[i] = clip((long) value + positiveRoundShift((long) value * 1697, 12));
+                }
+            }
+            case 8 -> {
+                for (int i = 0; i < 8; i++) {
+                    output[i] = clip((long) input[i] * 2);
+                }
+            }
+            case 16 -> {
+                for (int i = 0; i < 16; i++) {
+                    int value = input[i];
+                    output[i] = clip((long) value * 2 + positiveRoundShift((long) value * 1697, 11));
+                }
+            }
+            case 32 -> {
+                for (int i = 0; i < 32; i++) {
+                    output[i] = clip((long) input[i] * 4);
+                }
+            }
+            default -> throw new IllegalStateException("Unsupported inverse identity length: " + length);
+        }
+    }
+
     /// Returns one cached orthonormal inverse-DCT basis matrix for the requested supported vector
     /// length.
     ///
@@ -970,7 +1268,7 @@ final class InverseTransformer {
     /// @param value1 the second source value
     /// @return the rounded half-butterfly result
     private static int halfBtf(int weight0, int value0, int weight1, int value1) {
-        return roundShift((long) weight0 * value0 + (long) weight1 * value1, INV_COS_BIT);
+        return positiveRoundShift((long) weight0 * value0 + (long) weight1 * value1, INV_COS_BIT);
     }
 
     /// Applies one AV1 signed round shift.
@@ -989,6 +1287,21 @@ final class InverseTransformer {
         }
         long rounded = (value + (1L << (bitCount - 1)) + (value < 0 ? -1L : 0L)) >> bitCount;
         return saturatedInt(rounded);
+    }
+
+    /// Applies the positive-bias arithmetic shifts used by `dav1d` inverse-transform kernels.
+    ///
+    /// @param value the signed value to shift
+    /// @param bitCount the positive number of bits to shift away, or `0`
+    /// @return the rounded signed result
+    private static int positiveRoundShift(long value, int bitCount) {
+        if (bitCount < 0) {
+            throw new IllegalArgumentException("bitCount < 0: " + bitCount);
+        }
+        if (bitCount == 0) {
+            return saturatedInt(value);
+        }
+        return saturatedInt((value + (1L << (bitCount - 1))) >> bitCount);
     }
 
     /// Saturates one `long` into the signed `int` range.

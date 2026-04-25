@@ -935,7 +935,7 @@ final class TileResidualSyntaxReaderTest {
     /// @param transformSize the active transform size
     /// @return the expected natural-raster index of the first scanned AC coefficient
     private static int expectedFirstAcCoefficientIndex(TransformSize transformSize) {
-        return transformSize.widthPixels() > transformSize.heightPixels() ? 1 : transformSize.widthPixels();
+        return expectedOutputIndex(transformSize, 1);
     }
 
     /// Returns the natural-raster output index for one `TX_4X4` scan position.
@@ -943,7 +943,7 @@ final class TileResidualSyntaxReaderTest {
     /// @param scanIndex the zero-based `TX_4X4` scan index
     /// @return the natural-raster output index for the supplied `TX_4X4` scan position
     private static int expectedFourByFourOutputIndex(int scanIndex) {
-        int[] scan = {0, 4, 1, 2, 5, 8, 12, 9, 6, 3, 7, 10, 13, 14, 11, 15};
+        int[] scan = {0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15};
         return scan[scanIndex];
     }
 
@@ -981,16 +981,30 @@ final class TileResidualSyntaxReaderTest {
             if (descendingRows) {
                 for (int row = rowEnd; row >= rowStart; row--) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = row * outputWidth + column;
+                    scan[nextIndex++] = expectedScanIndex(transformSize, row, column, outputWidth);
                 }
             } else {
                 for (int row = rowStart; row <= rowEnd; row++) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = row * outputWidth + column;
+                    scan[nextIndex++] = expectedScanIndex(transformSize, row, column, outputWidth);
                 }
             }
         }
         return scan;
+    }
+
+    /// Converts one generated scan coordinate into the expected row-major coefficient index.
+    ///
+    /// @param transformSize the transform size
+    /// @param row the generated diagonal row coordinate
+    /// @param column the generated diagonal column coordinate
+    /// @param outputWidth the row-major coefficient row stride
+    /// @return the expected row-major coefficient index
+    private static int expectedScanIndex(TransformSize transformSize, int row, int column, int outputWidth) {
+        if (transformSize.widthPixels() == transformSize.heightPixels()) {
+            return column * outputWidth + row;
+        }
+        return row * outputWidth + column;
     }
 
     /// Creates the padded larger-transform `levels` grid used by coefficient token contexts.
@@ -1299,6 +1313,8 @@ final class TileResidualSyntaxReaderTest {
         TransformSize chromaTransformSize = Objects.requireNonNull(transformLayout.chromaTransformSize(), "chromaTransformSize");
         int visibleChromaWidthPixels = exactVisibleChromaWidthPixels(tileContext, position, blockSize);
         int visibleChromaHeightPixels = exactVisibleChromaHeightPixels(tileContext, position, blockSize);
+        int chromaCoefficientSkipContext =
+                initialChromaCoefficientSkipContext(pixelFormat, blockSize, chromaTransformSize);
         ResidualLayout lumaResidualLayout = residualSyntaxReader.read(header, lumaOnlyTransformLayout(transformLayout), neighborContext);
         if (header.skip()) {
             return new ResidualLayout(
@@ -1330,16 +1346,48 @@ final class TileResidualSyntaxReaderTest {
                         position,
                         chromaTransformSize,
                         visibleChromaWidthPixels,
-                        visibleChromaHeightPixels
+                        visibleChromaHeightPixels,
+                        chromaCoefficientSkipContext
                 )},
                 new TransformResidualUnit[]{readExpectedChromaResidualUnit(
                         syntaxReader,
                         position,
                         chromaTransformSize,
                         visibleChromaWidthPixels,
-                        visibleChromaHeightPixels
+                        visibleChromaHeightPixels,
+                        chromaCoefficientSkipContext
                 )}
         );
+    }
+
+    /// Returns the initial chroma coefficient-skip context for one top-left chroma unit.
+    ///
+    /// @param pixelFormat the synthetic sequence pixel format
+    /// @param blockSize the owning block size
+    /// @param transformSize the active chroma transform size
+    /// @return the initial chroma coefficient-skip context for the supplied unit
+    private static int initialChromaCoefficientSkipContext(
+            AvifPixelFormat pixelFormat,
+            BlockSize blockSize,
+            TransformSize transformSize
+    ) {
+        int blockLog2Width4 = chromaBlockLog2Dimension4(pixelFormat, blockSize, true);
+        int blockLog2Height4 = chromaBlockLog2Dimension4(pixelFormat, blockSize, false);
+        boolean notOneBlock = blockLog2Width4 > transformSize.log2Width4()
+                || blockLog2Height4 > transformSize.log2Height4();
+        return 7 + (notOneBlock ? 3 : 0);
+    }
+
+    /// Returns the effective chroma block dimension log2 in chroma 4x4 units.
+    ///
+    /// @param pixelFormat the synthetic sequence pixel format
+    /// @param blockSize the owning block size
+    /// @param width whether to return the width dimension instead of height
+    /// @return the effective chroma block dimension log2 in chroma 4x4 units
+    private static int chromaBlockLog2Dimension4(AvifPixelFormat pixelFormat, BlockSize blockSize, boolean width) {
+        int log2 = width ? blockSize.log2Width4() : blockSize.log2Height4();
+        int subsamplingShift = width ? chromaSubsamplingX(pixelFormat) : chromaSubsamplingY(pixelFormat);
+        return Math.max(0, log2 - (log2 != 0 ? subsamplingShift : 0));
     }
 
     /// Returns the exact visible chroma width in pixels for one luma-aligned block.
@@ -1434,6 +1482,28 @@ final class TileResidualSyntaxReaderTest {
         return tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
     }
 
+    /// Returns the horizontal chroma subsampling shift for the supplied pixel format.
+    ///
+    /// @param pixelFormat the synthetic sequence pixel format
+    /// @return the horizontal chroma subsampling shift for the supplied pixel format
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I444 -> 0;
+            case I420, I422 -> 1;
+        };
+    }
+
+    /// Returns the vertical chroma subsampling shift for the supplied pixel format.
+    ///
+    /// @param pixelFormat the synthetic sequence pixel format
+    /// @return the vertical chroma subsampling shift for the supplied pixel format
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I422, I444 -> 0;
+            case I420 -> 1;
+        };
+    }
+
     /// Decodes one expected minimal-block chroma residual unit using a mirrored `TX_4X4` oracle.
     ///
     /// @param syntaxReader the syntax reader positioned at the start of one chroma unit
@@ -1445,9 +1515,10 @@ final class TileResidualSyntaxReaderTest {
             BlockPosition position,
             TransformSize transformSize,
             int visibleWidthPixels,
-            int visibleHeightPixels
+            int visibleHeightPixels,
+            int coefficientSkipContext
     ) {
-        if (syntaxReader.readCoefficientSkipFlag(transformSize, 0)) {
+        if (syntaxReader.readCoefficientSkipFlag(transformSize, coefficientSkipContext)) {
             return createAllZeroResidualUnit(position, transformSize, visibleWidthPixels, visibleHeightPixels);
         }
 

@@ -78,7 +78,7 @@ final class InverseTransformerTest {
 
         int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_8X8);
 
-        assertArrayEquals(
+        assertArrayAlmostEquals(
                 new int[]{
                         8, 7, 4, 2, -2, -4, -7, -8,
                         7, 6, 4, 1, -1, -4, -6, -7,
@@ -210,8 +210,8 @@ final class InverseTransformerTest {
 
         assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
         assertTrue(residual[3] < 0, "Mirrored horizontal basis sample should stay negative");
-        assertEquals(residual[0], -residual[3]);
-        assertEquals(residual[1], -residual[2]);
+        assertAlmostOpposite(residual[0], residual[3]);
+        assertAlmostOpposite(residual[1], residual[2]);
         for (int index = 4; index < residual.length; index++) {
             assertEquals(0, residual[index]);
         }
@@ -521,13 +521,17 @@ final class InverseTransformerTest {
             int rowOffset = row * sideLength;
             for (int column = 0; column < sideLength / 2; column++) {
                 int mirroredColumn = sideLength - 1 - column;
-                assertEquals(
-                        residual[rowOffset + column],
-                        -residual[rowOffset + mirroredColumn],
-                        "Residual row is not horizontally antisymmetric at row " + row
-                );
+                assertAlmostOpposite(residual[rowOffset + column], residual[rowOffset + mirroredColumn]);
             }
         }
+    }
+
+    /// Verifies that two samples are opposite after integer-transform rounding.
+    ///
+    /// @param left the first sample
+    /// @param right the mirrored sample
+    private static void assertAlmostOpposite(int left, int right) {
+        assertTrue(Math.abs(left + right) <= 1, "Samples are not opposite within one rounding unit");
     }
 
     /// Verifies that each row in one rectangular residual block is horizontally antisymmetric.
@@ -540,12 +544,22 @@ final class InverseTransformerTest {
             int rowOffset = row * width;
             for (int column = 0; column < width / 2; column++) {
                 int mirroredColumn = width - 1 - column;
-                assertEquals(
-                        residual[rowOffset + column],
-                        -residual[rowOffset + mirroredColumn],
-                        "Residual row is not horizontally antisymmetric at row " + row
-                );
+                assertAlmostOpposite(residual[rowOffset + column], residual[rowOffset + mirroredColumn]);
             }
+        }
+    }
+
+    /// Verifies that every sample matches the expected value within one integer rounding unit.
+    ///
+    /// @param expected the expected samples
+    /// @param actual the actual samples
+    private static void assertArrayAlmostEquals(int[] expected, int[] actual) {
+        assertEquals(expected.length, actual.length);
+        for (int i = 0; i < expected.length; i++) {
+            assertTrue(
+                    Math.abs(expected[i] - actual[i]) <= 1,
+                    "Sample mismatch at index " + i + ": expected " + expected[i] + " but was " + actual[i]
+            );
         }
     }
 

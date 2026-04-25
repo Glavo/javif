@@ -25,6 +25,7 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.MotionMode;
@@ -337,6 +338,7 @@ public final class FrameReconstructor {
                         pixelFormat,
                         frameHeader,
                         sequenceHeader.features().orderHintBits(),
+                        sequenceHeader.features().intraEdgeFilter(),
                         checkedReferenceSurfaceSnapshots,
                         decodedBlockMap
                 );
@@ -805,6 +807,7 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     private static void reconstructNode(
             TilePartitionTreeReader.Node node,
@@ -814,6 +817,7 @@ public final class FrameReconstructor {
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
+            boolean intraEdgeFilterEnabled,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         reconstructNode(
@@ -824,6 +828,7 @@ public final class FrameReconstructor {
                 pixelFormat,
                 frameHeader,
                 orderHintBits,
+                intraEdgeFilterEnabled,
                 referenceSurfaceSnapshots,
                 DecodedBlockMap.create(new TilePartitionTreeReader.Node[][]{{node}}, lumaPlane.width(), lumaPlane.height())
         );
@@ -838,6 +843,7 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
     private static void reconstructNode(
@@ -848,6 +854,7 @@ public final class FrameReconstructor {
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
+            boolean intraEdgeFilterEnabled,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -860,6 +867,7 @@ public final class FrameReconstructor {
                     pixelFormat,
                     frameHeader,
                     orderHintBits,
+                    intraEdgeFilterEnabled,
                     referenceSurfaceSnapshots,
                     decodedBlockMap
             );
@@ -876,6 +884,7 @@ public final class FrameReconstructor {
                     pixelFormat,
                     frameHeader,
                     orderHintBits,
+                    intraEdgeFilterEnabled,
                     referenceSurfaceSnapshots,
                     decodedBlockMap
             );
@@ -890,6 +899,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V plane, or `null`
     /// @param pixelFormat the active decoded chroma layout
     /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
     private static void reconstructLeaf(
             TilePartitionTreeReader.LeafNode leafNode,
@@ -899,6 +909,7 @@ public final class FrameReconstructor {
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
+            boolean intraEdgeFilterEnabled,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -919,6 +930,8 @@ public final class FrameReconstructor {
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        int codedLumaWidth = header.size().widthPixels();
+        int codedLumaHeight = header.size().heightPixels();
 
         if (header.useIntrabc()) {
             reconstructIntrabcPrediction(
@@ -944,8 +957,8 @@ public final class FrameReconstructor {
                         lumaPlane,
                         lumaX,
                         lumaY,
-                        visibleLumaWidth,
-                        visibleLumaHeight,
+                        codedLumaWidth,
+                        codedLumaHeight,
                         header.filterIntraMode()
                 );
             } else {
@@ -953,10 +966,12 @@ public final class FrameReconstructor {
                         lumaPlane,
                         lumaX,
                         lumaY,
-                        visibleLumaWidth,
-                        visibleLumaHeight,
+                        codedLumaWidth,
+                        codedLumaHeight,
                         Objects.requireNonNull(header.yMode(), "header.yMode()"),
-                        header.yAngle()
+                        header.yAngle(),
+                        intraEdgeFilterEnabled,
+                        lumaSmoothEdgeReferences(header, decodedBlockMap)
                 );
             }
         } else {
@@ -983,6 +998,8 @@ public final class FrameReconstructor {
             int chromaY = lumaY >> chromaSubsamplingY;
             int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
             int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+            int codedChromaWidth = chromaDimension(codedLumaWidth, chromaSubsamplingX);
+            int codedChromaHeight = chromaDimension(codedLumaHeight, chromaSubsamplingY);
             if (header.intra()) {
                 if (header.uvPaletteSize() != 0) {
                     reconstructChromaPalette(
@@ -1001,8 +1018,8 @@ public final class FrameReconstructor {
                             chromaY,
                             lumaX,
                             lumaY,
-                            visibleChromaWidth,
-                            visibleChromaHeight,
+                            codedChromaWidth,
+                            codedChromaHeight,
                             header.cflAlphaU(),
                             chromaSubsamplingX,
                             chromaSubsamplingY
@@ -1014,8 +1031,8 @@ public final class FrameReconstructor {
                             chromaY,
                             lumaX,
                             lumaY,
-                            visibleChromaWidth,
-                            visibleChromaHeight,
+                            codedChromaWidth,
+                            codedChromaHeight,
                             header.cflAlphaV(),
                             chromaSubsamplingX,
                             chromaSubsamplingY
@@ -1025,25 +1042,101 @@ public final class FrameReconstructor {
                             chromaUPlane,
                             chromaX,
                             chromaY,
-                            visibleChromaWidth,
-                            visibleChromaHeight,
+                            codedChromaWidth,
+                            codedChromaHeight,
                             Objects.requireNonNull(header.uvMode(), "header.uvMode()"),
-                            header.uvAngle()
+                            header.uvAngle(),
+                            intraEdgeFilterEnabled,
+                            chromaSmoothEdgeReferences(header, decodedBlockMap)
                     );
                     IntraPredictor.predictChroma(
                             chromaVPlane,
                             chromaX,
                             chromaY,
-                            visibleChromaWidth,
-                            visibleChromaHeight,
+                            codedChromaWidth,
+                            codedChromaHeight,
                             Objects.requireNonNull(header.uvMode(), "header.uvMode()"),
-                            header.uvAngle()
+                            header.uvAngle(),
+                            intraEdgeFilterEnabled,
+                            chromaSmoothEdgeReferences(header, decodedBlockMap)
                     );
                 }
             }
 
             reconstructChromaResiduals(chromaUPlane, chromaVPlane, residualLayout, frameHeader, pixelFormat, header.qIndex());
         }
+    }
+
+    /// Returns whether the luma intra-edge references adjacent to one block are marked smooth.
+    ///
+    /// @param header the current decoded block header
+    /// @param decodedBlockMap the decoded leaf map used for causal neighbor lookup
+    /// @return whether an adjacent top or left luma edge comes from a smooth intra predictor
+    private static boolean lumaSmoothEdgeReferences(
+            TileBlockHeaderReader.BlockHeader header,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        int x4 = header.position().x4();
+        int y4 = header.position().y4();
+        return hasSmoothLumaMode(decodedBlockMap.leafAt(x4, y4 - 1))
+                || hasSmoothLumaMode(decodedBlockMap.leafAt(x4 - 1, y4));
+    }
+
+    /// Returns whether the chroma intra-edge references adjacent to one block are marked smooth.
+    ///
+    /// @param header the current decoded block header
+    /// @param decodedBlockMap the decoded leaf map used for causal neighbor lookup
+    /// @return whether an adjacent top or left chroma edge comes from a smooth intra predictor
+    private static boolean chromaSmoothEdgeReferences(
+            TileBlockHeaderReader.BlockHeader header,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        int x4 = header.position().x4();
+        int y4 = header.position().y4();
+        return hasSmoothChromaMode(decodedBlockMap.leafAt(x4, y4 - 1))
+                || hasSmoothChromaMode(decodedBlockMap.leafAt(x4 - 1, y4));
+    }
+
+    /// Returns whether one decoded leaf used a smooth luma intra mode.
+    ///
+    /// @param leafNode the decoded neighbor leaf, or `null`
+    /// @return whether the leaf used a smooth luma intra mode
+    private static boolean hasSmoothLumaMode(@Nullable TilePartitionTreeReader.LeafNode leafNode) {
+        if (leafNode == null || !leafNode.header().intra()) {
+            return false;
+        }
+        return isSmoothLumaMode(leafNode.header().yMode());
+    }
+
+    /// Returns whether one decoded leaf used a smooth chroma intra mode.
+    ///
+    /// @param leafNode the decoded neighbor leaf, or `null`
+    /// @return whether the leaf used a smooth chroma intra mode
+    private static boolean hasSmoothChromaMode(@Nullable TilePartitionTreeReader.LeafNode leafNode) {
+        if (leafNode == null || !leafNode.header().intra() || !leafNode.header().hasChroma()) {
+            return false;
+        }
+        return isSmoothChromaMode(leafNode.header().uvMode());
+    }
+
+    /// Returns whether one luma intra mode is a smooth predictor.
+    ///
+    /// @param mode the luma intra mode, or `null`
+    /// @return whether the mode is smooth
+    private static boolean isSmoothLumaMode(@Nullable LumaIntraPredictionMode mode) {
+        return mode == LumaIntraPredictionMode.SMOOTH
+                || mode == LumaIntraPredictionMode.SMOOTH_VERTICAL
+                || mode == LumaIntraPredictionMode.SMOOTH_HORIZONTAL;
+    }
+
+    /// Returns whether one chroma intra mode is a smooth predictor.
+    ///
+    /// @param mode the chroma intra mode, or `null`
+    /// @return whether the mode is smooth
+    private static boolean isSmoothChromaMode(@Nullable UvIntraPredictionMode mode) {
+        return mode == UvIntraPredictionMode.SMOOTH
+                || mode == UvIntraPredictionMode.SMOOTH_VERTICAL
+                || mode == UvIntraPredictionMode.SMOOTH_HORIZONTAL;
     }
 
     /// Validates that one partition-tree leaf lies inside the current reconstruction subset.

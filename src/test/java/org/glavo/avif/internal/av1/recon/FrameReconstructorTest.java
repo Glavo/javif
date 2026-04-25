@@ -6130,11 +6130,12 @@ final class FrameReconstructorTest {
                     AvifPixelFormat.class,
                     FrameHeader.class,
                     int.class,
+                    boolean.class,
                     ReferenceSurfaceSnapshot[].class
             );
             reconstructNode.setAccessible(true);
             for (TilePartitionTreeReader.Node root : roots) {
-                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader, 0, null);
+                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader, 0, false, null);
             }
         } catch (ReflectiveOperationException exception) {
             throw new AssertionError("Failed to reconstruct synthetic tile roots into one shared plane", exception);

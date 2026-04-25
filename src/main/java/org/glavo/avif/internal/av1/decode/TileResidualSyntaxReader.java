@@ -49,12 +49,12 @@ public final class TileResidualSyntaxReader {
     /// The chroma-V plane index used by chroma coefficient-context helpers.
     private static final int CHROMA_PLANE_V = 1;
 
-    /// The `dav1d` natural-order scan for two-dimensional `TX_4X4` transforms.
+    /// The `dav1d` two-dimensional `TX_4X4` scan converted into row-major coefficient storage.
     private static final int @Unmodifiable [] FOUR_BY_FOUR_SCAN = {
-            0, 4, 1, 2,
-            5, 8, 12, 9,
-            6, 3, 7, 10,
-            13, 14, 11, 15
+            0, 1, 4, 8,
+            5, 2, 3, 6,
+            9, 12, 13, 10,
+            7, 11, 14, 15
     };
 
     /// The `dav1d`-compatible two-dimensional scan tables for every modeled transform size.
@@ -1280,11 +1280,12 @@ public final class TileResidualSyntaxReader {
 
     /// Creates the `dav1d`-compatible two-dimensional scan table for one modeled transform size.
     ///
-    /// `dav1d` stores coefficient scans in a column-major scratch layout whose row span is clipped
-    /// to at most 32 samples. This method emits the same scan order converted into this project's
-    /// row-major natural coefficient layout. Square scans keep the alternating diagonal order, tall
-    /// rectangular scans walk each diagonal from high X to low X, and wide rectangular scans walk
-    /// each diagonal from high Y to low Y.
+    /// `dav1d` stores two-dimensional coefficient scan entries in the transform scratch layout
+    /// addressed as `coeff[y + x * sh]`. This method emits the same scan order converted into this
+    /// project's row-major natural coefficient layout. Rectangular scan generation already visits
+    /// row-major coordinates in dav1d order; square scans need an explicit axis swap because the
+    /// dav1d scratch stride equals the row-major width and would otherwise look valid while still
+    /// transposing horizontal and vertical AC coefficients.
     ///
     /// @param transformSize the modeled transform size whose scan should be created
     /// @return the `dav1d`-compatible two-dimensional scan table for the supplied transform size
@@ -1307,15 +1308,30 @@ public final class TileResidualSyntaxReader {
             if (descendingRows) {
                 for (int row = rowEnd; row >= rowStart; row--) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = row * outputWidth + column;
+                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth);
                 }
             } else {
                 for (int row = rowStart; row <= rowEnd; row++) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = row * outputWidth + column;
+                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth);
                 }
             }
         }
         return scan;
+    }
+
+    /// Converts one generated scan coordinate into this decoder's row-major coefficient index.
+    ///
+    /// @param transformSize the modeled transform size
+    /// @param row the generated diagonal row coordinate
+    /// @param column the generated diagonal column coordinate
+    /// @param outputWidth the row-major coefficient row stride
+    /// @return the row-major coefficient index
+    private static int scanIndex(TransformSize transformSize, int row, int column, int outputWidth) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        if (nonNullTransformSize.widthPixels() == nonNullTransformSize.heightPixels()) {
+            return column * outputWidth + row;
+        }
+        return row * outputWidth + column;
     }
 }
