@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
-import org.glavo.avif.decode.ArgbLongFrame;
+import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
@@ -119,9 +119,9 @@ final class DecodedPlanesArgbLongOutputTest {
     }
 
     /// Verifies that one frame-returning long-output overload preserves public frame metadata on
-    /// `ArgbLongFrame`.
+    /// `DecodedFrame`.
     @Test
-    void returnsArgbLongFrameMetadataForTwelveBitI444Output() {
+    void returnsDecodedFrameMetadataForTwelveBitI444Output() {
         DecodedPlanes planes = new DecodedPlanes(
                 12,
                 PixelFormat.I444,
@@ -134,7 +134,7 @@ final class DecodedPlanesArgbLongOutputTest {
                 plane(2, 1, 3, 2048, 3072, 3)
         );
 
-        ArgbLongFrame frame = ArgbOutput.toOpaqueArgbLongFrame(
+        DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
                 planes,
                 TEST_FRAME_TYPE,
                 TEST_VISIBLE,
@@ -146,7 +146,7 @@ final class DecodedPlanesArgbLongOutputTest {
                         DEFAULT_TRANSFORM.toOpaqueArgb64(1536, 2048, 2048, 12),
                         DEFAULT_TRANSFORM.toOpaqueArgb64(3072, 1024, 3072, 12)
                 },
-                frame.pixels()
+                frame.longPixels()
         );
         assertFrameMetadata(frame, planes);
     }
@@ -210,14 +210,14 @@ final class DecodedPlanesArgbLongOutputTest {
     /// @return whether the entry point supports `8-bit`
     private static boolean assertEightBitFrameEntryPointContract(DecodedPlanes planes, long[] expectedPixels) {
         try {
-            ArgbLongFrame frame = ArgbOutput.toOpaqueArgbLongFrame(
+            DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
                     planes,
                     TEST_FRAME_TYPE,
                     TEST_VISIBLE,
                     TEST_PRESENTATION_INDEX
             );
-            assertArrayEquals(expectedPixels, frame.pixels());
-            assertOpaquePixels(frame.pixels());
+            assertArrayEquals(expectedPixels, frame.longPixels());
+            assertOpaquePixels(frame.longPixels());
             assertFrameMetadata(frame, planes);
             return true;
         } catch (IllegalArgumentException | UnsupportedOperationException exception) {
@@ -241,11 +241,11 @@ final class DecodedPlanesArgbLongOutputTest {
         );
     }
 
-    /// Asserts public frame metadata on one `ArgbLongFrame`.
+    /// Asserts public frame metadata on one `DecodedFrame`.
     ///
     /// @param frame the frame to validate
     /// @param planes the source decoded planes
-    private static void assertFrameMetadata(ArgbLongFrame frame, DecodedPlanes planes) {
+    private static void assertFrameMetadata(DecodedFrame frame, DecodedPlanes planes) {
         assertEquals(planes.renderWidth(), frame.width());
         assertEquals(planes.renderHeight(), frame.height());
         assertEquals(planes.bitDepth(), frame.bitDepth());

@@ -26,9 +26,9 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.Objects;
 
-/// Base class for decoded AVIF frame output.
+/// Decoded AVIF frame output.
 @NotNullByDefault
-public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
+public final class AvifFrame {
     /// The frame width in pixels.
     private final int width;
     /// The frame height in pixels.
@@ -40,11 +40,9 @@ public sealed class AvifFrame permits AvifIntFrame, AvifLongFrame {
     /// The zero-based frame index.
     private final int frameIndex;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
-    private @Nullable
-    @Unmodifiable IntBuffer intPixels;
+    private @Nullable @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
-    private @Nullable
-    @Unmodifiable LongBuffer longPixels;
+    private @Nullable @Unmodifiable LongBuffer longPixels;
 
     /// Creates an AVIF frame from packed `int` ARGB pixels.
     ///

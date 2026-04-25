@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
-import org.glavo.avif.decode.ArgbIntFrame;
+import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
@@ -252,14 +252,14 @@ final class DecodedPlanesArgbIntOutputTest {
         }
     }
 
-    /// Asserts frame metadata when the converter already returns an `ArgbIntFrame`.
+    /// Asserts frame metadata when the converter already returns an `DecodedFrame`.
     ///
     /// Plain pixel packers are allowed temporarily while the output package is still being wired
     /// into the public frame layer.
     ///
     /// @param frame the returned frame, or `null` for temporary pixel-only converters
     /// @param planes the source decoded planes
-    private static void assertFrameMetadata(@Nullable ArgbIntFrame frame, DecodedPlanes planes) {
+    private static void assertFrameMetadata(@Nullable DecodedFrame frame, DecodedPlanes planes) {
         if (frame == null) {
             return;
         }
@@ -400,8 +400,8 @@ final class DecodedPlanesArgbIntOutputTest {
             Object target = constructor == null ? null : newInstance(constructor);
             Object[] arguments = buildArguments(planes);
             Object result = invoke(method, target, arguments);
-            if (result instanceof ArgbIntFrame frame) {
-                return new ConvertedOutput(frame, frame.pixels());
+            if (result instanceof DecodedFrame frame) {
+                return new ConvertedOutput(frame, frame.intPixels());
             }
             if (result instanceof int[] pixels) {
                 return new ConvertedOutput(null, pixels);
@@ -593,7 +593,7 @@ final class DecodedPlanesArgbIntOutputTest {
         /// @return the compatible candidate, or `null` if the method does not match the expected contract
         public static @Nullable Candidate create(Class<?> ownerClass, Method method) {
             Class<?> returnType = method.getReturnType();
-            if (returnType != ArgbIntFrame.class && returnType != int[].class) {
+            if (returnType != DecodedFrame.class && returnType != int[].class) {
                 return null;
             }
 
@@ -679,7 +679,7 @@ final class DecodedPlanesArgbIntOutputTest {
         /// @param method the candidate method
         /// @return the candidate score
         private static int score(Class<?> ownerClass, Method method) {
-            int score = method.getReturnType() == ArgbIntFrame.class ? 1_000 : 500;
+            int score = method.getReturnType() == DecodedFrame.class ? 1_000 : 500;
             if (Modifier.isPublic(method.getModifiers())) {
                 score += 100;
             }
@@ -694,6 +694,12 @@ final class DecodedPlanesArgbIntOutputTest {
             }
             if (methodName.contains("argb")) {
                 score += 20;
+            }
+            if (methodName.contains("argb8")) {
+                score += 40;
+            }
+            if (methodName.contains("highbitdepth")) {
+                score -= 40;
             }
             if (methodName.contains("convert")) {
                 score += 10;
@@ -710,7 +716,7 @@ final class DecodedPlanesArgbIntOutputTest {
     @NotNullByDefault
     private static final class ConvertedOutput {
         /// The converted frame, or `null` when the converter currently exposes only packed pixels.
-        private final @Nullable ArgbIntFrame frame;
+        private final @Nullable DecodedFrame frame;
 
         /// The packed non-premultiplied ARGB pixels.
         private final int[] pixels;
@@ -719,7 +725,7 @@ final class DecodedPlanesArgbIntOutputTest {
         ///
         /// @param frame the converted frame, or `null` for pixel-only converters
         /// @param pixels the packed non-premultiplied ARGB pixels
-        private ConvertedOutput(@Nullable ArgbIntFrame frame, int[] pixels) {
+        private ConvertedOutput(@Nullable DecodedFrame frame, int[] pixels) {
             this.frame = frame;
             this.pixels = Objects.requireNonNull(pixels, "pixels");
         }
@@ -727,7 +733,7 @@ final class DecodedPlanesArgbIntOutputTest {
         /// Returns the converted frame, or `null` when only pixels are available.
         ///
         /// @return the converted frame, or `null`
-        public @Nullable ArgbIntFrame frame() {
+        public @Nullable DecodedFrame frame() {
             return frame;
         }
 

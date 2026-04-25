@@ -22,7 +22,6 @@ import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.util.Duration;
 import org.glavo.avif.AvifFrame;
-import org.glavo.avif.AvifIntFrame;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,7 +43,7 @@ public final class AvifFXImage extends WritableImage {
     /// Creates a JavaFX image from one decoded frame.
     ///
     /// @param frame the decoded frame to display
-    public AvifFXImage(AvifIntFrame frame) {
+    public AvifFXImage(AvifFrame frame) {
         super(frame.width(), frame.height());
         this.frames = List.of(frame);
         this.animated = false;

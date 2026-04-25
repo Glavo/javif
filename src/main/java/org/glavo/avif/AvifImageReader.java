@@ -364,7 +364,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param outputHeight the output height
     /// @param frameIndex the zero-based frame index
     /// @return the composed frame
-    private static AvifIntFrame composeGridIntFrames(
+    private static AvifFrame composeGridIntFrames(
             DecodedFrame[] cellFrames, int rows, int columns,
             int outputWidth, int outputHeight, int frameIndex
     ) {
@@ -396,7 +396,7 @@ public final class AvifImageReader implements AutoCloseable {
             yOffset += maxCellHeight;
         }
         PixelFormat fmt = cellFrames[0].pixelFormat();
-        return new AvifIntFrame(outputWidth, outputHeight,
+        return new AvifFrame(outputWidth, outputHeight,
                 cellFrames[0].bitDepth(), fmt, frameIndex, canvas);
     }
 
@@ -474,7 +474,7 @@ public final class AvifImageReader implements AutoCloseable {
                 pixels = applyMirrorInt(pixels, width, height, mirror);
             }
 
-            return new AvifIntFrame(width, height, frame.bitDepth(),
+            return new AvifFrame(width, height, frame.bitDepth(),
                     frame.pixelFormat(), frame.frameIndex(), pixels);
         }
         return frame;
@@ -580,7 +580,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return an AVIF public frame
     private static AvifFrame adaptFrame(DecodedFrame frame, int frameIndex) {
         if (frame.bitDepth() == 8) {
-            return new AvifIntFrame(
+            return new AvifFrame(
                     frame.width(),
                     frame.height(),
                     frame.bitDepth(),
@@ -590,7 +590,7 @@ public final class AvifImageReader implements AutoCloseable {
             );
         }
         if (frame.bitDepth() == 10 || frame.bitDepth() == 12) {
-            return new AvifLongFrame(
+            return new AvifFrame(
                     frame.width(),
                     frame.height(),
                     frame.bitDepth(),
@@ -642,7 +642,7 @@ public final class AvifImageReader implements AutoCloseable {
     }
 
     /// Combines alpha from raw luma plane into an 8-bit color frame.
-    private static AvifIntFrame combineIntPlaneAlpha(
+    private static AvifFrame combineIntPlaneAlpha(
             DecodedFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
     ) {
         IntBuffer colorPixels = color.intPixelBuffer();
@@ -664,11 +664,11 @@ public final class AvifImageReader implements AutoCloseable {
                 combined[i] = (colorPixels.get(i) & 0x00FFFFFF) | (alpha8 << 24);
             }
         }
-        return new AvifIntFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
+        return new AvifFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
     /// Combines alpha from raw luma plane into a 10/12-bit color frame.
-    private static AvifLongFrame combineLongPlaneAlpha(
+    private static AvifFrame combineLongPlaneAlpha(
             DecodedFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
     ) {
         LongBuffer colorPixels = color.longPixelBuffer();
@@ -691,7 +691,7 @@ public final class AvifImageReader implements AutoCloseable {
                 combined[i] = (colorPixels.get(i) & 0x0000FFFF_FFFFFFFFL) | ((alpha16 & maxSampleL) << 48);
             }
         }
-        return new AvifLongFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
+        return new AvifFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
     /// Creates an unsupported-feature exception.

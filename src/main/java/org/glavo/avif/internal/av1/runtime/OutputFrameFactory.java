@@ -47,13 +47,13 @@ public final class OutputFrameFactory {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         return switch (checkedDecodedPlanes.bitDepth()) {
-            case 8 -> ArgbOutput.toOpaqueArgbIntFrame(
+            case 8 -> ArgbOutput.toOpaqueArgb8Frame(
                     checkedDecodedPlanes,
                     checkedFrameHeader.frameType(),
                     visible,
                     presentationIndex
             );
-            case 10, 12 -> ArgbOutput.toOpaqueArgbLongFrame(
+            case 10, 12 -> ArgbOutput.toOpaqueArgbHighBitDepthFrame(
                     checkedDecodedPlanes,
                     checkedFrameHeader.frameType(),
                     visible,

@@ -101,21 +101,21 @@ final class AvifImageReaderTest {
         try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage())) {
             AvifFrame frame = reader.readFrame();
 
-            assertTrue(frame instanceof AvifIntFrame);
-            AvifIntFrame intFrame = (AvifIntFrame) frame;
+            assertEquals(8, frame.bitDepth());
+            AvifFrame intFrame = frame;
             assertEquals(64, intFrame.width());
             assertEquals(64, intFrame.height());
             assertEquals(8, intFrame.bitDepth());
             assertEquals(PixelFormat.I420, intFrame.pixelFormat());
             assertEquals(0, intFrame.frameIndex());
 
-            IntBuffer pixelBuffer = intFrame.pixelBuffer();
+            IntBuffer pixelBuffer = intFrame.intPixelBuffer();
             assertTrue(pixelBuffer.isReadOnly());
             assertEquals(64 * 64, pixelBuffer.remaining());
             assertEquals(OPAQUE_MID_GRAY, pixelBuffer.get(0));
             assertEquals(OPAQUE_MID_GRAY, pixelBuffer.get(pixelBuffer.limit() - 1));
 
-            int[] pixels = intFrame.pixels();
+            int[] pixels = intFrame.intPixels();
             assertEquals(64 * 64, pixels.length);
             assertEquals(OPAQUE_MID_GRAY, pixels[0]);
             assertEquals(OPAQUE_MID_GRAY, pixels[pixels.length - 1]);
@@ -149,14 +149,14 @@ final class AvifImageReaderTest {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE))) {
             AvifFrame frame = reader.readFrame();
 
-            assertTrue(frame instanceof AvifIntFrame);
-            AvifIntFrame intFrame = (AvifIntFrame) frame;
+            assertEquals(8, frame.bitDepth());
+            AvifFrame intFrame = frame;
             assertEquals(1, intFrame.width());
             assertEquals(1, intFrame.height());
             assertEquals(8, intFrame.bitDepth());
             assertEquals(PixelFormat.I444, intFrame.pixelFormat());
 
-            int[] pixels = intFrame.pixels();
+            int[] pixels = intFrame.intPixels();
             assertEquals(1, pixels.length);
             assertEquals(0xFF, pixels[0] >>> 24);
             assertNull(reader.readFrame());
@@ -274,7 +274,7 @@ final class AvifImageReaderTest {
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
-            assertTrue(frame instanceof AvifIntFrame);
+            assertEquals(8, frame.bitDepth());
             assertEquals(64, frame.width());
             assertEquals(64, frame.height());
             assertNull(reader.readFrame());
@@ -376,10 +376,10 @@ final class AvifImageReaderTest {
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
-            assertTrue(frame instanceof AvifIntFrame);
-            AvifIntFrame intFrame = (AvifIntFrame) frame;
+            assertEquals(8, frame.bitDepth());
+            AvifFrame intFrame = frame;
 
-            int[] pixels = intFrame.pixels();
+            int[] pixels = intFrame.intPixels();
             assertEquals(64 * 64, pixels.length);
             assertTrue((pixels[0] >>> 24) != 0xFF, "synthetic alpha should produce non-opaque pixels");
             assertNull(reader.readFrame());

@@ -15,8 +15,6 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.decode.ArgbIntFrame;
-import org.glavo.avif.decode.ArgbLongFrame;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
@@ -32,23 +30,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for runtime frame-output factory dispatch.
 @NotNullByDefault
 final class OutputFrameFactoryTest {
-    /// Verifies that 8-bit decoded planes produce one public `ArgbIntFrame`.
+    /// Verifies that 8-bit decoded planes produce one public `DecodedFrame`.
     @Test
-    void createFrameReturnsArgbIntFrameForEightBitPlanes() {
+    void createFrameReturnsDecodedFrameForEightBitPlanes() {
         DecodedPlanes decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 73);
         FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x01);
 
         DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, frameHeader, false, 5L);
 
-        assertTrue(frame instanceof ArgbIntFrame);
-        assertEquals(1, ((ArgbIntFrame) frame).pixels().length);
-        assertTrue(((ArgbIntFrame) frame).pixelBuffer().isReadOnly());
+        assertEquals(8, frame.bitDepth());
+        assertEquals(1, frame.intPixels().length);
+        assertTrue(frame.intPixelBuffer().isReadOnly());
         assertFrameMetadata(frame, 8, PixelFormat.I400, FrameType.KEY, false, 5L);
     }
 
-    /// Verifies that 10-bit and 12-bit decoded planes both produce one public `ArgbLongFrame`.
+    /// Verifies that 10-bit and 12-bit decoded planes both produce one public `DecodedFrame`.
     @Test
-    void createFrameReturnsArgbLongFrameForHighBitDepthPlanes() {
+    void createFrameReturnsDecodedFrameForHighBitDepthPlanes() {
         FrameHeader intraFrameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.INTRA, true, 0x00);
 
         DecodedFrame tenBitFrame = OutputFrameFactory.createFrame(
@@ -64,14 +62,14 @@ final class OutputFrameFactoryTest {
                 9L
         );
 
-        assertTrue(tenBitFrame instanceof ArgbLongFrame);
-        assertEquals(1, ((ArgbLongFrame) tenBitFrame).pixels().length);
-        assertTrue(((ArgbLongFrame) tenBitFrame).pixelBuffer().isReadOnly());
+        assertTrue(tenBitFrame.bitDepth() == 10 || tenBitFrame.bitDepth() == 12);
+        assertEquals(1, tenBitFrame.longPixels().length);
+        assertTrue(tenBitFrame.longPixelBuffer().isReadOnly());
         assertFrameMetadata(tenBitFrame, 10, PixelFormat.I400, FrameType.INTRA, true, 8L);
 
-        assertTrue(twelveBitFrame instanceof ArgbLongFrame);
-        assertEquals(1, ((ArgbLongFrame) twelveBitFrame).pixels().length);
-        assertTrue(((ArgbLongFrame) twelveBitFrame).pixelBuffer().isReadOnly());
+        assertTrue(twelveBitFrame.bitDepth() == 10 || twelveBitFrame.bitDepth() == 12);
+        assertEquals(1, twelveBitFrame.longPixels().length);
+        assertTrue(twelveBitFrame.longPixelBuffer().isReadOnly());
         assertFrameMetadata(twelveBitFrame, 12, PixelFormat.I400, FrameType.INTRA, false, 9L);
     }
 
@@ -87,9 +85,9 @@ final class OutputFrameFactoryTest {
 
         DecodedFrame frame = OutputFrameFactory.createExistingFrame(surfaceSnapshot, 12L);
 
-        assertTrue(frame instanceof ArgbLongFrame);
-        assertEquals(1, ((ArgbLongFrame) frame).pixels().length);
-        assertTrue(((ArgbLongFrame) frame).pixelBuffer().isReadOnly());
+        assertTrue(frame.bitDepth() == 10 || frame.bitDepth() == 12);
+        assertEquals(1, frame.longPixels().length);
+        assertTrue(frame.longPixelBuffer().isReadOnly());
         assertFrameMetadata(frame, 12, PixelFormat.I400, FrameType.SWITCH, true, 12L);
     }
 
