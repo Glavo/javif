@@ -110,9 +110,31 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Primary AV1 item is missing av1C", null);
         }
 
-        boolean alphaPresent = hasAlphaFor(primaryItem.id);
-        if (alphaPresent) {
-            throw unsupported("Alpha auxiliary images are not implemented in this slice", null);
+        boolean alphaPresent = false;
+        byte @Nullable [] alphaPayload = null;
+        Item alphaItem = findAlphaItem(primaryItem.id);
+        if (alphaItem != null) {
+            if (!"av01".equals(alphaItem.type)) {
+                throw unsupported("Unsupported alpha auxiliary item type: " + alphaItem.type, null);
+            }
+            if (alphaItem.hasUnsupportedEssentialProperty) {
+                throw new AvifDecodeException(AvifErrorCode.MISSING_IMAGE_ITEM, "Alpha auxiliary item is not usable", null);
+            }
+            ImageSpatialExtents alphaIspe = alphaItem.firstProperty(ImageSpatialExtents.class);
+            if (alphaIspe == null) {
+                throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Alpha auxiliary item is missing ispe", null);
+            }
+            if (alphaIspe.width != ispe.width || alphaIspe.height != ispe.height) {
+                throw unsupported(
+                        "Alpha auxiliary image with different dimensions than the master image is not implemented in this slice",
+                        null
+                );
+            }
+            if (alphaItem.firstProperty(Av1Config.class) == null) {
+                throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Alpha auxiliary item is missing av1C", null);
+            }
+            alphaPresent = true;
+            alphaPayload = mergeItemExtents(alphaItem);
         }
 
         byte[] payload = mergeItemExtents(primaryItem);
@@ -126,7 +148,7 @@ public final class AvifContainerParser {
                 1,
                 primaryItem.firstProperty(AvifColorInfo.class)
         );
-        return new AvifContainer(info, payload);
+        return new AvifContainer(info, payload, alphaPayload);
     }
 
     /// Parses an `ftyp` box.
@@ -623,20 +645,20 @@ public final class AvifContainerParser {
         }
     }
 
-    /// Returns whether an alpha auxiliary item exists for the supplied item id.
+    /// Finds the alpha auxiliary item for the supplied master image item id.
     ///
     /// @param itemId the master image item id
-    /// @return whether an alpha auxiliary item exists for the supplied item id
-    private boolean hasAlphaFor(int itemId) {
+    /// @return the alpha auxiliary item, or `null`
+    private @Nullable Item findAlphaItem(int itemId) {
         for (Item item : meta.items.values()) {
             if (item.auxForId == itemId) {
                 AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
                 if (aux != null && "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha".equals(aux.type)) {
-                    return true;
+                    return item;
                 }
             }
         }
-        return false;
+        return null;
     }
 
     /// Merges item extents into one contiguous payload.

@@ -63,6 +63,14 @@ final class AvifImageReaderTest {
     private static final Path LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE =
             Path.of("external", "libavif", "tests", "data", "paris_icc_exif_xmp.avif");
 
+    /// A fixture with a color item and an alpha auxiliary item.
+    private static final Path LIBAVIF_ALPHA_NO_IROT_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "abc_color_irot_alpha_NOirot.avif");
+
+    /// A fixture with an alpha auxiliary item missing ispe.
+    private static final Path LIBAVIF_ALPHA_NOISPE_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "alpha_noispe.avif");
+
     /// Verifies that metadata can be parsed from a minimal AVIF primary image item.
     ///
     /// @throws IOException if the reader cannot consume the test stream
@@ -207,6 +215,64 @@ final class AvifImageReaderTest {
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
         }
+    }
+
+    /// Verifies that a fixture with an alpha auxiliary image parses successfully.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readsAlphaFixtureGracefully() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_ALPHA_NO_IROT_FIXTURE)) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.width() > 0);
+            assertTrue(info.height() > 0);
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(info.width(), frame.width());
+            assertEquals(info.height(), frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that a synthetic AVIF image with alpha decodes with non-opaque pixels.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameDecodesSyntheticAlpha() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(syntheticAlphaAvif())) {
+            AvifImageInfo info = reader.info();
+
+            assertEquals(64, info.width());
+            assertEquals(64, info.height());
+            assertEquals(8, info.bitDepth());
+            assertTrue(info.alphaPresent());
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertTrue(frame instanceof AvifIntFrame);
+            AvifIntFrame intFrame = (AvifIntFrame) frame;
+
+            int[] pixels = intFrame.pixels();
+            assertEquals(64 * 64, pixels.length);
+            assertTrue((pixels[0] >>> 24) != 0xFF, "synthetic alpha should produce non-opaque pixels");
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that an alpha auxiliary item missing ispe is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsAlphaMissingIspe() throws IOException {
+        byte[] bytes = syntheticAlphaAvifWithoutIspe();
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
     }
 
     /// Verifies that truncated ispe payload is rejected.
@@ -428,6 +494,175 @@ final class AvifImageReaderTest {
     /// @return the truncated byte array
     private static byte[] truncateAfter(byte[] data, int length) {
         return Arrays.copyOf(data, Math.min(length, data.length));
+    }
+
+    /// Creates a synthetic AVIF still image with a primary color item and an alpha auxiliary item.
+    ///
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvif() {
+        byte[] colorPayload = av1StillPicturePayload();
+        byte[] alphaPayload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] firstMeta = buildDualItemMeta(colorPayload.length + alphaPayload.length);
+        int metaSize = firstMeta.length;
+        int mdatHeaderSize = 8;
+        int colorOffset = ftyp.length + metaSize + mdatHeaderSize;
+        int alphaOffset = colorOffset + colorPayload.length;
+        byte[] meta = buildDualItemMeta(colorOffset, colorPayload.length, alphaOffset, alphaPayload.length);
+        return concat(ftyp, meta, box("mdat", concat(colorPayload, alphaPayload)));
+    }
+
+    /// Creates a synthetic AVIF with alpha missing ispe on the alpha item.
+    ///
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvifWithoutIspe() {
+        byte[] colorPayload = av1StillPicturePayload();
+        byte[] alphaPayload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        int mdatHeaderSize = 8;
+
+        // Build meta without ipma first to measure size
+        byte[] placeholderMeta = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox());
+        int placeholderSize = placeholderMeta.length;
+        int colorOffset = ftyp.length + placeholderSize + mdatHeaderSize;
+        int alphaOffset = colorOffset + colorPayload.length;
+
+        // Build iprp with ispe ONLY on color item (no ispe on alpha)
+        byte[] iprp = box("iprp",
+                box("ipco",
+                        imageSpatialExtentsProperty(),
+                        av1ConfigProperty(),
+                        colorProperty(),
+                        monochromeAv1ConfigProperty(),
+                        auxCAlphaProperty()
+                ),
+                fullBox("ipma", 0, 0,
+                        u32(2),
+                        u16(1),
+                        new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03},
+                        u16(2),
+                        new byte[]{2, (byte) 0x84, (byte) 0x85}
+                )
+        );
+
+        byte[] iloc = fullBox("iloc", 0, 0,
+                new byte[]{0x44, 0x40},
+                u16(2),
+                u16(1),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(colorOffset),
+                u32(colorPayload.length),
+                u16(2),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(alphaOffset),
+                u32(alphaPayload.length)
+        );
+
+        byte[] iinf = fullBox("iinf", 0, 0,
+                u16(2),
+                fullBox("infe", 2, 0, u16(1), u16(0), fourCc("av01"), new byte[]{0}),
+                fullBox("infe", 2, 0, u16(2), u16(0), fourCc("av01"), new byte[]{0})
+        );
+
+        byte[] iref = refBox(1, 2);
+
+        byte[] meta = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), iloc, iinf, iprp, iref);
+        return concat(ftyp, meta, box("mdat", concat(colorPayload, alphaPayload)));
+    }
+
+    /// Creates a dual-item meta box with placeholder sizes.
+    ///
+    /// @param totalPayloadLength the total mdat payload length
+    /// @return the dual-item meta box bytes
+    private static byte[] buildDualItemMeta(int totalPayloadLength) {
+        return buildDualItemMeta(0, 0, 0, totalPayloadLength);
+    }
+
+    /// Creates a dual-item meta box with actual payload offsets and lengths.
+    ///
+    /// @param colorOffset the absolute color item payload offset
+    /// @param colorLength the color item payload length
+    /// @param alphaOffset the absolute alpha item payload offset
+    /// @param alphaLength the alpha item payload length
+    /// @return the dual-item meta box bytes
+    private static byte[] buildDualItemMeta(int colorOffset, int colorLength, int alphaOffset, int alphaLength) {
+        byte[] iloc = fullBox("iloc", 0, 0,
+                new byte[]{0x44, 0x40},
+                u16(2),
+                u16(1),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(colorOffset),
+                u32(colorLength),
+                u16(2),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(alphaOffset),
+                u32(alphaLength)
+        );
+
+        byte[] iinf = fullBox("iinf", 0, 0,
+                u16(2),
+                fullBox("infe", 2, 0, u16(1), u16(0), fourCc("av01"), new byte[]{0}),
+                fullBox("infe", 2, 0, u16(2), u16(0), fourCc("av01"), new byte[]{0})
+        );
+
+        byte[] iprp = box("iprp",
+                box("ipco",
+                        imageSpatialExtentsProperty(),
+                        av1ConfigProperty(),
+                        colorProperty(),
+                        imageSpatialExtentsProperty(),
+                        monochromeAv1ConfigProperty(),
+                        auxCAlphaProperty()
+                ),
+                fullBox("ipma", 0, 0,
+                        u32(2),
+                        u16(1),
+                        new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03},
+                        u16(2),
+                        new byte[]{3, (byte) 0x84, (byte) 0x85, (byte) 0x86}
+                )
+        );
+
+        byte[] iref = refBox(1, 2);
+
+        return fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), iloc, iinf, iprp, iref);
+    }
+
+    /// Creates an `iref` box with an `auxl` reference from one item to another.
+    ///
+    /// @param fromId the from item id
+    /// @param toId the to item id
+    /// @return the iref box bytes
+    private static byte[] refBox(int fromId, int toId) {
+        return fullBox("iref", 0, 0,
+                box("auxl", u16(fromId), u16(1), u16(toId))
+        );
+    }
+
+    /// Creates a monochrome `av1C` property matching the 8-bit test AV1 payload.
+    ///
+    /// @return the monochrome av1C property bytes
+    private static byte[] monochromeAv1ConfigProperty() {
+        return box("av1C", new byte[]{(byte) 0x81, 0x00, 0x1C, 0x00});
+    }
+
+    /// Creates an `auxC` property for alpha auxiliary images.
+    ///
+    /// @return the auxC property bytes
+    private static byte[] auxCAlphaProperty() {
+        byte[] urns = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        return fullBox("auxC", 0, 0, urns);
     }
 
     /// Creates a minimal AVIF still image with one primary AV1 image item.

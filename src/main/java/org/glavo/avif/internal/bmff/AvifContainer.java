@@ -17,6 +17,7 @@ package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifImageInfo;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
@@ -29,17 +30,31 @@ public final class AvifContainer {
     private final AvifImageInfo info;
     /// The primary image AV1 OBU payload.
     private final byte @Unmodifiable [] primaryItemPayload;
+    /// The alpha auxiliary image AV1 OBU payload, or `null` when absent.
+    private final byte @Nullable @Unmodifiable [] alphaItemPayload;
 
-    /// Creates parsed AVIF container data.
+    /// Creates parsed AVIF container data without an alpha image.
     ///
     /// @param info the parsed image metadata
     /// @param primaryItemPayload the primary image AV1 OBU payload
     public AvifContainer(AvifImageInfo info, byte[] primaryItemPayload) {
+        this(info, primaryItemPayload, null);
+    }
+
+    /// Creates parsed AVIF container data with an optional alpha image.
+    ///
+    /// @param info the parsed image metadata
+    /// @param primaryItemPayload the primary image AV1 OBU payload
+    /// @param alphaItemPayload the alpha auxiliary image AV1 OBU payload, or `null`
+    public AvifContainer(AvifImageInfo info, byte[] primaryItemPayload, byte @Nullable [] alphaItemPayload) {
         this.info = Objects.requireNonNull(info, "info");
         this.primaryItemPayload = Arrays.copyOf(
                 Objects.requireNonNull(primaryItemPayload, "primaryItemPayload"),
                 primaryItemPayload.length
         );
+        this.alphaItemPayload = alphaItemPayload != null
+                ? Arrays.copyOf(alphaItemPayload, alphaItemPayload.length)
+                : null;
     }
 
     /// Returns the parsed image metadata.
@@ -54,5 +69,15 @@ public final class AvifContainer {
     /// @return the primary image AV1 OBU payload
     public byte[] primaryItemPayload() {
         return Arrays.copyOf(primaryItemPayload, primaryItemPayload.length);
+    }
+
+    /// Returns the alpha auxiliary image AV1 OBU payload.
+    ///
+    /// @return the alpha auxiliary image AV1 OBU payload, or `null`
+    public byte @Nullable [] alphaItemPayload() {
+        if (alphaItemPayload == null) {
+            return null;
+        }
+        return Arrays.copyOf(alphaItemPayload, alphaItemPayload.length);
     }
 }

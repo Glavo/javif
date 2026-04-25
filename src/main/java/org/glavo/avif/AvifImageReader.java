@@ -213,15 +213,19 @@ public final class AvifImageReader implements AutoCloseable {
                     null
             );
         }
-        try (Av1ImageReader av1Reader = Av1ImageReader.open(
+        try (Av1ImageReader colorReader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(container.primaryItemPayload()).order(ByteOrder.LITTLE_ENDIAN)),
                 config.av1DecoderConfig()
         )) {
-            DecodedFrame decodedFrame = av1Reader.readFrame();
-            if (decodedFrame == null) {
+            DecodedFrame colorFrame = colorReader.readFrame();
+            if (colorFrame == null) {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item produced no frame", null);
             }
-            return adaptFrame(decodedFrame, frameIndex);
+            byte @Nullable [] alphaPayload = container.alphaItemPayload();
+            if (alphaPayload != null) {
+                return adaptFrameWithAlpha(colorFrame, alphaPayload, frameIndex);
+            }
+            return adaptFrame(colorFrame, frameIndex);
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -287,6 +291,96 @@ public final class AvifImageReader implements AutoCloseable {
             );
         }
         throw new IllegalArgumentException("Unsupported decoded frame class: " + frame.getClass().getName());
+    }
+
+    /// Decodes an alpha auxiliary AV1 payload and combines it with a decoded color frame.
+    ///
+    /// @param colorFrame the decoded color frame
+    /// @param alphaPayload the alpha auxiliary AV1 OBU payload
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @return the combined AVIF frame
+    /// @throws IOException if the alpha payload cannot be decoded
+    private AvifFrame adaptFrameWithAlpha(DecodedFrame colorFrame, byte[] alphaPayload, int frameIndex) throws IOException {
+        try (Av1ImageReader alphaReader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(alphaPayload).order(ByteOrder.LITTLE_ENDIAN)),
+                config.av1DecoderConfig()
+        )) {
+            DecodedFrame alphaFrame = alphaReader.readFrame();
+            if (alphaFrame == null) {
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha auxiliary item produced no frame", null);
+            }
+            if (alphaFrame.width() != colorFrame.width() || alphaFrame.height() != colorFrame.height()) {
+                throw unsupported("Alpha with different decoded dimensions than master image", null);
+            }
+            if (colorFrame instanceof ArgbIntFrame colorInt && alphaFrame instanceof ArgbIntFrame alphaInt) {
+                return combineIntFrames(colorInt, alphaInt, frameIndex);
+            }
+            if (colorFrame instanceof ArgbLongFrame colorLong && alphaFrame instanceof ArgbLongFrame alphaLong) {
+                return combineLongFrames(colorLong, alphaLong, frameIndex);
+            }
+            throw unsupported("Alpha and color frame pixel formats do not match", null);
+        } catch (AvifDecodeException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+        }
+    }
+
+    /// Combines an 8-bit alpha frame into an 8-bit color frame yielding non-premultiplied ARGB.
+    ///
+    /// @param color the decoded color frame
+    /// @param alpha the decoded alpha frame
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @return the combined frame
+    private static AvifIntFrame combineIntFrames(ArgbIntFrame color, ArgbIntFrame alpha, int frameIndex) {
+        int[] colorPixels = color.pixels();
+        int[] alphaPixels = alpha.pixels();
+        int pixelCount = colorPixels.length;
+        if (alphaPixels.length != pixelCount) {
+            throw new IllegalArgumentException("Alpha and color pixel counts do not match");
+        }
+        int[] combined = new int[pixelCount];
+        for (int i = 0; i < pixelCount; i++) {
+            int alphaLuma = alphaPixels[i] & 0xFF;
+            combined[i] = (colorPixels[i] & 0x00FFFFFF) | (alphaLuma << 24);
+        }
+        return new AvifIntFrame(
+                color.width(), color.height(), color.bitDepth(), color.pixelFormat(),
+                frameIndex, combined
+        );
+    }
+
+    /// Combines a 10/12-bit alpha frame into a 10/12-bit color frame yielding non-premultiplied ARGB.
+    ///
+    /// @param color the decoded color frame
+    /// @param alpha the decoded alpha frame
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @return the combined frame
+    private static AvifLongFrame combineLongFrames(ArgbLongFrame color, ArgbLongFrame alpha, int frameIndex) {
+        long[] colorPixels = color.pixels();
+        long[] alphaPixels = alpha.pixels();
+        int pixelCount = colorPixels.length;
+        if (alphaPixels.length != pixelCount) {
+            throw new IllegalArgumentException("Alpha and color pixel counts do not match");
+        }
+        long[] combined = new long[pixelCount];
+        for (int i = 0; i < pixelCount; i++) {
+            long alphaLuma = alphaPixels[i] & 0xFFFFL;
+            combined[i] = (colorPixels[i] & 0x0000FFFF_FFFFFFFFL) | (alphaLuma << 48);
+        }
+        return new AvifLongFrame(
+                color.width(), color.height(), color.bitDepth(), color.pixelFormat(),
+                frameIndex, combined
+        );
+    }
+
+    /// Creates an unsupported-feature exception.
+    ///
+    /// @param message the failure message
+    /// @param offset the byte offset or `null`
+    /// @return an unsupported-feature exception
+    private static AvifDecodeException unsupported(String message, @Nullable Long offset) {
+        return new AvifDecodeException(AvifErrorCode.UNSUPPORTED_FEATURE, message, offset);
     }
 
     /// Copies remaining bytes from a buffer into a byte array.
