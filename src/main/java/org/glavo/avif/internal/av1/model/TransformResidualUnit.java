@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -43,7 +44,7 @@ public final class TransformResidualUnit {
     private final int endOfBlockIndex;
 
     /// The signed transform-domain coefficients in natural raster order.
-    private final int[] coefficients;
+    private final int @Unmodifiable [] coefficients;
 
     /// The exact visible residual width in pixels that should be written back into the plane.
     private final int visibleWidthPixels;

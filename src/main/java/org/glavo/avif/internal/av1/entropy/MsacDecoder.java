@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.entropy;
 
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -31,7 +32,7 @@ public final class MsacDecoder {
     private static final int WINDOW_SIZE = Long.SIZE;
 
     /// The backing bytes that contain the entropy-coded tile payload.
-    private final byte[] data;
+    private final byte @Unmodifiable [] data;
     /// The exclusive end offset of the readable slice inside `data`.
     private final int endOffset;
     /// Whether decoded symbols are allowed to update their CDFs in place.

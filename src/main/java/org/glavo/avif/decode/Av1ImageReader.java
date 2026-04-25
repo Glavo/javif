@@ -42,6 +42,7 @@ import org.glavo.avif.internal.av1.runtime.RuntimeReferenceSlot;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -185,14 +186,14 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @return all decoded frames from the source
     /// @throws IOException if the source is unreadable or the bitstream is malformed
-    public List<DecodedFrame> readAllFrames() throws IOException {
+    public @Unmodifiable List<DecodedFrame> readAllFrames() throws IOException {
         ensureOpen();
 
         List<DecodedFrame> frames = new ArrayList<>();
         while (true) {
             DecodedFrame frame = readFrame();
             if (frame == null) {
-                return frames;
+                return List.copyOf(frames);
             }
             frames.add(frame);
         }

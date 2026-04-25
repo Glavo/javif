@@ -27,6 +27,7 @@ import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -55,9 +56,9 @@ public final class FrameHeaderParser {
     /// The AV1 maximum chroma film grain point count.
     private static final int MAX_FILM_GRAIN_UV_POINTS = 10;
     /// The default loop filter reference deltas.
-    private static final int[] DEFAULT_REFERENCE_DELTAS = new int[]{1, 0, 0, 0, -1, 0, -1, -1};
+    private static final int @Unmodifiable [] DEFAULT_REFERENCE_DELTAS = new int[]{1, 0, 0, 0, -1, 0, -1, -1};
     /// The default loop filter mode deltas.
-    private static final int[] DEFAULT_MODE_DELTAS = new int[]{0, 0};
+    private static final int @Unmodifiable [] DEFAULT_MODE_DELTAS = new int[]{0, 0};
 
     /// Parses a standalone AV1 frame header OBU.
     ///
@@ -1801,7 +1802,7 @@ public final class FrameHeaderParser {
         /// Whether skip mode is enabled for the frame.
         private final boolean enabled;
         /// The two skip-mode reference positions, or `-1` when unavailable.
-        private final int[] referenceIndices;
+        private final int @Unmodifiable [] referenceIndices;
 
         /// Creates parsed skip-mode state.
         ///

@@ -17,7 +17,9 @@ package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifImageInfo;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Parsed AVIF container data needed by the current reader.
@@ -26,7 +28,7 @@ public final class AvifContainer {
     /// The parsed image metadata.
     private final AvifImageInfo info;
     /// The primary image AV1 OBU payload.
-    private final byte[] primaryItemPayload;
+    private final byte @Unmodifiable [] primaryItemPayload;
 
     /// Creates parsed AVIF container data.
     ///
@@ -34,7 +36,10 @@ public final class AvifContainer {
     /// @param primaryItemPayload the primary image AV1 OBU payload
     public AvifContainer(AvifImageInfo info, byte[] primaryItemPayload) {
         this.info = Objects.requireNonNull(info, "info");
-        this.primaryItemPayload = Objects.requireNonNull(primaryItemPayload, "primaryItemPayload");
+        this.primaryItemPayload = Arrays.copyOf(
+                Objects.requireNonNull(primaryItemPayload, "primaryItemPayload"),
+                primaryItemPayload.length
+        );
     }
 
     /// Returns the parsed image metadata.
@@ -48,6 +53,6 @@ public final class AvifContainer {
     ///
     /// @return the primary image AV1 OBU payload
     public byte[] primaryItemPayload() {
-        return primaryItemPayload;
+        return Arrays.copyOf(primaryItemPayload, primaryItemPayload.length);
     }
 }

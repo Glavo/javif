@@ -24,8 +24,10 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -405,7 +407,7 @@ public final class TileTransformLayoutReader {
     @NotNullByDefault
     private static final class InterTransformResult {
         /// The decoded luma transform units in bitstream order.
-        private final TransformUnit[] lumaUnits;
+        private final TransformUnit @Unmodifiable [] lumaUnits;
 
         /// Whether the layout came from a variable luma transform tree.
         private final boolean variableTransformTree;
@@ -415,7 +417,7 @@ public final class TileTransformLayoutReader {
         /// @param lumaUnits the decoded luma transform units in bitstream order
         /// @param variableTransformTree whether the layout came from a variable luma transform tree
         private InterTransformResult(TransformUnit[] lumaUnits, boolean variableTransformTree) {
-            this.lumaUnits = Objects.requireNonNull(lumaUnits, "lumaUnits");
+            this.lumaUnits = Arrays.copyOf(Objects.requireNonNull(lumaUnits, "lumaUnits"), lumaUnits.length);
             this.variableTransformTree = variableTransformTree;
         }
 
@@ -423,7 +425,7 @@ public final class TileTransformLayoutReader {
         ///
         /// @return the decoded luma transform units in bitstream order
         public TransformUnit[] lumaUnits() {
-            return lumaUnits;
+            return Arrays.copyOf(lumaUnits, lumaUnits.length);
         }
 
         /// Returns whether the layout came from a variable luma transform tree.

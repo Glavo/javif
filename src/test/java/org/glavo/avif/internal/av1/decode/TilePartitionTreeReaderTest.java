@@ -30,6 +30,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 @NotNullByDefault
 final class TilePartitionTreeReaderTest {
     /// One fixed tile payload that the current partition-tree reader fully decodes.
-    private static final byte[] FIXED_TILE_PAYLOAD = HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+    private static final byte @Unmodifiable [] FIXED_TILE_PAYLOAD = HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
 
     /// Verifies that one 64x64 tile can be expanded into a non-empty partition tree with in-bounds leaves.
     @Test

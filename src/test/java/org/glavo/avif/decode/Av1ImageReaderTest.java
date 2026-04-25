@@ -49,6 +49,7 @@ import org.glavo.avif.internal.io.BufferedInput;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -79,29 +80,29 @@ final class Av1ImageReaderTest {
     /// This payload decodes as one reduced still-picture key frame whose luma and chroma blocks are
     /// fully intra-predicted with zero residuals, so the current reader can return a stable opaque
     /// gray `ArgbIntFrame` without relying on runtime brute-force search.
-    private static final byte[] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
+    private static final byte @Unmodifiable [] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
     /// One fixed tile payload that decodes an active luma Wiener restoration unit before the
     /// current all-zero key-frame block syntax.
-    private static final byte[] ACTIVE_WIENER_RESTORATION_TILE_PAYLOAD = new byte[]{
+    private static final byte @Unmodifiable [] ACTIVE_WIENER_RESTORATION_TILE_PAYLOAD = new byte[]{
             0x4E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
     /// One deterministic real tile payload whose first visible `8x8` key-frame leaf uses both luma
     /// and chroma palettes.
-    private static final byte[] PALETTE_BLOCK_TILE_PAYLOAD =
+    private static final byte @Unmodifiable [] PALETTE_BLOCK_TILE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
     /// One deterministic real tile payload whose direct parsed top-left `16x16` key-frame leaf
     /// uses both luma and chroma palettes.
-    private static final byte[] DIRECT_PALETTE_TILE_PAYLOAD =
+    private static final byte @Unmodifiable [] DIRECT_PALETTE_TILE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/direct-palette-tile.hex");
 
     /// One deterministic real inter tile payload whose first decoded block uses one stored
     /// reference surface with a zero motion vector.
-    private static final byte[] INTER_BLOCK_TILE_PAYLOAD =
+    private static final byte @Unmodifiable [] INTER_BLOCK_TILE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
 
     /// The generated named-fixture resource backing deterministic tile-block-header payloads.
@@ -109,7 +110,7 @@ final class Av1ImageReaderTest {
             "av1/fixtures/generated/tile-block-header-fixtures.txt";
 
     /// One deterministic real `intrabc` tile payload whose decoded block uses same-frame copy.
-    private static final byte[] INTRABC_BLOCK_TILE_PAYLOAD =
+    private static final byte @Unmodifiable [] INTRABC_BLOCK_TILE_PAYLOAD =
             HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH, "intrabc");
 
     /// The expected packed opaque gray pixel produced by the supported still-picture payload.
@@ -117,7 +118,7 @@ final class Av1ImageReaderTest {
 
     /// The stable top-left `8x8` ARGB block produced by the current legacy directional
     /// still-picture payload.
-    private static final int[][] LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8 = {
+    private static final int @Unmodifiable [] @Unmodifiable [] LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8 = {
             {0xFF7F7F7F, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
             {0xFF7E7E7E, 0xFF7E7E7E, 0xFF7E7E7E, 0xFF7E7E7E, 0xFF808080, 0xFF808080, 0xFF808080, 0xFF808080},
             {0xFF808080, 0xFF808080, 0xFF7F7F7F, 0xFF7E7E7E, 0xFF818181, 0xFF818181, 0xFF818181, 0xFF818181},

@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.model;
 
 import org.glavo.avif.decode.FrameType;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -61,7 +62,7 @@ public final class FrameHeader {
     /// Whether short signaling was used to derive the reference-frame list.
     private final boolean frameReferenceShortSignaling;
     /// The decoded reference-frame slot indices for LAST..ALTREF.
-    private final int[] referenceFrameIndices;
+    private final int @Unmodifiable [] referenceFrameIndices;
     /// The frame dimensions and render size.
     private final FrameSize frameSize;
     /// The super-resolution settings for the frame.
@@ -103,7 +104,7 @@ public final class FrameHeader {
     /// Whether skip mode is enabled for this frame.
     private final boolean skipModeEnabled;
     /// The two reference indices used by skip mode, or `-1` when unavailable.
-    private final int[] skipModeReferenceIndices;
+    private final int @Unmodifiable [] skipModeReferenceIndices;
     /// Whether warped motion is enabled for this frame.
     private final boolean warpedMotion;
     /// Whether the reduced transform type set is used.
@@ -1130,9 +1131,9 @@ public final class FrameHeader {
         /// The tile row count.
         private final int rows;
         /// The tile column start superblock coordinates.
-        private final int[] columnStartSuperblocks;
+        private final int @Unmodifiable [] columnStartSuperblocks;
         /// The tile row start superblock coordinates.
-        private final int[] rowStartSuperblocks;
+        private final int @Unmodifiable [] rowStartSuperblocks;
         /// The tile group update index.
         private final int updateTileIndex;
 
@@ -1420,11 +1421,11 @@ public final class FrameHeader {
         /// The highest active segment index, or `-1` when all segment features are defaulted.
         private final int lastActiveSegmentId;
         /// The per-segment data array.
-        private final SegmentData[] segments;
+        private final SegmentData @Unmodifiable [] segments;
         /// The derived lossless flag for each segment.
-        private final boolean[] losslessBySegment;
+        private final boolean @Unmodifiable [] losslessBySegment;
         /// The derived qindex for each segment.
-        private final int[] qIndexBySegment;
+        private final int @Unmodifiable [] qIndexBySegment;
 
         /// Creates parsed segmentation parameters.
         ///
@@ -1736,7 +1737,7 @@ public final class FrameHeader {
     @NotNullByDefault
     public static final class LoopFilterInfo {
         /// The luma loop filter levels for vertical and horizontal edges.
-        private final int[] levelY;
+        private final int @Unmodifiable [] levelY;
         /// The chroma U loop filter level.
         private final int levelU;
         /// The chroma V loop filter level.
@@ -1748,9 +1749,9 @@ public final class FrameHeader {
         /// Whether mode/reference deltas are updated in this frame.
         private final boolean modeRefDeltaUpdate;
         /// The reference-frame loop filter deltas.
-        private final int[] referenceDeltas;
+        private final int @Unmodifiable [] referenceDeltas;
         /// The mode loop filter deltas.
-        private final int[] modeDeltas;
+        private final int @Unmodifiable [] modeDeltas;
 
         /// Creates parsed loop filter parameters.
         ///
@@ -1847,9 +1848,9 @@ public final class FrameHeader {
         /// The number of CDEF strength bits.
         private final int bits;
         /// The luma CDEF strengths.
-        private final int[] yStrengths;
+        private final int @Unmodifiable [] yStrengths;
         /// The chroma CDEF strengths.
-        private final int[] uvStrengths;
+        private final int @Unmodifiable [] uvStrengths;
 
         /// Creates parsed CDEF parameters.
         ///
@@ -1897,7 +1898,7 @@ public final class FrameHeader {
     @NotNullByDefault
     public static final class RestorationInfo {
         /// The restoration types for Y, U, and V.
-        private final RestorationType[] types;
+        private final RestorationType @Unmodifiable [] types;
         /// The restoration unit size log2 for luma.
         private final int unitSizeLog2Y;
         /// The restoration unit size log2 for chroma.
@@ -1986,23 +1987,23 @@ public final class FrameHeader {
         /// The referenced frame slot when parameters were inherited, or `-1` when self-contained.
         private final int referenceFrameIndex;
         /// The luma scaling points.
-        private final FilmGrainPoint[] yPoints;
+        private final FilmGrainPoint @Unmodifiable [] yPoints;
         /// Whether chroma scaling is derived from the luma scaling function.
         private final boolean chromaScalingFromLuma;
         /// The Cb scaling points.
-        private final FilmGrainPoint[] cbPoints;
+        private final FilmGrainPoint @Unmodifiable [] cbPoints;
         /// The Cr scaling points.
-        private final FilmGrainPoint[] crPoints;
+        private final FilmGrainPoint @Unmodifiable [] crPoints;
         /// The normalized grain scaling shift, equal to `grain_scaling_minus_8 + 8`.
         private final int scalingShift;
         /// The auto-regressive coefficient neighborhood lag.
         private final int arCoeffLag;
         /// The normalized luma auto-regressive coefficients with the bitstream `+128` offset removed.
-        private final int[] arCoefficientsY;
+        private final int @Unmodifiable [] arCoefficientsY;
         /// The normalized Cb auto-regressive coefficients with the bitstream `+128` offset removed.
-        private final int[] arCoefficientsCb;
+        private final int @Unmodifiable [] arCoefficientsCb;
         /// The normalized Cr auto-regressive coefficients with the bitstream `+128` offset removed.
-        private final int[] arCoefficientsCr;
+        private final int @Unmodifiable [] arCoefficientsCr;
         /// The normalized auto-regressive coefficient shift, equal to `ar_coeff_shift_minus_6 + 6`.
         private final int arCoeffShift;
         /// The grain scale shift used during synthesis.

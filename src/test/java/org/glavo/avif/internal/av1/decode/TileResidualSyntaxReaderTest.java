@@ -36,6 +36,7 @@ import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
@@ -68,7 +69,7 @@ final class TileResidualSyntaxReaderTest {
             "av1/fixtures/generated/tile-residual-fixtures.txt";
 
     /// The `dav1d` low-token context offsets for the mirrored `TX_4X4` chroma oracle.
-    private static final int[][] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
             {0, 1, 6, 6, 21},
             {1, 6, 6, 21, 21},
             {6, 6, 21, 21, 21},

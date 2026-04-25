@@ -27,6 +27,7 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -53,7 +54,7 @@ public final class BlockNeighborContext {
     private static final byte INTERPOLATION_FILTER_UNSET = 3;
 
     /// The `dav1d` luma coefficient skip-context lookup table indexed by merged top and left counts.
-    private static final int[][] LUMA_COEFFICIENT_SKIP_CONTEXTS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] LUMA_COEFFICIENT_SKIP_CONTEXTS = {
             {1, 2, 2, 2, 3},
             {2, 4, 4, 4, 5},
             {2, 4, 4, 4, 5},
@@ -2908,10 +2909,10 @@ public final class BlockNeighborContext {
         private final int compoundInterModeContext;
 
         /// The provisional motion-vector candidates sorted in descending weight order.
-        private final ProvisionalMotionVectorCandidate[] candidates;
+        private final ProvisionalMotionVectorCandidate @Unmodifiable [] candidates;
 
         /// The de-duplicated spatial motion-vector candidates used for nearest/near/new prediction.
-        private final ProvisionalMotionVectorCandidate[] referenceMotionVectorCandidates;
+        private final ProvisionalMotionVectorCandidate @Unmodifiable [] referenceMotionVectorCandidates;
 
         /// Creates one provisional inter-mode syntax context.
         ///

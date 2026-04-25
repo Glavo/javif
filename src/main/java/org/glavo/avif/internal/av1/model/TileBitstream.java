@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.model;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -28,7 +29,7 @@ public final class TileBitstream {
     /// The zero-based tile index within the frame.
     private final int tileIndex;
     /// The backing payload bytes that contain the tile payload.
-    private final byte[] data;
+    private final byte @Unmodifiable [] data;
     /// The first tile byte inside `data`.
     private final int dataOffset;
     /// The byte length of the tile payload.

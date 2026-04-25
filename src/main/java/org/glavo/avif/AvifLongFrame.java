@@ -17,6 +17,7 @@ package org.glavo.avif;
 
 import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -25,7 +26,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class AvifLongFrame extends AvifFrame {
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format.
-    private final long[] pixels;
+    private final long @Unmodifiable [] pixels;
 
     /// Creates a `long`-backed AVIF frame.
     ///

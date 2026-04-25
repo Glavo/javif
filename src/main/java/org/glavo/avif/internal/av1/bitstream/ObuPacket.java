@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.bitstream;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -25,7 +26,7 @@ public final class ObuPacket {
     /// The parsed OBU header.
     private final ObuHeader header;
     /// The raw OBU payload bytes.
-    private final byte[] payload;
+    private final byte @Unmodifiable [] payload;
     /// The zero-based byte offset of the OBU header.
     private final long streamOffset;
     /// The zero-based OBU index within the stream.

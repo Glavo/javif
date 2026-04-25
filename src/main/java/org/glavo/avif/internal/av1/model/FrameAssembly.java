@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.model;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -32,7 +33,7 @@ public final class FrameAssembly {
     /// The parsed frame header for this frame.
     private final FrameHeader frameHeader;
     /// The refreshed reference-frame headers indexed by runtime reference slot.
-    private final @Nullable FrameHeader[] referenceFrameHeaders;
+    private final @Nullable FrameHeader @Unmodifiable [] referenceFrameHeaders;
     /// The byte offset of the first OBU that belongs to this frame.
     private final long streamOffset;
     /// The zero-based index of the first OBU that belongs to this frame.
@@ -256,7 +257,7 @@ public final class FrameAssembly {
         /// The byte length of the tile data inside the source OBU payload.
         private final int tileDataLength;
         /// The parsed per-tile bitstream views inside this tile group.
-        private final TileBitstream[] tiles;
+        private final TileBitstream @Unmodifiable [] tiles;
 
         /// Creates tile-group payload metadata.
         ///

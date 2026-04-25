@@ -17,6 +17,7 @@ package org.glavo.avif.testutil;
 
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// Test oracle for AV1 normative horizontal super-resolution upscaling.
 @NotNullByDefault
@@ -49,7 +50,7 @@ public final class SuperResolutionOracle {
     private static final int FILTER_START_OFFSET = FILTER_TAP_COUNT / 2 - 1;
 
     /// The AV1 normative 64-phase horizontal super-resolution filters.
-    private static final int[][] FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] FILTERS = {
             {0, 0, 0, 128, 0, 0, 0, 0},
             {0, 0, -1, 128, 2, -1, 0, 0},
             {0, 1, -3, 127, 4, -2, 1, 0},

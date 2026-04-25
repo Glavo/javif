@@ -53,6 +53,7 @@ import org.glavo.avif.testutil.InterPredictionOracle;
 import org.glavo.avif.testutil.SuperResolutionOracle;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -73,18 +74,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 final class FrameReconstructorIntegrationTest {
     /// One fixed single-tile payload that stays inside the current first-pixel reconstruction subset.
-    private static final byte[] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
+    private static final byte @Unmodifiable [] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
     /// One deterministic real tile payload whose first visible `8x8` leaf decodes both luma and
     /// chroma palette syntax.
-    private static final byte[] BITSTREAM_DERIVED_PALETTE_PAYLOAD =
+    private static final byte @Unmodifiable [] BITSTREAM_DERIVED_PALETTE_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/palette-block.hex");
 
     /// One deterministic real inter tile payload whose first block uses one single reference and a
     /// zero motion vector.
-    private static final byte[] BITSTREAM_DERIVED_INTER_PAYLOAD =
+    private static final byte @Unmodifiable [] BITSTREAM_DERIVED_INTER_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
 
     /// The generated named-fixture resource backing deterministic frame-reconstructor integration payloads.
@@ -96,7 +97,7 @@ final class FrameReconstructorIntegrationTest {
             "av1/fixtures/generated/tile-block-header-fixtures.txt";
 
     /// The top-left `8x8` luma block produced by the current legacy directional still-picture fixture.
-    private static final int[][] LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8 = {
+    private static final int @Unmodifiable [] @Unmodifiable [] LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8 = {
             {127, 128, 128, 128, 128, 128, 128, 128},
             {126, 126, 126, 126, 128, 128, 128, 128},
             {128, 128, 127, 126, 129, 129, 129, 129},

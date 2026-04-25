@@ -31,6 +31,7 @@ import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -53,19 +54,19 @@ public final class TileSyntaxReader {
     private static final int MOTION_VECTOR_JOINT_VERTICAL = 2;
 
     /// The Wiener coefficient lower bounds in AV1 coefficient order.
-    private static final int[] WIENER_TAPS_MIN = {-5, -23, -17};
+    private static final int @Unmodifiable [] WIENER_TAPS_MIN = {-5, -23, -17};
 
     /// The Wiener coefficient upper bounds in AV1 coefficient order.
-    private static final int[] WIENER_TAPS_MAX = {10, 8, 46};
+    private static final int @Unmodifiable [] WIENER_TAPS_MAX = {10, 8, 46};
 
     /// The Wiener coefficient subexponential `k` parameters in AV1 coefficient order.
-    private static final int[] WIENER_TAPS_K = {1, 2, 3};
+    private static final int @Unmodifiable [] WIENER_TAPS_K = {1, 2, 3};
 
     /// The self-guided projection coefficient lower bounds.
-    private static final int[] SELF_GUIDED_PROJECTION_MIN = {-96, -32};
+    private static final int @Unmodifiable [] SELF_GUIDED_PROJECTION_MIN = {-96, -32};
 
     /// The self-guided projection coefficient upper bounds.
-    private static final int[] SELF_GUIDED_PROJECTION_MAX = {31, 95};
+    private static final int @Unmodifiable [] SELF_GUIDED_PROJECTION_MAX = {31, 95};
 
     /// The self-guided projection coefficient subexponential `k` parameter.
     private static final int SELF_GUIDED_PROJECTION_SUBEXP_K = 4;

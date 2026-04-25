@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.model;
 import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -34,7 +35,7 @@ public final class SequenceHeader {
     /// The timing and decoder model information for the sequence.
     private final TimingInfo timingInfo;
     /// The operating point definitions declared by the sequence.
-    private final OperatingPoint[] operatingPoints;
+    private final OperatingPoint @Unmodifiable [] operatingPoints;
     /// Whether the sequence is marked as still-picture only.
     private final boolean stillPicture;
     /// Whether the sequence uses the reduced still-picture header form.

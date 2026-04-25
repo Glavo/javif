@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -40,13 +41,13 @@ public final class RestorationUnit {
     private final FrameHeader.RestorationType type;
 
     /// The Wiener coefficients indexed by pass and coefficient.
-    private final int[][] wienerCoefficients;
+    private final int @Unmodifiable [] @Unmodifiable [] wienerCoefficients;
 
     /// The self-guided restoration parameter set index.
     private final int selfGuidedSet;
 
     /// The self-guided projection coefficients.
-    private final int[] selfGuidedProjectionCoefficients;
+    private final int @Unmodifiable [] selfGuidedProjectionCoefficients;
 
     /// Creates one decoded restoration unit.
     ///

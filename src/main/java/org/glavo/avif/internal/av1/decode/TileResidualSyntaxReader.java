@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -52,7 +53,7 @@ public final class TileResidualSyntaxReader {
     private static final int CHROMA_PLANE_V = 1;
 
     /// The `dav1d` natural-order scan for two-dimensional `TX_4X4` transforms.
-    private static final int[] FOUR_BY_FOUR_SCAN = {
+    private static final int @Unmodifiable [] FOUR_BY_FOUR_SCAN = {
             0, 4, 1, 2,
             5, 8, 12, 9,
             6, 3, 7, 10,
@@ -60,10 +61,10 @@ public final class TileResidualSyntaxReader {
     };
 
     /// The default two-dimensional scan tables for every modeled transform size.
-    private static final int[][] DEFAULT_SCANS = createDefaultScans();
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SCANS = createDefaultScans();
 
     /// The `dav1d` low-token context offsets for square transforms.
-    private static final int[][] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
             {0, 1, 6, 6, 21},
             {1, 6, 6, 21, 21},
             {6, 6, 21, 21, 21},

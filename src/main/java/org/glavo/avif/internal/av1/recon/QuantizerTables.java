@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// Shared AV1 QTX lookup tables used by the current reconstruction subset.
 ///
@@ -25,7 +26,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 @NotNullByDefault
 final class QuantizerTables {
     /// The 8-bit AV1 QTX lookup table for DC coefficients.
-    private static final short[] DC_QLOOKUP_8_QTX = {
+    private static final short @Unmodifiable [] DC_QLOOKUP_8_QTX = {
             4, 8, 8, 9, 10, 11, 12, 12, 13, 14, 15, 16, 17, 18,
             19, 19, 20, 21, 22, 23, 24, 25, 26, 26, 27, 28, 29, 30,
             31, 32, 32, 33, 34, 35, 36, 37, 38, 38, 39, 40, 41, 42,
@@ -48,7 +49,7 @@ final class QuantizerTables {
     };
 
     /// The 8-bit AV1 QTX lookup table for AC coefficients.
-    private static final short[] AC_QLOOKUP_8_QTX = {
+    private static final short @Unmodifiable [] AC_QLOOKUP_8_QTX = {
             4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
             20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
             33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
@@ -72,7 +73,7 @@ final class QuantizerTables {
     };
 
     /// The 10-bit AV1 QTX lookup table for DC coefficients.
-    private static final short[] DC_QLOOKUP_10_QTX = {
+    private static final short @Unmodifiable [] DC_QLOOKUP_10_QTX = {
             4, 9, 10, 13, 15, 17, 20, 22, 25, 28, 31, 34, 37, 40, 43, 47,
             50, 53, 57, 60, 64, 68, 71, 75, 78, 82, 86, 90, 93, 97, 101, 105,
             109, 113, 116, 120, 124, 128, 132, 136, 140, 143, 147, 151, 155, 159, 163, 166,
@@ -92,7 +93,7 @@ final class QuantizerTables {
     };
 
     /// The 10-bit AV1 QTX lookup table for AC coefficients.
-    private static final short[] AC_QLOOKUP_10_QTX = {
+    private static final short @Unmodifiable [] AC_QLOOKUP_10_QTX = {
             4, 9, 11, 13, 16, 18, 21, 24, 27, 30, 33, 37, 40, 44, 48, 51,
             55, 59, 63, 67, 71, 75, 79, 83, 88, 92, 96, 100, 105, 109, 114, 118,
             122, 127, 131, 136, 140, 145, 149, 154, 158, 163, 168, 172, 177, 181, 186, 190,
@@ -112,7 +113,7 @@ final class QuantizerTables {
     };
 
     /// The 12-bit AV1 QTX lookup table for DC coefficients.
-    private static final short[] DC_QLOOKUP_12_QTX = {
+    private static final short @Unmodifiable [] DC_QLOOKUP_12_QTX = {
             4, 12, 18, 25, 33, 41, 50, 60, 70, 80, 91, 103, 115, 127, 140, 153,
             166, 180, 194, 208, 222, 237, 251, 266, 281, 296, 312, 327, 343, 358, 374, 390,
             405, 421, 437, 453, 469, 484, 500, 516, 532, 548, 564, 580, 596, 611, 627, 643,
@@ -132,7 +133,7 @@ final class QuantizerTables {
     };
 
     /// The 12-bit AV1 QTX lookup table for AC coefficients.
-    private static final short[] AC_QLOOKUP_12_QTX = {
+    private static final short @Unmodifiable [] AC_QLOOKUP_12_QTX = {
             4, 13, 19, 27, 35, 44, 54, 64, 75, 87, 99, 112, 126, 139, 154, 168,
             183, 199, 214, 230, 247, 263, 280, 297, 314, 331, 349, 366, 384, 402, 420, 438,
             456, 475, 493, 511, 530, 548, 567, 586, 604, 623, 642, 660, 679, 698, 716, 735,

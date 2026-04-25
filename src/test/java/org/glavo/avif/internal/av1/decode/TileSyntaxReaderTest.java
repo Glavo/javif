@@ -39,6 +39,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -57,13 +58,13 @@ final class TileSyntaxReaderTest {
     private static final String TILE_SYNTAX_FIXTURES_RESOURCE = "av1/fixtures/generated/tile-syntax-fixtures.txt";
 
     /// Fixed payload whose first `use_filter_intra` decision decodes to `true`.
-    private static final byte[] FILTER_INTRA_PAYLOAD = readTileSyntaxFixture("filter-intra");
+    private static final byte @Unmodifiable [] FILTER_INTRA_PAYLOAD = readTileSyntaxFixture("filter-intra");
 
     /// Fixed payload whose first palette decisions decode to luma and chroma palette syntax.
-    private static final byte[] PALETTE_PAYLOAD = readTileSyntaxFixture("palette");
+    private static final byte @Unmodifiable [] PALETTE_PAYLOAD = readTileSyntaxFixture("palette");
 
     /// Fixed payload whose first motion-vector residual changes both motion-vector components.
-    private static final byte[] MOTION_VECTOR_RESIDUAL_PAYLOAD = readTileSyntaxFixture("motion-vector-residual");
+    private static final byte @Unmodifiable [] MOTION_VECTOR_RESIDUAL_PAYLOAD = readTileSyntaxFixture("motion-vector-residual");
 
     /// Verifies that inter-frame skip, intra, and partition symbols use the expected tile-local CDF tables.
     @Test

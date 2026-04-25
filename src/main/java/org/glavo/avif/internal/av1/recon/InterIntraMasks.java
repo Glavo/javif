@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.recon;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.InterIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -50,22 +51,22 @@ final class InterIntraMasks {
     private static final int WEDGE_OBLIQUE153 = 5;
 
     /// Odd-row oblique wedge master border.
-    private static final int[] WEDGE_MASTER_BORDER_ODD = {1, 2, 6, 18, 37, 53, 60, 63};
+    private static final int @Unmodifiable [] WEDGE_MASTER_BORDER_ODD = {1, 2, 6, 18, 37, 53, 60, 63};
 
     /// Even-row oblique wedge master border.
-    private static final int[] WEDGE_MASTER_BORDER_EVEN = {1, 4, 11, 27, 46, 58, 62, 63};
+    private static final int @Unmodifiable [] WEDGE_MASTER_BORDER_EVEN = {1, 4, 11, 27, 46, 58, 62, 63};
 
     /// Vertical wedge master border.
-    private static final int[] WEDGE_MASTER_BORDER_VERTICAL = {0, 2, 7, 21, 43, 57, 62, 64};
+    private static final int @Unmodifiable [] WEDGE_MASTER_BORDER_VERTICAL = {0, 2, 7, 21, 43, 57, 62, 64};
 
     /// Inter-intra one-dimensional non-DC blend weights.
-    private static final int[] INTER_INTRA_WEIGHTS_1D = {
+    private static final int @Unmodifiable [] INTER_INTRA_WEIGHTS_1D = {
             60, 52, 45, 39, 34, 30, 26, 22, 19, 17, 15, 13, 11, 10, 8, 7,
             6, 6, 5, 4, 4, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 1
     };
 
     /// Wedge codebook used when the block is taller than it is wide.
-    private static final int[][] WEDGE_CODEBOOK_HGTW = {
+    private static final int @Unmodifiable [] @Unmodifiable [] WEDGE_CODEBOOK_HGTW = {
             {WEDGE_OBLIQUE27, 4, 4}, {WEDGE_OBLIQUE63, 4, 4},
             {WEDGE_OBLIQUE117, 4, 4}, {WEDGE_OBLIQUE153, 4, 4},
             {WEDGE_HORIZONTAL, 4, 2}, {WEDGE_HORIZONTAL, 4, 4},
@@ -77,7 +78,7 @@ final class InterIntraMasks {
     };
 
     /// Wedge codebook used when the block is wider than it is tall.
-    private static final int[][] WEDGE_CODEBOOK_HLTW = {
+    private static final int @Unmodifiable [] @Unmodifiable [] WEDGE_CODEBOOK_HLTW = {
             {WEDGE_OBLIQUE27, 4, 4}, {WEDGE_OBLIQUE63, 4, 4},
             {WEDGE_OBLIQUE117, 4, 4}, {WEDGE_OBLIQUE153, 4, 4},
             {WEDGE_VERTICAL, 2, 4}, {WEDGE_VERTICAL, 4, 4},
@@ -89,7 +90,7 @@ final class InterIntraMasks {
     };
 
     /// Wedge codebook used when the block is square.
-    private static final int[][] WEDGE_CODEBOOK_HEQW = {
+    private static final int @Unmodifiable [] @Unmodifiable [] WEDGE_CODEBOOK_HEQW = {
             {WEDGE_OBLIQUE27, 4, 4}, {WEDGE_OBLIQUE63, 4, 4},
             {WEDGE_OBLIQUE117, 4, 4}, {WEDGE_OBLIQUE153, 4, 4},
             {WEDGE_HORIZONTAL, 4, 2}, {WEDGE_HORIZONTAL, 4, 6},
@@ -101,7 +102,7 @@ final class InterIntraMasks {
     };
 
     /// The generated luma-domain wedge master masks indexed by direction.
-    private static final int[][] WEDGE_MASTER = createWedgeMaster();
+    private static final int @Unmodifiable [] @Unmodifiable [] WEDGE_MASTER = createWedgeMaster();
 
     /// Prevents instantiation of this utility class.
     private InterIntraMasks() {

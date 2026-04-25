@@ -35,6 +35,7 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -97,7 +98,7 @@ public final class FrameReconstructor {
     private static final int SUPERRES_FILTER_START_OFFSET = SUPERRES_FILTER_TAP_COUNT / 2 - 1;
 
     /// The AV1 OBMC blend masks indexed by overlap length `1, 2, 4, 8, 16, 32, 64`.
-    private static final int[][] OBMC_MASKS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] OBMC_MASKS = {
             {64},
             {45, 64},
             {39, 50, 59, 64},
@@ -119,7 +120,7 @@ public final class FrameReconstructor {
     private static final int LOCAL_WARP_SAMPLE_CAPACITY = 8;
 
     /// The default AV1 regular 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
-    private static final int[][] REGULAR_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] REGULAR_SUBPEL_FILTERS = {
             {0, 1, -3, 63, 4, -1, 0, 0},
             {0, 1, -5, 61, 9, -2, 0, 0},
             {0, 1, -6, 58, 14, -4, 1, 0},
@@ -138,7 +139,7 @@ public final class FrameReconstructor {
     };
 
     /// The default AV1 smooth 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
-    private static final int[][] SMOOTH_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SMOOTH_SUBPEL_FILTERS = {
             {0, 1, 14, 31, 17, 1, 0, 0},
             {0, 0, 13, 31, 18, 2, 0, 0},
             {0, 0, 11, 31, 20, 2, 0, 0},
@@ -157,7 +158,7 @@ public final class FrameReconstructor {
     };
 
     /// The default AV1 sharp 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
-    private static final int[][] SHARP_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SHARP_SUBPEL_FILTERS = {
             {-1, 1, -3, 63, 4, -1, 1, 0},
             {-1, 3, -6, 62, 8, -3, 2, -1},
             {-1, 4, -9, 60, 13, -5, 3, -1},
@@ -177,7 +178,7 @@ public final class FrameReconstructor {
 
     /// The reduced-width AV1 regular 8-tap subpel filters used when the sampled axis is at most
     /// four samples wide.
-    private static final int[][] SMALL_REGULAR_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SMALL_REGULAR_SUBPEL_FILTERS = {
             {0, 0, -2, 63, 4, -1, 0, 0},
             {0, 0, -4, 61, 9, -2, 0, 0},
             {0, 0, -5, 58, 14, -3, 0, 0},
@@ -197,7 +198,7 @@ public final class FrameReconstructor {
 
     /// The reduced-width AV1 smooth 8-tap subpel filters used when the sampled axis is at most
     /// four samples wide.
-    private static final int[][] SMALL_SMOOTH_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SMALL_SMOOTH_SUBPEL_FILTERS = {
             {0, 0, 15, 31, 17, 1, 0, 0},
             {0, 0, 13, 31, 18, 2, 0, 0},
             {0, 0, 11, 31, 20, 2, 0, 0},
@@ -216,7 +217,7 @@ public final class FrameReconstructor {
     };
 
     /// The AV1 normative 64-phase horizontal super-resolution filters.
-    private static final int[][] SUPERRES_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SUPERRES_FILTERS = {
             {0, 0, 0, 128, 0, 0, 0, 0},
             {0, 0, -1, 128, 2, -1, 0, 0},
             {0, 1, -3, 127, 4, -2, 1, 0},

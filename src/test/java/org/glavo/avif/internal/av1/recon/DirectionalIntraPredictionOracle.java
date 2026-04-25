@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.recon;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.function.IntBinaryOperator;
 
@@ -31,7 +32,7 @@ final class DirectionalIntraPredictionOracle {
     private static final int ANGLE_STEP = 3;
 
     /// The AV1 directional intra derivative table used by the no-upsample prediction path.
-    private static final int[] DR_INTRA_DERIVATIVE = {
+    private static final int @Unmodifiable [] DR_INTRA_DERIVATIVE = {
             0, 0, 0,
             1023, 0, 0,
             547, 0, 0,

@@ -22,6 +22,7 @@ import org.glavo.avif.AvifImageInfo;
 import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
@@ -36,7 +37,7 @@ import java.util.Set;
 @NotNullByDefault
 public final class AvifContainerParser {
     /// The source bytes.
-    private final byte[] source;
+    private final byte @Unmodifiable [] source;
     /// The parsed metadata state.
     private final MetaState meta = new MetaState();
     /// Whether an AVIF-compatible `ftyp` box was parsed.

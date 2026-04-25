@@ -23,6 +23,7 @@ import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -42,7 +43,7 @@ public final class RestorationApplier {
     private static final int SELF_GUIDED_RESTORATION_BITS = 4;
 
     /// The AV1 self-guided restoration parameter table in `{r0, e0, r1, e1}` order.
-    private static final int[][] SELF_GUIDED_PARAMS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SELF_GUIDED_PARAMS = {
             {2, 140, 1, 3236},
             {2, 112, 1, 2158},
             {2, 93, 1, 1618},

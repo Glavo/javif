@@ -31,6 +31,7 @@ import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -43,14 +44,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 final class FrameSyntaxDecoderTest {
     /// One fixed inter-tile payload whose first block decodes as `skip = false` and `intra = false`.
-    private static final byte[] INTER_BLOCK_PAYLOAD = HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+    private static final byte @Unmodifiable [] INTER_BLOCK_PAYLOAD = HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
 
     /// One fixed payload whose first skip decision changes when the skip CDF is inherited.
-    private static final byte[] DIFFERENT_INHERITED_SKIP_PAYLOAD =
+    private static final byte @Unmodifiable [] DIFFERENT_INHERITED_SKIP_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/frame-cdf-different-skip.hex");
 
     /// One fixed payload whose leading loop-restoration unit decodes as active Wiener syntax.
-    private static final byte[] RESTORATION_WIENER_PAYLOAD = new byte[]{
+    private static final byte @Unmodifiable [] RESTORATION_WIENER_PAYLOAD = new byte[]{
             0x4E, 0, 0, 0, 0, 0, 0, 0
     };
 

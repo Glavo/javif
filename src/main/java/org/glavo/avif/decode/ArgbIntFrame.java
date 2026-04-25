@@ -16,14 +16,16 @@
 package org.glavo.avif.decode;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Decoded frame backed by packed `int` ARGB pixels.
 @NotNullByDefault
 public final class ArgbIntFrame extends DecodedFrame {
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
-    private final int[] pixels;
+    private final int @Unmodifiable [] pixels;
 
     /// Creates a decoded `int`-backed ARGB frame.
     ///
@@ -46,13 +48,13 @@ public final class ArgbIntFrame extends DecodedFrame {
             int[] pixels
     ) {
         super(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex);
-        this.pixels = Objects.requireNonNull(pixels, "pixels");
+        this.pixels = Arrays.copyOf(Objects.requireNonNull(pixels, "pixels"), pixels.length);
     }
 
     /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
     ///
     /// @return the packed ARGB pixels
     public int[] pixels() {
-        return pixels;
+        return Arrays.copyOf(pixels, pixels.length);
     }
 }

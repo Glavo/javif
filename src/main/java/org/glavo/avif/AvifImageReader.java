@@ -24,6 +24,7 @@ import org.glavo.avif.internal.bmff.AvifContainerParser;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -232,13 +233,13 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @return all decoded frames
     /// @throws IOException if a frame cannot be decoded
-    public List<AvifFrame> readAllFrames() throws IOException {
+    public @Unmodifiable List<AvifFrame> readAllFrames() throws IOException {
         ensureOpen();
         ArrayList<AvifFrame> frames = new ArrayList<>();
         while (true) {
             AvifFrame frame = readFrame();
             if (frame == null) {
-                return frames;
+                return List.copyOf(frames);
             }
             frames.add(frame);
         }

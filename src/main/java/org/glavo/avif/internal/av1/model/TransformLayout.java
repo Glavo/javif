@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -52,10 +53,10 @@ public final class TransformLayout {
     private final boolean variableLumaTransformTree;
 
     /// The luma transform units in bitstream order.
-    private final TransformUnit[] lumaUnits;
+    private final TransformUnit @Unmodifiable [] lumaUnits;
 
     /// The shared chroma transform units for the U and V planes in bitstream order.
-    private final TransformUnit[] chromaUnits;
+    private final TransformUnit @Unmodifiable [] chromaUnits;
 
     /// Creates one decoded block-level transform layout.
     ///

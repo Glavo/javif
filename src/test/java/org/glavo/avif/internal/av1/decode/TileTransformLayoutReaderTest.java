@@ -32,6 +32,7 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
@@ -45,15 +46,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 final class TileTransformLayoutReaderTest {
     /// One fixed key-frame payload whose first switchable transform-depth symbol decodes to `2`.
-    private static final byte[] KEY_FRAME_DEPTH_TWO_PAYLOAD =
+    private static final byte @Unmodifiable [] KEY_FRAME_DEPTH_TWO_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/key-transform-depth-2.hex");
 
     /// One fixed inter payload whose first 8x8 block splits into four 4x4 transform units.
-    private static final byte[] INTER_8X8_SPLIT_PAYLOAD =
+    private static final byte @Unmodifiable [] INTER_8X8_SPLIT_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/inter-transform-8x8-split.hex");
 
     /// One fixed inter payload whose first 16x16 block splits into four 8x8 transform units.
-    private static final byte[] INTER_16X16_SPLIT_PAYLOAD =
+    private static final byte @Unmodifiable [] INTER_16X16_SPLIT_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/inter-transform-16x16-split.hex");
 
     /// Verifies that switchable key-frame transform syntax selects a smaller repeated luma transform size.

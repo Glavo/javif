@@ -32,6 +32,7 @@ import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -1904,7 +1905,7 @@ public final class TileBlockHeaderReader {
         private final int qIndex;
 
         /// The current delta-lf runtime slots after any superblock-level updates.
-        private final int[] deltaLfValues;
+        private final int @Unmodifiable [] deltaLfValues;
 
         /// The decoded luma intra prediction mode, or `null` for non-intra blocks.
         private final @Nullable LumaIntraPredictionMode yMode;
@@ -1919,19 +1920,19 @@ public final class TileBlockHeaderReader {
         private final int uvPaletteSize;
 
         /// The decoded luma palette entries, or an empty array when palette mode is disabled.
-        private final int[] yPaletteColors;
+        private final int @Unmodifiable [] yPaletteColors;
 
         /// The decoded U chroma palette entries, or an empty array when palette mode is disabled.
-        private final int[] uPaletteColors;
+        private final int @Unmodifiable [] uPaletteColors;
 
         /// The decoded V chroma palette entries, or an empty array when palette mode is disabled.
-        private final int[] vPaletteColors;
+        private final int @Unmodifiable [] vPaletteColors;
 
         /// The packed luma palette indices with two 4-bit entries per byte.
-        private final byte[] yPaletteIndices;
+        private final byte @Unmodifiable [] yPaletteIndices;
 
         /// The packed chroma palette indices with two 4-bit entries per byte.
-        private final byte[] uvPaletteIndices;
+        private final byte @Unmodifiable [] uvPaletteIndices;
 
         /// The decoded filter-intra mode, or `null` when filter intra is disabled.
         private final @Nullable FilterIntraMode filterIntraMode;

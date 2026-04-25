@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -29,16 +30,16 @@ public final class FrameSyntaxDecodeResult {
     private final FrameAssembly assembly;
 
     /// The decoded top-level partition roots for each tile in frame order.
-    private final TilePartitionTreeReader.Node[][] tileRoots;
+    private final TilePartitionTreeReader.Node @Unmodifiable [] @Unmodifiable [] tileRoots;
 
     /// The tile-local temporal motion fields produced while decoding the current frame.
-    private final TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields;
+    private final TileDecodeContext.TemporalMotionField @Unmodifiable [] decodedTemporalMotionFields;
 
     /// The decoded frame-level loop-restoration unit syntax.
     private final RestorationUnitMap restorationUnitMap;
 
     /// The final tile-local CDF contexts produced while decoding the current frame.
-    private final CdfContext[] finalTileCdfContexts;
+    private final CdfContext @Unmodifiable [] finalTileCdfContexts;
 
     /// Creates one structural frame-decode result.
     ///

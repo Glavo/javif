@@ -22,6 +22,8 @@ import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -32,7 +34,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class TilePartitionTreeReader {
     /// The above-edge partition state values copied from `dav1d`.
-    private static final int[][] ABOVE_PARTITION_EDGE_VALUES = {
+    private static final int @Unmodifiable [] @Unmodifiable [] ABOVE_PARTITION_EDGE_VALUES = {
             {0x00, 0x00, 0x10, -1, 0x00, 0x10, 0x10, 0x10, -1, -1},
             {0x10, 0x10, 0x18, -1, 0x10, 0x18, 0x18, 0x18, 0x10, 0x1C},
             {0x18, 0x18, 0x1C, -1, 0x18, 0x1C, 0x1C, 0x1C, 0x18, 0x1E},
@@ -41,7 +43,7 @@ public final class TilePartitionTreeReader {
     };
 
     /// The left-edge partition state values copied from `dav1d`.
-    private static final int[][] LEFT_PARTITION_EDGE_VALUES = {
+    private static final int @Unmodifiable [] @Unmodifiable [] LEFT_PARTITION_EDGE_VALUES = {
             {0x00, 0x10, 0x00, -1, 0x10, 0x10, 0x00, 0x10, -1, -1},
             {0x10, 0x18, 0x10, -1, 0x18, 0x18, 0x10, 0x18, 0x1C, 0x10},
             {0x18, 0x1C, 0x18, -1, 0x1C, 0x1C, 0x18, 0x1C, 0x1E, 0x18},
@@ -612,7 +614,7 @@ public final class TilePartitionTreeReader {
         private final PartitionType partitionType;
 
         /// The child nodes in bitstream order.
-        private final Node[] children;
+        private final Node @Unmodifiable [] children;
 
         /// Creates one non-leaf partition node.
         ///

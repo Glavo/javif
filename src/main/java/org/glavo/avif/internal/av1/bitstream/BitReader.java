@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.bitstream;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -25,7 +26,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class BitReader {
     /// The payload bytes being read.
-    private final byte[] data;
+    private final byte @Unmodifiable [] data;
     /// The first readable byte offset inside `data`.
     private final int startByteOffset;
     /// The readable byte length inside `data`.

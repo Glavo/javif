@@ -20,6 +20,7 @@ import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -31,10 +32,10 @@ import java.util.Objects;
 @NotNullByDefault
 public final class RestorationUnitMap {
     /// The unit column count for each plane.
-    private final int[] columnsByPlane;
+    private final int @Unmodifiable [] columnsByPlane;
 
     /// The unit row count for each plane.
-    private final int[] rowsByPlane;
+    private final int @Unmodifiable [] rowsByPlane;
 
     /// The flat unit storage for each plane.
     private final @Nullable RestorationUnit[][] unitsByPlane;

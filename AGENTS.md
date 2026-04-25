@@ -14,6 +14,14 @@ These rules apply to all Java code written or modified in this repository.
 - Represent optional or absent values with `@Nullable` instead.
 - Do not introduce APIs that require callers to unwrap `Optional`.
 
+## Immutability Annotations
+
+- Annotate immutable collections and arrays with JetBrains Annotations `@Unmodifiable`.
+- Annotate immutable collection views with JetBrains Annotations `@UnmodifiableView`.
+- For arrays, place the annotation on the array dimension, for example `String @Unmodifiable []`.
+- For multidimensional immutable arrays, annotate every immutable dimension, for example
+  `int @Unmodifiable [] @Unmodifiable []`.
+
 ## Runtime Dependencies
 
 - Except for tests, all code in this repository must run with no runtime dependencies other than the `java.base` module.

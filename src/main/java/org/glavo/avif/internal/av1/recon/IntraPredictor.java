@@ -19,6 +19,7 @@ import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// Minimal intra predictor used by the first reconstruction-capable decode path.
 ///
@@ -29,12 +30,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 @NotNullByDefault
 final class IntraPredictor {
     /// The AV1 directional base angles in `VERTICAL`-through-`VERTICAL_LEFT` order.
-    private static final int[] DIRECTIONAL_BASE_ANGLES = {
+    private static final int @Unmodifiable [] DIRECTIONAL_BASE_ANGLES = {
             90, 180, 45, 135, 113, 157, 203, 67
     };
 
     /// The AV1 directional derivative table indexed by half-angle.
-    private static final int[] DIRECTIONAL_DERIVATIVES = {
+    private static final int @Unmodifiable [] DIRECTIONAL_DERIVATIVES = {
             0,
             1023, 0,
             547,
@@ -72,7 +73,7 @@ final class IntraPredictor {
     /// 1. the current unit top-left reference
     /// 2. the four top reference samples
     /// 3. the two left reference samples
-    private static final int[][][] FILTER_INTRA_TAPS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] FILTER_INTRA_TAPS = {
             {
                     {0, -6, 10, 0, 0, 0, 12},
                     {1, -5, 2, 10, 0, 0, 9},
@@ -126,25 +127,25 @@ final class IntraPredictor {
     };
 
     /// The smooth predictor weights for a width or height of one sample.
-    private static final int[] SMOOTH_WEIGHTS_1 = {255};
+    private static final int @Unmodifiable [] SMOOTH_WEIGHTS_1 = {255};
 
     /// The smooth predictor weights for a width or height of two samples.
-    private static final int[] SMOOTH_WEIGHTS_2 = {255, 128};
+    private static final int @Unmodifiable [] SMOOTH_WEIGHTS_2 = {255, 128};
 
     /// The smooth predictor weights for a width or height of four samples.
-    private static final int[] SMOOTH_WEIGHTS_4 = {255, 149, 85, 64};
+    private static final int @Unmodifiable [] SMOOTH_WEIGHTS_4 = {255, 149, 85, 64};
 
     /// The smooth predictor weights for a width or height of eight samples.
-    private static final int[] SMOOTH_WEIGHTS_8 = {255, 197, 146, 105, 73, 50, 37, 32};
+    private static final int @Unmodifiable [] SMOOTH_WEIGHTS_8 = {255, 197, 146, 105, 73, 50, 37, 32};
 
     /// The smooth predictor weights for a width or height of sixteen samples.
-    private static final int[] SMOOTH_WEIGHTS_16 = {
+    private static final int @Unmodifiable [] SMOOTH_WEIGHTS_16 = {
             255, 225, 196, 170, 145, 123, 102, 84,
             68, 54, 43, 33, 26, 20, 17, 16
     };
 
     /// The smooth predictor weights for a width or height of thirty-two samples.
-    private static final int[] SMOOTH_WEIGHTS_32 = {
+    private static final int @Unmodifiable [] SMOOTH_WEIGHTS_32 = {
             255, 240, 225, 210, 196, 182, 169, 157,
             145, 133, 122, 111, 101, 92, 83, 74,
             66, 59, 52, 45, 39, 34, 29, 25,
@@ -152,7 +153,7 @@ final class IntraPredictor {
     };
 
     /// The smooth predictor weights for a width or height of sixty-four samples.
-    private static final int[] SMOOTH_WEIGHTS_64 = {
+    private static final int @Unmodifiable [] SMOOTH_WEIGHTS_64 = {
             255, 248, 240, 233, 225, 218, 210, 203,
             196, 189, 182, 176, 169, 163, 156, 150,
             144, 138, 133, 127, 121, 116, 111, 106,

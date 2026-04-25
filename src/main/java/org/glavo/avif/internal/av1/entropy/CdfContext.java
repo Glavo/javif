@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.entropy;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -27,21 +28,21 @@ import java.util.Objects;
 @NotNullByDefault
 public final class CdfContext {
     /// The transformed default skip CDFs.
-    private static final int[][] DEFAULT_SKIP_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SKIP_CDFS = inverse2d(new int[][]{
             {31671},
             {16515},
             {4576}
     });
 
     /// The transformed default skip-mode CDFs.
-    private static final int[][] DEFAULT_SKIP_MODE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SKIP_MODE_CDFS = inverse2d(new int[][]{
             {32621},
             {20708},
             {8127}
     });
 
     /// The transformed default intra/inter decision CDFs.
-    private static final int[][] DEFAULT_INTRA_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_INTRA_CDFS = inverse2d(new int[][]{
             {806},
             {16662},
             {20186},
@@ -49,7 +50,7 @@ public final class CdfContext {
     });
 
     /// The transformed default compound-reference decision CDFs.
-    private static final int[][] DEFAULT_COMPOUND_REFERENCE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_COMPOUND_REFERENCE_CDFS = inverse2d(new int[][]{
             {26828},
             {24035},
             {12031},
@@ -58,7 +59,7 @@ public final class CdfContext {
     });
 
     /// The transformed default compound-direction decision CDFs.
-    private static final int[][] DEFAULT_COMPOUND_DIRECTION_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_COMPOUND_DIRECTION_CDFS = inverse2d(new int[][]{
             {1198},
             {2070},
             {9166},
@@ -67,7 +68,7 @@ public final class CdfContext {
     });
 
     /// The transformed default single-reference selection CDFs.
-    private static final int[][][] DEFAULT_SINGLE_REFERENCE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_SINGLE_REFERENCE_CDFS = inverse3d(new int[][][]{
             {{4897}, {16973}, {29744}},
             {{1555}, {16751}, {30279}},
             {{4236}, {19647}, {31194}},
@@ -77,27 +78,27 @@ public final class CdfContext {
     });
 
     /// The transformed default compound forward-reference selection CDFs.
-    private static final int[][][] DEFAULT_COMPOUND_FORWARD_REFERENCE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_COMPOUND_FORWARD_REFERENCE_CDFS = inverse3d(new int[][][]{
             {{4946}, {19891}, {30731}},
             {{9468}, {22441}, {31059}},
             {{1503}, {15160}, {27544}}
     });
 
     /// The transformed default compound backward-reference selection CDFs.
-    private static final int[][][] DEFAULT_COMPOUND_BACKWARD_REFERENCE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_COMPOUND_BACKWARD_REFERENCE_CDFS = inverse3d(new int[][][]{
             {{2235}, {17182}, {30606}},
             {{1423}, {15175}, {30489}}
     });
 
     /// The transformed default compound unidirectional-reference selection CDFs.
-    private static final int[][][] DEFAULT_COMPOUND_UNIDIRECTIONAL_REFERENCE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_COMPOUND_UNIDIRECTIONAL_REFERENCE_CDFS = inverse3d(new int[][][]{
             {{5284}, {23152}, {31774}},
             {{3865}, {14173}, {25120}},
             {{3128}, {15270}, {26710}}
     });
 
     /// The transformed default single-reference new-motion-vector CDFs.
-    private static final int[][] DEFAULT_SINGLE_INTER_NEWMV_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SINGLE_INTER_NEWMV_CDFS = inverse2d(new int[][]{
             {24035},
             {16630},
             {15339},
@@ -107,13 +108,13 @@ public final class CdfContext {
     });
 
     /// The transformed default single-reference global-motion CDFs.
-    private static final int[][] DEFAULT_SINGLE_INTER_GLOBALMV_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SINGLE_INTER_GLOBALMV_CDFS = inverse2d(new int[][]{
             {2175},
             {1054}
     });
 
     /// The transformed default single-reference reference-motion-vector CDFs.
-    private static final int[][] DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SINGLE_INTER_REFERENCE_MV_CDFS = inverse2d(new int[][]{
             {23974},
             {24188},
             {17848},
@@ -123,14 +124,14 @@ public final class CdfContext {
     });
 
     /// The transformed default dynamic-reference-list selection CDFs.
-    private static final int[][] DEFAULT_DRL_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_DRL_CDFS = inverse2d(new int[][]{
             {13104},
             {24560},
             {18945}
     });
 
     /// The transformed default compound inter-mode CDFs.
-    private static final int[][] DEFAULT_COMPOUND_INTER_MODE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_COMPOUND_INTER_MODE_CDFS = inverse2d(new int[][]{
             {7760, 13823, 15808, 17641, 19156, 20666, 26891},
             {10730, 19452, 21145, 22749, 24039, 25131, 28724},
             {10664, 20221, 21588, 22906, 24295, 25387, 28436},
@@ -142,7 +143,7 @@ public final class CdfContext {
     });
 
     /// The transformed default motion-mode CDFs.
-    private static final int[][] DEFAULT_MOTION_MODE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_MODE_CDFS = inverse2d(new int[][]{
             {10923, 21845},
             {10923, 21845},
             {10923, 21845},
@@ -168,7 +169,7 @@ public final class CdfContext {
     });
 
     /// The transformed default OBMC selection CDFs.
-    private static final int[][] DEFAULT_OBMC_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_OBMC_CDFS = inverse2d(new int[][]{
             {16384},
             {16384},
             {16384},
@@ -194,7 +195,7 @@ public final class CdfContext {
     });
 
     /// The transformed default joint-compound selection CDFs.
-    private static final int[][] DEFAULT_JOINT_COMPOUND_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_JOINT_COMPOUND_CDFS = inverse2d(new int[][]{
             {18244},
             {12865},
             {7053},
@@ -204,7 +205,7 @@ public final class CdfContext {
     });
 
     /// The transformed default masked-compound selection CDFs.
-    private static final int[][] DEFAULT_MASK_COMPOUND_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MASK_COMPOUND_CDFS = inverse2d(new int[][]{
             {26607},
             {22891},
             {18840},
@@ -214,7 +215,7 @@ public final class CdfContext {
     });
 
     /// The transformed default wedge-vs-segment compound CDFs.
-    private static final int[][] DEFAULT_WEDGE_COMPOUND_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_WEDGE_COMPOUND_CDFS = inverse2d(new int[][]{
             {23431},
             {13171},
             {11470},
@@ -227,7 +228,7 @@ public final class CdfContext {
     });
 
     /// The transformed default inter-intra enable CDFs.
-    private static final int[][] DEFAULT_INTER_INTRA_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_INTER_INTRA_CDFS = inverse2d(new int[][]{
             {16384},
             {26887},
             {27597},
@@ -235,7 +236,7 @@ public final class CdfContext {
     });
 
     /// The transformed default inter-intra prediction-mode CDFs.
-    private static final int[][] DEFAULT_INTER_INTRA_MODE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_INTER_INTRA_MODE_CDFS = inverse2d(new int[][]{
             {8192, 16384, 24576},
             {1875, 11082, 27332},
             {2473, 9996, 26388},
@@ -243,7 +244,7 @@ public final class CdfContext {
     });
 
     /// The transformed default inter-intra wedge enable CDFs.
-    private static final int[][] DEFAULT_INTER_INTRA_WEDGE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_INTER_INTRA_WEDGE_CDFS = inverse2d(new int[][]{
             {20036},
             {24957},
             {26704},
@@ -254,7 +255,7 @@ public final class CdfContext {
     });
 
     /// The transformed default wedge-index CDFs.
-    private static final int[][] DEFAULT_WEDGE_INDEX_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_WEDGE_INDEX_CDFS = inverse2d(new int[][]{
             {2438, 4440, 6599, 8663, 11005, 12874, 15751, 18094, 20359, 22362, 24127, 25702, 27752, 29450, 31171},
             {806, 3266, 6005, 6738, 7218, 7367, 7771, 14588, 16323, 17367, 18452, 19422, 22839, 26127, 29629},
             {2779, 3738, 4683, 7213, 7775, 8017, 8655, 14357, 17939, 21332, 24520, 27470, 29456, 30529, 31656},
@@ -267,7 +268,7 @@ public final class CdfContext {
     });
 
     /// The transformed default switchable interpolation-filter CDFs.
-    private static final int[][][] DEFAULT_INTERPOLATION_FILTER_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_INTERPOLATION_FILTER_CDFS = inverse3d(new int[][][]{
             {
                     {31935, 32720},
                     {5568, 32719},
@@ -291,7 +292,7 @@ public final class CdfContext {
     });
 
     /// The transformed default transform-size CDFs.
-    private static final int[][][] DEFAULT_TRANSFORM_SIZE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_TRANSFORM_SIZE_CDFS = inverse3d(new int[][][]{
             {
                     {19968},
                     {19968},
@@ -315,7 +316,7 @@ public final class CdfContext {
     });
 
     /// The transformed default inter transform-partition CDFs.
-    private static final int[][] DEFAULT_TRANSFORM_PARTITION_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_TRANSFORM_PARTITION_CDFS = inverse2d(new int[][]{
             {28581},
             {23846},
             {20847},
@@ -340,7 +341,7 @@ public final class CdfContext {
     });
 
     /// The transformed default coefficient-skip CDFs grouped by AV1 transform-context class.
-    private static final int[][][] DEFAULT_COEFFICIENT_SKIP_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_COEFFICIENT_SKIP_CDFS = inverse3d(new int[][][]{
             {
                     {31849}, {5892}, {12112}, {21935}, {20289}, {27473}, {32487},
                     {7654}, {19473}, {29984}, {9961}, {30242}, {32117}
@@ -364,7 +365,7 @@ public final class CdfContext {
     });
 
     /// The transformed default end-of-block prefix CDFs grouped by clamped transform area.
-    private static final int[][][][] DEFAULT_END_OF_BLOCK_PREFIX_CDFS = inverse4d(new int[][][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_END_OF_BLOCK_PREFIX_CDFS = inverse4d(new int[][][][]{
             {
                     {
                             {840, 1039, 1980, 4895},
@@ -438,7 +439,7 @@ public final class CdfContext {
     });
 
     /// The transformed default end-of-block base-token CDFs grouped by AV1 transform-context class.
-    private static final int[][][][] DEFAULT_END_OF_BLOCK_BASE_TOKEN_CDFS = inverse4d(new int[][][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_END_OF_BLOCK_BASE_TOKEN_CDFS = inverse4d(new int[][][][]{
             {
                     {
                             {17837, 29055},
@@ -512,7 +513,7 @@ public final class CdfContext {
     });
 
     /// The transformed default end-of-block high-bit CDFs grouped by AV1 transform-context class.
-    private static final int[][][][] DEFAULT_END_OF_BLOCK_HIGH_BIT_CDFS = inverse4d(new int[][][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_END_OF_BLOCK_HIGH_BIT_CDFS = inverse4d(new int[][][][]{
             {
                     {
                             {16961}, {17223}, {7621}, {16384}, {16384}, {16384}, {16384}, {16384}, {16384}
@@ -559,7 +560,7 @@ public final class CdfContext {
     ///
     /// This compact fallback remains used for non-`TX_4X4` residual paths that still only decode
     /// the first non-zero AC coefficient.
-    private static final int[][][] DEFAULT_BASE_TOKEN_CONTEXT0_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_BASE_TOKEN_CONTEXT0_CDFS = inverse3d(new int[][][]{
             {
                     {4034, 8930, 12727},
                     {6302, 16444, 21761}
@@ -586,7 +587,7 @@ public final class CdfContext {
     ///
     /// These tables are copied from the first `dav1d` transform-context group and cover the
     /// two-dimensional 4x4 residual path implemented by `TileResidualSyntaxReader`.
-    private static final int[][][] DEFAULT_BASE_TOKEN_GROUP0_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_BASE_TOKEN_GROUP0_CDFS = inverse3d(new int[][][]{
             {
                     {4034, 8930, 12727},
                     {18082, 29741, 31877},
@@ -646,7 +647,7 @@ public final class CdfContext {
     });
 
     /// The transformed default DC-sign CDFs for luma and chroma planes.
-    private static final int[][][] DEFAULT_DC_SIGN_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_DC_SIGN_CDFS = inverse3d(new int[][][]{
             {
                     {16000},
                     {13056},
@@ -660,7 +661,7 @@ public final class CdfContext {
     });
 
     /// The transformed default DC high-token CDFs for the `br_tok` context `0`.
-    private static final int[][][] DEFAULT_DC_HIGH_TOKEN_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_DC_HIGH_TOKEN_CDFS = inverse3d(new int[][][]{
             {
                     {14298, 20718, 24174},
                     {15967, 22905, 26286}
@@ -683,7 +684,7 @@ public final class CdfContext {
     ///
     /// This compact fallback remains used for non-`TX_4X4` residual paths that still only decode
     /// the first non-zero AC coefficient.
-    private static final int[][][] DEFAULT_END_OF_BLOCK_HIGH_TOKEN_CONTEXT7_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_END_OF_BLOCK_HIGH_TOKEN_CONTEXT7_CDFS = inverse3d(new int[][][]{
             {
                     {14392, 19951, 22756},
                     {23032, 28815, 30936}
@@ -706,7 +707,7 @@ public final class CdfContext {
     ///
     /// These tables are copied from the first `dav1d` transform-context group and cover the
     /// two-dimensional 4x4 residual path implemented by `TileResidualSyntaxReader`.
-    private static final int[][][] DEFAULT_HIGH_TOKEN_GROUP0_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_HIGH_TOKEN_GROUP0_CDFS = inverse3d(new int[][][]{
             {
                     {14298, 20718, 24174},
                     {12536, 19601, 23789},
@@ -756,10 +757,10 @@ public final class CdfContext {
     });
 
     /// The transformed default delta-q CDF.
-    private static final int[] DEFAULT_DELTA_Q_CDF = inverse(608, 648, 91);
+    private static final int @Unmodifiable [] DEFAULT_DELTA_Q_CDF = inverse(608, 648, 91);
 
     /// The transformed default delta-lf CDFs.
-    private static final int[][] DEFAULT_DELTA_LF_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_DELTA_LF_CDFS = inverse2d(new int[][]{
             {608, 648, 91},
             {608, 648, 91},
             {608, 648, 91},
@@ -768,28 +769,28 @@ public final class CdfContext {
     });
 
     /// The transformed default motion-vector joint CDF.
-    private static final int[] DEFAULT_MOTION_VECTOR_JOINT_CDF = inverse(4096, 11264, 19328);
+    private static final int @Unmodifiable [] DEFAULT_MOTION_VECTOR_JOINT_CDF = inverse(4096, 11264, 19328);
 
     /// The transformed default motion-vector class CDFs for vertical and horizontal components.
-    private static final int[][] DEFAULT_MOTION_VECTOR_CLASS_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_CLASS_CDFS = inverse2d(new int[][]{
             {28672, 30976, 31858, 32320, 32551, 32656, 32740, 32757, 32762, 32767},
             {28672, 30976, 31858, 32320, 32551, 32656, 32740, 32757, 32762, 32767}
     });
 
     /// The transformed default motion-vector sign CDFs for vertical and horizontal components.
-    private static final int[][] DEFAULT_MOTION_VECTOR_SIGN_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_SIGN_CDFS = inverse2d(new int[][]{
             {16384},
             {16384}
     });
 
     /// The transformed default class-0 motion-vector magnitude CDFs for vertical and horizontal components.
-    private static final int[][] DEFAULT_MOTION_VECTOR_CLASS0_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_CLASS0_CDFS = inverse2d(new int[][]{
             {27648},
             {27648}
     });
 
     /// The transformed default class-0 fractional motion-vector CDFs for vertical and horizontal components.
-    private static final int[][][] DEFAULT_MOTION_VECTOR_CLASS0_FP_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_CLASS0_FP_CDFS = inverse3d(new int[][][]{
             {
                     {16384, 24576, 26624},
                     {12288, 21248, 24128}
@@ -801,13 +802,13 @@ public final class CdfContext {
     });
 
     /// The transformed default class-0 high-precision motion-vector CDFs.
-    private static final int[][] DEFAULT_MOTION_VECTOR_CLASS0_HP_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_CLASS0_HP_CDFS = inverse2d(new int[][]{
             {20480},
             {20480}
     });
 
     /// The transformed default non-class-0 motion-vector bit CDFs for vertical and horizontal components.
-    private static final int[][][] DEFAULT_MOTION_VECTOR_CLASSN_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_CLASSN_CDFS = inverse3d(new int[][][]{
             {
                     {17408}, {17920}, {18944}, {20480}, {22528},
                     {24576}, {28672}, {29952}, {29952}, {30720}
@@ -819,31 +820,31 @@ public final class CdfContext {
     });
 
     /// The transformed default non-class-0 fractional motion-vector CDFs.
-    private static final int[][] DEFAULT_MOTION_VECTOR_CLASSN_FP_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_CLASSN_FP_CDFS = inverse2d(new int[][]{
             {8192, 17408, 21248},
             {8192, 17408, 21248}
     });
 
     /// The transformed default non-class-0 high-precision motion-vector CDFs.
-    private static final int[][] DEFAULT_MOTION_VECTOR_CLASSN_HP_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_MOTION_VECTOR_CLASSN_HP_CDFS = inverse2d(new int[][]{
             {16384},
             {16384}
     });
 
     /// The transformed default `intrabc` CDF.
-    private static final int[] DEFAULT_INTRABC_CDF = inverse(30531);
+    private static final int @Unmodifiable [] DEFAULT_INTRABC_CDF = inverse(30531);
 
     /// The transformed default Wiener restoration enable CDF.
-    private static final int[] DEFAULT_RESTORATION_WIENER_CDF = inverse(9984);
+    private static final int @Unmodifiable [] DEFAULT_RESTORATION_WIENER_CDF = inverse(9984);
 
     /// The transformed default self-guided restoration enable CDF.
-    private static final int[] DEFAULT_RESTORATION_SELF_GUIDED_CDF = inverse(14199);
+    private static final int @Unmodifiable [] DEFAULT_RESTORATION_SELF_GUIDED_CDF = inverse(14199);
 
     /// The transformed default switchable restoration CDF.
-    private static final int[] DEFAULT_RESTORATION_SWITCHABLE_CDF = inverse(13158, 22885);
+    private static final int @Unmodifiable [] DEFAULT_RESTORATION_SWITCHABLE_CDF = inverse(13158, 22885);
 
     /// The transformed default luma intra-mode CDFs.
-    private static final int[][] DEFAULT_Y_MODE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_Y_MODE_CDFS = inverse2d(new int[][]{
             {22801, 23489, 24293, 24756, 25601, 26123, 26606, 27418, 27945, 29228, 29685, 30349},
             {18673, 19845, 22631, 23318, 23950, 24649, 25527, 27364, 28152, 29701, 29984, 30852},
             {19770, 20979, 23396, 23939, 24241, 24654, 25136, 27073, 27830, 29360, 29730, 30659},
@@ -851,7 +852,7 @@ public final class CdfContext {
     });
 
     /// The transformed default `use_filter_intra` CDFs.
-    private static final int[][] DEFAULT_USE_FILTER_INTRA_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_USE_FILTER_INTRA_CDFS = inverse2d(new int[][]{
             {4621},
             {6743},
             {5893},
@@ -877,10 +878,10 @@ public final class CdfContext {
     });
 
     /// The transformed default filter-intra-mode CDF.
-    private static final int[] DEFAULT_FILTER_INTRA_CDF = inverse(8949, 12776, 17211, 29558);
+    private static final int @Unmodifiable [] DEFAULT_FILTER_INTRA_CDF = inverse(8949, 12776, 17211, 29558);
 
     /// The transformed default chroma intra-mode CDFs.
-    private static final int[][][] DEFAULT_UV_MODE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_UV_MODE_CDFS = inverse3d(new int[][][]{
             {
                     {22631, 24152, 25378, 25661, 25986, 26520, 27055, 27923, 28244, 30059, 30941, 31961},
                     {9513, 26881, 26973, 27046, 27118, 27664, 27739, 27824, 28359, 29505, 29800, 31796},
@@ -914,7 +915,7 @@ public final class CdfContext {
     });
 
     /// The transformed default partition CDFs.
-    private static final int[][][] DEFAULT_PARTITION_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_PARTITION_CDFS = inverse3d(new int[][][]{
             {
                     {27899, 28219, 28529, 32484, 32539, 32619, 32639},
                     {6607, 6990, 8268, 32060, 32219, 32338, 32371},
@@ -948,7 +949,7 @@ public final class CdfContext {
     });
 
     /// The transformed default luma palette-use CDFs.
-    private static final int[][][] DEFAULT_LUMA_PALETTE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_LUMA_PALETTE_CDFS = inverse3d(new int[][][]{
             {
                     {31676},
                     {3419},
@@ -987,7 +988,7 @@ public final class CdfContext {
     });
 
     /// The transformed default palette-size CDFs for luma and chroma planes.
-    private static final int[][][] DEFAULT_PALETTE_SIZE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_PALETTE_SIZE_CDFS = inverse3d(new int[][][]{
             {
                     {7952, 13000, 18149, 21478, 25527, 29241},
                     {7139, 11421, 16195, 19544, 23666, 28073},
@@ -1009,13 +1010,13 @@ public final class CdfContext {
     });
 
     /// The transformed default chroma palette-use CDFs.
-    private static final int[][] DEFAULT_CHROMA_PALETTE_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_CHROMA_PALETTE_CDFS = inverse2d(new int[][]{
             {32461},
             {21488}
     });
 
     /// The transformed default palette color-map CDFs for luma and chroma planes.
-    private static final int[][][][] DEFAULT_COLOR_MAP_CDFS = inverse4d(new int[][][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_COLOR_MAP_CDFS = inverse4d(new int[][][][]{
             {
                     {
                             {28710}, {16384}, {10553}, {27036}, {31603}
@@ -1065,21 +1066,21 @@ public final class CdfContext {
     });
 
     /// The transformed default segmentation-prediction CDFs.
-    private static final int[][] DEFAULT_SEGMENT_PREDICTION_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SEGMENT_PREDICTION_CDFS = inverse2d(new int[][]{
             {16384},
             {16384},
             {16384}
     });
 
     /// The transformed default segment-id CDFs.
-    private static final int[][] DEFAULT_SEGMENT_ID_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SEGMENT_ID_CDFS = inverse2d(new int[][]{
             {5622, 7893, 16093, 18233, 27809, 28373, 32533},
             {14274, 18230, 22557, 24935, 29980, 30851, 32344},
             {27527, 28487, 28723, 28890, 32397, 32647, 32679}
     });
 
     /// The transformed default key-frame luma intra-mode CDFs.
-    private static final int[][][] DEFAULT_KEY_FRAME_Y_MODE_CDFS = inverse3d(new int[][][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_KEY_FRAME_Y_MODE_CDFS = inverse3d(new int[][][]{
             {
                     {15588, 17027, 19338, 20218, 20682, 21110, 21825, 23244, 24189, 28165, 29093, 30466},
                     {12016, 18066, 19516, 20303, 20719, 21444, 21888, 23032, 24434, 28658, 30172, 31409},
@@ -1118,7 +1119,7 @@ public final class CdfContext {
     });
 
     /// The transformed default directional angle-delta CDFs.
-    private static final int[][] DEFAULT_ANGLE_DELTA_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_ANGLE_DELTA_CDFS = inverse2d(new int[][]{
             {2180, 5032, 7567, 22776, 26989, 30217},
             {2301, 5608, 8801, 23487, 26974, 30330},
             {3780, 11018, 13699, 19354, 23083, 31286},
@@ -1130,10 +1131,10 @@ public final class CdfContext {
     });
 
     /// The transformed default CFL-sign CDF.
-    private static final int[] DEFAULT_CFL_SIGN_CDF = inverse(1418, 2123, 13340, 18405, 26972, 28343, 32294);
+    private static final int @Unmodifiable [] DEFAULT_CFL_SIGN_CDF = inverse(1418, 2123, 13340, 18405, 26972, 28343, 32294);
 
     /// The transformed default CFL-alpha CDFs.
-    private static final int[][] DEFAULT_CFL_ALPHA_CDFS = inverse2d(new int[][]{
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_CFL_ALPHA_CDFS = inverse2d(new int[][]{
             {7637, 20719, 31401, 32481, 32657, 32688, 32692, 32696, 32700, 32704, 32708, 32712, 32716, 32720, 32724},
             {14365, 23603, 28135, 31168, 32167, 32395, 32487, 32573, 32620, 32647, 32668, 32672, 32676, 32680, 32684},
             {11532, 22380, 28445, 31360, 32349, 32523, 32584, 32649, 32673, 32677, 32681, 32685, 32689, 32693, 32697},

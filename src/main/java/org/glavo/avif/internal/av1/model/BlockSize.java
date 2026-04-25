@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.model;
 import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// The AV1 block sizes currently needed by the early partition tree reader.
 @NotNullByDefault
@@ -68,7 +69,7 @@ public enum BlockSize {
     SIZE_4X4(1, 1, 0, 0);
 
     /// The maximum luma transform sizes in block-size enum order.
-    private static final TransformSize[] MAX_LUMA_TRANSFORM_SIZES = {
+    private static final TransformSize @Unmodifiable [] MAX_LUMA_TRANSFORM_SIZES = {
             TransformSize.TX_64X64,
             TransformSize.TX_64X64,
             TransformSize.TX_64X64,
@@ -94,7 +95,7 @@ public enum BlockSize {
     };
 
     /// The maximum 4:2:0 chroma transform sizes in block-size enum order.
-    private static final TransformSize[] MAX_CHROMA_420_TRANSFORM_SIZES = {
+    private static final TransformSize @Unmodifiable [] MAX_CHROMA_420_TRANSFORM_SIZES = {
             TransformSize.TX_32X32,
             TransformSize.TX_32X32,
             TransformSize.TX_32X32,
@@ -120,7 +121,7 @@ public enum BlockSize {
     };
 
     /// The maximum 4:2:2 chroma transform sizes in block-size enum order when `dav1d` exposes one directly.
-    private static final @Nullable TransformSize[] MAX_CHROMA_422_TRANSFORM_SIZES = {
+    private static final @Nullable TransformSize @Unmodifiable [] MAX_CHROMA_422_TRANSFORM_SIZES = {
             TransformSize.TX_32X32,
             TransformSize.TX_32X32,
             null,
@@ -146,7 +147,7 @@ public enum BlockSize {
     };
 
     /// The maximum 4:4:4 chroma transform sizes in block-size enum order.
-    private static final TransformSize[] MAX_CHROMA_444_TRANSFORM_SIZES = {
+    private static final TransformSize @Unmodifiable [] MAX_CHROMA_444_TRANSFORM_SIZES = {
             TransformSize.TX_32X32,
             TransformSize.TX_32X32,
             TransformSize.TX_32X32,

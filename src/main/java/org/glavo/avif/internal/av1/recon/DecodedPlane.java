@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -36,7 +37,7 @@ public final class DecodedPlane {
     private final int stride;
 
     /// The stored unsigned sample values in row-major order.
-    private final short[] samples;
+    private final short @Unmodifiable [] samples;
 
     /// Creates one immutable decoded-plane snapshot.
     ///

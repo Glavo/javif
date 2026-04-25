@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -35,13 +36,13 @@ public final class ResidualLayout {
     private final BlockSize blockSize;
 
     /// The luma transform residual units in bitstream order.
-    private final TransformResidualUnit[] lumaUnits;
+    private final TransformResidualUnit @Unmodifiable [] lumaUnits;
 
     /// The chroma U transform residual units in bitstream order.
-    private final TransformResidualUnit[] chromaUUnits;
+    private final TransformResidualUnit @Unmodifiable [] chromaUUnits;
 
     /// The chroma V transform residual units in bitstream order.
-    private final TransformResidualUnit[] chromaVUnits;
+    private final TransformResidualUnit @Unmodifiable [] chromaVUnits;
 
     /// Creates one block-level residual layout.
     ///

@@ -3,6 +3,7 @@ package org.glavo.avif.testutil;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// Test-only oracle for the current inter-prediction subset supported by the reconstruction core.
 ///
@@ -26,7 +27,7 @@ public final class InterPredictionOracle {
     private static final int INTER_FILTER_PHASES = 16;
 
     /// The current regular eight-tap fixed-filter coefficients indexed by phase.
-    private static final int[][] REGULAR_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] REGULAR_SUBPEL_FILTERS = {
             {0, 1, -3, 63, 4, -1, 0, 0},
             {0, 1, -5, 61, 9, -2, 0, 0},
             {0, 1, -6, 58, 14, -4, 1, 0},
@@ -45,7 +46,7 @@ public final class InterPredictionOracle {
     };
 
     /// The current smooth eight-tap fixed-filter coefficients indexed by phase.
-    private static final int[][] SMOOTH_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SMOOTH_SUBPEL_FILTERS = {
             {0, 1, 14, 31, 17, 1, 0, 0},
             {0, 0, 13, 31, 18, 2, 0, 0},
             {0, 0, 11, 31, 20, 2, 0, 0},
@@ -64,7 +65,7 @@ public final class InterPredictionOracle {
     };
 
     /// The current sharp eight-tap fixed-filter coefficients indexed by phase.
-    private static final int[][] SHARP_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SHARP_SUBPEL_FILTERS = {
             {-1, 1, -3, 63, 4, -1, 1, 0},
             {-1, 3, -6, 62, 8, -3, 2, -1},
             {-1, 4, -9, 60, 13, -5, 3, -1},
@@ -83,7 +84,7 @@ public final class InterPredictionOracle {
     };
 
     /// The reduced-width regular eight-tap fixed-filter coefficients indexed by phase.
-    private static final int[][] SMALL_REGULAR_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SMALL_REGULAR_SUBPEL_FILTERS = {
             {0, 0, -2, 63, 4, -1, 0, 0},
             {0, 0, -4, 61, 9, -2, 0, 0},
             {0, 0, -5, 58, 14, -3, 0, 0},
@@ -102,7 +103,7 @@ public final class InterPredictionOracle {
     };
 
     /// The reduced-width smooth eight-tap fixed-filter coefficients indexed by phase.
-    private static final int[][] SMALL_SMOOTH_SUBPEL_FILTERS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SMALL_SMOOTH_SUBPEL_FILTERS = {
             {0, 0, 15, 31, 17, 1, 0, 0},
             {0, 0, 13, 31, 18, 2, 0, 0},
             {0, 0, 11, 31, 20, 2, 0, 0},

@@ -18,6 +18,7 @@ package org.glavo.avif.internal.bmff;
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -27,7 +28,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class BoxInput {
     /// The complete source bytes.
-    private final byte[] source;
+    private final byte @Unmodifiable [] source;
     /// The inclusive lower bound for this view.
     private final int start;
     /// The exclusive upper bound for this view.

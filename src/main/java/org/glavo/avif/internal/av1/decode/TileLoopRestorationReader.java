@@ -19,6 +19,7 @@ import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -32,13 +33,13 @@ final class TileLoopRestorationReader {
     private static final int SUPERRES_NUMERATOR = 8;
 
     /// The initial Wiener coefficient references for each pass.
-    private static final int[] WIENER_TAPS_MID = {3, -7, 15};
+    private static final int @Unmodifiable [] WIENER_TAPS_MID = {3, -7, 15};
 
     /// The initial self-guided projection coefficient references.
-    private static final int[] SELF_GUIDED_PROJECTION_MID = {-32, 31};
+    private static final int @Unmodifiable [] SELF_GUIDED_PROJECTION_MID = {-32, 31};
 
     /// The AV1 self-guided restoration parameter table in `{r0, e0, r1, e1}` order.
-    private static final int[][] SELF_GUIDED_PARAMS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] SELF_GUIDED_PARAMS = {
             {2, 140, 1, 3236},
             {2, 112, 1, 2158},
             {2, 93, 1, 1618},

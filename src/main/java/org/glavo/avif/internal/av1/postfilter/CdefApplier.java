@@ -23,6 +23,7 @@ import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -38,7 +39,7 @@ public final class CdefApplier {
     private static final int CDEF_UNIT_SIZE = 8;
 
     /// Direction vectors used for primary CDEF filtering.
-    private static final int[][] DIRECTIONS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] DIRECTIONS = {
             {1, 0},
             {1, -1},
             {0, -1},
@@ -50,13 +51,13 @@ public final class CdefApplier {
     };
 
     /// Primary CDEF taps selected by primary-strength parity.
-    private static final int[][] PRIMARY_TAPS = {
+    private static final int @Unmodifiable [] @Unmodifiable [] PRIMARY_TAPS = {
             {4, 2},
             {3, 3}
     };
 
     /// Secondary CDEF taps.
-    private static final int[] SECONDARY_TAPS = {2, 1};
+    private static final int @Unmodifiable [] SECONDARY_TAPS = {2, 1};
 
     /// Applies CDEF to one decoded frame.
     ///

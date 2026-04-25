@@ -19,6 +19,7 @@ import org.glavo.avif.internal.av1.model.TransformKernel;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformType;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
@@ -85,64 +86,64 @@ final class InverseTransformer {
     private static final int COSPI_DELTA_3784 = 3784 - 4096;
 
     /// The cached orthonormal inverse-DCT basis for one `4`-point vector.
-    private static final double[][] INVERSE_DCT_BASIS_4 = createInverseDctBasis(4);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_DCT_BASIS_4 = createInverseDctBasis(4);
 
     /// The cached orthonormal inverse-DCT basis for one `8`-point vector.
-    private static final double[][] INVERSE_DCT_BASIS_8 = createInverseDctBasis(8);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_DCT_BASIS_8 = createInverseDctBasis(8);
 
     /// The cached orthonormal inverse-DCT basis for one `16`-point vector.
-    private static final double[][] INVERSE_DCT_BASIS_16 = createInverseDctBasis(16);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_DCT_BASIS_16 = createInverseDctBasis(16);
 
     /// The cached orthonormal inverse-DCT basis for one `32`-point vector.
-    private static final double[][] INVERSE_DCT_BASIS_32 = createInverseDctBasis(32);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_DCT_BASIS_32 = createInverseDctBasis(32);
 
     /// The cached orthonormal inverse-DCT basis for one `64`-point vector.
-    private static final double[][] INVERSE_DCT_BASIS_64 = createInverseDctBasis(64);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_DCT_BASIS_64 = createInverseDctBasis(64);
 
     /// The cached orthonormal inverse-ADST basis for one `4`-point vector.
-    private static final double[][] INVERSE_ADST_BASIS_4 = createInverseAdstBasis(4);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_ADST_BASIS_4 = createInverseAdstBasis(4);
 
     /// The cached orthonormal inverse-ADST basis for one `8`-point vector.
-    private static final double[][] INVERSE_ADST_BASIS_8 = createInverseAdstBasis(8);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_ADST_BASIS_8 = createInverseAdstBasis(8);
 
     /// The cached orthonormal inverse-ADST basis for one `16`-point vector.
-    private static final double[][] INVERSE_ADST_BASIS_16 = createInverseAdstBasis(16);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_ADST_BASIS_16 = createInverseAdstBasis(16);
 
     /// The cached orthonormal inverse-ADST basis for one `32`-point vector.
-    private static final double[][] INVERSE_ADST_BASIS_32 = createInverseAdstBasis(32);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_ADST_BASIS_32 = createInverseAdstBasis(32);
 
     /// The cached orthonormal inverse-ADST basis for one `64`-point vector.
-    private static final double[][] INVERSE_ADST_BASIS_64 = createInverseAdstBasis(64);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_ADST_BASIS_64 = createInverseAdstBasis(64);
 
     /// The cached flipped inverse-ADST basis for one `4`-point vector.
-    private static final double[][] INVERSE_FLIPADST_BASIS_4 = createFlippedBasis(INVERSE_ADST_BASIS_4);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_FLIPADST_BASIS_4 = createFlippedBasis(INVERSE_ADST_BASIS_4);
 
     /// The cached flipped inverse-ADST basis for one `8`-point vector.
-    private static final double[][] INVERSE_FLIPADST_BASIS_8 = createFlippedBasis(INVERSE_ADST_BASIS_8);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_FLIPADST_BASIS_8 = createFlippedBasis(INVERSE_ADST_BASIS_8);
 
     /// The cached flipped inverse-ADST basis for one `16`-point vector.
-    private static final double[][] INVERSE_FLIPADST_BASIS_16 = createFlippedBasis(INVERSE_ADST_BASIS_16);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_FLIPADST_BASIS_16 = createFlippedBasis(INVERSE_ADST_BASIS_16);
 
     /// The cached flipped inverse-ADST basis for one `32`-point vector.
-    private static final double[][] INVERSE_FLIPADST_BASIS_32 = createFlippedBasis(INVERSE_ADST_BASIS_32);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_FLIPADST_BASIS_32 = createFlippedBasis(INVERSE_ADST_BASIS_32);
 
     /// The cached flipped inverse-ADST basis for one `64`-point vector.
-    private static final double[][] INVERSE_FLIPADST_BASIS_64 = createFlippedBasis(INVERSE_ADST_BASIS_64);
+    private static final double @Unmodifiable [] @Unmodifiable [] INVERSE_FLIPADST_BASIS_64 = createFlippedBasis(INVERSE_ADST_BASIS_64);
 
     /// The cached identity basis for one `4`-point vector.
-    private static final double[][] IDENTITY_BASIS_4 = createIdentityBasis(4);
+    private static final double @Unmodifiable [] @Unmodifiable [] IDENTITY_BASIS_4 = createIdentityBasis(4);
 
     /// The cached identity basis for one `8`-point vector.
-    private static final double[][] IDENTITY_BASIS_8 = createIdentityBasis(8);
+    private static final double @Unmodifiable [] @Unmodifiable [] IDENTITY_BASIS_8 = createIdentityBasis(8);
 
     /// The cached identity basis for one `16`-point vector.
-    private static final double[][] IDENTITY_BASIS_16 = createIdentityBasis(16);
+    private static final double @Unmodifiable [] @Unmodifiable [] IDENTITY_BASIS_16 = createIdentityBasis(16);
 
     /// The cached identity basis for one `32`-point vector.
-    private static final double[][] IDENTITY_BASIS_32 = createIdentityBasis(32);
+    private static final double @Unmodifiable [] @Unmodifiable [] IDENTITY_BASIS_32 = createIdentityBasis(32);
 
     /// The cached identity basis for one `64`-point vector.
-    private static final double[][] IDENTITY_BASIS_64 = createIdentityBasis(64);
+    private static final double @Unmodifiable [] @Unmodifiable [] IDENTITY_BASIS_64 = createIdentityBasis(64);
 
     /// Prevents instantiation of this utility class.
     private InverseTransformer() {

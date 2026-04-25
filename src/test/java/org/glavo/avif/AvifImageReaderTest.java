@@ -17,6 +17,7 @@ package org.glavo.avif;
 
 import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -33,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 final class AvifImageReaderTest {
     /// One fixed single-tile payload that decodes as opaque mid-gray in the current AV1 decoder.
-    private static final byte[] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
+    private static final byte @Unmodifiable [] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
