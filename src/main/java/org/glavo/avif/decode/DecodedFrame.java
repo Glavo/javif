@@ -47,54 +47,6 @@ public final class DecodedFrame {
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
     private @Nullable @Unmodifiable LongBuffer longPixels;
 
-    /// Creates a decoded frame from packed `int` ARGB pixels.
-    ///
-    /// @param width             the output frame width in pixels
-    /// @param height            the output frame height in pixels
-    /// @param bitDepth          the decoded bit depth
-    /// @param pixelFormat       the chroma layout
-    /// @param frameType         the AV1 frame type
-    /// @param visible           whether the frame is visible
-    /// @param presentationIndex the zero-based presentation index
-    /// @param pixels            the packed non-premultiplied ARGB pixels
-    public DecodedFrame(
-            int width,
-            int height,
-            int bitDepth,
-            PixelFormat pixelFormat,
-            FrameType frameType,
-            boolean visible,
-            long presentationIndex,
-            int[] pixels
-    ) {
-        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
-                PixelBuffers.immutableIntPixels(Objects.requireNonNull(pixels, "pixels")), null);
-    }
-
-    /// Creates a decoded frame from packed `long` ARGB pixels.
-    ///
-    /// @param width             the output frame width in pixels
-    /// @param height            the output frame height in pixels
-    /// @param bitDepth          the decoded bit depth
-    /// @param pixelFormat       the chroma layout
-    /// @param frameType         the AV1 frame type
-    /// @param visible           whether the frame is visible
-    /// @param presentationIndex the zero-based presentation index
-    /// @param pixels            the packed non-premultiplied ARGB pixels
-    public DecodedFrame(
-            int width,
-            int height,
-            int bitDepth,
-            PixelFormat pixelFormat,
-            FrameType frameType,
-            boolean visible,
-            long presentationIndex,
-            long[] pixels
-    ) {
-        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
-                null, PixelBuffers.immutableLongPixels(Objects.requireNonNull(pixels, "pixels")));
-    }
-
     /// Creates a decoded frame from a packed `int` ARGB pixel buffer.
     ///
     /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
