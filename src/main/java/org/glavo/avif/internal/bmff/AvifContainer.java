@@ -39,6 +39,8 @@ public final class AvifContainer {
     private final boolean isGrid;
     /// Grid cell AV1 OBU payloads in row-major order, or `null`.
     private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] gridCellPayloads;
+    /// Alpha grid cell AV1 OBU payloads in row-major order, or `null`.
+    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] gridAlphaCellPayloads;
     /// Grid row count.
     private final int gridRows;
     /// Grid column count.
@@ -47,6 +49,14 @@ public final class AvifContainer {
     private final int gridOutputWidth;
     /// Grid output height, or -1 if to be computed from cells.
     private final int gridOutputHeight;
+    /// Alpha grid row count.
+    private final int gridAlphaRows;
+    /// Alpha grid column count.
+    private final int gridAlphaColumns;
+    /// Alpha grid output width.
+    private final int gridAlphaOutputWidth;
+    /// Alpha grid output height.
+    private final int gridAlphaOutputHeight;
 
     /// The clean-aperture crop x offset, or -1.
     private final int clapCropX;
@@ -117,10 +127,15 @@ public final class AvifContainer {
                 : null;
         this.isGrid = false;
         this.gridCellPayloads = null;
+        this.gridAlphaCellPayloads = null;
         this.gridRows = 0;
         this.gridColumns = 0;
         this.gridOutputWidth = 0;
         this.gridOutputHeight = 0;
+        this.gridAlphaRows = 0;
+        this.gridAlphaColumns = 0;
+        this.gridAlphaOutputWidth = 0;
+        this.gridAlphaOutputHeight = 0;
         this.clapCropX = clapCropX;
         this.clapCropY = clapCropY;
         this.clapCropWidth = clapCropWidth;
@@ -148,18 +163,49 @@ public final class AvifContainer {
             int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight,
             int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
             int rotationCode, int mirrorAxis) {
+        this(info, gridCellPayloads, null, null,
+                gridRows, gridColumns, gridOutputWidth, gridOutputHeight,
+                0, 0, 0, 0,
+                clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis);
+    }
+
+    /// Creates parsed AVIF container data for a grid derived image with optional alpha payloads.
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifContainer(
+            AvifImageInfo info,
+            byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
+            byte @Nullable [] alphaItemPayload,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] gridAlphaCellPayloads,
+            int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight,
+            int gridAlphaRows, int gridAlphaColumns, int gridAlphaOutputWidth, int gridAlphaOutputHeight,
+            int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
+            int rotationCode, int mirrorAxis
+    ) {
         this.info = Objects.requireNonNull(info, "info");
         Objects.requireNonNull(gridCellPayloads, "gridCellPayloads");
         if (gridRows <= 0) throw new IllegalArgumentException("gridRows <= 0: " + gridRows);
         if (gridColumns <= 0) throw new IllegalArgumentException("gridColumns <= 0: " + gridColumns);
+        if (gridAlphaCellPayloads != null) {
+            if (gridAlphaRows <= 0) throw new IllegalArgumentException("gridAlphaRows <= 0: " + gridAlphaRows);
+            if (gridAlphaColumns <= 0) throw new IllegalArgumentException("gridAlphaColumns <= 0: " + gridAlphaColumns);
+        }
         this.primaryItemPayload = null;
-        this.alphaItemPayload = null;
+        this.alphaItemPayload = alphaItemPayload != null
+                ? immutablePayload(alphaItemPayload)
+                : null;
         this.isGrid = true;
         this.gridCellPayloads = immutablePayloads(gridCellPayloads);
+        this.gridAlphaCellPayloads = gridAlphaCellPayloads != null
+                ? immutablePayloads(gridAlphaCellPayloads)
+                : null;
         this.gridRows = gridRows;
         this.gridColumns = gridColumns;
         this.gridOutputWidth = gridOutputWidth;
         this.gridOutputHeight = gridOutputHeight;
+        this.gridAlphaRows = gridAlphaRows;
+        this.gridAlphaColumns = gridAlphaColumns;
+        this.gridAlphaOutputWidth = gridAlphaOutputWidth;
+        this.gridAlphaOutputHeight = gridAlphaOutputHeight;
         this.clapCropX = clapCropX;
         this.clapCropY = clapCropY;
         this.clapCropWidth = clapCropWidth;
@@ -184,10 +230,15 @@ public final class AvifContainer {
         this.alphaItemPayload = null;
         this.isGrid = false;
         this.gridCellPayloads = null;
+        this.gridAlphaCellPayloads = null;
         this.gridRows = 0;
         this.gridColumns = 0;
         this.gridOutputWidth = 0;
         this.gridOutputHeight = 0;
+        this.gridAlphaRows = 0;
+        this.gridAlphaColumns = 0;
+        this.gridAlphaOutputWidth = 0;
+        this.gridAlphaOutputHeight = 0;
         this.clapCropX = -1;
         this.clapCropY = -1;
         this.clapCropWidth = -1;
@@ -246,6 +297,16 @@ public final class AvifContainer {
         return payloadViews(gridCellPayloads);
     }
 
+    /// Returns the alpha grid cell AV1 OBU payloads in row-major order.
+    ///
+    /// @return the alpha grid cell AV1 OBU payloads, or `null`
+    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] gridAlphaCellPayloads() {
+        if (gridAlphaCellPayloads == null) {
+            return null;
+        }
+        return payloadViews(gridAlphaCellPayloads);
+    }
+
     /// Returns the grid row count.
     ///
     /// @return the grid row count
@@ -272,6 +333,34 @@ public final class AvifContainer {
     /// @return the grid output height, or -1 if to be computed
     public int gridOutputHeight() {
         return gridOutputHeight;
+    }
+
+    /// Returns the alpha grid row count.
+    ///
+    /// @return the alpha grid row count
+    public int gridAlphaRows() {
+        return gridAlphaRows;
+    }
+
+    /// Returns the alpha grid column count.
+    ///
+    /// @return the alpha grid column count
+    public int gridAlphaColumns() {
+        return gridAlphaColumns;
+    }
+
+    /// Returns the alpha grid output width.
+    ///
+    /// @return the alpha grid output width
+    public int gridAlphaOutputWidth() {
+        return gridAlphaOutputWidth;
+    }
+
+    /// Returns the alpha grid output height.
+    ///
+    /// @return the alpha grid output height
+    public int gridAlphaOutputHeight() {
+        return gridAlphaOutputHeight;
     }
 
     /// Returns whether a clean-aperture crop is present.

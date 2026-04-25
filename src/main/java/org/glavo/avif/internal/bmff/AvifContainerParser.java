@@ -173,6 +173,37 @@ public final class AvifContainerParser {
     /// @return the parsed AVIF container
     /// @throws AvifDecodeException if the grid is malformed or unsupported
     private AvifContainer parseGridContainer(Item gridItem) throws AvifDecodeException {
+        GridPayloads colorGrid = parseGridPayloads(gridItem);
+        AlphaPayloads alphaPayloads = parseGridAlphaPayloads(gridItem, colorGrid);
+
+        AvifImageInfo info = new AvifImageInfo(
+                colorGrid.outputWidth,
+                colorGrid.outputHeight,
+                AvifBitDepth.fromBits(colorGrid.representativeAv1C.bitDepth()),
+                colorGrid.representativeAv1C.pixelFormat(),
+                alphaPayloads.present(),
+                false,
+                1,
+                gridItem.firstProperty(AvifColorInfo.class)
+        );
+
+        int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
+        return new AvifContainer(info, colorGrid.cellPayloads,
+                alphaPayloads.alphaItemPayload,
+                alphaPayloads.gridCellPayloads,
+                colorGrid.rows, colorGrid.columns, colorGrid.outputWidth, colorGrid.outputHeight,
+                alphaPayloads.gridRows, alphaPayloads.gridColumns,
+                alphaPayloads.gridOutputWidth, alphaPayloads.gridOutputHeight,
+                transforms[0], transforms[1], transforms[2], transforms[3],
+                transforms[4], transforms[5]);
+    }
+
+    /// Parses the payloads and geometry for one `grid` derived image item.
+    ///
+    /// @param gridItem the grid item
+    /// @return parsed grid payloads and geometry
+    /// @throws AvifDecodeException if the grid is malformed or unsupported
+    private GridPayloads parseGridPayloads(Item gridItem) throws AvifDecodeException {
         byte[] gridPayload = mergeItemExtents(gridItem);
         BoxInput input = new BoxInput(gridPayload);
         int version = input.readU8();
@@ -272,24 +303,129 @@ public final class AvifContainerParser {
             outputHeight = computeGridOutputHeight(rows, columns, cellIds);
         }
 
-        boolean alphaPresent = hasGridAlpha(gridItem.id, cellIds);
-
-        AvifImageInfo info = new AvifImageInfo(
-                outputWidth,
-                outputHeight,
-                AvifBitDepth.fromBits(representativeAv1C.bitDepth()),
-                representativeAv1C.pixelFormat(),
-                alphaPresent,
-                false,
-                1,
-                gridItem.firstProperty(AvifColorInfo.class)
-        );
-
         byte[][] payloads = cellPayloads.toArray(byte[][]::new);
-        int[] transforms = extractTransformParams(gridItem, outputWidth, outputHeight);
-        return new AvifContainer(info, payloads, rows, columns, outputWidth, outputHeight,
-                transforms[0], transforms[1], transforms[2], transforms[3],
-                transforms[4], transforms[5]);
+        return new GridPayloads(rows, columns, outputWidth, outputHeight, representativeAv1C, payloads);
+    }
+
+    /// Parses alpha auxiliary payloads for a grid color item.
+    ///
+    /// @param gridItem the color grid item
+    /// @param colorGrid the parsed color grid
+    /// @return alpha payload data, or empty data when no alpha is present
+    /// @throws AvifDecodeException if alpha data is malformed or unsupported
+    private AlphaPayloads parseGridAlphaPayloads(Item gridItem, GridPayloads colorGrid) throws AvifDecodeException {
+        Item alphaItem = findAlphaItem(gridItem.id);
+        if (alphaItem != null) {
+            if (alphaItem.hasUnsupportedEssentialProperty) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.MISSING_IMAGE_ITEM,
+                        "Alpha auxiliary item is not usable: " + alphaItem.id,
+                        null
+                );
+            }
+            if ("grid".equals(alphaItem.type)) {
+                GridPayloads alphaGrid = parseGridPayloads(alphaItem);
+                validateAlphaGridDimensions(colorGrid, alphaGrid);
+                return AlphaPayloads.grid(alphaGrid);
+            }
+            if (!"av01".equals(alphaItem.type)) {
+                throw unsupported("Unsupported alpha auxiliary item type: " + alphaItem.type, null);
+            }
+            validateAlphaItemDimensions(alphaItem, colorGrid.outputWidth, colorGrid.outputHeight);
+            return AlphaPayloads.item(mergeItemExtents(alphaItem));
+        }
+
+        return parsePerCellGridAlphaPayloads(gridItem, colorGrid);
+    }
+
+    /// Parses the legacy grid-alpha shape where each color cell has its own alpha auxiliary item.
+    ///
+    /// @param gridItem the color grid item
+    /// @param colorGrid the parsed color grid
+    /// @return alpha payload data, or empty data when no complete per-cell alpha set is present
+    /// @throws AvifDecodeException if alpha data is malformed or unsupported
+    private AlphaPayloads parsePerCellGridAlphaPayloads(Item gridItem, GridPayloads colorGrid) throws AvifDecodeException {
+        List<Integer> cellIds = gridItem.dimgCellIds;
+        byte[][] alphaCellPayloads = new byte[cellIds.size()][];
+        for (int i = 0; i < cellIds.size(); i++) {
+            int cellId = cellIds.get(i);
+            Item colorCellItem = meta.requireItem(cellId);
+            Item alphaCellItem = findAlphaItem(cellId);
+            if (alphaCellItem == null) {
+                return AlphaPayloads.empty();
+            }
+            if (!"av01".equals(alphaCellItem.type)) {
+                throw unsupported("Unsupported per-cell alpha auxiliary item type: " + alphaCellItem.type, null);
+            }
+            if (alphaCellItem.dimgForId != 0) {
+                throw unsupported("Per-cell alpha auxiliary item is also a derived-image cell: " + alphaCellItem.id, null);
+            }
+            if (alphaCellItem.hasUnsupportedEssentialProperty) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.MISSING_IMAGE_ITEM,
+                        "Per-cell alpha auxiliary item is not usable: " + alphaCellItem.id,
+                        null
+                );
+            }
+            ImageSpatialExtents colorIspe = colorCellItem.firstProperty(ImageSpatialExtents.class);
+            assert colorIspe != null;
+            validateAlphaItemDimensions(alphaCellItem, colorIspe.width, colorIspe.height);
+            alphaCellPayloads[i] = mergeItemExtents(alphaCellItem);
+        }
+        return AlphaPayloads.grid(new GridPayloads(
+                colorGrid.rows,
+                colorGrid.columns,
+                colorGrid.outputWidth,
+                colorGrid.outputHeight,
+                colorGrid.representativeAv1C,
+                alphaCellPayloads
+        ));
+    }
+
+    /// Validates that an alpha grid matches the color grid canvas dimensions.
+    ///
+    /// @param colorGrid the color grid
+    /// @param alphaGrid the alpha grid
+    /// @throws AvifDecodeException if dimensions differ
+    private static void validateAlphaGridDimensions(GridPayloads colorGrid, GridPayloads alphaGrid)
+            throws AvifDecodeException {
+        if (alphaGrid.outputWidth != colorGrid.outputWidth || alphaGrid.outputHeight != colorGrid.outputHeight) {
+            throw unsupported(
+                    "Alpha grid with different dimensions than the master grid is not implemented in this slice",
+                    null
+            );
+        }
+    }
+
+    /// Validates one alpha item against the expected output dimensions.
+    ///
+    /// @param alphaItem the alpha item
+    /// @param expectedWidth the expected alpha width
+    /// @param expectedHeight the expected alpha height
+    /// @throws AvifDecodeException if the item is malformed or has unsupported dimensions
+    private void validateAlphaItemDimensions(Item alphaItem, int expectedWidth, int expectedHeight)
+            throws AvifDecodeException {
+        ImageSpatialExtents alphaIspe = alphaItem.firstProperty(ImageSpatialExtents.class);
+        if (alphaIspe == null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Alpha auxiliary item is missing ispe: " + alphaItem.id,
+                    null
+            );
+        }
+        if (alphaIspe.width != expectedWidth || alphaIspe.height != expectedHeight) {
+            throw unsupported(
+                    "Alpha auxiliary image with different dimensions than the master image is not implemented in this slice",
+                    null
+            );
+        }
+        if (alphaItem.firstProperty(Av1Config.class) == null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Alpha auxiliary item is missing av1C: " + alphaItem.id,
+                    null
+            );
+        }
     }
 
     /// Extracts transform parameters from the properties of one item.
@@ -436,23 +572,6 @@ public final class AvifContainerParser {
             totalHeight = checkedU32ToInt(checkedAdd(totalHeight, rowHeights[row], 0), 0);
         }
         return totalHeight;
-    }
-
-    /// Returns whether a grid image has alpha auxiliary images.
-    ///
-    /// @param gridItemId the grid item id
-    /// @param cellIds the grid cell item ids
-    /// @return whether alpha is present
-    private boolean hasGridAlpha(int gridItemId, List<Integer> cellIds) {
-        for (Item item : meta.items.values()) {
-            if (item.auxForId == gridItemId) {
-                AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
-                if (aux != null && "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha".equals(aux.type)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     /// Parses an `ftyp` box.
@@ -1258,7 +1377,7 @@ public final class AvifContainerParser {
                 int toId = fullBox.version == 0 ? payload.readU16() : checkedU32ToInt(payload.readU32(), payload.offset() - 4);
                 Item toItem = meta.requireItem(toId);
                 if ("auxl".equals(reference.type())) {
-                    toItem.auxForId = fromItem.id;
+                    fromItem.auxForId = toItem.id;
                 }
                 if ("dimg".equals(reference.type())) {
                     if (toItem.dimgForId != 0 && toItem.dimgForId != fromItem.id) {
@@ -1519,6 +1638,120 @@ public final class AvifContainerParser {
             sampleSizes.addAll(other.sampleSizes);
             syncSamples.clear();
             syncSamples.addAll(other.syncSamples);
+        }
+    }
+
+    /// Parsed grid payloads and geometry.
+    @NotNullByDefault
+    private static final class GridPayloads {
+        /// The grid row count.
+        private final int rows;
+        /// The grid column count.
+        private final int columns;
+        /// The reconstructed output width.
+        private final int outputWidth;
+        /// The reconstructed output height.
+        private final int outputHeight;
+        /// The representative AV1 configuration from the first grid cell.
+        private final Av1Config representativeAv1C;
+        /// The grid cell AV1 OBU payloads in row-major order.
+        private final byte @Unmodifiable [] @Unmodifiable [] cellPayloads;
+
+        /// Creates parsed grid payloads and geometry.
+        ///
+        /// @param rows the grid row count
+        /// @param columns the grid column count
+        /// @param outputWidth the reconstructed output width
+        /// @param outputHeight the reconstructed output height
+        /// @param representativeAv1C the representative AV1 configuration from the first grid cell
+        /// @param cellPayloads the grid cell AV1 OBU payloads in row-major order
+        private GridPayloads(
+                int rows,
+                int columns,
+                int outputWidth,
+                int outputHeight,
+                Av1Config representativeAv1C,
+                byte @Unmodifiable [] @Unmodifiable [] cellPayloads
+        ) {
+            this.rows = rows;
+            this.columns = columns;
+            this.outputWidth = outputWidth;
+            this.outputHeight = outputHeight;
+            this.representativeAv1C = Objects.requireNonNull(representativeAv1C, "representativeAv1C");
+            this.cellPayloads = Objects.requireNonNull(cellPayloads, "cellPayloads");
+        }
+    }
+
+    /// Parsed alpha auxiliary payloads.
+    @NotNullByDefault
+    private static final class AlphaPayloads {
+        /// The standalone alpha item payload, or `null`.
+        private final byte @Nullable [] alphaItemPayload;
+        /// The alpha grid cell AV1 OBU payloads in row-major order, or `null`.
+        private final byte @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads;
+        /// The alpha grid row count.
+        private final int gridRows;
+        /// The alpha grid column count.
+        private final int gridColumns;
+        /// The alpha grid reconstructed output width.
+        private final int gridOutputWidth;
+        /// The alpha grid reconstructed output height.
+        private final int gridOutputHeight;
+
+        /// Creates parsed alpha payloads.
+        ///
+        /// @param alphaItemPayload the standalone alpha item payload, or `null`
+        /// @param gridCellPayloads the alpha grid cell AV1 OBU payloads, or `null`
+        /// @param gridRows the alpha grid row count
+        /// @param gridColumns the alpha grid column count
+        /// @param gridOutputWidth the alpha grid reconstructed output width
+        /// @param gridOutputHeight the alpha grid reconstructed output height
+        private AlphaPayloads(
+                byte @Nullable [] alphaItemPayload,
+                byte @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads,
+                int gridRows,
+                int gridColumns,
+                int gridOutputWidth,
+                int gridOutputHeight
+        ) {
+            this.alphaItemPayload = alphaItemPayload;
+            this.gridCellPayloads = gridCellPayloads;
+            this.gridRows = gridRows;
+            this.gridColumns = gridColumns;
+            this.gridOutputWidth = gridOutputWidth;
+            this.gridOutputHeight = gridOutputHeight;
+        }
+
+        /// Creates empty alpha payloads.
+        ///
+        /// @return empty alpha payloads
+        private static AlphaPayloads empty() {
+            return new AlphaPayloads(null, null, 0, 0, 0, 0);
+        }
+
+        /// Creates alpha payloads from one standalone item.
+        ///
+        /// @param alphaItemPayload the standalone alpha item payload
+        /// @return alpha payloads for the item
+        private static AlphaPayloads item(byte[] alphaItemPayload) {
+            return new AlphaPayloads(Objects.requireNonNull(alphaItemPayload, "alphaItemPayload"),
+                    null, 0, 0, 0, 0);
+        }
+
+        /// Creates alpha payloads from grid data.
+        ///
+        /// @param grid the parsed alpha grid
+        /// @return alpha payloads for the grid
+        private static AlphaPayloads grid(GridPayloads grid) {
+            return new AlphaPayloads(null, grid.cellPayloads, grid.rows, grid.columns,
+                    grid.outputWidth, grid.outputHeight);
+        }
+
+        /// Returns whether any alpha payload is present.
+        ///
+        /// @return whether alpha is present
+        private boolean present() {
+            return alphaItemPayload != null || gridCellPayloads != null;
         }
     }
 

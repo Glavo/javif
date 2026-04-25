@@ -55,10 +55,10 @@ final class LibavifTestDataCorpusTest {
             decode("libavif-test-data/circle_custom_properties.avif", 100, 60, 8, AvifPixelFormat.I444, true, false, 1),
             parseFailure("libavif-test-data/clap_irot_imir_non_essential.avif", AvifErrorCode.BMFF_PARSE_FAILED),
             decode("libavif-test-data/clop_irot_imor.avif", 12, 34, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", 512, 600, 10, AvifPixelFormat.I444, false, false, 1),
+            decode("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
             parseFailure("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", AvifErrorCode.UNSUPPORTED_FEATURE),
-            decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/color_grid_gainmap_different_grid.avif", 512, 600, 10, AvifPixelFormat.I444, false, false, 1),
+            decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
+            decode("libavif-test-data/color_grid_gainmap_different_grid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", 128, 200, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", 64, 64, 12, AvifPixelFormat.I422, false, true, 5),
             decode("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif", 150, 150, 8, AvifPixelFormat.I420, false, true, 5),
@@ -128,6 +128,16 @@ final class LibavifTestDataCorpusTest {
                 .map(testCase -> DynamicTest.dynamicTest(testCase.resourceName, () -> assertCorpusCase(testCase)));
     }
 
+    /// Verifies grid alpha resources produce non-opaque decoded pixels.
+    ///
+    /// @throws IOException if a resource cannot be read or decoded
+    @Test
+    void gridAlphaFixturesProduceAlphaPixels() throws IOException {
+        assertHasNonOpaqueAlpha("libavif-test-data/color_grid_alpha_nogrid.avif");
+        assertHasNonOpaqueAlpha("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif");
+        assertHasNonOpaqueAlpha("libavif-test-data/color_grid_gainmap_different_grid.avif");
+    }
+
     /// Asserts one corpus case.
     ///
     /// @param testCase the expected behavior to assert
@@ -187,6 +197,65 @@ final class LibavifTestDataCorpusTest {
         assertEquals(AvifBitDepth.fromBits(expected.bitDepth), actual.bitDepth());
         assertEquals(expected.pixelFormat, actual.pixelFormat());
         assertEquals(frameIndex, actual.frameIndex());
+    }
+
+    /// Asserts that a decoded fixture contains at least one non-opaque alpha sample.
+    ///
+    /// @param resourceName the classpath resource name
+    /// @throws IOException if the resource cannot be read or decoded
+    private static void assertHasNonOpaqueAlpha(String resourceName) throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(resourceName))) {
+            assertTrue(reader.info().alphaPresent());
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            if (frame.bitDepth().isEightBit()) {
+                assertTrue(hasNonOpaqueIntAlpha(frame));
+            } else {
+                assertTrue(hasNonOpaqueLongAlpha(frame));
+                assertTrue(hasWideAlphaRange(frame));
+            }
+        }
+    }
+
+    /// Returns whether an 8-bit frame has at least one non-opaque alpha sample.
+    ///
+    /// @param frame the decoded frame
+    /// @return whether a non-opaque alpha sample is present
+    private static boolean hasNonOpaqueIntAlpha(AvifFrame frame) {
+        var pixels = frame.intPixelBuffer();
+        while (pixels.hasRemaining()) {
+            if ((pixels.get() >>> 24) != 0xFF) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether a high-bit-depth frame has at least one non-opaque alpha sample.
+    ///
+    /// @param frame the decoded frame
+    /// @return whether a non-opaque alpha sample is present
+    private static boolean hasNonOpaqueLongAlpha(AvifFrame frame) {
+        var pixels = frame.longPixelBuffer();
+        while (pixels.hasRemaining()) {
+            if (((pixels.get() >>> 48) & 0xFFFFL) != 0xFFFFL) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether high-bit-depth alpha uses the full 16-bit output channel domain.
+    ///
+    /// @param frame the decoded frame
+    /// @return whether alpha includes a value near full opacity
+    private static boolean hasWideAlphaRange(AvifFrame frame) {
+        var pixels = frame.longPixelBuffer();
+        long maxAlpha = 0;
+        while (pixels.hasRemaining()) {
+            maxAlpha = Math.max(maxAlpha, (pixels.get() >>> 48) & 0xFFFFL);
+        }
+        return maxAlpha > 60_000L;
     }
 
     /// Lists copied libavif AVIF resources.

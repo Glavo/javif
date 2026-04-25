@@ -130,6 +130,25 @@ final class LibavifImageIoReferenceTest {
         assertRotatedFrameSize(source, "libavif-test-data/abc_color_irot_alpha_NOirot.avif");
     }
 
+    /// Verifies that high-bit-depth rotation transforms are applied to decoded frame dimensions.
+    ///
+    /// @throws IOException if the AVIF resource cannot be decoded
+    @Test
+    void highBitDepthIrotFixtureDecodesWithRotatedFrameDimensions() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes("libavif-test-data/clop_irot_imor.avif"))) {
+            AvifImageInfo info = reader.info();
+            assertEquals(12, info.width());
+            assertEquals(34, info.height());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(AvifBitDepth.TEN_BITS, frame.bitDepth());
+            assertEquals(34, frame.width());
+            assertEquals(12, frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Asserts one ImageIO-readable image resource.
     ///
     /// @param resource the expected image resource
