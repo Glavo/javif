@@ -292,6 +292,43 @@ public final class AvifImageReader implements AutoCloseable {
         return decodeRawColorPlanes(primaryPayload, "Primary AV1 item");
     }
 
+    /// Reads raw decoded alpha auxiliary planes for the frame at the supplied index.
+    ///
+    /// The returned planes expose an alpha auxiliary AV1 image before AVIF item transforms are
+    /// applied. A `null` return value means the frame has no alpha auxiliary image. Alpha grids
+    /// and alpha AVIS sequences are not implemented.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return raw decoded alpha auxiliary planes, or `null` when no alpha auxiliary image is present
+    /// @throws IOException if the alpha auxiliary image cannot be decoded
+    public @Nullable AvifPlanes readRawAlphaPlanes(int frameIndex) throws IOException {
+        ensureOpen();
+        if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        if (!container.info().alphaPresent()) {
+            return null;
+        }
+        if (container.isSequence()) {
+            throw unsupported("Raw alpha planes for AVIS sequences are not implemented", null);
+        }
+        if (frameIndex != 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.UNSUPPORTED_FEATURE,
+                    "Indexed AVIF alpha plane decoding beyond the primary still image is not implemented in this slice",
+                    null
+            );
+        }
+        ByteBuffer alphaPayload = container.alphaItemPayload();
+        if (alphaPayload != null) {
+            return alphaPlanesFromDecodedImage(decodeRawColorPlanes(alphaPayload, "Alpha auxiliary AV1 item"));
+        }
+        if (container.gridAlphaCellPayloads() != null) {
+            throw unsupported("Raw alpha planes for alpha grids are not implemented", null);
+        }
+        return null;
+    }
+
     /// Decodes the next frame from an image sequence using the persistent sequential AV1 reader.
     ///
     /// @param frameIndex the zero-based frame index
@@ -402,6 +439,24 @@ public final class AvifImageReader implements AutoCloseable {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " planes are not available", null);
         }
         return AvifPlanes.fromDecodedPlanes(planes);
+    }
+
+    /// Creates alpha-only public planes from a decoded auxiliary image.
+    ///
+    /// @param planes the decoded auxiliary image planes
+    /// @return alpha-only public planes exposing only the luma plane
+    private static AvifPlanes alphaPlanesFromDecodedImage(AvifPlanes planes) {
+        return new AvifPlanes(
+                planes.bitDepth(),
+                AvifPixelFormat.I400,
+                planes.codedWidth(),
+                planes.codedHeight(),
+                planes.renderWidth(),
+                planes.renderHeight(),
+                planes.lumaPlane(),
+                null,
+                null
+        );
     }
 
     /// Decodes one image-sequence frame without mutating the persistent sequential AV1 reader.

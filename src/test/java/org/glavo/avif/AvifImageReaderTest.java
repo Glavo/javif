@@ -195,6 +195,7 @@ final class AvifImageReaderTest {
             assertEquals(32, chromaU.height());
             assertEquals(32, chromaV.width());
             assertEquals(32, chromaV.height());
+            assertNull(reader.readRawAlphaPlanes(0));
         }
     }
 
@@ -730,6 +731,17 @@ final class AvifImageReaderTest {
             assertEquals(64, auxiliaryImage.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, auxiliaryImage.bitDepth());
             assertEquals(AvifPixelFormat.I400, auxiliaryImage.pixelFormat());
+
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertEquals(AvifBitDepth.EIGHT_BITS, alphaPlanes.bitDepth());
+            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertEquals(64, alphaPlanes.codedWidth());
+            assertEquals(64, alphaPlanes.codedHeight());
+            assertFalse(alphaPlanes.hasChroma());
+            assertEquals(64, alphaPlanes.lumaPlane().width());
+            assertEquals(64, alphaPlanes.lumaPlane().height());
+            assertTrue(alphaPlanes.lumaPlane().sample(0, 0) < 255);
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
