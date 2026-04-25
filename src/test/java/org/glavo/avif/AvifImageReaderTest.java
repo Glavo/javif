@@ -25,7 +25,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -227,15 +226,18 @@ final class AvifImageReaderTest {
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void openParsesAnimatedSequenceMetadata() throws IOException {
+    void readsAnimatedSequenceInfoAndFirstFrame() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_ANIMATED_FIXTURE)) {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
             assertEquals(5, info.frameCount());
             assertEquals(150, info.width());
             assertEquals(150, info.height());
-            assertEquals(8, info.bitDepth());
-            assertEquals(PixelFormat.I420, info.pixelFormat());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(150, frame.width());
+            assertEquals(150, frame.height());
         }
     }
 

@@ -11,6 +11,7 @@ reader. Runtime dependency is `java.base` only.
 - Alpha auxiliary images (non-premultiplied ARGB combining)
 - Grid derived images (cell composition)
 - Progressive still images (`prog` references)
+- AVIS animated sequences (keyframe decode, frame count/dimensions/timing metadata)
 
 **BMFF features supported:**
 - Boxes: `ftyp`, `meta` (`hdlr`, `pitm`, `iloc`, `iinf/infe`, `iprp/ipco/ipma`, `iref`, `idat`)
@@ -23,21 +24,19 @@ references, missing required properties, and essential unknown property rejectio
 
 **Test fixtures:** `white_1x1.avif`, `extended_pixi.avif`, `colors_sdr_srgb.avif`,
 `paris_icc_exif_xmp.avif`, `abc_color_irot_alpha_NOirot.avif`, `sofa_grid1x5_420.avif`,
-`draw_points_idat_progressive.avif`, plus synthetic still-image, alpha, grid, and irot tests.
+`draw_points_idat_progressive.avif`, `colors-animated-8bpc.avif`,
+plus synthetic still-image, alpha, grid, and irot tests.
 
 **Known gaps:**
-- AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
-- AVIS image sequences: `moov`/track/sample-table parsing works (frame count, dimensions,
-  timing metadata). Full per-sample AV1 decode is deferred (sample payloads use length-prefixed
-  OBU format not yet handled).
+- AV1 `I444` pixel-accuracy tracked separately from AVIF container coverage.
+- AVIS inter-frame decoding: keyframe samples decode correctly; inter frames require
+  persistent decoder state across samples.
 - Grid and transform composition: 8-bit only; 10/12-bit deferred.
 
 ## Remaining Work
 
-1. **AVIS image sequences**
-   - Parse `moov`, tracks, sample tables, sync samples, durations, and sample dependencies.
-   - Decode sequential and indexed frames using nearest-keyframe state.
-   - Expose frame count, animation status, and timing metadata in the public API.
+1. **AVIS inter-frame decoding** — keyframe samples decode correctly; delta frames need
+   persistent decoder state or nearest-keyframe reconstruction.
 
 2. **Improve AV1 integration for AVIF composition**
    - Expose postprocessed planes before ARGB packing for reuse in alpha, grid, and transform paths.

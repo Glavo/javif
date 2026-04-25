@@ -896,9 +896,6 @@ public final class AvifContainerParser {
         if (s.sampleSizes.isEmpty()) {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Sequence has no samples", null);
         }
-        if (s.seqHeaderObu == null) {
-            throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, "Sequence is missing av1C sequence header", null);
-        }
         int sampleCount = s.sampleSizes.size();
         int chunkOff = s.chunkOffsets.isEmpty() ? 0 : s.chunkOffsets.get(0);
         int bytesOff = 0;
@@ -909,11 +906,8 @@ public final class AvifContainerParser {
             long off = (long) chunkOff + bytesOff;
             if (off + sz > source.length)
                 throw new AvifDecodeException(AvifErrorCode.TRUNCATED_DATA, "Sample outside source: " + i, off);
-            byte[] sampleData = new byte[sz];
-            System.arraycopy(source, (int) off, sampleData, 0, sz);
-            byte[] data = new byte[s.seqHeaderObu.length + sampleData.length];
-            System.arraycopy(s.seqHeaderObu, 0, data, 0, s.seqHeaderObu.length);
-            System.arraycopy(sampleData, 0, data, s.seqHeaderObu.length, sampleData.length);
+            byte[] data = new byte[sz];
+            System.arraycopy(source, (int) off, data, 0, sz);
             payloads.add(data);
             bytesOff += sz;
             deltas.add(i < s.sampleDeltas.size() ? s.sampleDeltas.get(i) : 1);
