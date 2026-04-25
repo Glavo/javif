@@ -1581,17 +1581,16 @@ public final class BlockNeighborContext {
 
     /// Returns the chroma coefficient skip-context for one transform unit on the supplied plane.
     ///
-    /// The current implementation stores chroma coefficient-context bytes on a chroma-grid edge
-    /// that already accounts for sequence subsampling, so the supplied block origin and transform
-    /// size can stay in the existing block-position and transform-size model. Each chroma plane
-    /// keeps its own edge state, matching the fact that U and V residual syntax do not share
-    /// coefficient neighbor history.
+    /// Chroma coefficient-skip syntax uses dav1d's dedicated context range `7..12` instead of the
+    /// luma skip-context lookup table. The context is based on whether the coded chroma block spans
+    /// multiple transform units and whether top or left chroma coefficient edges contain any
+    /// non-zero history for the current plane.
     ///
     /// @param plane the chroma plane index, where `0` is U and `1` is V
     /// @param blockSize the coded block size that owns the current chroma transform unit
     /// @param position the current block origin in tile-relative luma 4x4 units
     /// @param transformSize the current chroma transform size
-    /// @return the chroma coefficient skip-context in `[0, 7)`
+    /// @return the chroma coefficient skip-context in `[7, 13)`
     public int chromaCoefficientSkipContext(
             int plane,
             BlockSize blockSize,
@@ -1601,24 +1600,21 @@ public final class BlockNeighborContext {
         BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
-        if (chromaBlockWidth4(nonNullBlockSize) == nonNullTransformSize.width4()
-                && chromaBlockHeight4(nonNullBlockSize) == nonNullTransformSize.height4()) {
-            return 0;
-        }
-
         byte[] aboveContexts = selectAboveChromaCoefficientContext(plane);
         byte[] leftContexts = selectLeftChromaCoefficientContext(plane);
-        int aboveContext = mergeCoefficientContext(
+        boolean notOneBlock = chromaBlockLog2Width4(nonNullBlockSize) > nonNullTransformSize.log2Width4()
+                || chromaBlockLog2Height4(nonNullBlockSize) > nonNullTransformSize.log2Height4();
+        boolean aboveHasNonZero = hasNonZeroCoefficientContext(
                 aboveContexts,
                 chromaX4(nonNullPosition),
                 nonNullTransformSize.width4()
         );
-        int leftContext = mergeCoefficientContext(
+        boolean leftHasNonZero = hasNonZeroCoefficientContext(
                 leftContexts,
                 chromaY4(nonNullPosition),
                 nonNullTransformSize.height4()
         );
-        return LUMA_COEFFICIENT_SKIP_CONTEXTS[Math.min(aboveContext & 0x3F, 4)][Math.min(leftContext & 0x3F, 4)];
+        return 7 + (notOneBlock ? 3 : 0) + (aboveHasNonZero ? 1 : 0) + (leftHasNonZero ? 1 : 0);
     }
 
     /// Returns the chroma DC-sign context for one transform unit on the supplied plane.
@@ -1814,6 +1810,22 @@ public final class BlockNeighborContext {
         return merged;
     }
 
+    /// Returns whether one coefficient-context edge span contains any non-zero residual history.
+    ///
+    /// @param contexts the stored coefficient-context edge bytes
+    /// @param start the inclusive start coordinate in 4x4 units
+    /// @param span the requested span length in 4x4 units
+    /// @return whether any stored context byte differs from the all-zero sentinel
+    private static boolean hasNonZeroCoefficientContext(byte[] contexts, int start, int span) {
+        int end = Math.min(contexts.length, start + span);
+        for (int index = start; index < end; index++) {
+            if ((contexts[index] & 0xFF) != ALL_ZERO_COEFFICIENT_CONTEXT_BYTE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Sums the stored DC-sign classes across one visible coefficient-context edge span.
     ///
     /// Stored coefficient-context bytes encode negative values as class `0`, all-zero as class `1`,
@@ -1849,20 +1861,24 @@ public final class BlockNeighborContext {
         return Objects.requireNonNull(position, "position").y4() >> chromaSubsamplingY;
     }
 
-    /// Returns the effective chroma-block width in chroma 4x4 units for one coded block size.
+    /// Returns the effective chroma-block width log2 in chroma 4x4 units for one coded block size.
     ///
     /// @param blockSize the coded block size to inspect
-    /// @return the effective chroma-block width in chroma 4x4 units
-    private int chromaBlockWidth4(BlockSize blockSize) {
-        return Math.max(1, Objects.requireNonNull(blockSize, "blockSize").width4() >> chromaSubsamplingX);
+    /// @return the effective chroma-block width log2 in chroma 4x4 units
+    private int chromaBlockLog2Width4(BlockSize blockSize) {
+        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
+        int log2Width4 = nonNullBlockSize.log2Width4();
+        return Math.max(0, log2Width4 - (log2Width4 != 0 ? chromaSubsamplingX : 0));
     }
 
-    /// Returns the effective chroma-block height in chroma 4x4 units for one coded block size.
+    /// Returns the effective chroma-block height log2 in chroma 4x4 units for one coded block size.
     ///
     /// @param blockSize the coded block size to inspect
-    /// @return the effective chroma-block height in chroma 4x4 units
-    private int chromaBlockHeight4(BlockSize blockSize) {
-        return Math.max(1, Objects.requireNonNull(blockSize, "blockSize").height4() >> chromaSubsamplingY);
+    /// @return the effective chroma-block height log2 in chroma 4x4 units
+    private int chromaBlockLog2Height4(BlockSize blockSize) {
+        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
+        int log2Height4 = nonNullBlockSize.log2Height4();
+        return Math.max(0, log2Height4 - (log2Height4 != 0 ? chromaSubsamplingY : 0));
     }
 
     /// Returns the stored above-edge chroma coefficient-context bytes for one chroma plane.

@@ -100,6 +100,24 @@ final class LumaDequantizerTest {
         assertArrayEquals(expected, dequantized);
     }
 
+    /// Verifies that large transforms apply the AV1 dequantization shift after magnitude scaling.
+    @Test
+    void largeTransformAppliesDequantizationShiftBeforeSign() {
+        int[] coefficients = new int[TransformSize.TX_32X32.widthPixels() * TransformSize.TX_32X32.heightPixels()];
+        coefficients[0] = 3;
+        coefficients[1] = -3;
+
+        int[] dequantized = LumaDequantizer.dequantize(
+                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_32X32, 1, coefficients, 0x11),
+                new LumaDequantizer.Context(2, 0, 8)
+        );
+
+        int[] expected = new int[coefficients.length];
+        expected[0] = 12;
+        expected[1] = -13;
+        assertArrayEquals(expected, dequantized);
+    }
+
     /// Verifies that unsupported bit depths still fail fast in the current subset.
     @Test
     void rejectsUnsupportedBitDepths() {

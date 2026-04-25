@@ -29,6 +29,7 @@ import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.PartitionType;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
@@ -73,6 +74,50 @@ public final class TileSyntaxReader {
 
     /// The self-guided projection coefficient precision.
     private static final int SELF_GUIDED_PROJECTION_BITS = 7;
+
+    /// The `dav1d` transform-type lookup table shared by intra and inter transform sets.
+    private static final TransformType @Unmodifiable [] TRANSFORM_TYPES_PER_SET = {
+            TransformType.IDTX,
+            TransformType.DCT_DCT,
+            TransformType.ADST_ADST,
+            TransformType.ADST_DCT,
+            TransformType.DCT_ADST,
+            TransformType.IDTX,
+            TransformType.DCT_DCT,
+            TransformType.V_DCT,
+            TransformType.H_DCT,
+            TransformType.ADST_ADST,
+            TransformType.ADST_DCT,
+            TransformType.DCT_ADST,
+            TransformType.IDTX,
+            TransformType.V_DCT,
+            TransformType.H_DCT,
+            TransformType.DCT_DCT,
+            TransformType.ADST_DCT,
+            TransformType.DCT_ADST,
+            TransformType.FLIPADST_DCT,
+            TransformType.DCT_FLIPADST,
+            TransformType.ADST_ADST,
+            TransformType.FLIPADST_FLIPADST,
+            TransformType.ADST_FLIPADST,
+            TransformType.FLIPADST_ADST,
+            TransformType.IDTX,
+            TransformType.V_DCT,
+            TransformType.H_DCT,
+            TransformType.V_ADST,
+            TransformType.H_ADST,
+            TransformType.V_FLIPADST,
+            TransformType.H_FLIPADST,
+            TransformType.DCT_DCT,
+            TransformType.ADST_DCT,
+            TransformType.DCT_ADST,
+            TransformType.FLIPADST_DCT,
+            TransformType.DCT_FLIPADST,
+            TransformType.ADST_ADST,
+            TransformType.FLIPADST_FLIPADST,
+            TransformType.ADST_FLIPADST,
+            TransformType.FLIPADST_ADST
+    };
 
     /// The tile-local decode state that owns the mutable decoder and CDF context.
     private final TileDecodeContext tileContext;
@@ -348,6 +393,57 @@ public final class TileSyntaxReader {
     /// @return whether the current transform region splits to smaller transforms
     public boolean readTransformSplitFlag(int tableIndex, int context) {
         return msacDecoder.decodeBooleanAdapt(cdfContext.mutableTransformPartitionCdf(tableIndex, context));
+    }
+
+    /// Decodes one explicitly signaled luma intra transform type.
+    ///
+    /// @param transformSize the active luma transform size
+    /// @param yMode the luma intra prediction mode used as transform-type context
+    /// @param reducedTransformSet whether the active frame uses the reduced transform-type set
+    /// @return the decoded luma intra transform type
+    public TransformType readIntraTransformType(
+            TransformSize transformSize,
+            LumaIntraPredictionMode yMode,
+            boolean reducedTransformSet
+    ) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        LumaIntraPredictionMode nonNullYMode = Objects.requireNonNull(yMode, "yMode");
+        int minSquareLevel = nonNullTransformSize.minSquareLevel();
+        int yModeIndex = nonNullYMode.symbolIndex();
+        if (reducedTransformSet || minSquareLevel == TransformSize.TX_16X16.minSquareLevel()) {
+            int symbol = msacDecoder.decodeSymbolAdapt(
+                    cdfContext.mutableIntraTransformTypeSet2Cdf(minSquareLevel, yModeIndex),
+                    4
+            );
+            return TRANSFORM_TYPES_PER_SET[symbol];
+        }
+
+        int symbol = msacDecoder.decodeSymbolAdapt(
+                cdfContext.mutableIntraTransformTypeSet1Cdf(minSquareLevel, yModeIndex),
+                6
+        );
+        return TRANSFORM_TYPES_PER_SET[symbol + 5];
+    }
+
+    /// Decodes one explicitly signaled luma inter transform type.
+    ///
+    /// @param transformSize the active luma transform size
+    /// @param reducedTransformSet whether the active frame uses the reduced transform-type set
+    /// @return the decoded luma inter transform type
+    public TransformType readInterTransformType(TransformSize transformSize, boolean reducedTransformSet) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        int minSquareLevel = nonNullTransformSize.minSquareLevel();
+        if (reducedTransformSet || nonNullTransformSize.maxSquareLevel() == TransformSize.TX_32X32.maxSquareLevel()) {
+            boolean useDctDct = msacDecoder.decodeBooleanAdapt(cdfContext.mutableInterTransformTypeSet3Cdf(minSquareLevel));
+            return useDctDct ? TransformType.DCT_DCT : TransformType.IDTX;
+        }
+        if (minSquareLevel == TransformSize.TX_16X16.minSquareLevel()) {
+            int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableInterTransformTypeSet2Cdf(), 11);
+            return TRANSFORM_TYPES_PER_SET[symbol + 12];
+        }
+
+        int symbol = msacDecoder.decodeSymbolAdapt(cdfContext.mutableInterTransformTypeSet1Cdf(minSquareLevel), 15);
+        return TRANSFORM_TYPES_PER_SET[symbol + 24];
     }
 
     /// Decodes one luma coefficient-skip flag for the supplied transform size and context.

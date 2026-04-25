@@ -17,6 +17,8 @@ package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.DecodedFrame;
+import org.glavo.avif.internal.av1.output.ArgbOutput;
+import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.bmff.AvifContainer;
@@ -237,7 +239,12 @@ public final class AvifImageReader implements AutoCloseable {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item produced no frame", null);
             }
             ByteBuffer alphaPayload = container.alphaItemPayload();
-            AvifFrame rawFrame = adaptFrame(colorFrame, frameIndex);
+            AvifFrame rawFrame = adaptFrame(
+                    colorFrame,
+                    colorReader.lastPlanes(),
+                    container.info().colorInfo(),
+                    frameIndex
+            );
             if (alphaPayload != null) {
                 rawFrame = adaptFrameWithAlpha(rawFrame, alphaPayload, frameIndex);
             }
@@ -281,7 +288,7 @@ public final class AvifImageReader implements AutoCloseable {
             if (decodedFrame == null)
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence produced no frame: " + frameIndex, null);
             sequenceAv1FrameIndex++;
-            return adaptFrame(decodedFrame, frameIndex);
+            return adaptFrame(decodedFrame, sequenceAv1Reader.lastPlanes(), container.info().colorInfo(), frameIndex);
         } catch (AvifDecodeException e) {
             throw e;
         } catch (IOException e) {
@@ -783,7 +790,15 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frame the decoded AV1 frame
     /// @param frameIndex the zero-based AVIF frame index
     /// @return an AVIF public frame
-    private static AvifFrame adaptFrame(DecodedFrame frame, int frameIndex) {
+    private static AvifFrame adaptFrame(
+            DecodedFrame frame,
+            @Nullable DecodedPlanes planes,
+            @Nullable AvifColorInfo colorInfo,
+            int frameIndex
+    ) {
+        if (colorInfo != null && planes != null) {
+            return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex);
+        }
         if (frame.bitDepth().isEightBit()) {
             return new AvifFrame(
                     frame.width(),
@@ -802,6 +817,46 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.pixelFormat(),
                     frameIndex,
                     frame.longPixelBuffer()
+            );
+        }
+        throw new IllegalArgumentException("Unsupported decoded bit depth: " + frame.bitDepth());
+    }
+
+    /// Adapts decoded AV1 planes to the AVIF public frame model using container color metadata.
+    ///
+    /// @param frame the decoded AV1 frame metadata
+    /// @param planes the decoded AV1 planes to render
+    /// @param colorInfo the AVIF `nclx` color metadata
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @return an AVIF public frame rendered with the container-selected YUV transform
+    private static AvifFrame adaptFrameFromPlanes(
+            DecodedFrame frame,
+            DecodedPlanes planes,
+            AvifColorInfo colorInfo,
+            int frameIndex
+    ) {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorInfo(
+                colorInfo,
+                frame.pixelFormat() == AvifPixelFormat.I400
+        );
+        if (frame.bitDepth().isEightBit()) {
+            return new AvifFrame(
+                    frame.width(),
+                    frame.height(),
+                    frame.bitDepth(),
+                    frame.pixelFormat(),
+                    frameIndex,
+                    ArgbOutput.toOpaqueArgbPixels(planes, transform)
+            );
+        }
+        if (frame.bitDepth().isHighBitDepth()) {
+            return new AvifFrame(
+                    frame.width(),
+                    frame.height(),
+                    frame.bitDepth(),
+                    frame.pixelFormat(),
+                    frameIndex,
+                    ArgbOutput.toOpaqueArgbLongPixels(planes, transform)
             );
         }
         throw new IllegalArgumentException("Unsupported decoded bit depth: " + frame.bitDepth());

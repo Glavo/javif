@@ -1618,10 +1618,10 @@ final class FrameReconstructorTest {
         assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
     }
 
-    /// Verifies that one `TX_64X64` luma DC residual now reconstructs successfully through the
-    /// first-pixel path.
+    /// Verifies that one `TX_64X64` luma DC residual reconstructs successfully after the large
+    /// transform dequantization shift.
     @Test
-    void reconstructsSingleTileI400KeyFrameWithPositiveSixtyFourBySixtyFourDcResidual() {
+    void reconstructsSingleTileI400KeyFrameWithPositiveLargeSixtyFourBySixtyFourDcResidual() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_64X64;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
@@ -1632,7 +1632,7 @@ final class FrameReconstructorTest {
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, AvifPixelFormat.I400),
-                createResidualLayout(position, size, 64)
+                createResidualLayout(position, size, 1024)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
@@ -1723,24 +1723,24 @@ final class FrameReconstructorTest {
         assertPlaneEquals(
                 planes.lumaPlane(),
                 new int[][]{
-                        {128, 136, 144, 152},
-                        {64, 96, 120, 144},
-                        {132, 147, 164, 164},
-                        {68, 101, 133, 155}
+                        {128, 128, 128, 127},
+                        {129, 128, 128, 128},
+                        {129, 129, 129, 128},
+                        {129, 129, 129, 129}
                 }
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaUPlane()),
                 new int[][]{
-                        {117, 134},
-                        {120, 141}
+                        {128, 128},
+                        {128, 128}
                 }
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaVPlane()),
                 new int[][]{
-                        {139, 122},
-                        {136, 115}
+                        {128, 128},
+                        {128, 128}
                 }
         );
     }
@@ -1776,28 +1776,28 @@ final class FrameReconstructorTest {
         assertPlaneEquals(
                 planes.lumaPlane(),
                 new int[][]{
-                        {128, 136, 144, 152},
-                        {64, 96, 120, 144},
-                        {132, 147, 164, 164},
-                        {68, 101, 133, 155}
+                        {128, 128, 128, 127},
+                        {129, 128, 128, 128},
+                        {129, 129, 129, 128},
+                        {129, 129, 129, 129}
                 }
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaUPlane()),
                 new int[][]{
-                        {130, 138},
-                        {104, 130},
-                        {134, 146},
-                        {106, 136}
+                        {128, 127},
+                        {128, 128},
+                        {128, 128},
+                        {128, 128}
                 }
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaVPlane()),
                 new int[][]{
-                        {126, 118},
-                        {152, 126},
-                        {122, 110},
-                        {150, 120}
+                        {128, 129},
+                        {128, 128},
+                        {128, 128},
+                        {128, 128}
                 }
         );
     }
@@ -1833,28 +1833,28 @@ final class FrameReconstructorTest {
         assertPlaneEquals(
                 planes.lumaPlane(),
                 new int[][]{
-                        {128, 136, 144, 152},
-                        {64, 96, 120, 144},
-                        {132, 147, 164, 164},
-                        {68, 101, 133, 155}
+                        {128, 128, 128, 127},
+                        {129, 128, 128, 128},
+                        {129, 129, 129, 128},
+                        {129, 129, 129, 129}
                 }
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaUPlane()),
                 new int[][]{
-                        {128, 132, 136, 140},
-                        {96, 112, 124, 136},
-                        {130, 138, 146, 146},
-                        {98, 114, 131, 142}
+                        {128, 128, 128, 127},
+                        {128, 128, 128, 128},
+                        {128, 128, 128, 128},
+                        {128, 128, 128, 128}
                 }
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaVPlane()),
                 new int[][]{
-                        {128, 124, 120, 116},
-                        {160, 144, 132, 120},
-                        {126, 118, 110, 110},
-                        {158, 142, 125, 114}
+                        {128, 128, 128, 129},
+                        {128, 128, 128, 128},
+                        {128, 128, 128, 128},
+                        {128, 128, 128, 128}
                 }
         );
     }
@@ -5750,14 +5750,25 @@ final class FrameReconstructorTest {
     ) {
         int height = interSamples.length;
         int width = interSamples[0].length;
-        int[][] expected = new int[height][width];
+        MutablePlaneBuffer intraPlane = new MutablePlaneBuffer(width, height, 8);
         for (int y = 0; y < height; y++) {
             if (interSamples[y].length != width) {
                 throw new IllegalArgumentException("inter sample rows must share the same width");
             }
             for (int x = 0; x < width; x++) {
+                intraPlane.setSample(x, y, interSamples[y][x]);
+            }
+        }
+        if (subsamplingX == 0 && subsamplingY == 0) {
+            IntraPredictor.predictLuma(intraPlane, 0, 0, width, height, mode.toLumaPredictionMode(), 0);
+        } else {
+            IntraPredictor.predictChroma(intraPlane, 0, 0, width, height, mode.toUvPredictionMode(), 0);
+        }
+        int[][] expected = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
                 int mask = InterIntraMasks.maskValue(mode, wedge, wedgeIndex, size, x, y, subsamplingX, subsamplingY);
-                expected[y][x] = (interSamples[y][x] * (64 - mask) + 128 * mask + 32) >> 6;
+                expected[y][x] = (interSamples[y][x] * (64 - mask) + intraPlane.sample(x, y) * mask + 32) >> 6;
             }
         }
         return expected;

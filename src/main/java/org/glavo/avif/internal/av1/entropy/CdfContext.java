@@ -340,6 +340,109 @@ public final class CdfContext {
             {16088}
     });
 
+    /// The transformed default inter transform-type CDFs for transform set 1.
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_INTER_TRANSFORM_TYPE_SET_1_CDFS = inverse2d(new int[][]{
+            {4458, 5560, 7695, 9709, 13330, 14789, 17537, 20266, 21504, 22848, 23934, 25474, 27727, 28915, 30631},
+            {1645, 2573, 4778, 5711, 7807, 8622, 10522, 15357, 17674, 20408, 22517, 25010, 27116, 28856, 30749}
+    });
+
+    /// The transformed default inter transform-type CDF for transform set 2.
+    private static final int @Unmodifiable [] DEFAULT_INTER_TRANSFORM_TYPE_SET_2_CDF =
+            inverse(770, 2421, 5225, 12907, 15819, 18927, 21561, 24089, 26595, 28526, 30529);
+
+    /// The transformed default inter transform-type CDFs for the reduced/large transform set.
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_INTER_TRANSFORM_TYPE_SET_3_CDFS = inverse2d(new int[][]{
+            {16384},
+            {4167},
+            {1998},
+            {748}
+    });
+
+    /// The transformed default intra transform-type CDFs for transform set 1.
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_INTRA_TRANSFORM_TYPE_SET_1_CDFS =
+            inverse3d(new int[][][]{
+                    {
+                            {1535, 8035, 9461, 12751, 23467, 27825},
+                            {564, 3335, 9709, 10870, 18143, 28094},
+                            {672, 3247, 3676, 11982, 19415, 23127},
+                            {5279, 13885, 15487, 18044, 23527, 30252},
+                            {4423, 6074, 7985, 10416, 25693, 29298},
+                            {1486, 4241, 9460, 10662, 16456, 27694},
+                            {439, 2838, 3522, 6737, 18058, 23754},
+                            {1190, 4233, 4855, 11670, 20281, 24377},
+                            {1045, 4312, 8647, 10159, 18644, 29335},
+                            {202, 3734, 4747, 7298, 17127, 24016},
+                            {447, 4312, 6819, 8884, 16010, 23858},
+                            {277, 4369, 5255, 8905, 16465, 22271},
+                            {3409, 5436, 10599, 15599, 19687, 24040}
+                    },
+                    {
+                            {1870, 13742, 14530, 16498, 23770, 27698},
+                            {326, 8796, 14632, 15079, 19272, 27486},
+                            {484, 7576, 7712, 14443, 19159, 22591},
+                            {1126, 15340, 15895, 17023, 20896, 30279},
+                            {655, 4854, 5249, 5913, 22099, 27138},
+                            {1299, 6458, 8885, 9290, 14851, 25497},
+                            {311, 5295, 5552, 6885, 16107, 22672},
+                            {883, 8059, 8270, 11258, 17289, 21549},
+                            {741, 7580, 9318, 10345, 16688, 29046},
+                            {110, 7406, 7915, 9195, 16041, 23329},
+                            {363, 7974, 9357, 10673, 15629, 24474},
+                            {153, 7647, 8112, 9936, 15307, 19996},
+                            {3511, 6332, 11165, 15335, 19323, 23594}
+                    }
+            });
+
+    /// The transformed default intra transform-type CDFs for transform set 2.
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_INTRA_TRANSFORM_TYPE_SET_2_CDFS =
+            inverse3d(new int[][][]{
+                    {
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214}
+                    },
+                    {
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214},
+                            {6554, 13107, 19661, 26214}
+                    },
+                    {
+                            {1127, 12814, 22772, 27483},
+                            {145, 6761, 11980, 26667},
+                            {362, 5887, 11678, 16725},
+                            {385, 15213, 18587, 30693},
+                            {25, 2914, 23134, 27903},
+                            {60, 4470, 11749, 23991},
+                            {37, 3332, 14511, 21448},
+                            {157, 6320, 13036, 17439},
+                            {119, 6719, 12906, 29396},
+                            {47, 5537, 12576, 21499},
+                            {269, 6076, 11258, 23115},
+                            {83, 5615, 12001, 17228},
+                            {1968, 5556, 12023, 18547}
+                    }
+            });
+
     /// The transformed default coefficient-skip CDFs grouped by AV1 transform-context class.
     private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] DEFAULT_COEFFICIENT_SKIP_CDFS = inverse3d(new int[][][]{
             {
@@ -1221,6 +1324,21 @@ public final class CdfContext {
     /// The mutable inter transform-partition CDFs.
     private final int[][] transformPartitionCdfs;
 
+    /// The mutable inter transform-type CDFs for transform set 1.
+    private final int[][] interTransformTypeSet1Cdfs;
+
+    /// The mutable inter transform-type CDF for transform set 2.
+    private final int[] interTransformTypeSet2Cdf;
+
+    /// The mutable inter transform-type CDFs for the reduced/large transform set.
+    private final int[][] interTransformTypeSet3Cdfs;
+
+    /// The mutable intra transform-type CDFs for transform set 1.
+    private final int[][][] intraTransformTypeSet1Cdfs;
+
+    /// The mutable intra transform-type CDFs for transform set 2.
+    private final int[][][] intraTransformTypeSet2Cdfs;
+
     /// The mutable coefficient-skip CDFs grouped by AV1 transform-context class.
     private final int[][][] coefficientSkipCdfs;
 
@@ -1233,23 +1351,14 @@ public final class CdfContext {
     /// The mutable end-of-block high-bit CDFs grouped by AV1 transform-context class.
     private final int[][][][] endOfBlockHighBitCdfs;
 
-    /// The mutable coefficient base-token CDFs for base-token context `0`.
-    private final int[][][] baseTokenContext0Cdfs;
-
-    /// The mutable coefficient base-token CDFs for the supported `TX_4X4` context range.
-    private final int[][][] baseTokenGroup0Cdfs;
+    /// The mutable coefficient base-token CDFs grouped by transform context, plane, and token context.
+    private final int[][][][] baseTokenCdfs;
 
     /// The mutable DC-sign CDFs for luma and chroma planes.
     private final int[][][] dcSignCdfs;
 
-    /// The mutable DC high-token CDFs for the `br_tok` context `0`.
-    private final int[][][] dcHighTokenCdfs;
-
-    /// The mutable high-token CDFs for the last scanned coefficient at `br_tok` context `7`.
-    private final int[][][] endOfBlockHighTokenContext7Cdfs;
-
-    /// The mutable coefficient high-token CDFs for the supported `TX_4X4` context range.
-    private final int[][][] highTokenGroup0Cdfs;
+    /// The mutable coefficient high-token CDFs grouped by transform context, plane, and token context.
+    private final int[][][][] highTokenCdfs;
 
     /// The mutable delta-q CDF.
     private final int[] deltaQCdf;
@@ -1369,16 +1478,18 @@ public final class CdfContext {
     /// @param interpolationFilterCdfs the mutable switchable interpolation-filter CDFs
     /// @param transformSizeCdfs the mutable transform-size CDFs
     /// @param transformPartitionCdfs the mutable inter transform-partition CDFs
+    /// @param interTransformTypeSet1Cdfs the mutable inter transform-type CDFs for transform set 1
+    /// @param interTransformTypeSet2Cdf the mutable inter transform-type CDF for transform set 2
+    /// @param interTransformTypeSet3Cdfs the mutable inter transform-type CDFs for the reduced/large transform set
+    /// @param intraTransformTypeSet1Cdfs the mutable intra transform-type CDFs for transform set 1
+    /// @param intraTransformTypeSet2Cdfs the mutable intra transform-type CDFs for transform set 2
     /// @param coefficientSkipCdfs the mutable coefficient-skip CDFs grouped by AV1 transform-context class
     /// @param endOfBlockPrefixCdfs the mutable end-of-block prefix CDFs
     /// @param endOfBlockBaseTokenCdfs the mutable end-of-block base-token CDFs
     /// @param endOfBlockHighBitCdfs the mutable end-of-block high-bit CDFs
-    /// @param baseTokenContext0Cdfs the mutable coefficient base-token CDFs for base-token context `0`
-    /// @param baseTokenGroup0Cdfs the mutable coefficient base-token CDFs for the supported `TX_4X4` context range
+    /// @param baseTokenCdfs the mutable coefficient base-token CDFs
     /// @param dcSignCdfs the mutable DC-sign CDFs
-    /// @param dcHighTokenCdfs the mutable DC high-token CDFs
-    /// @param endOfBlockHighTokenContext7Cdfs the mutable high-token CDFs for `br_tok` context `7`
-    /// @param highTokenGroup0Cdfs the mutable coefficient high-token CDFs for the supported `TX_4X4` context range
+    /// @param highTokenCdfs the mutable coefficient high-token CDFs
     /// @param deltaQCdf the mutable delta-q CDF
     /// @param deltaLfCdfs the mutable delta-lf CDFs
     /// @param motionVectorJointCdf the mutable motion-vector joint CDF
@@ -1436,16 +1547,18 @@ public final class CdfContext {
             int[][][] interpolationFilterCdfs,
             int[][][] transformSizeCdfs,
             int[][] transformPartitionCdfs,
+            int[][] interTransformTypeSet1Cdfs,
+            int[] interTransformTypeSet2Cdf,
+            int[][] interTransformTypeSet3Cdfs,
+            int[][][] intraTransformTypeSet1Cdfs,
+            int[][][] intraTransformTypeSet2Cdfs,
             int[][][] coefficientSkipCdfs,
             int[][][][] endOfBlockPrefixCdfs,
             int[][][][] endOfBlockBaseTokenCdfs,
             int[][][][] endOfBlockHighBitCdfs,
-            int[][][] baseTokenContext0Cdfs,
-            int[][][] baseTokenGroup0Cdfs,
+            int[][][][] baseTokenCdfs,
             int[][][] dcSignCdfs,
-            int[][][] dcHighTokenCdfs,
-            int[][][] endOfBlockHighTokenContext7Cdfs,
-            int[][][] highTokenGroup0Cdfs,
+            int[][][][] highTokenCdfs,
             int[] deltaQCdf,
             int[][] deltaLfCdfs,
             int[] motionVectorJointCdf,
@@ -1503,19 +1616,18 @@ public final class CdfContext {
         this.interpolationFilterCdfs = Objects.requireNonNull(interpolationFilterCdfs, "interpolationFilterCdfs");
         this.transformSizeCdfs = Objects.requireNonNull(transformSizeCdfs, "transformSizeCdfs");
         this.transformPartitionCdfs = Objects.requireNonNull(transformPartitionCdfs, "transformPartitionCdfs");
+        this.interTransformTypeSet1Cdfs = Objects.requireNonNull(interTransformTypeSet1Cdfs, "interTransformTypeSet1Cdfs");
+        this.interTransformTypeSet2Cdf = Objects.requireNonNull(interTransformTypeSet2Cdf, "interTransformTypeSet2Cdf");
+        this.interTransformTypeSet3Cdfs = Objects.requireNonNull(interTransformTypeSet3Cdfs, "interTransformTypeSet3Cdfs");
+        this.intraTransformTypeSet1Cdfs = Objects.requireNonNull(intraTransformTypeSet1Cdfs, "intraTransformTypeSet1Cdfs");
+        this.intraTransformTypeSet2Cdfs = Objects.requireNonNull(intraTransformTypeSet2Cdfs, "intraTransformTypeSet2Cdfs");
         this.coefficientSkipCdfs = Objects.requireNonNull(coefficientSkipCdfs, "coefficientSkipCdfs");
         this.endOfBlockPrefixCdfs = Objects.requireNonNull(endOfBlockPrefixCdfs, "endOfBlockPrefixCdfs");
         this.endOfBlockBaseTokenCdfs = Objects.requireNonNull(endOfBlockBaseTokenCdfs, "endOfBlockBaseTokenCdfs");
         this.endOfBlockHighBitCdfs = Objects.requireNonNull(endOfBlockHighBitCdfs, "endOfBlockHighBitCdfs");
-        this.baseTokenContext0Cdfs = Objects.requireNonNull(baseTokenContext0Cdfs, "baseTokenContext0Cdfs");
-        this.baseTokenGroup0Cdfs = Objects.requireNonNull(baseTokenGroup0Cdfs, "baseTokenGroup0Cdfs");
+        this.baseTokenCdfs = Objects.requireNonNull(baseTokenCdfs, "baseTokenCdfs");
         this.dcSignCdfs = Objects.requireNonNull(dcSignCdfs, "dcSignCdfs");
-        this.dcHighTokenCdfs = Objects.requireNonNull(dcHighTokenCdfs, "dcHighTokenCdfs");
-        this.endOfBlockHighTokenContext7Cdfs = Objects.requireNonNull(
-                endOfBlockHighTokenContext7Cdfs,
-                "endOfBlockHighTokenContext7Cdfs"
-        );
-        this.highTokenGroup0Cdfs = Objects.requireNonNull(highTokenGroup0Cdfs, "highTokenGroup0Cdfs");
+        this.highTokenCdfs = Objects.requireNonNull(highTokenCdfs, "highTokenCdfs");
         this.deltaQCdf = Objects.requireNonNull(deltaQCdf, "deltaQCdf");
         this.deltaLfCdfs = Objects.requireNonNull(deltaLfCdfs, "deltaLfCdfs");
         this.motionVectorJointCdf = Objects.requireNonNull(motionVectorJointCdf, "motionVectorJointCdf");
@@ -1552,6 +1664,15 @@ public final class CdfContext {
     ///
     /// @return a mutable CDF context seeded with the AV1 default tables
     public static CdfContext createDefault() {
+        return createDefault(0);
+    }
+
+    /// Creates a mutable CDF context seeded with the AV1 default tables for one base quantizer.
+    ///
+    /// @param baseQIndex the frame base quantizer index in `[0, 256)`
+    /// @return a mutable CDF context seeded with the AV1 default tables for the supplied base quantizer
+    public static CdfContext createDefault(int baseQIndex) {
+        int qcat = CoefficientCdfDefaults.qcatForBaseQIndex(baseQIndex);
         return new CdfContext(
                 deepCopy(DEFAULT_SKIP_CDFS),
                 deepCopy(DEFAULT_SKIP_MODE_CDFS),
@@ -1579,16 +1700,18 @@ public final class CdfContext {
                 deepCopy(DEFAULT_INTERPOLATION_FILTER_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_SIZE_CDFS),
                 deepCopy(DEFAULT_TRANSFORM_PARTITION_CDFS),
-                deepCopy(DEFAULT_COEFFICIENT_SKIP_CDFS),
-                deepCopy(DEFAULT_END_OF_BLOCK_PREFIX_CDFS),
-                deepCopy(DEFAULT_END_OF_BLOCK_BASE_TOKEN_CDFS),
-                deepCopy(DEFAULT_END_OF_BLOCK_HIGH_BIT_CDFS),
-                deepCopy(DEFAULT_BASE_TOKEN_CONTEXT0_CDFS),
-                deepCopy(DEFAULT_BASE_TOKEN_GROUP0_CDFS),
+                deepCopy(DEFAULT_INTER_TRANSFORM_TYPE_SET_1_CDFS),
+                Arrays.copyOf(DEFAULT_INTER_TRANSFORM_TYPE_SET_2_CDF, DEFAULT_INTER_TRANSFORM_TYPE_SET_2_CDF.length),
+                deepCopy(DEFAULT_INTER_TRANSFORM_TYPE_SET_3_CDFS),
+                deepCopy(DEFAULT_INTRA_TRANSFORM_TYPE_SET_1_CDFS),
+                deepCopy(DEFAULT_INTRA_TRANSFORM_TYPE_SET_2_CDFS),
+                CoefficientCdfDefaults.coefficientSkipCdfs(qcat),
+                CoefficientCdfDefaults.endOfBlockPrefixCdfs(qcat),
+                CoefficientCdfDefaults.endOfBlockBaseTokenCdfs(qcat),
+                CoefficientCdfDefaults.endOfBlockHighBitCdfs(qcat),
+                CoefficientCdfDefaults.baseTokenCdfs(qcat),
                 deepCopy(DEFAULT_DC_SIGN_CDFS),
-                deepCopy(DEFAULT_DC_HIGH_TOKEN_CDFS),
-                deepCopy(DEFAULT_END_OF_BLOCK_HIGH_TOKEN_CONTEXT7_CDFS),
-                deepCopy(DEFAULT_HIGH_TOKEN_GROUP0_CDFS),
+                CoefficientCdfDefaults.highTokenCdfs(qcat),
                 Arrays.copyOf(DEFAULT_DELTA_Q_CDF, DEFAULT_DELTA_Q_CDF.length),
                 deepCopy(DEFAULT_DELTA_LF_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
@@ -1653,16 +1776,18 @@ public final class CdfContext {
                 deepCopy(interpolationFilterCdfs),
                 deepCopy(transformSizeCdfs),
                 deepCopy(transformPartitionCdfs),
+                deepCopy(interTransformTypeSet1Cdfs),
+                Arrays.copyOf(interTransformTypeSet2Cdf, interTransformTypeSet2Cdf.length),
+                deepCopy(interTransformTypeSet3Cdfs),
+                deepCopy(intraTransformTypeSet1Cdfs),
+                deepCopy(intraTransformTypeSet2Cdfs),
                 deepCopy(coefficientSkipCdfs),
                 deepCopy(endOfBlockPrefixCdfs),
                 deepCopy(endOfBlockBaseTokenCdfs),
                 deepCopy(endOfBlockHighBitCdfs),
-                deepCopy(baseTokenContext0Cdfs),
-                deepCopy(baseTokenGroup0Cdfs),
+                deepCopy(baseTokenCdfs),
                 deepCopy(dcSignCdfs),
-                deepCopy(dcHighTokenCdfs),
-                deepCopy(endOfBlockHighTokenContext7Cdfs),
-                deepCopy(highTokenGroup0Cdfs),
+                deepCopy(highTokenCdfs),
                 Arrays.copyOf(deltaQCdf, deltaQCdf.length),
                 deepCopy(deltaLfCdfs),
                 Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
@@ -1923,6 +2048,49 @@ public final class CdfContext {
         return transformPartitionCdfs[baseIndex + Objects.checkIndex(context, 3)];
     }
 
+    /// Returns the live mutable inter transform-type CDF for transform set 1.
+    ///
+    /// @param minSquareLevel the smallest square transform level touched by the transform in `[0, 2)`
+    /// @return the live mutable inter transform-type CDF for transform set 1
+    public int[] mutableInterTransformTypeSet1Cdf(int minSquareLevel) {
+        return interTransformTypeSet1Cdfs[Objects.checkIndex(minSquareLevel, interTransformTypeSet1Cdfs.length)];
+    }
+
+    /// Returns the live mutable inter transform-type CDF for transform set 2.
+    ///
+    /// @return the live mutable inter transform-type CDF for transform set 2
+    public int[] mutableInterTransformTypeSet2Cdf() {
+        return interTransformTypeSet2Cdf;
+    }
+
+    /// Returns the live mutable inter transform-type CDF for the reduced/large transform set.
+    ///
+    /// @param minSquareLevel the smallest square transform level touched by the transform in `[0, 4)`
+    /// @return the live mutable inter transform-type CDF for the reduced/large transform set
+    public int[] mutableInterTransformTypeSet3Cdf(int minSquareLevel) {
+        return interTransformTypeSet3Cdfs[Objects.checkIndex(minSquareLevel, interTransformTypeSet3Cdfs.length)];
+    }
+
+    /// Returns the live mutable intra transform-type CDF for transform set 1.
+    ///
+    /// @param minSquareLevel the smallest square transform level touched by the transform in `[0, 2)`
+    /// @param yMode the zero-based luma intra prediction mode index in `[0, 13)`
+    /// @return the live mutable intra transform-type CDF for transform set 1
+    public int[] mutableIntraTransformTypeSet1Cdf(int minSquareLevel, int yMode) {
+        int[][] table = intraTransformTypeSet1Cdfs[Objects.checkIndex(minSquareLevel, intraTransformTypeSet1Cdfs.length)];
+        return table[Objects.checkIndex(yMode, table.length)];
+    }
+
+    /// Returns the live mutable intra transform-type CDF for transform set 2.
+    ///
+    /// @param minSquareLevel the smallest square transform level touched by the transform in `[0, 3)`
+    /// @param yMode the zero-based luma intra prediction mode index in `[0, 13)`
+    /// @return the live mutable intra transform-type CDF for transform set 2
+    public int[] mutableIntraTransformTypeSet2Cdf(int minSquareLevel, int yMode) {
+        int[][] table = intraTransformTypeSet2Cdfs[Objects.checkIndex(minSquareLevel, intraTransformTypeSet2Cdfs.length)];
+        return table[Objects.checkIndex(yMode, table.length)];
+    }
+
     /// Returns the live mutable coefficient-skip CDF for the supplied transform-context group and context index.
     ///
     /// @param transformContextIndex the zero-based AV1 transform-context group index in `[0, 5)`
@@ -1971,26 +2139,14 @@ public final class CdfContext {
 
     /// Returns the live mutable coefficient base-token CDF for the supplied transform context and base-token context.
     ///
-    /// The current implementation exposes the full supported `TX_4X4` context range for transform
-    /// context group `0`, and falls back to base-token context `0` for the larger-transform paths
-    /// that still decode only the first non-zero AC coefficient.
-    ///
     /// @param transformContextIndex the AV1 transform-context group index in `[0, 5)`
     /// @param chroma whether the syntax belongs to a chroma plane
     /// @param context the zero-based base-token context index
     /// @return the live mutable coefficient base-token CDF for the supplied inputs
     public int[] mutableBaseTokenCdf(int transformContextIndex, boolean chroma, int context) {
-        if (transformContextIndex == 0) {
-            int[][] planeTable = baseTokenGroup0Cdfs[chroma ? 1 : 0];
-            if (context >= 0 && context < planeTable.length) {
-                return planeTable[context];
-            }
-        }
-        if (context != 0) {
-            throw new IllegalArgumentException("Unsupported base-token context: " + context);
-        }
-        int[][] transformTable = baseTokenContext0Cdfs[Objects.checkIndex(transformContextIndex, baseTokenContext0Cdfs.length)];
-        return transformTable[chroma ? 1 : 0];
+        int[][][] transformTable = baseTokenCdfs[Objects.checkIndex(transformContextIndex, baseTokenCdfs.length)];
+        int[][] planeTable = transformTable[chroma ? 1 : 0];
+        return planeTable[Objects.checkIndex(context, planeTable.length)];
     }
 
     /// Returns the live mutable DC-sign CDF for the supplied plane and context.
@@ -2005,41 +2161,24 @@ public final class CdfContext {
 
     /// Returns the live mutable DC high-token CDF for the supplied transform context and plane.
     ///
-    /// @param transformContextIndex the AV1 transform-context group index in `[0, 4)`
+    /// @param transformContextIndex the AV1 transform-context group index in `[0, 5)`
     /// @param chroma whether the syntax belongs to a chroma plane
     /// @return the live mutable DC high-token CDF for the supplied inputs
     public int[] mutableDcHighTokenCdf(int transformContextIndex, boolean chroma) {
-        int[][] transformTable = dcHighTokenCdfs[Objects.checkIndex(transformContextIndex, dcHighTokenCdfs.length)];
-        return transformTable[chroma ? 1 : 0];
+        return mutableHighTokenCdf(transformContextIndex, chroma, 0);
     }
 
     /// Returns the live mutable coefficient high-token CDF for the supplied transform context and `br_tok` context.
-    ///
-    /// The current implementation exposes the full supported `TX_4X4` context range for transform
-    /// context group `0`, and falls back to `br_tok` contexts `0` and `7` for the larger-transform
-    /// paths that still decode only the first non-zero AC coefficient.
     ///
     /// @param transformContextIndex the AV1 transform-context group index in `[0, 5)`
     /// @param chroma whether the syntax belongs to a chroma plane
     /// @param context the zero-based `br_tok` context index
     /// @return the live mutable coefficient high-token CDF for the supplied inputs
     public int[] mutableHighTokenCdf(int transformContextIndex, boolean chroma, int context) {
-        if (transformContextIndex == 0) {
-            int[][] planeTable = highTokenGroup0Cdfs[chroma ? 1 : 0];
-            if (context >= 0 && context < planeTable.length) {
-                return planeTable[context];
-            }
-        }
-        if (context == 0) {
-            return mutableDcHighTokenCdf(transformContextIndex, chroma);
-        }
-        if (context != 7) {
-            throw new IllegalArgumentException("Unsupported high-token context: " + context);
-        }
-        int[][] transformTable = endOfBlockHighTokenContext7Cdfs[
-                Objects.checkIndex(Math.min(transformContextIndex, 3), endOfBlockHighTokenContext7Cdfs.length)
-        ];
-        return transformTable[chroma ? 1 : 0];
+        int checkedTransformContextIndex = Objects.checkIndex(transformContextIndex, baseTokenCdfs.length);
+        int[][][] transformTable = highTokenCdfs[Math.min(checkedTransformContextIndex, highTokenCdfs.length - 1)];
+        int[][] planeTable = transformTable[chroma ? 1 : 0];
+        return planeTable[Objects.checkIndex(context, planeTable.length)];
     }
 
     /// Returns the live mutable delta-q CDF.

@@ -71,6 +71,25 @@ final class IntraPredictorTest {
         );
     }
 
+    /// Verifies that top-frame-edge vertical prediction uses the available left reference sample.
+    @Test
+    void verticalPredictionUsesLeftReferenceOnTopFrameEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(0, 0, 51);
+
+        IntraPredictor.predictLuma(plane, 1, 0, 3, 2, LumaIntraPredictionMode.VERTICAL, 0);
+
+        assertBlockEquals(
+                plane,
+                1,
+                0,
+                new int[][]{
+                        {51, 51, 51},
+                        {51, 51, 51}
+                }
+        );
+    }
+
     /// Verifies that horizontal prediction copies the left edge into every output column.
     @Test
     void horizontalPredictionRepeatsLeftReferenceColumn() {
@@ -89,6 +108,26 @@ final class IntraPredictorTest {
                         {7, 7},
                         {9, 9},
                         {11, 11}
+                }
+        );
+    }
+
+    /// Verifies that left-frame-edge horizontal prediction uses the available top reference sample.
+    @Test
+    void horizontalPredictionUsesTopReferenceOnLeftFrameEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(0, 0, 76);
+
+        IntraPredictor.predictLuma(plane, 0, 1, 2, 3, LumaIntraPredictionMode.HORIZONTAL, 0);
+
+        assertBlockEquals(
+                plane,
+                0,
+                1,
+                new int[][]{
+                        {76, 76},
+                        {76, 76},
+                        {76, 76}
                 }
         );
     }
@@ -197,9 +236,9 @@ final class IntraPredictorTest {
                 1,
                 1,
                 new int[][]{
-                        {35, 54, 68},
-                        {65, 80, 90},
-                        {85, 96, 104}
+                        {35, 34, 35},
+                        {55, 49, 47},
+                        {68, 60, 55}
                 }
         );
     }
@@ -224,8 +263,8 @@ final class IntraPredictorTest {
                 1,
                 new int[][]{
                         {10, 20, 30},
-                        {59, 65, 71},
-                        {89, 92, 95}
+                        {39, 45, 51},
+                        {57, 60, 63}
                 }
         );
     }
@@ -249,9 +288,9 @@ final class IntraPredictorTest {
                 1,
                 1,
                 new int[][]{
-                        {60, 88, 105},
-                        {70, 94, 109},
-                        {80, 100, 112}
+                        {60, 47, 40},
+                        {70, 53, 43},
+                        {80, 59, 47}
                 }
         );
     }
@@ -294,10 +333,10 @@ final class IntraPredictorTest {
                 1,
                 1,
                 new int[][]{
-                        {61, 61, 63, 75},
-                        {26, 36, 47, 66},
-                        {80, 81, 90, 100},
-                        {36, 50, 68, 89}
+                        {33, 32, 38, 40},
+                        {51, 46, 44, 46},
+                        {66, 58, 55, 52},
+                        {79, 71, 65, 62}
                 }
         );
     }
@@ -322,9 +361,49 @@ final class IntraPredictorTest {
                 1,
                 1,
                 new int[][]{
-                        {61, 61, 118},
-                        {26, 36, 80},
-                        {109, 123, 147}
+                        {33, 32, 38},
+                        {51, 46, 44},
+                        {66, 58, 55}
+                }
+        );
+    }
+
+    /// Verifies that filter-intra prediction uses the left edge when top references are missing.
+    @Test
+    void filterIntraPredictionUsesLeftReferencesOnTopFrameEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(0, 0, 51);
+        plane.setSample(0, 1, 51);
+
+        IntraPredictor.predictFilterIntraLuma(plane, 1, 0, 2, 2, FilterIntraMode.DC);
+
+        assertBlockEquals(
+                plane,
+                1,
+                0,
+                new int[][]{
+                        {51, 51},
+                        {51, 51}
+                }
+        );
+    }
+
+    /// Verifies that filter-intra prediction uses the top edge when left references are missing.
+    @Test
+    void filterIntraPredictionUsesTopReferencesOnLeftFrameEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(0, 0, 76);
+        plane.setSample(1, 0, 76);
+
+        IntraPredictor.predictFilterIntraLuma(plane, 0, 1, 2, 2, FilterIntraMode.DC);
+
+        assertBlockEquals(
+                plane,
+                0,
+                1,
+                new int[][]{
+                        {76, 76},
+                        {76, 76}
                 }
         );
     }
@@ -576,7 +655,11 @@ final class IntraPredictorTest {
     private static void assertBlockEquals(MutablePlaneBuffer plane, int x, int y, int[][] expected) {
         for (int row = 0; row < expected.length; row++) {
             for (int column = 0; column < expected[row].length; column++) {
-                assertEquals(expected[row][column], plane.sample(x + column, y + row));
+                assertEquals(
+                        expected[row][column],
+                        plane.sample(x + column, y + row),
+                        "Mismatch at relative row " + row + ", column " + column
+                );
             }
         }
     }

@@ -32,6 +32,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.testutil.HexFixtureResources;
@@ -55,26 +56,36 @@ final class TileResidualSyntaxReaderTest {
     /// The default synthetic frame height used by residual-syntax tests.
     private static final int DEFAULT_FRAME_HEIGHT = 64;
 
-    /// The shared fallback `coeff_base` context used by the mirrored larger-transform chroma oracle.
-    private static final int GENERIC_BASE_TOKEN_CONTEXT = 0;
-
-    /// The shared fallback `br_tok` context used by the mirrored larger-transform chroma oracle.
-    private static final int GENERIC_HIGH_TOKEN_CONTEXT = 7;
-
     /// The padded `levels` grid size used by the mirrored `TX_4X4` chroma oracle.
-    private static final int FOUR_BY_FOUR_LEVEL_GRID_SIZE = 6;
+    private static final int FOUR_BY_FOUR_LEVEL_GRID_SIZE = 8;
 
     /// The generated named-fixture resource backing deterministic residual payload tests.
     private static final String TILE_RESIDUAL_FIXTURE_RESOURCE_PATH =
             "av1/fixtures/generated/tile-residual-fixtures.txt";
 
-    /// The `dav1d` low-token context offsets for the mirrored `TX_4X4` chroma oracle.
-    private static final int @Unmodifiable [] @Unmodifiable [] FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS = {
-            {0, 1, 6, 6, 21},
-            {1, 6, 6, 21, 21},
-            {6, 6, 21, 21, 21},
-            {6, 21, 21, 21, 21},
-            {21, 21, 21, 21, 21}
+    /// The `dav1d` low-token context offsets for square, wide, and tall 2D transforms.
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] LEVEL_CONTEXT_OFFSETS = {
+            {
+                    {0, 1, 6, 6, 21},
+                    {1, 6, 6, 21, 21},
+                    {6, 6, 21, 21, 21},
+                    {6, 21, 21, 21, 21},
+                    {21, 21, 21, 21, 21}
+            },
+            {
+                    {0, 16, 6, 6, 21},
+                    {16, 16, 6, 21, 21},
+                    {16, 16, 21, 21, 21},
+                    {16, 16, 21, 21, 21},
+                    {16, 16, 21, 21, 21}
+            },
+            {
+                    {0, 11, 11, 11, 11},
+                    {11, 11, 11, 11, 11},
+                    {6, 6, 21, 21, 21},
+                    {6, 21, 21, 21, 21},
+                    {21, 21, 21, 21, 21}
+            }
     };
 
     /// Verifies that a single 4x4 transform block can decode `txb_skip = true` as an all-zero residual unit.
@@ -948,33 +959,221 @@ final class TileResidualSyntaxReaderTest {
         return expectedScan(transformSize)[scanIndex];
     }
 
-    /// Builds the diagonal default scan used by the larger-transform residual test oracle.
+    /// Builds the `dav1d`-compatible scan used by the larger-transform residual test oracle.
     ///
     /// @param transformSize the active transform size
-    /// @return the diagonal default scan for the supplied transform size
+    /// @return the `dav1d`-compatible scan for the supplied transform size
     private static int[] expectedScan(TransformSize transformSize) {
-        int width = transformSize.widthPixels();
-        int height = transformSize.heightPixels();
-        int[] scan = new int[width * height];
-        boolean wide = width > height;
+        int codedWidth = clippedCoefficientWidth(transformSize);
+        int codedHeight = clippedCoefficientHeight(transformSize);
+        int outputWidth = transformSize.widthPixels();
+        int[] scan = new int[codedWidth * codedHeight];
         int nextIndex = 0;
-        for (int diagonal = 0; diagonal < width + height - 1; diagonal++) {
-            int rowStart = Math.max(0, diagonal - (width - 1));
-            int rowEnd = Math.min(height - 1, diagonal);
-            boolean descendingRows = (((diagonal & 1) == 1) ^ wide);
+        for (int diagonal = 0; diagonal < codedWidth + codedHeight - 1; diagonal++) {
+            int rowStart = Math.max(0, diagonal - (codedWidth - 1));
+            int rowEnd = Math.min(codedHeight - 1, diagonal);
+            boolean descendingRows;
+            if (codedWidth == codedHeight) {
+                descendingRows = (diagonal & 1) == 1;
+            } else {
+                descendingRows = codedWidth > codedHeight;
+            }
             if (descendingRows) {
                 for (int row = rowEnd; row >= rowStart; row--) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = row * width + column;
+                    scan[nextIndex++] = row * outputWidth + column;
                 }
             } else {
                 for (int row = rowStart; row <= rowEnd; row++) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = row * width + column;
+                    scan[nextIndex++] = row * outputWidth + column;
                 }
             }
         }
         return scan;
+    }
+
+    /// Creates the padded larger-transform `levels` grid used by coefficient token contexts.
+    ///
+    /// @param transformSize the active transform size
+    /// @param transformType the active transform type
+    /// @return a padded zero-filled level grid
+    private static int[][] createGenericLevelGrid(TransformSize transformSize, TransformType transformType) {
+        int width;
+        int height;
+        if (!transformType.oneDimensional()) {
+            width = clippedCoefficientWidth(transformSize);
+            height = clippedCoefficientHeight(transformSize);
+        } else if (verticalOneDimensional(transformType)) {
+            width = 4 << Math.min(transformSize.log2Width4(), 3);
+            height = coefficientCount(transformSize) / width;
+        } else {
+            width = 4 << Math.min(transformSize.log2Height4(), 3);
+            height = coefficientCount(transformSize) / width;
+        }
+        return new int[width + 5][height + 5];
+    }
+
+    /// Returns the coefficient-context grid X coordinate for one larger-transform scan index.
+    ///
+    /// @param transformSize the active transform size
+    /// @param transformType the active transform type
+    /// @param scanIndex the zero-based scan index
+    /// @return the coefficient-context grid X coordinate
+    private static int genericLevelX(TransformSize transformSize, TransformType transformType, int scanIndex) {
+        if (!transformType.oneDimensional()) {
+            return expectedOutputIndex(transformSize, scanIndex) & (transformSize.widthPixels() - 1);
+        }
+        int log2Primary = verticalOneDimensional(transformType)
+                ? Math.min(transformSize.log2Width4(), 3)
+                : Math.min(transformSize.log2Height4(), 3);
+        return scanIndex & ((4 << log2Primary) - 1);
+    }
+
+    /// Returns the coefficient-context grid Y coordinate for one larger-transform scan index.
+    ///
+    /// @param transformSize the active transform size
+    /// @param transformType the active transform type
+    /// @param scanIndex the zero-based scan index
+    /// @return the coefficient-context grid Y coordinate
+    private static int genericLevelY(TransformSize transformSize, TransformType transformType, int scanIndex) {
+        if (!transformType.oneDimensional()) {
+            return expectedOutputIndex(transformSize, scanIndex) >> (transformSize.log2Width4() + 2);
+        }
+        int log2Primary = verticalOneDimensional(transformType)
+                ? Math.min(transformSize.log2Width4(), 3)
+                : Math.min(transformSize.log2Height4(), 3);
+        return scanIndex >> (log2Primary + 2);
+    }
+
+    /// Returns the base-token context for one larger-transform coefficient.
+    ///
+    /// @param transformSize the active transform size
+    /// @param transformType the active transform type
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the coefficient-context grid X coordinate
+    /// @param y the coefficient-context grid Y coordinate
+    /// @return the base-token context for the supplied coefficient
+    private static int genericBaseTokenContext(
+            TransformSize transformSize,
+            TransformType transformType,
+            int[][] levelBytes,
+            int x,
+            int y
+    ) {
+        int magnitude = genericHighMagnitude(transformType, levelBytes, x, y);
+        int offset;
+        if (transformType.oneDimensional()) {
+            magnitude += levelBytes[x][y + 3] + levelBytes[x][y + 4];
+            offset = 26 + (y > 1 ? 10 : y * 5);
+        } else {
+            magnitude += levelBytes[x][y + 2] + levelBytes[x + 2][y];
+            offset = LEVEL_CONTEXT_OFFSETS[levelContextOffsetIndex(transformSize)]
+                    [Math.min(y, 4)][Math.min(x, 4)];
+        }
+        return offset + (magnitude > 512 ? 4 : (magnitude + 64) >> 7);
+    }
+
+    /// Returns the high-token context for one larger-transform non-DC coefficient.
+    ///
+    /// @param transformType the active transform type
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the coefficient-context grid X coordinate
+    /// @param y the coefficient-context grid Y coordinate
+    /// @return the high-token context for the supplied coefficient
+    private static int genericHighTokenContext(TransformType transformType, int[][] levelBytes, int x, int y) {
+        int magnitude = genericHighMagnitude(transformType, levelBytes, x, y) & 0x3F;
+        int baseContext = genericEndOfBlockHighTokenContext(transformType, x, y);
+        return baseContext + (magnitude > 12 ? 6 : (magnitude + 1) >> 1);
+    }
+
+    /// Returns the high-token context for one larger-transform end-of-block coefficient.
+    ///
+    /// @param transformType the active transform type
+    /// @param x the coefficient-context grid X coordinate
+    /// @param y the coefficient-context grid Y coordinate
+    /// @return the high-token context for the supplied end-of-block coefficient
+    private static int genericEndOfBlockHighTokenContext(TransformType transformType, int x, int y) {
+        if (transformType.oneDimensional()) {
+            return y != 0 ? 14 : 7;
+        }
+        return ((x | y) > 1) ? 14 : 7;
+    }
+
+    /// Returns the high-token context for one larger-transform DC coefficient.
+    ///
+    /// @param transformType the active transform type
+    /// @param levelBytes the padded local `levels` grid
+    /// @return the high-token context for the DC coefficient
+    private static int genericDcHighTokenContext(TransformType transformType, int[][] levelBytes) {
+        int magnitude = transformType.oneDimensional()
+                ? genericHighMagnitude(transformType, levelBytes, 0, 0)
+                : levelBytes[0][1] + levelBytes[1][0] + levelBytes[1][1];
+        magnitude &= 0x3F;
+        return magnitude > 12 ? 6 : (magnitude + 1) >> 1;
+    }
+
+    /// Returns the high-magnitude accumulator for one larger-transform coefficient position.
+    ///
+    /// @param transformType the active transform type
+    /// @param levelBytes the padded local `levels` grid
+    /// @param x the coefficient-context grid X coordinate
+    /// @param y the coefficient-context grid Y coordinate
+    /// @return the high-magnitude accumulator for the supplied coefficient position
+    private static int genericHighMagnitude(TransformType transformType, int[][] levelBytes, int x, int y) {
+        int magnitude = levelBytes[x][y + 1] + levelBytes[x + 1][y];
+        if (!transformType.oneDimensional()) {
+            magnitude += levelBytes[x + 1][y + 1];
+        } else {
+            magnitude += levelBytes[x][y + 2];
+        }
+        return magnitude;
+    }
+
+    /// Returns the low-context offset table index for one two-dimensional transform size.
+    ///
+    /// @param transformSize the active transform size
+    /// @return `0` for square, `1` for wide, or `2` for tall
+    private static int levelContextOffsetIndex(TransformSize transformSize) {
+        if (transformSize.widthPixels() == transformSize.heightPixels()) {
+            return 0;
+        }
+        return transformSize.widthPixels() > transformSize.heightPixels() ? 1 : 2;
+    }
+
+    /// Returns whether a transform type belongs to the vertical one-dimensional class.
+    ///
+    /// @param transformType the transform type to test
+    /// @return whether the supplied transform type belongs to the vertical one-dimensional class
+    private static boolean verticalOneDimensional(TransformType transformType) {
+        return switch (transformType) {
+            case V_DCT, V_ADST, V_FLIPADST -> true;
+            default -> false;
+        };
+    }
+
+    /// Returns the coefficient count modeled by entropy syntax for the supplied transform size.
+    ///
+    /// @param transformSize the active transform size
+    /// @return the modeled coefficient count
+    private static int coefficientCount(TransformSize transformSize) {
+        return clippedCoefficientWidth(transformSize) * clippedCoefficientHeight(transformSize);
+    }
+
+    /// Returns the entropy-coded coefficient width for the supplied transform size.
+    ///
+    /// @param transformSize the active transform size
+    /// @return the entropy-coded coefficient width
+    private static int clippedCoefficientWidth(TransformSize transformSize) {
+        return 4 << Math.min(transformSize.log2Width4(), 3);
+    }
+
+    /// Returns the entropy-coded coefficient height for the supplied transform size.
+    ///
+    /// @param transformSize the active transform size
+    /// @return the entropy-coded coefficient height
+    private static int clippedCoefficientHeight(TransformSize transformSize) {
+        return 4 << Math.min(transformSize.log2Height4(), 3);
     }
 
     /// Counts the number of non-zero coefficients in one dense transform-domain coefficient array.
@@ -1364,33 +1563,56 @@ final class TileResidualSyntaxReaderTest {
             int visibleHeightPixels,
             int endOfBlockIndex
     ) {
+        TransformType transformType = TransformType.DCT_DCT;
         int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
         int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
+        int[][] levelBytes = createGenericLevelGrid(transformSize, transformType);
         if (endOfBlockIndex > 0) {
+            int lastX = genericLevelX(transformSize, transformType, endOfBlockIndex);
+            int lastY = genericLevelY(transformSize, transformType, endOfBlockIndex);
             int lastToken = syntaxReader.readEndOfBlockBaseToken(
                     transformSize,
                     true,
                     endOfBlockTokenContext(endOfBlockIndex, transformSize)
             );
             if (lastToken == 3) {
-                lastToken = syntaxReader.readHighToken(transformSize, true, GENERIC_HIGH_TOKEN_CONTEXT);
+                lastToken = syntaxReader.readHighToken(
+                        transformSize,
+                        true,
+                        genericEndOfBlockHighTokenContext(transformType, lastX, lastY)
+                );
             }
             coefficientTokens[endOfBlockIndex] = lastToken;
+            levelBytes[lastX][lastY] = coefficientLevelByte(lastToken);
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
-                int token = syntaxReader.readBaseToken(transformSize, true, GENERIC_BASE_TOKEN_CONTEXT);
+                int x = genericLevelX(transformSize, transformType, scanIndex);
+                int y = genericLevelY(transformSize, transformType, scanIndex);
+                int token = syntaxReader.readBaseToken(
+                        transformSize,
+                        true,
+                        genericBaseTokenContext(transformSize, transformType, levelBytes, x, y)
+                );
                 if (token == 3) {
-                    token = syntaxReader.readHighToken(transformSize, true, GENERIC_HIGH_TOKEN_CONTEXT);
+                    token = syntaxReader.readHighToken(
+                            transformSize,
+                            true,
+                            genericHighTokenContext(transformType, levelBytes, x, y)
+                    );
                 }
                 coefficientTokens[scanIndex] = token;
+                levelBytes[x][y] = coefficientLevelByte(token);
             }
         }
 
+        int dcBaseContext = endOfBlockIndex > 0 && transformType.oneDimensional()
+                ? genericBaseTokenContext(transformSize, transformType, levelBytes, 0, 0)
+                : 0;
         int dcToken = endOfBlockIndex == 0
-                ? syntaxReader.readEndOfBlockBaseToken(transformSize, true, GENERIC_BASE_TOKEN_CONTEXT)
-                : syntaxReader.readBaseToken(transformSize, true, GENERIC_BASE_TOKEN_CONTEXT);
+                ? syntaxReader.readEndOfBlockBaseToken(transformSize, true, 0)
+                : syntaxReader.readBaseToken(transformSize, true, dcBaseContext);
         if (dcToken == 3) {
-            dcToken = syntaxReader.readHighToken(transformSize, true, GENERIC_BASE_TOKEN_CONTEXT);
+            dcToken = syntaxReader.readHighToken(transformSize, true, genericDcHighTokenContext(transformType, levelBytes));
         }
 
         if (dcToken != 0) {
@@ -1470,7 +1692,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return the base-token context for the supplied coefficient
     private static int fourByFourBaseTokenContext(int[][] levelBytes, int x, int y) {
         int magnitude = fourByFourHighMagnitude(levelBytes, x, y) + levelBytes[x][y + 2] + levelBytes[x + 2][y];
-        int offset = FOUR_BY_FOUR_LEVEL_CONTEXT_OFFSETS[Math.min(y, 4)][Math.min(x, 4)];
+        int offset = LEVEL_CONTEXT_OFFSETS[0][Math.min(y, 4)][Math.min(x, 4)];
         return offset + (magnitude > 512 ? 4 : (magnitude + 64) >> 7);
     }
 

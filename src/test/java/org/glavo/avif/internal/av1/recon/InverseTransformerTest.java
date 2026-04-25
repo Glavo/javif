@@ -171,6 +171,30 @@ final class InverseTransformerTest {
         );
     }
 
+    /// Verifies that AV1 lossless `WHT_WHT` reconstruction follows the dedicated Walsh-Hadamard
+    /// path instead of the regular `DCT_DCT` transform.
+    @Test
+    void reconstructsFourByFourWalshHadamardLosslessBlock() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 4;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.WHT_WHT
+        );
+
+        assertArrayEquals(
+                new int[]{
+                        1, 0, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0
+                },
+                residual
+        );
+    }
+
     /// Verifies that horizontal one-dimensional DCT transforms only the coefficient row selected
     /// by the vertical identity axis.
     @Test
@@ -358,7 +382,7 @@ final class InverseTransformerTest {
     @Test
     void reconstructsThirtyTwoByThirtyTwoDcOnlyResidualBlock() {
         int[] coefficients = new int[TX_32X32_AREA];
-        coefficients[0] = 1024;
+        coefficients[0] = 512;
 
         int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_32X32);
 
@@ -385,7 +409,7 @@ final class InverseTransformerTest {
     @Test
     void reconstructsSixtyFourBySixtyFourDcOnlyResidualBlock() {
         int[] coefficients = new int[TX_64X64_AREA];
-        coefficients[0] = 2048;
+        coefficients[0] = 512;
 
         int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_64X64);
 

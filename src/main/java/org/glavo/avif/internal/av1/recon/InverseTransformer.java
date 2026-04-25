@@ -183,6 +183,10 @@ final class InverseTransformer {
             throw new IllegalArgumentException("dequantizedCoefficients length does not match transform area");
         }
 
+        if (nonNullTransformType == TransformType.WHT_WHT) {
+            return reconstructWalshHadamard(nonNullCoefficients, nonNullTransformSize);
+        }
+
         if (nonNullTransformType != TransformType.DCT_DCT) {
             return reconstructGenericTransform(
                     nonNullCoefficients,
@@ -211,16 +215,16 @@ final class InverseTransformer {
             case RTX_16X4 -> reconstructRectangularDctDct(coefficients, 16, 4, 1);
             case RTX_8X16 -> reconstructRectangularDctDct(coefficients, 8, 16, 1);
             case RTX_16X8 -> reconstructRectangularDctDct(coefficients, 16, 8, 1);
-            case TX_32X32 -> reconstructGenericLargeDctDct(coefficients, 32, 32);
-            case TX_64X64 -> reconstructGenericLargeDctDct(coefficients, 64, 64);
-            case RTX_16X32 -> reconstructGenericLargeDctDct(coefficients, 16, 32);
-            case RTX_32X16 -> reconstructGenericLargeDctDct(coefficients, 32, 16);
-            case RTX_32X64 -> reconstructGenericLargeDctDct(coefficients, 32, 64);
-            case RTX_64X32 -> reconstructGenericLargeDctDct(coefficients, 64, 32);
-            case RTX_8X32 -> reconstructGenericLargeDctDct(coefficients, 8, 32);
-            case RTX_32X8 -> reconstructGenericLargeDctDct(coefficients, 32, 8);
-            case RTX_16X64 -> reconstructGenericLargeDctDct(coefficients, 16, 64);
-            case RTX_64X16 -> reconstructGenericLargeDctDct(coefficients, 64, 16);
+            case TX_32X32 -> reconstructGenericLargeDctDct(coefficients, 32, 32, 2);
+            case TX_64X64 -> reconstructGenericLargeDctDct(coefficients, 64, 64, 2);
+            case RTX_16X32 -> reconstructGenericLargeDctDct(coefficients, 16, 32, 1);
+            case RTX_32X16 -> reconstructGenericLargeDctDct(coefficients, 32, 16, 1);
+            case RTX_32X64 -> reconstructGenericLargeDctDct(coefficients, 32, 64, 1);
+            case RTX_64X32 -> reconstructGenericLargeDctDct(coefficients, 64, 32, 1);
+            case RTX_8X32 -> reconstructGenericLargeDctDct(coefficients, 8, 32, 2);
+            case RTX_32X8 -> reconstructGenericLargeDctDct(coefficients, 32, 8, 2);
+            case RTX_16X64 -> reconstructGenericLargeDctDct(coefficients, 16, 64, 2);
+            case RTX_64X16 -> reconstructGenericLargeDctDct(coefficients, 64, 16, 2);
             default -> throw unsupportedTransformSize(transformSize);
         };
     }
@@ -459,19 +463,26 @@ final class InverseTransformer {
     /// orthonormal inverse-DCT basis matrices.
     ///
     /// The current rollout uses this slower path only for transform sizes whose larger axis has not
-    /// yet been hand-lowered into one staged integer kernel. Final output scaling still follows the
-    /// same AV1 residual-domain convention as the smaller exact kernels by applying one final `/ 8`
-    /// after the separable 2-D synthesis.
+    /// yet been hand-lowered into one staged integer kernel. The orthonormal synthesis result is
+    /// rescaled to the same DC-domain gain as dav1d's integer path for the transform-size-specific
+    /// intermediate shift.
     ///
     /// @param coefficients the dequantized coefficients in natural raster order
     /// @param width the transform width in samples
     /// @param height the transform height in samples
+    /// @param intermediateShift the dav1d intermediate shift for this large transform size
     /// @return one signed residual sample block in natural raster order
-    private static int[] reconstructGenericLargeDctDct(int[] coefficients, int width, int height) {
+    private static int[] reconstructGenericLargeDctDct(
+            int[] coefficients,
+            int width,
+            int height,
+            int intermediateShift
+    ) {
         double[][] rowBasis = inverseDctBasis(width);
         double[][] columnBasis = inverseDctBasis(height);
         double[] rowBuffer = new double[width * height];
         int[] output = new int[width * height];
+        double outputScale = largeDctOutputScale(width, height, intermediateShift);
 
         for (int row = 0; row < height; row++) {
             int rowOffset = row * width;
@@ -492,10 +503,28 @@ final class InverseTransformer {
                 for (int frequency = 0; frequency < height; frequency++) {
                     sum += rowBasisRow[frequency] * rowBuffer[frequency * width + column];
                 }
-                output[row * width + column] = saturatedInt(Math.round(sum / 8.0));
+                output[row * width + column] = saturatedInt(Math.round((sum * outputScale) / 8.0));
             }
         }
         return output;
+    }
+
+    /// Returns the scale that maps orthonormal large-DCT output to dav1d's integer-transform gain.
+    ///
+    /// The scalar dav1d DC path applies one `181/256` pass, the transform-size intermediate shift,
+    /// and one final `181/4096` pass. Rectangular 2:1 transforms apply one extra `181/256` prescale.
+    ///
+    /// @param width the transform width in samples
+    /// @param height the transform height in samples
+    /// @param intermediateShift the dav1d intermediate shift for this transform size
+    /// @return the multiplicative correction for an orthonormal 2-D DCT followed by `/ 8`
+    private static double largeDctOutputScale(int width, int height, int intermediateShift) {
+        double orthonormalDenominator = Math.sqrt((double) width * height) * 8.0;
+        double dav1dDenominator = 32.0 * (1 << intermediateShift);
+        if (width * 2 == height || height * 2 == width) {
+            dav1dDenominator *= Math.sqrt(2.0);
+        }
+        return orthonormalDenominator / dav1dDenominator;
     }
 
     /// Reconstructs one non-`DCT_DCT` residual block through cached separable basis matrices.
@@ -539,6 +568,66 @@ final class InverseTransformer {
             }
         }
         return output;
+    }
+
+    /// Reconstructs one AV1 lossless `WHT_WHT` residual block.
+    ///
+    /// AV1 lossless blocks always use a coded `TX_4X4` transform. The coefficient transpose and
+    /// initial `>> 2` match the scalar `dav1d` path before running the horizontal and vertical
+    /// inverse Walsh-Hadamard passes.
+    ///
+    /// @param coefficients the dequantized lossless coefficients in natural raster order
+    /// @param transformSize the active transform size
+    /// @return one signed `TX_4X4` residual sample block
+    private static int[] reconstructWalshHadamard(int[] coefficients, TransformSize transformSize) {
+        if (transformSize != TransformSize.TX_4X4) {
+            throw new IllegalStateException("WHT_WHT is only valid for TX_4X4 lossless blocks");
+        }
+
+        int[] tmp = new int[16];
+        int[] output = new int[16];
+        int[] scratch = new int[4];
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                scratch[x] = coefficients[(x << 2) + y] >> 2;
+            }
+            inverseWalshHadamard4(scratch);
+            for (int x = 0; x < 4; x++) {
+                tmp[(y << 2) + x] = scratch[x];
+            }
+        }
+
+        for (int x = 0; x < 4; x++) {
+            for (int y = 0; y < 4; y++) {
+                scratch[y] = tmp[(y << 2) + x];
+            }
+            inverseWalshHadamard4(scratch);
+            for (int y = 0; y < 4; y++) {
+                output[(y << 2) + x] = scratch[y];
+            }
+        }
+        return output;
+    }
+
+    /// Applies one in-place AV1 inverse Walsh-Hadamard transform to four samples.
+    ///
+    /// @param values the four-sample vector to transform in place
+    private static void inverseWalshHadamard4(int[] values) {
+        int in0 = values[0];
+        int in1 = values[1];
+        int in2 = values[2];
+        int in3 = values[3];
+
+        int t0 = in0 + in1;
+        int t2 = in2 - in3;
+        int t4 = (t0 - t2) >> 1;
+        int t3 = t4 - in3;
+        int t1 = t4 - in1;
+
+        values[0] = t0 - t3;
+        values[1] = t3;
+        values[2] = t1;
+        values[3] = t2 + t1;
     }
 
     /// Reconstructs one supported one-dimensional inverse DCT vector.
@@ -756,6 +845,7 @@ final class InverseTransformer {
             case DCT -> inverseDctBasis(length);
             case ADST -> inverseAdstBasis(length);
             case FLIPADST -> inverseFlipAdstBasis(length);
+            case WHT -> throw new IllegalStateException("WHT uses the dedicated lossless transform path");
             case IDENTITY -> identityBasis(length);
         };
     }

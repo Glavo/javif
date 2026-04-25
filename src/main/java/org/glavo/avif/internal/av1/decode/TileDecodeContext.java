@@ -177,7 +177,12 @@ public final class TileDecodeContext {
     /// @param tileIndex the zero-based tile index within the frame
     /// @return tile-local decode state for the selected tile
     public static TileDecodeContext create(FrameAssembly assembly, int tileIndex) {
-        return create(assembly, tileIndex, CdfContext.createDefault());
+        FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
+        return create(
+                nonNullAssembly,
+                tileIndex,
+                CdfContext.createDefault(nonNullAssembly.frameHeader().quantization().baseQIndex())
+        );
     }
 
     /// Creates tile-local decode state with a copy of the supplied base CDF context.
@@ -201,7 +206,13 @@ public final class TileDecodeContext {
             int tileIndex,
             TemporalMotionField temporalMotionField
     ) {
-        return create(assembly, tileIndex, CdfContext.createDefault(), temporalMotionField);
+        FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
+        return create(
+                nonNullAssembly,
+                tileIndex,
+                CdfContext.createDefault(nonNullAssembly.frameHeader().quantization().baseQIndex()),
+                temporalMotionField
+        );
     }
 
     /// Creates tile-local decode state with a copy of the supplied base CDF context and a supplied temporal motion field.

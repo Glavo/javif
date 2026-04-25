@@ -25,10 +25,8 @@ import java.util.Objects;
 ///
 /// Coefficients are stored as signed transform-domain levels in natural raster order under the
 /// explicit transform type carried by this unit. The current implementation fully decodes the
-/// modeled two-dimensional luma residual path, including multi-coefficient larger-transform units
-/// that reuse the current simplified non-chroma token contexts. The same contract is also used by
-/// the incremental chroma reconstruction path even before full chroma syntax decoding is wired
-/// through the bitstream reader.
+/// modeled luma and chroma residual paths, including multi-coefficient larger-transform units that
+/// use coefficient-neighbor token contexts matching the AV1 entropy syntax.
 @NotNullByDefault
 public final class TransformResidualUnit {
     /// The tile-relative block origin of this transform residual unit in luma 4x4 units.

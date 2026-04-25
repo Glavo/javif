@@ -78,14 +78,14 @@ final class IntraPredictor {
     /// 3. the two left reference samples
     private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] FILTER_INTRA_TAPS = {
             {
-                    {0, -6, 10, 0, 0, 0, 12},
-                    {1, -5, 2, 10, 0, 0, 9},
-                    {2, -3, 1, 1, 10, 0, 7},
-                    {3, -3, 1, 1, 2, 10, 5},
-                    {4, -4, 6, 0, 0, 0, 2},
-                    {5, -3, 2, 6, 0, 0, 2},
-                    {6, -3, 2, 2, 6, 0, 2},
-                    {7, -3, 1, 2, 2, 6, 3}
+                    {-6, 10, 0, 0, 0, 12, 0},
+                    {-5, 2, 10, 0, 0, 9, 0},
+                    {-3, 1, 1, 10, 0, 7, 0},
+                    {-3, 1, 1, 2, 10, 5, 0},
+                    {-4, 6, 0, 0, 0, 2, 12},
+                    {-3, 2, 6, 0, 0, 2, 9},
+                    {-3, 2, 2, 6, 0, 2, 7},
+                    {-3, 1, 2, 2, 6, 3, 5}
             },
             {
                     {-10, 16, 0, 0, 0, 10, 0},
@@ -240,13 +240,13 @@ final class IntraPredictor {
             for (int blockX = 0; blockX < predictionWidth; blockX += 4) {
                 int currentX = x + blockX;
                 int leftReferenceX = currentX - 1;
-                int p0 = plane.sampleOrFallback(leftReferenceX, topReferenceY, defaultSample);
-                int p1 = plane.sampleOrFallback(currentX, topReferenceY, defaultSample);
-                int p2 = plane.sampleOrFallback(currentX + 1, topReferenceY, defaultSample);
-                int p3 = plane.sampleOrFallback(currentX + 2, topReferenceY, defaultSample);
-                int p4 = plane.sampleOrFallback(currentX + 3, topReferenceY, defaultSample);
-                int p5 = plane.sampleOrFallback(leftReferenceX, currentY, defaultSample);
-                int p6 = plane.sampleOrFallback(leftReferenceX, currentY + 1, defaultSample);
+                int p0 = filterIntraTopLeftReference(plane, x, y, currentX, currentY, topReferenceY, defaultSample);
+                int p1 = filterIntraTopReference(plane, x, y, currentX, topReferenceY, defaultSample);
+                int p2 = filterIntraTopReference(plane, x, y, currentX + 1, topReferenceY, defaultSample);
+                int p3 = filterIntraTopReference(plane, x, y, currentX + 2, topReferenceY, defaultSample);
+                int p4 = filterIntraTopReference(plane, x, y, currentX + 3, topReferenceY, defaultSample);
+                int p5 = filterIntraLeftReference(plane, x, y, leftReferenceX, currentY, defaultSample);
+                int p6 = filterIntraLeftReference(plane, x, y, leftReferenceX, currentY + 1, defaultSample);
                 for (int yy = 0; yy < 2; yy++) {
                     for (int xx = 0; xx < 4; xx++) {
                         int[] tap = taps[(yy << 2) + xx];
@@ -265,6 +265,77 @@ final class IntraPredictor {
                 }
             }
         }
+    }
+
+    /// Returns one filter-intra top-left reference sample.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param blockX the block origin X coordinate
+    /// @param blockY the block origin Y coordinate
+    /// @param currentX the current recursive unit origin X coordinate
+    /// @param currentY the current recursive unit origin Y coordinate
+    /// @param topReferenceY the top reference row for this recursive unit
+    /// @param defaultSample the midpoint frame-edge default sample
+    /// @return one filter-intra top-left reference sample
+    private static int filterIntraTopLeftReference(
+            MutablePlaneBuffer plane,
+            int blockX,
+            int blockY,
+            int currentX,
+            int currentY,
+            int topReferenceY,
+            int defaultSample
+    ) {
+        if (topReferenceY >= 0 && currentX > 0) {
+            return plane.sample(currentX - 1, topReferenceY);
+        }
+        return defaultTopLeft(plane, blockX, blockY, defaultSample);
+    }
+
+    /// Returns one filter-intra top reference sample with AV1 frame-edge fallback.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param blockX the block origin X coordinate
+    /// @param blockY the block origin Y coordinate
+    /// @param sampleX the top reference X coordinate
+    /// @param topReferenceY the top reference row for this recursive unit
+    /// @param defaultSample the midpoint frame-edge default sample
+    /// @return one filter-intra top reference sample
+    private static int filterIntraTopReference(
+            MutablePlaneBuffer plane,
+            int blockX,
+            int blockY,
+            int sampleX,
+            int topReferenceY,
+            int defaultSample
+    ) {
+        if (topReferenceY < 0) {
+            return blockX > 0 ? plane.sample(blockX - 1, blockY) : defaultSample - 1;
+        }
+        return plane.sample(Math.min(sampleX, plane.width() - 1), topReferenceY);
+    }
+
+    /// Returns one filter-intra left reference sample with AV1 frame-edge fallback.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param blockX the block origin X coordinate
+    /// @param blockY the block origin Y coordinate
+    /// @param leftReferenceX the left reference column for this recursive unit
+    /// @param sampleY the left reference Y coordinate
+    /// @param defaultSample the midpoint frame-edge default sample
+    /// @return one filter-intra left reference sample
+    private static int filterIntraLeftReference(
+            MutablePlaneBuffer plane,
+            int blockX,
+            int blockY,
+            int leftReferenceX,
+            int sampleY,
+            int defaultSample
+    ) {
+        if (leftReferenceX < 0) {
+            return blockY > 0 ? plane.sample(blockX, blockY - 1) : defaultSample + 1;
+        }
+        return plane.sample(leftReferenceX, Math.min(sampleY, plane.height() - 1));
     }
 
     /// Reconstructs one chroma intra-predicted block directly into the destination plane.
@@ -459,21 +530,25 @@ final class IntraPredictor {
         int defaultSample = 1 << (plane.bitDepth() - 1);
         int referenceWidth = mode.usesHorizontalSmoothReference() ? smoothWeightAxisSize(width) : width;
         int referenceHeight = mode.usesVerticalSmoothReference() ? smoothWeightAxisSize(height) : height;
-        int[] top = new int[referenceWidth];
-        int[] left = new int[referenceHeight];
-        for (int i = 0; i < top.length; i++) {
-            top[i] = plane.sampleOrFallback(x + i, y - 1, defaultSample);
-        }
-        for (int i = 0; i < left.length; i++) {
-            left[i] = plane.sampleOrFallback(x - 1, y + i, defaultSample);
-        }
+        int[] top = topReferenceSamples(plane, x, y, referenceWidth, defaultSample);
+        int[] left = leftReferenceSamples(plane, x, y, referenceHeight, defaultSample);
 
         int topLeft = defaultTopLeft(plane, x, y, defaultSample);
         switch (mode) {
             case DC -> predictDc(plane, x, y, width, height, top, left, defaultSample);
             case VERTICAL -> predictVertical(plane, x, y, width, height, top);
             case HORIZONTAL -> predictHorizontal(plane, x, y, width, height, left);
-            case PAETH -> predictPaeth(plane, x, y, width, height, top, left, topLeft);
+            case PAETH -> {
+                if (x <= 0 && y <= 0) {
+                    fillBlock(plane, x, y, width, height, defaultSample);
+                } else if (x <= 0) {
+                    predictVertical(plane, x, y, width, height, top);
+                } else if (y <= 0) {
+                    predictHorizontal(plane, x, y, width, height, left);
+                } else {
+                    predictPaeth(plane, x, y, width, height, top, left, topLeft);
+                }
+            }
             case SMOOTH -> predictSmooth(plane, x, y, width, height, top, left);
             case SMOOTH_VERTICAL -> predictSmoothVertical(plane, x, y, width, height, top, left);
             case SMOOTH_HORIZONTAL -> predictSmoothHorizontal(plane, x, y, width, height, top, left);
@@ -536,11 +611,11 @@ final class IntraPredictor {
         }
 
         int defaultSample = 1 << (plane.bitDepth() - 1);
-        if (angle == 90) {
+        if (angle == 90 || (angle < 90 && y <= 0)) {
             predictVertical(plane, x, y, width, height, topDirectionalReferences(plane, x, y, width, height, defaultSample, width));
             return;
         }
-        if (angle == 180) {
+        if (angle == 180 || (angle > 180 && x <= 0)) {
             predictHorizontal(plane, x, y, width, height, leftDirectionalReferences(plane, x, y, width, height, defaultSample, height));
             return;
         }
@@ -709,8 +784,11 @@ final class IntraPredictor {
     /// @param defaultSample the frame-edge default sample
     /// @return the fallback top-left predictor sample for one block origin
     private static int defaultTopLeft(MutablePlaneBuffer plane, int x, int y, int defaultSample) {
-        if (x > 0 && y > 0) {
-            return plane.sample(x - 1, y - 1);
+        if (x > 0) {
+            return y > 0 ? plane.sample(x - 1, y - 1) : plane.sample(x - 1, y);
+        }
+        if (y > 0) {
+            return plane.sample(x, y - 1);
         }
         return defaultSample;
     }
@@ -749,14 +827,8 @@ final class IntraPredictor {
     /// @return the stable DC predictor value for one block
     private static int dcPredictionValue(MutablePlaneBuffer plane, int x, int y, int width, int height) {
         int defaultSample = 1 << (plane.bitDepth() - 1);
-        int[] top = new int[width];
-        int[] left = new int[height];
-        for (int i = 0; i < width; i++) {
-            top[i] = plane.sampleOrFallback(x + i, y - 1, defaultSample);
-        }
-        for (int i = 0; i < height; i++) {
-            left[i] = plane.sampleOrFallback(x - 1, y + i, defaultSample);
-        }
+        int[] top = topReferenceSamples(plane, x, y, width, defaultSample);
+        int[] left = leftReferenceSamples(plane, x, y, height, defaultSample);
         return dcPredictionValue(x, y, width, height, top, left, defaultSample);
     }
 
@@ -1055,22 +1127,7 @@ final class IntraPredictor {
             int defaultSample,
             int length
     ) {
-        int[] references = new int[length];
-        if (y <= 0) {
-            for (int i = 0; i < references.length; i++) {
-                references[i] = defaultSample;
-            }
-            return references;
-        }
-        int maxX = plane.width() - 1;
-        for (int i = 0; i < references.length; i++) {
-            int sampleX = x + i;
-            if (sampleX > maxX) {
-                sampleX = maxX;
-            }
-            references[i] = plane.sample(sampleX, y - 1);
-        }
-        return references;
+        return topReferenceSamples(plane, x, y, length, defaultSample);
     }
 
     /// Returns one left-edge directional reference buffer with bottom-left extension.
@@ -1092,11 +1149,48 @@ final class IntraPredictor {
             int defaultSample,
             int length
     ) {
+        return leftReferenceSamples(plane, x, y, length, defaultSample);
+    }
+
+    /// Returns one top-edge reference buffer with AV1 frame-edge fallback and right extension.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param length the required reference-buffer length
+    /// @param defaultSample the midpoint frame-edge default sample
+    /// @return one top-edge reference buffer with AV1 frame-edge fallback and right extension
+    private static int[] topReferenceSamples(MutablePlaneBuffer plane, int x, int y, int length, int defaultSample) {
+        int[] references = new int[length];
+        if (y <= 0) {
+            int sample = x > 0 ? plane.sample(x - 1, y) : defaultSample - 1;
+            fillReferences(references, sample);
+            return references;
+        }
+        int maxX = plane.width() - 1;
+        for (int i = 0; i < references.length; i++) {
+            int sampleX = x + i;
+            if (sampleX > maxX) {
+                sampleX = maxX;
+            }
+            references[i] = plane.sample(sampleX, y - 1);
+        }
+        return references;
+    }
+
+    /// Returns one left-edge reference buffer with AV1 frame-edge fallback and bottom extension.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param length the required reference-buffer length
+    /// @param defaultSample the midpoint frame-edge default sample
+    /// @return one left-edge reference buffer with AV1 frame-edge fallback and bottom extension
+    private static int[] leftReferenceSamples(MutablePlaneBuffer plane, int x, int y, int length, int defaultSample) {
         int[] references = new int[length];
         if (x <= 0) {
-            for (int i = 0; i < references.length; i++) {
-                references[i] = defaultSample;
-            }
+            int sample = y > 0 ? plane.sample(x, y - 1) : defaultSample + 1;
+            fillReferences(references, sample);
             return references;
         }
         int maxY = plane.height() - 1;
@@ -1108,6 +1202,16 @@ final class IntraPredictor {
             references[i] = plane.sample(x - 1, sampleY);
         }
         return references;
+    }
+
+    /// Fills a reference buffer with one sample.
+    ///
+    /// @param references the reference buffer to fill
+    /// @param sample the sample value to store
+    private static void fillReferences(int[] references, int sample) {
+        for (int i = 0; i < references.length; i++) {
+            references[i] = sample;
+        }
     }
 
     /// Returns one conceptual zone-2 edge sample addressed by signed edge index.

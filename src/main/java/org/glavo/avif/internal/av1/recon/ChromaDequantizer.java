@@ -23,8 +23,9 @@ import java.util.Objects;
 /// Minimal chroma dequantizer for the first residual-producing reconstruction path.
 ///
 /// The current implementation matches the AV1 `8-bit`, `10-bit`, and `12-bit` QTX lookup tables
-/// shared by luma and chroma coefficients. Plane-specific behavior is expressed only through the
-/// caller-supplied DC/AC delta quantizers.
+/// shared by luma and chroma coefficients, including the transform-size dequantization shift
+/// applied by dav1d for large transform contexts. Plane-specific behavior is expressed only through
+/// the caller-supplied DC/AC delta quantizers.
 @NotNullByDefault
 final class ChromaDequantizer {
     /// Prevents instantiation of this utility class.
@@ -64,9 +65,14 @@ final class ChromaDequantizer {
                 nonNullContext.qIndex() + nonNullContext.acDelta(),
                 nonNullContext.bitDepth()
         );
-        dequantizedCoefficients[0] = scaledCoefficient(quantizedCoefficients[0], dcQuantizer);
+        int dequantizationShift = QuantizerTables.dequantizationShift(nonNullResidualUnit.size());
+        dequantizedCoefficients[0] = scaledCoefficient(quantizedCoefficients[0], dcQuantizer, dequantizationShift);
         for (int coefficientIndex = 1; coefficientIndex < quantizedCoefficients.length; coefficientIndex++) {
-            dequantizedCoefficients[coefficientIndex] = scaledCoefficient(quantizedCoefficients[coefficientIndex], acQuantizer);
+            dequantizedCoefficients[coefficientIndex] = scaledCoefficient(
+                    quantizedCoefficients[coefficientIndex],
+                    acQuantizer,
+                    dequantizationShift
+            );
         }
         return dequantizedCoefficients;
     }
@@ -75,9 +81,14 @@ final class ChromaDequantizer {
     ///
     /// @param coefficient the quantized transform coefficient
     /// @param quantizer the active dequantizer
+    /// @param dequantizationShift the transform-size dequantization shift
     /// @return the scaled transform coefficient
-    private static int scaledCoefficient(int coefficient, int quantizer) {
-        long scaled = (long) coefficient * quantizer;
+    private static int scaledCoefficient(int coefficient, int quantizer, int dequantizationShift) {
+        long magnitude = coefficient < 0 ? -(long) coefficient : coefficient;
+        long scaled = (magnitude * quantizer) >> dequantizationShift;
+        if (coefficient < 0) {
+            scaled = -scaled;
+        }
         if (scaled > Integer.MAX_VALUE) {
             return Integer.MAX_VALUE;
         }

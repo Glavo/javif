@@ -2270,7 +2270,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(8, decodedPlanes.codedWidth());
         assertEquals(8, decodedPlanes.codedHeight());
         assertEquals(128, decodedPlanes.lumaPlane().sample(0, 0));
-        assertEquals(198, decodedPlanes.lumaPlane().sample(7, 7));
+        assertEquals(129, decodedPlanes.lumaPlane().sample(7, 7));
         assertNull(decodedPlanes.chromaUPlane());
         assertNull(decodedPlanes.chromaVPlane());
     }

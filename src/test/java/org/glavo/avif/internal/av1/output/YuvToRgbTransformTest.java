@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
+import org.glavo.avif.AvifColorInfo;
 import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -68,6 +69,22 @@ final class YuvToRgbTransformTest {
 
         assertEquals(0xFFFF_0000_0000_0000L, transform.toOpaqueArgb64(64, 512, 512, 10));
         assertEquals(0xFFFF_FFFF_FFFF_FFFFL, transform.toOpaqueArgb64(940, 512, 512, 10));
+    }
+
+    /// Verifies AVIF container `nclx` matrix and range signaling selects the output transform.
+    @Test
+    void colorInfoSelectsMatrixAndRangeTransform() {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorInfo(
+                new AvifColorInfo(1, 13, 1, false),
+                false
+        );
+
+        assertEquals(0xFF00_0000, transform.toOpaqueArgb(16, 128, 128));
+        assertEquals(0xFFFF_FFFF, transform.toOpaqueArgb(235, 128, 128));
+        assertNotEquals(
+                YuvToRgbTransform.BT601_LIMITED_RANGE.toOpaqueArgb(100, 90, 200),
+                transform.toOpaqueArgb(100, 90, 200)
+        );
     }
 
     /// Creates one color configuration for transform-selection tests.

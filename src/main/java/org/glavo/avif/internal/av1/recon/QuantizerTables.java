@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.internal.av1.model.TransformSize;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -172,6 +173,14 @@ final class QuantizerTables {
     /// @return the active AC dequantizer
     static int acQuantizer(int qIndex, int bitDepth) {
         return tableValue(acTable(bitDepth), qIndex);
+    }
+
+    /// Returns the AV1 dequantization right shift for one transform size.
+    ///
+    /// @param transformSize the transform size whose coefficient context selects the shift
+    /// @return the non-negative dequantization shift
+    static int dequantizationShift(TransformSize transformSize) {
+        return Math.max(0, transformSize.coefficientContextIndex() - 2);
     }
 
     /// Returns the DC lookup table for the requested AV1 bit depth.

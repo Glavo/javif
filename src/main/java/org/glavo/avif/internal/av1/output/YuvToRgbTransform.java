@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
+import org.glavo.avif.AvifColorInfo;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -182,10 +183,42 @@ public final class YuvToRgbTransform {
     public static YuvToRgbTransform fromColorConfig(SequenceHeader.ColorConfig colorConfig) {
         SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         boolean fullRange = checkedColorConfig.colorRange();
-        return switch (checkedColorConfig.matrixCoefficients()) {
+        return fromMatrixCoefficients(checkedColorConfig.matrixCoefficients(), fullRange, checkedColorConfig.monochrome());
+    }
+
+    /// Selects a display transform for one AVIF container `nclx` color property.
+    ///
+    /// The pure Java output path currently models YUV matrix and range conversion. ICC profile
+    /// application and transfer-function adaptation remain metadata-only because production code
+    /// in this repository cannot depend on modules outside `java.base`.
+    ///
+    /// @param colorInfo the AVIF container color information
+    /// @param monochrome whether the decoded AV1 planes are monochrome
+    /// @return the selected fixed-point YUV-to-RGB transform
+    public static YuvToRgbTransform fromColorInfo(AvifColorInfo colorInfo, boolean monochrome) {
+        AvifColorInfo checkedColorInfo = Objects.requireNonNull(colorInfo, "colorInfo");
+        return fromMatrixCoefficients(
+                checkedColorInfo.matrixCoefficients(),
+                checkedColorInfo.fullRange(),
+                monochrome
+        );
+    }
+
+    /// Selects a display transform from CICP matrix coefficients and sample-range signaling.
+    ///
+    /// @param matrixCoefficients the CICP matrix coefficients value
+    /// @param fullRange whether samples are full range
+    /// @param monochrome whether the decoded planes are monochrome
+    /// @return the selected fixed-point YUV-to-RGB transform
+    private static YuvToRgbTransform fromMatrixCoefficients(
+            int matrixCoefficients,
+            boolean fullRange,
+            boolean monochrome
+    ) {
+        return switch (matrixCoefficients) {
             case 0 -> RGB_IDENTITY;
             case 1 -> fullRange ? BT709_FULL_RANGE : BT709_LIMITED_RANGE;
-            case 2 -> checkedColorConfig.monochrome() ? defaultTransform(fullRange) : BT601_FULL_RANGE;
+            case 2 -> monochrome ? defaultTransform(fullRange) : BT601_FULL_RANGE;
             case 5, 6 -> fullRange ? BT601_FULL_RANGE : BT601_LIMITED_RANGE;
             case 7 -> fullRange ? SMPTE240M_FULL_RANGE : SMPTE240M_LIMITED_RANGE;
             case 9 -> fullRange ? BT2020_NCL_FULL_RANGE : BT2020_NCL_LIMITED_RANGE;

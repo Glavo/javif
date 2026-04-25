@@ -54,7 +54,9 @@ public enum TransformType {
     /// A vertical `FLIPADST` and horizontal identity transform.
     V_FLIPADST(TransformKernel.IDENTITY, TransformKernel.FLIPADST),
     /// A vertical identity and horizontal `FLIPADST` transform.
-    H_FLIPADST(TransformKernel.FLIPADST, TransformKernel.IDENTITY);
+    H_FLIPADST(TransformKernel.FLIPADST, TransformKernel.IDENTITY),
+    /// A two-dimensional Walsh-Hadamard transform used by AV1 lossless 4x4 blocks.
+    WHT_WHT(TransformKernel.WHT, TransformKernel.WHT);
 
     /// The horizontal one-dimensional kernel.
     private final TransformKernel horizontalKernel;

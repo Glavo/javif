@@ -66,6 +66,24 @@ final class ChromaDequantizerTest {
         assertArrayEquals(expected, dequantized);
     }
 
+    /// Verifies that 64-wide or 64-high transforms apply the larger AV1 dequantization shift.
+    @Test
+    void largestTransformAppliesDequantizationShiftBeforeSign() {
+        int[] coefficients = new int[TransformSize.TX_64X64.widthPixels() * TransformSize.TX_64X64.heightPixels()];
+        coefficients[0] = 2;
+        coefficients[1] = -3;
+
+        int[] dequantized = ChromaDequantizer.dequantize(
+                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_64X64, 1, coefficients, 0x11),
+                new ChromaDequantizer.Context(1, 1, 2, 10)
+        );
+
+        int[] expected = new int[coefficients.length];
+        expected[0] = 5;
+        expected[1] = -9;
+        assertArrayEquals(expected, dequantized);
+    }
+
     /// Verifies that unsupported chroma bit depths still fail fast.
     @Test
     void rejectsUnsupportedBitDepths() {

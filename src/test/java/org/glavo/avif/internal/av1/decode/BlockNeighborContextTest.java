@@ -770,6 +770,72 @@ final class BlockNeighborContextTest {
         assertEquals(temporalBlock, tileContext.decodedTemporalMotionField().block(3, 3));
     }
 
+    /// Verifies that chroma coefficient-skip contexts use dav1d's dedicated chroma range.
+    @Test
+    void chromaCoefficientSkipContextUsesDedicatedChromaRange() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, AvifPixelFormat.I444));
+        BlockPosition position = new BlockPosition(0, 0);
+
+        assertEquals(7, context.chromaCoefficientSkipContext(
+                0,
+                BlockSize.SIZE_32X32,
+                position,
+                TransformSize.TX_32X32
+        ));
+        assertEquals(10, context.chromaCoefficientSkipContext(
+                0,
+                BlockSize.SIZE_16X16,
+                position,
+                TransformSize.TX_4X4
+        ));
+
+        context.updateChromaCoefficientContext(0, position, TransformSize.TX_4X4, 0x82);
+
+        assertEquals(11, context.chromaCoefficientSkipContext(
+                0,
+                BlockSize.SIZE_16X16,
+                new BlockPosition(1, 0),
+                TransformSize.TX_4X4
+        ));
+        assertEquals(11, context.chromaCoefficientSkipContext(
+                0,
+                BlockSize.SIZE_16X16,
+                new BlockPosition(0, 1),
+                TransformSize.TX_4X4
+        ));
+        assertEquals(12, context.chromaCoefficientSkipContext(
+                0,
+                BlockSize.SIZE_16X16,
+                position,
+                TransformSize.TX_4X4
+        ));
+        assertEquals(10, context.chromaCoefficientSkipContext(
+                1,
+                BlockSize.SIZE_16X16,
+                position,
+                TransformSize.TX_4X4
+        ));
+    }
+
+    /// Verifies that chroma coefficient-skip contexts account for subsampled chroma block size.
+    @Test
+    void chromaCoefficientSkipContextAccountsForSubsampling() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, AvifPixelFormat.I420));
+
+        assertEquals(7, context.chromaCoefficientSkipContext(
+                0,
+                BlockSize.SIZE_8X8,
+                new BlockPosition(0, 0),
+                TransformSize.TX_4X4
+        ));
+        assertEquals(10, context.chromaCoefficientSkipContext(
+                0,
+                BlockSize.SIZE_16X16,
+                new BlockPosition(0, 0),
+                TransformSize.TX_4X4
+        ));
+    }
+
     /// Verifies inter-frame initialization starts with non-intra neighbors.
     @Test
     void initializesInterFrameNeighborState() {
@@ -898,7 +964,16 @@ final class BlockNeighborContextTest {
     /// @param frameType the synthetic frame type
     /// @return a simple tile context used by neighbor-context tests
     private static TileDecodeContext testTileContext(FrameType frameType) {
-        return testTileContext(frameType, false, null);
+        return testTileContext(frameType, AvifPixelFormat.I420);
+    }
+
+    /// Creates a simple tile context used by neighbor-context tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param pixelFormat the synthetic decoded pixel format
+    /// @return a simple tile context used by neighbor-context tests
+    private static TileDecodeContext testTileContext(FrameType frameType, AvifPixelFormat pixelFormat) {
+        return testTileContext(frameType, pixelFormat, false, null);
     }
 
     /// Creates a simple tile context used by neighbor-context tests.
@@ -909,6 +984,22 @@ final class BlockNeighborContextTest {
     /// @return a simple tile context used by neighbor-context tests
     private static TileDecodeContext testTileContext(
             FrameType frameType,
+            boolean useReferenceFrameMotionVectors,
+            @org.jetbrains.annotations.Nullable TileDecodeContext.TemporalMotionField temporalMotionField
+    ) {
+        return testTileContext(frameType, AvifPixelFormat.I420, useReferenceFrameMotionVectors, temporalMotionField);
+    }
+
+    /// Creates a simple tile context used by neighbor-context tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param pixelFormat the synthetic decoded pixel format
+    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
+    /// @param temporalMotionField the synthetic tile-local temporal motion field, or `null`
+    /// @return a simple tile context used by neighbor-context tests
+    private static TileDecodeContext testTileContext(
+            FrameType frameType,
+            AvifPixelFormat pixelFormat,
             boolean useReferenceFrameMotionVectors,
             @org.jetbrains.annotations.Nullable TileDecodeContext.TemporalMotionField temporalMotionField
     ) {
@@ -954,10 +1045,10 @@ final class BlockNeighborContextTest {
                         2,
                         2,
                         true,
-                        AvifPixelFormat.I420,
+                        pixelFormat,
                         0,
-                        true,
-                        true,
+                        pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422,
+                        pixelFormat == AvifPixelFormat.I420,
                         false
                 )
         );
