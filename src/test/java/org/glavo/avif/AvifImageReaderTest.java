@@ -23,14 +23,20 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `AvifImageReader`.
+///
+/// Known gap: AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
+/// Some I444 images may produce slightly different pixel values compared to a reference decoder.
 @NotNullByDefault
 final class AvifImageReaderTest {
     /// One fixed single-tile payload that decodes as opaque mid-gray in the current AV1 decoder.
@@ -44,6 +50,18 @@ final class AvifImageReaderTest {
     /// The smallest still-image fixture from libavif's test data.
     private static final Path LIBAVIF_WHITE_1X1_FIXTURE =
             Path.of("external", "libavif", "tests", "data", "white_1x1.avif");
+
+    /// A still-image fixture that uses an extended `pixi` property.
+    private static final Path LIBAVIF_EXTENDED_PIXI_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "extended_pixi.avif");
+
+    /// A basic SDR sRGB still-image fixture.
+    private static final Path LIBAVIF_COLORS_SDR_SRGB_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "colors_sdr_srgb.avif");
+
+    /// A still-image fixture with embedded ICC, Exif, and XMP metadata.
+    private static final Path LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "paris_icc_exif_xmp.avif");
 
     /// Verifies that metadata can be parsed from a minimal AVIF primary image item.
     ///
@@ -132,6 +150,284 @@ final class AvifImageReaderTest {
             assertEquals(0xFF, pixels[0] >>> 24);
             assertNull(reader.readFrame());
         }
+    }
+
+    /// Verifies that a fixture with an extended `pixi` property parses metadata correctly.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openParsesExtendedPixiFixtureInfo() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_EXTENDED_PIXI_FIXTURE)) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.width() > 0);
+            assertTrue(info.height() > 0);
+            assertTrue(info.bitDepth() == 8 || info.bitDepth() == 10 || info.bitDepth() == 12);
+            assertFalse(info.alphaPresent());
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+        }
+    }
+
+    /// Verifies that an SDR sRGB fixture parses and decodes through the public reader.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameDecodesColorsSdrSrgbFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_COLORS_SDR_SRGB_FIXTURE)) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.width() > 0);
+            assertTrue(info.height() > 0);
+            assertTrue(info.bitDepth() == 8 || info.bitDepth() == 10 || info.bitDepth() == 12);
+            assertFalse(info.alphaPresent());
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(info.width(), frame.width());
+            assertEquals(info.height(), frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that a fixture with ICC/Exif/XMP metadata parses correctly.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openParsesParisIccExifXmpFixtureInfo() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE)) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.width() > 0);
+            assertTrue(info.height() > 0);
+            assertTrue(info.bitDepth() == 8 || info.bitDepth() == 10 || info.bitDepth() == 12);
+            assertFalse(info.alphaPresent());
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+        }
+    }
+
+    /// Verifies that truncated ispe payload is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsTruncatedIspe() throws IOException {
+        byte[] valid = minimalAvifStillImage();
+        int ispeOffset = indexOf(valid, fourCc("ispe")) + 12;
+        byte[] truncated = truncateAfter(valid, ispeOffset);
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(truncated));
+        assertEquals(AvifErrorCode.TRUNCATED_DATA, ex.code());
+    }
+
+    /// Verifies that truncated av1C payload is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsTruncatedAv1C() throws IOException {
+        byte[] valid = minimalAvifStillImage();
+        int av1cOffset = indexOf(valid, fourCc("av1C")) + 8;
+        byte[] truncated = truncateAfter(valid, av1cOffset);
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(truncated));
+        assertEquals(AvifErrorCode.TRUNCATED_DATA, ex.code());
+    }
+
+    /// Verifies that missing ispe on the primary item is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsMissingIspe() throws IOException {
+        byte[] bytes = minimalAvifWithoutProperty("ispe");
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    }
+
+    /// Verifies that missing av1C on the primary item is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsMissingAv1C() throws IOException {
+        byte[] bytes = minimalAvifWithoutProperty("av1C");
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    }
+
+    /// Verifies that duplicate hdlr in meta is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsDuplicateHdlr() throws IOException {
+        byte[] ftyp = fileTypeBox();
+        byte[] placeholderMeta = fullBox("meta", 0, 0, handlerBox());
+        int payloadOffset = ftyp.length + placeholderMeta.length + 8;
+        byte[] iloc = itemLocationBox(payloadOffset, 0);
+        byte[] meta = fullBox("meta", 0, 0, handlerBox(), handlerBox(), primaryItemBox(), iloc, itemInfoBox(), itemPropertiesBox());
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class,
+                () -> AvifImageReader.open(concat(ftyp, meta)));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    }
+
+    /// Verifies that ipma referencing a missing property is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsIpmaWithMissingProperty() throws IOException {
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] metaFirst = minimalMetaWithoutIpma(0, av1Payload.length);
+        int itemPayloadOffset = ftyp.length + metaFirst.length + 8;
+        byte[] ispe = imageSpatialExtentsProperty();
+        // ipma with property index 123 (which does not exist in ipco)
+        byte[] iprpBox = box(
+                "iprp",
+                box("ipco", ispe),
+                fullBox("ipma", 0, 0, u32(1), u16(1), new byte[]{1, (byte) 0x80})
+        );
+        byte[] meta = fullBox("meta", 0, 0,
+                handlerBox(),
+                primaryItemBox(),
+                itemLocationBox(itemPayloadOffset, av1Payload.length),
+                itemInfoBox(),
+                iprpBox
+        );
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class,
+                () -> AvifImageReader.open(concat(ftyp, meta, box("mdat", av1Payload))));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    }
+
+    /// Verifies that an essential unknown property on the primary item is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsEssentialUnknownProperty() throws IOException {
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] metaFirst = minimalMetaWithoutIpma(0, av1Payload.length);
+        int itemPayloadOffset = ftyp.length + metaFirst.length + 8;
+        // "xxxx" is an unknown property type, marked essential (0x81)
+        byte[] unknownProp = box("xxxx", new byte[]{1, 2, 3, 4});
+        byte[] iprpBox = box(
+                "iprp",
+                box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty(), unknownProp),
+                fullBox("ipma", 0, 0,
+                        u32(1),
+                        u16(1),
+                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, (byte) 0x84}
+                )
+        );
+        byte[] meta = fullBox("meta", 0, 0,
+                handlerBox(),
+                primaryItemBox(),
+                itemLocationBox(itemPayloadOffset, av1Payload.length),
+                itemInfoBox(),
+                iprpBox
+        );
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class,
+                () -> AvifImageReader.open(concat(ftyp, meta, box("mdat", av1Payload))));
+        assertEquals(AvifErrorCode.MISSING_IMAGE_ITEM, ex.code());
+    }
+
+    /// Verifies that an input without a valid ftyp box is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsMissingFtyp() throws IOException {
+        byte[] bytes = box("xxxx", new byte[0]);
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
+        assertEquals(AvifErrorCode.INVALID_FTYP, ex.code());
+    }
+
+    /// Verifies that a meta box without hdlr is rejected.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsMetaWithoutHdlr() throws IOException {
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] meta = fullBox("meta", 0, 0, primaryItemBox());
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class,
+                () -> AvifImageReader.open(concat(ftyp, meta, box("mdat", av1Payload))));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    }
+
+    /// Builds a minimal AVIF with one property omitted.
+    ///
+    /// @param omitType the property type to omit
+    /// @return the AVIF container bytes
+    private static byte[] minimalAvifWithoutProperty(String omitType) {
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] metaFirst = minimalMetaWithoutIpma(0, av1Payload.length);
+        int itemPayloadOffset = ftyp.length + metaFirst.length + 8;
+        ArrayList<byte[]> properties = new ArrayList<>();
+        if (!"ispe".equals(omitType)) {
+            properties.add(imageSpatialExtentsProperty());
+        }
+        if (!"av1C".equals(omitType)) {
+            properties.add(av1ConfigProperty());
+        }
+        if (!"colr".equals(omitType)) {
+            properties.add(colorProperty());
+        }
+        byte[] iprpBox = box("iprp", box("ipco", properties.toArray(byte[][]::new)),
+                fullBox("ipma", 0, 0, u32(1), u16(1),
+                        new byte[]{(byte) properties.size(),
+                                (byte) 0x81,
+                                properties.size() >= 2 ? (byte) 0x82 : (byte) 0x00,
+                                properties.size() >= 3 ? (byte) 0x03 : (byte) 0x00}));
+        byte[] meta = fullBox("meta", 0, 0,
+                handlerBox(),
+                primaryItemBox(),
+                itemLocationBox(itemPayloadOffset, av1Payload.length),
+                itemInfoBox(),
+                iprpBox
+        );
+        return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
+    /// Builds a placeholder meta box used to measure iprp size.
+    ///
+    /// @param itemPayloadOffset ignored
+    /// @param itemPayloadLength ignored
+    /// @return the placeholder meta box bytes
+    private static byte[] minimalMetaWithoutIpma(int itemPayloadOffset, int itemPayloadLength) {
+        return fullBox("meta", 0, 0,
+                handlerBox(),
+                primaryItemBox(),
+                itemLocationBox(itemPayloadOffset, itemPayloadLength),
+                itemInfoBox()
+        );
+    }
+
+    /// Returns the index of the first occurrence of `pattern` in `data`.
+    ///
+    /// @param data the byte array to search
+    /// @param pattern the pattern to search for
+    /// @return the index of the first occurrence, or -1
+    private static int indexOf(byte[] data, byte[] pattern) {
+        for (int i = 0; i <= data.length - pattern.length; i++) {
+            boolean match = true;
+            for (int j = 0; j < pattern.length; j++) {
+                if (data[i + j] != pattern[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// Returns a copy of `data` truncated after `length` bytes.
+    ///
+    /// @param data the source byte array
+    /// @param length the new length
+    /// @return the truncated byte array
+    private static byte[] truncateAfter(byte[] data, int length) {
+        return Arrays.copyOf(data, Math.min(length, data.length));
     }
 
     /// Creates a minimal AVIF still image with one primary AV1 image item.

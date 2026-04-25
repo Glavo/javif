@@ -368,6 +368,11 @@ public final class AvifContainerParser {
             case "av1C" -> parseAv1C(input);
             case "colr" -> parseColr(input);
             case "auxC" -> parseAuxC(input);
+            case "pixi" -> parsePixi(input);
+            case "pasp" -> parsePasp(input);
+            case "clap" -> parseClap(input);
+            case "irot" -> parseIrot(input);
+            case "imir" -> parseImir(input);
             default -> new OpaqueProperty(header.type());
         };
     }
@@ -461,6 +466,97 @@ public final class AvifContainerParser {
             output.write(value);
         }
         return new AuxiliaryType(output.toString(java.nio.charset.StandardCharsets.ISO_8859_1));
+    }
+
+    /// Parses a `pixi` property.
+    ///
+    /// @param input the property payload input
+    /// @return the parsed property
+    /// @throws AvifDecodeException if the property is malformed
+    private static PixelInformation parsePixi(BoxInput input) throws AvifDecodeException {
+        readFullBox(input);
+        int numChannels = input.readU8();
+        if (numChannels < 1) {
+            throw parseFailed("pixi must have at least one channel", input.offset() - 1);
+        }
+        if (numChannels > input.remaining()) {
+            throw parseFailed("pixi numChannels exceeds available payload", input.offset() - 1);
+        }
+        int[] bitsPerChannel = new int[numChannels];
+        for (int i = 0; i < numChannels; i++) {
+            bitsPerChannel[i] = input.readU8();
+        }
+        return new PixelInformation(bitsPerChannel);
+    }
+
+    /// Parses a `pasp` property.
+    ///
+    /// @param input the property payload input
+    /// @return the parsed property
+    /// @throws AvifDecodeException if the property is malformed
+    private static PixelAspectRatio parsePasp(BoxInput input) throws AvifDecodeException {
+        int hSpacing = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int vSpacing = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        if (hSpacing <= 0 || vSpacing <= 0) {
+            throw parseFailed("pasp spacing values must be positive", input.offset());
+        }
+        return new PixelAspectRatio(hSpacing, vSpacing);
+    }
+
+    /// Parses a `clap` property.
+    ///
+    /// @param input the property payload input
+    /// @return the parsed property
+    /// @throws AvifDecodeException if the property is malformed
+    private static CleanAperture parseClap(BoxInput input) throws AvifDecodeException {
+        int cleanApertureWidthN = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int cleanApertureWidthD = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int cleanApertureHeightN = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int cleanApertureHeightD = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int horizOffN = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int horizOffD = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int vertOffN = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int vertOffD = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        if (cleanApertureWidthD <= 0 || cleanApertureHeightD <= 0 || horizOffD <= 0 || vertOffD <= 0) {
+            throw parseFailed("clap denominator values must be positive", input.offset());
+        }
+        return new CleanAperture(
+                cleanApertureWidthN, cleanApertureWidthD,
+                cleanApertureHeightN, cleanApertureHeightD,
+                horizOffN, horizOffD,
+                vertOffN, vertOffD
+        );
+    }
+
+    /// Parses an `irot` property.
+    ///
+    /// @param input the property payload input
+    /// @return the parsed property
+    /// @throws AvifDecodeException if the property is malformed
+    private static ImageRotation parseIrot(BoxInput input) throws AvifDecodeException {
+        int packed = input.readU8();
+        if ((packed & 0xFC) != 0) {
+            throw parseFailed("irot reserved bits must be zero", input.offset() - 1);
+        }
+        int rotation = packed & 0x03;
+        return new ImageRotation(rotation);
+    }
+
+    /// Parses an `imir` property.
+    ///
+    /// @param input the property payload input
+    /// @return the parsed property
+    /// @throws AvifDecodeException if the property is malformed
+    private static ImageMirror parseImir(BoxInput input) throws AvifDecodeException {
+        int packed = input.readU8();
+        if ((packed & 0xFE) != 0) {
+            throw parseFailed("imir reserved bits must be zero", input.offset() - 1);
+        }
+        int axis = packed & 0x01;
+        if (axis != 0 && axis != 1) {
+            throw parseFailed("imir axis must be 0 or 1", input.offset() - 1);
+        }
+        return new ImageMirror(axis);
     }
 
     /// Parses an `ipma` box.
@@ -792,7 +888,7 @@ public final class AvifContainerParser {
 
     /// Marker interface for parsed item properties.
     @NotNullByDefault
-    private sealed interface Property permits ImageSpatialExtents, Av1Config, ColorProperty, AuxiliaryType, OpaqueProperty {
+    private sealed interface Property permits ImageSpatialExtents, Av1Config, ColorProperty, AuxiliaryType, OpaqueProperty, PixelInformation, PixelAspectRatio, CleanAperture, ImageRotation, ImageMirror {
     }
 
     /// Parsed `ispe` item property.
@@ -926,6 +1022,113 @@ public final class AvifContainerParser {
         /// @param type the property type
         private OpaqueProperty(String type) {
             this.type = Objects.requireNonNull(type, "type");
+        }
+    }
+
+    /// Parsed `pixi` item property.
+    @NotNullByDefault
+    private static final class PixelInformation implements Property {
+        /// The bits-per-channel array.
+        private final int @Unmodifiable [] bitsPerChannel;
+
+        /// Creates a pixel information property.
+        ///
+        /// @param bitsPerChannel the bits-per-channel array
+        private PixelInformation(int[] bitsPerChannel) {
+            this.bitsPerChannel = bitsPerChannel.clone();
+        }
+    }
+
+    /// Parsed `pasp` item property.
+    @NotNullByDefault
+    private static final class PixelAspectRatio implements Property {
+        /// The horizontal relative spacing.
+        private final int hSpacing;
+        /// The vertical relative spacing.
+        private final int vSpacing;
+
+        /// Creates a pixel aspect ratio property.
+        ///
+        /// @param hSpacing the horizontal relative spacing
+        /// @param vSpacing the vertical relative spacing
+        private PixelAspectRatio(int hSpacing, int vSpacing) {
+            this.hSpacing = hSpacing;
+            this.vSpacing = vSpacing;
+        }
+    }
+
+    /// Parsed `clap` item property.
+    @NotNullByDefault
+    private static final class CleanAperture implements Property {
+        /// The clean aperture width numerator.
+        private final int cleanApertureWidthN;
+        /// The clean aperture width denominator.
+        private final int cleanApertureWidthD;
+        /// The clean aperture height numerator.
+        private final int cleanApertureHeightN;
+        /// The clean aperture height denominator.
+        private final int cleanApertureHeightD;
+        /// The horizontal offset numerator.
+        private final int horizOffN;
+        /// The horizontal offset denominator.
+        private final int horizOffD;
+        /// The vertical offset numerator.
+        private final int vertOffN;
+        /// The vertical offset denominator.
+        private final int vertOffD;
+
+        /// Creates a clean aperture property.
+        ///
+        /// @param cleanApertureWidthN the clean aperture width numerator
+        /// @param cleanApertureWidthD the clean aperture width denominator
+        /// @param cleanApertureHeightN the clean aperture height numerator
+        /// @param cleanApertureHeightD the clean aperture height denominator
+        /// @param horizOffN the horizontal offset numerator
+        /// @param horizOffD the horizontal offset denominator
+        /// @param vertOffN the vertical offset numerator
+        /// @param vertOffD the vertical offset denominator
+        private CleanAperture(
+                int cleanApertureWidthN, int cleanApertureWidthD,
+                int cleanApertureHeightN, int cleanApertureHeightD,
+                int horizOffN, int horizOffD,
+                int vertOffN, int vertOffD
+        ) {
+            this.cleanApertureWidthN = cleanApertureWidthN;
+            this.cleanApertureWidthD = cleanApertureWidthD;
+            this.cleanApertureHeightN = cleanApertureHeightN;
+            this.cleanApertureHeightD = cleanApertureHeightD;
+            this.horizOffN = horizOffN;
+            this.horizOffD = horizOffD;
+            this.vertOffN = vertOffN;
+            this.vertOffD = vertOffD;
+        }
+    }
+
+    /// Parsed `irot` item property.
+    @NotNullByDefault
+    private static final class ImageRotation implements Property {
+        /// The rotation angle code.
+        private final int rotation;
+
+        /// Creates an image rotation property.
+        ///
+        /// @param rotation the rotation angle code
+        private ImageRotation(int rotation) {
+            this.rotation = rotation;
+        }
+    }
+
+    /// Parsed `imir` item property.
+    @NotNullByDefault
+    private static final class ImageMirror implements Property {
+        /// The mirror axis.
+        private final int axis;
+
+        /// Creates an image mirror property.
+        ///
+        /// @param axis the mirror axis
+        private ImageMirror(int axis) {
+            this.axis = axis;
         }
     }
 }
