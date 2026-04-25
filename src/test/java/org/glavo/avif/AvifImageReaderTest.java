@@ -578,6 +578,22 @@ final class AvifImageReaderTest {
         assertMinimalAvisSequence(minimalAvisSequenceWithSplitChunks(true));
     }
 
+    /// Verifies that non-image AVIS tracks are not selected as the primary sequence.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceAfterIgnoredNonImageTrack() throws IOException {
+        assertMinimalAvisSequence(minimalAvisSequenceWithIgnoredLeadingTrack("soun"));
+    }
+
+    /// Verifies that an `auxv` AVIS track without an auxiliary declaration is not selected as color.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceAfterIgnoredUndeclaredAuxiliaryTrack() throws IOException {
+        assertMinimalAvisSequence(minimalAvisSequenceWithIgnoredLeadingTrack("auxv"));
+    }
+
     /// Verifies that AVIS media duration falls back to summed frame durations when `mdhd` omits it.
     ///
     /// @throws IOException if the synthetic sequence cannot be read or decoded
@@ -651,6 +667,16 @@ final class AvifImageReaderTest {
         AvifDecodeException exception = assertThrows(
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 3, 2))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that duplicate AVIS media handler boxes are rejected.
+    @Test
+    void rejectsAnimatedSequenceWithDuplicateMediaHandler() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithDuplicateMediaHandler())
         );
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
@@ -1613,6 +1639,113 @@ final class AvifImageReaderTest {
         return concat(ftyp, moov, box("mdat", mdatPayload));
     }
 
+    /// Creates a minimal AVIS sequence where an ignored track appears before the image track.
+    ///
+    /// @param leadingHandlerType the ignored leading track handler type
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithIgnoredLeadingTrack(String leadingHandlerType) {
+        byte[] sample0 = av1StillPicturePayload();
+        byte[] sample1 = av1StillPicturePayload();
+        byte[] sample2 = av1StillPicturePayload();
+        byte[] chunkPadding = new byte[]{0x55, 0x66, 0x77, 0x00, 0x11};
+        byte[] mdatPayload = concat(sample0, chunkPadding, sample1, sample2);
+        byte[] ftyp = sequenceFileTypeBox();
+
+        byte[] firstMoov = minimalAvisMoovBoxWithLeadingIgnoredTrack(
+                leadingHandlerType,
+                new int[]{0, 0},
+                sample0.length,
+                sample1.length,
+                sample2.length
+        );
+        int chunk0Offset = ftyp.length + firstMoov.length + 8;
+        int chunk1Offset = chunk0Offset + sample0.length + chunkPadding.length;
+        byte[] moov = minimalAvisMoovBoxWithLeadingIgnoredTrack(
+                leadingHandlerType,
+                new int[]{chunk0Offset, chunk1Offset},
+                sample0.length,
+                sample1.length,
+                sample2.length
+        );
+        return concat(ftyp, moov, box("mdat", mdatPayload));
+    }
+
+    /// Creates a minimal AVIS sequence with duplicate `mdia` handler boxes.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithDuplicateMediaHandler() {
+        byte[] sample = av1StillPicturePayload();
+        return concat(
+                sequenceFileTypeBox(),
+                minimalAvisMoovBoxWithDuplicateMediaHandler(
+                        new int[]{0, 0},
+                        sample.length,
+                        sample.length,
+                        sample.length
+                )
+        );
+    }
+
+    /// Creates a minimal AVIS `moov` box with one leading ignored track.
+    ///
+    /// @param leadingHandlerType the ignored leading track handler type
+    /// @param chunkOffsets the absolute chunk offsets for the image track
+    /// @param sampleSizes the image-track sample sizes
+    /// @return the `moov` box bytes
+    private static byte[] minimalAvisMoovBoxWithLeadingIgnoredTrack(
+            String leadingHandlerType,
+            int[] chunkOffsets,
+            int... sampleSizes
+    ) {
+        byte[] ignoredTrack = avisTrackBox(
+                leadingHandlerType,
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                sampleSizes
+        );
+        byte[] imageTrack = avisTrackBox(
+                null,
+                chunkOffsets,
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                sampleSizes
+        );
+        return box("moov", ignoredTrack, imageTrack);
+    }
+
+    /// Creates a minimal AVIS `moov` box with duplicate media handler boxes.
+    ///
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param sampleSizes the sample sizes
+    /// @return the `moov` box bytes
+    private static byte[] minimalAvisMoovBoxWithDuplicateMediaHandler(int[] chunkOffsets, int... sampleSizes) {
+        return box(
+                "moov",
+                box(
+                        "trak",
+                        trackHeaderBox(3),
+                        box(
+                                "mdia",
+                                mediaHeaderBox(3),
+                                handlerBox("pict"),
+                                handlerBox("pict"),
+                                box("minf", sampleTableBox(chunkOffsets, false, 3, 1, 1, sampleSizes))
+                        )
+                )
+        );
+    }
+
     /// Creates a minimal AVIS `moov` box.
     ///
     /// @param chunkOffsets the absolute chunk offsets
@@ -1638,7 +1771,52 @@ final class AvifImageReaderTest {
     ) {
         return box(
                 "moov",
-                box("trak", trackHeaderBox(trackDuration), editList == null ? new byte[0] : editList, mediaBox(
+                avisTrackBox(
+                        null,
+                        chunkOffsets,
+                        useCo64,
+                        timingSampleCount,
+                        firstStscChunk,
+                        mediaDuration,
+                        sampleDelta,
+                        trackDuration,
+                        editList,
+                        sampleSizes
+                )
+        );
+    }
+
+    /// Creates a minimal AVIS track box.
+    ///
+    /// @param handlerType the optional media handler type
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param trackDuration the duration written to `tkhd`
+    /// @param editList the optional `edts` box
+    /// @param sampleSizes the sample sizes
+    /// @return the `trak` box bytes
+    private static byte[] avisTrackBox(
+            @Nullable String handlerType,
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
+            int trackDuration,
+            byte @Nullable [] editList,
+            int... sampleSizes
+    ) {
+        return box(
+                "trak",
+                trackHeaderBox(trackDuration),
+                editList == null ? new byte[0] : editList,
+                mediaBox(
+                        handlerType,
                         chunkOffsets,
                         useCo64,
                         timingSampleCount,
@@ -1646,7 +1824,7 @@ final class AvifImageReaderTest {
                         mediaDuration,
                         sampleDelta,
                         sampleSizes
-                ))
+                )
         );
     }
 
@@ -1709,9 +1887,43 @@ final class AvifImageReaderTest {
             int sampleDelta,
             int... sampleSizes
     ) {
+        return mediaBox(
+                null,
+                chunkOffsets,
+                useCo64,
+                timingSampleCount,
+                firstStscChunk,
+                mediaDuration,
+                sampleDelta,
+                sampleSizes
+        );
+    }
+
+    /// Creates a minimal AVIS media box.
+    ///
+    /// @param handlerType the optional media handler type
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param sampleSizes the sample sizes
+    /// @return the `mdia` box bytes
+    private static byte[] mediaBox(
+            @Nullable String handlerType,
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
+            int... sampleSizes
+    ) {
         return box(
                 "mdia",
                 mediaHeaderBox(mediaDuration),
+                handlerType == null ? new byte[0] : handlerBox(handlerType),
                 box("minf", sampleTableBox(
                         chunkOffsets,
                         useCo64,
@@ -1874,12 +2086,20 @@ final class AvifImageReaderTest {
     ///
     /// @return the handler box bytes
     private static byte[] handlerBox() {
+        return handlerBox("pict");
+    }
+
+    /// Creates a handler box.
+    ///
+    /// @param handlerType the four-character handler type
+    /// @return the handler box bytes
+    private static byte[] handlerBox(String handlerType) {
         return fullBox(
                 "hdlr",
                 0,
                 0,
                 u32(0),
-                fourCc("pict"),
+                fourCc(handlerType),
                 u32(0),
                 u32(0),
                 u32(0),

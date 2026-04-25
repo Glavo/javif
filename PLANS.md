@@ -13,6 +13,7 @@ Implemented container/API coverage:
 - random indexed AVIS reads
 - AVIS `stsc`, `stco`, `co64`, `stts`, media-duration reconciliation, and
   edit-list repetition metadata
+- AVIS media handler filtering for image, auxiliary-image, and unrelated tracks
 - raw plane access for color, alpha, depth, and gain-map images
 
 ## Remaining Work
@@ -39,7 +40,9 @@ Implemented container/API coverage:
 
 ### Container And API
 
-- Improve AVIS multi-track edge cases.
+- Finish AVIS multi-track edge cases beyond handler filtering: multiple
+  compatible color tracks, explicit auxiliary-to-color track matching, and
+  unsupported track-reference combinations.
 - Add incremental or streaming input behavior instead of requiring a complete
   buffered source.
 - Expose remaining useful metadata through typed public descriptors.

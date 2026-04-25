@@ -1462,7 +1462,7 @@ public final class AvifContainerParser {
 
     /// Parses a `moov` box for AVIS image sequences.
     ///
-    /// Navigates to the sample table inside the first video track and extracts frame metadata.
+    /// Navigates to supported color and auxiliary-image tracks and extracts frame metadata.
     ///
     /// @param input the moov box payload
     /// @throws AvifDecodeException if the box is malformed
@@ -1475,23 +1475,41 @@ public final class AvifContainerParser {
                 BoxInput trakPayload = input.slice(child.payloadOffset(), child.payloadSize());
                 parseMoovTrack(trakPayload);
                 MoovState parsedTrack = meta.moovState.copy();
-                if (parsedTrack.auxiliaryType != null && !meta.moovAuxiliaryTypes.contains(parsedTrack.auxiliaryType)) {
-                    meta.moovAuxiliaryTypes.add(parsedTrack.auxiliaryType);
-                }
-                if (AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(parsedTrack.auxiliaryType) && meta.moovAlphaState == null) {
-                    meta.moovAlphaState = parsedTrack;
-                }
-                if (AvifAuxiliaryImageInfo.DEPTH_TYPE.equals(parsedTrack.auxiliaryType) && meta.moovDepthState == null) {
-                    meta.moovDepthState = parsedTrack;
-                }
-                if (selectedTrack.seqHeaderObu != null
-                        || parsedTrack.seqHeaderObu == null
-                        || parsedTrack.auxiliaryType != null) {
+                if (isMoovImageTrack(parsedTrack)) {
+                    if (parsedTrack.auxiliaryType != null && !meta.moovAuxiliaryTypes.contains(parsedTrack.auxiliaryType)) {
+                        meta.moovAuxiliaryTypes.add(parsedTrack.auxiliaryType);
+                    }
+                    if (AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(parsedTrack.auxiliaryType)
+                            && meta.moovAlphaState == null) {
+                        meta.moovAlphaState = parsedTrack;
+                    }
+                    if (AvifAuxiliaryImageInfo.DEPTH_TYPE.equals(parsedTrack.auxiliaryType)
+                            && meta.moovDepthState == null) {
+                        meta.moovDepthState = parsedTrack;
+                    }
+                    if (selectedTrack.seqHeaderObu != null
+                            || parsedTrack.seqHeaderObu == null
+                            || parsedTrack.auxiliaryType != null) {
+                        meta.moovState.copyFrom(selectedTrack);
+                    }
+                } else {
                     meta.moovState.copyFrom(selectedTrack);
                 }
             }
             input.skipBoxPayload(child);
         }
+    }
+
+    /// Returns whether a parsed `trak` can be used as an AVIS image-sequence track.
+    ///
+    /// @param track the parsed track state
+    /// @return whether the track handler describes a color or auxiliary image track
+    private static boolean isMoovImageTrack(MoovState track) {
+        String handlerType = track.mediaHandlerType;
+        return handlerType == null
+                || "pict".equals(handlerType)
+                || "vide".equals(handlerType)
+                || ("auxv".equals(handlerType) && track.auxiliaryType != null);
     }
 
     /// Parses a `trak` box and extracts video track metadata.
@@ -1587,16 +1605,37 @@ public final class AvifContainerParser {
 
     /// Parses a `mdia` box to reach the media information and sample table.
     private void parseMoovMdia(BoxInput input) throws AvifDecodeException {
+        boolean hdlrSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
                 case "mdhd" -> parseMoovMdhd(payload);
+                case "hdlr" -> {
+                    if (hdlrSeen) {
+                        throw parseFailed("Box[mdia] contains a duplicate unique box of type 'hdlr'", child.offset());
+                    }
+                    hdlrSeen = true;
+                    parseMoovHandler(payload);
+                }
                 case "minf" -> parseMoovMinf(payload);
                 default -> {}
             }
             input.skipBoxPayload(child);
         }
+    }
+
+    /// Parses an AVIS media handler box.
+    ///
+    /// @param input the box payload input
+    /// @throws AvifDecodeException if the handler box is malformed
+    private void parseMoovHandler(BoxInput input) throws AvifDecodeException {
+        readFullBox(input);
+        long preDefined = input.readU32();
+        if (preDefined != 0) {
+            throw parseFailed("mdia hdlr pre_defined must be zero", input.offset() - 4);
+        }
+        meta.moovState.mediaHandlerType = input.readFourCc();
     }
 
     /// Parses an `mdhd` box for media timescale and duration.
@@ -2532,6 +2571,8 @@ public final class AvifContainerParser {
         private @Nullable AvifColorInfo colr;
         /// The parsed image sequence ICC profile payload, or `null`.
         private byte @Nullable [] iccProfile;
+        /// The parsed media handler type, or `null` when the track has no `hdlr` box.
+        private @Nullable String mediaHandlerType;
         /// The parsed image sequence media timescale.
         private int mediaTimescale;
         /// The parsed image sequence media duration.
@@ -2578,6 +2619,7 @@ public final class AvifContainerParser {
             pixelFormat = other.pixelFormat;
             colr = other.colr;
             iccProfile = other.iccProfile == null ? null : other.iccProfile.clone();
+            mediaHandlerType = other.mediaHandlerType;
             mediaTimescale = other.mediaTimescale;
             mediaDuration = other.mediaDuration;
             trackDuration = other.trackDuration;
