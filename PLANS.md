@@ -29,8 +29,9 @@ plus synthetic still-image, alpha, grid, and irot tests.
 
 **Known gaps:**
 - AV1 `I444` pixel-accuracy tracked separately from AVIF container coverage.
-- AVIS inter-frame decoding: keyframe samples decode correctly; inter frames require
-  persistent decoder state across samples.
+- AVIS inter-frame decoding blocked by AV1 decoder reference-plane boundary bug
+  (`DecodedPlane.sample` with `x=150` out of range during warped motion prediction).
+  Keyframe samples decode correctly; moov parsing and frame metadata work.
 - Grid and transform composition: 8-bit only; 10/12-bit deferred.
 
 ## Remaining Work

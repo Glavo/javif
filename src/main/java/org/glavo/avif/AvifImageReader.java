@@ -50,6 +50,10 @@ public final class AvifImageReader implements AutoCloseable {
     private int nextFrameIndex;
     /// Whether this reader has been closed.
     private boolean closed;
+    /// A persistent AV1 reader for image sequences, or `null`.
+    private @Nullable Av1ImageReader sequenceAv1Reader;
+    /// The expected next frame index from the persistent sequence reader.
+    private int sequenceAv1FrameIndex;
 
     /// Creates an AVIF image reader.
     ///
@@ -253,23 +257,38 @@ public final class AvifImageReader implements AutoCloseable {
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        byte[] payload = payloads[frameIndex];
-        if (payload == null) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sample payload is null: " + frameIndex, null);
+        if (frameIndex < sequenceAv1FrameIndex) {
+            throw new AvifDecodeException(AvifErrorCode.UNSUPPORTED_FEATURE,
+                    "Random-access sequence decoding is not implemented in this slice", null);
         }
-        try (Av1ImageReader av1Reader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)),
-                config.av1DecoderConfig()
-        )) {
-            DecodedFrame decodedFrame = av1Reader.readFrame();
-            if (decodedFrame == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sample produced no frame: " + frameIndex, null);
+        if (sequenceAv1Reader == null) {
+            ByteArrayOutputStream concat = new ByteArrayOutputStream();
+            for (byte[] p : payloads) {
+                concat.writeBytes(Objects.requireNonNull(p));
             }
+            sequenceAv1Reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(
+                            ByteBuffer.wrap(concat.toByteArray()).order(ByteOrder.LITTLE_ENDIAN)),
+                    config.av1DecoderConfig()
+            );
+            sequenceAv1FrameIndex = 0;
+        }
+        while (sequenceAv1FrameIndex < frameIndex) {
+            DecodedFrame skipped = sequenceAv1Reader.readFrame();
+            if (skipped == null)
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence ended before frame " + frameIndex, null);
+            sequenceAv1FrameIndex++;
+        }
+        try {
+            DecodedFrame decodedFrame = sequenceAv1Reader.readFrame();
+            if (decodedFrame == null)
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence produced no frame: " + frameIndex, null);
+            sequenceAv1FrameIndex++;
             return adaptFrame(decodedFrame, frameIndex);
-        } catch (AvifDecodeException exception) {
-            throw exception;
-        } catch (IOException exception) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+        } catch (AvifDecodeException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, e.getMessage(), null, e);
         }
     }
 
@@ -398,6 +417,10 @@ public final class AvifImageReader implements AutoCloseable {
     /// Closes this reader.
     @Override
     public void close() {
+        if (sequenceAv1Reader != null) {
+            try { sequenceAv1Reader.close(); } catch (IOException ignored) {}
+            sequenceAv1Reader = null;
+        }
         closed = true;
     }
 
