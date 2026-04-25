@@ -17,7 +17,6 @@ package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.DecodedFrame;
-import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.bmff.AvifContainer;
@@ -395,7 +394,7 @@ public final class AvifImageReader implements AutoCloseable {
             }
             yOffset += maxCellHeight;
         }
-        PixelFormat fmt = cellFrames[0].pixelFormat();
+        AvifPixelFormat fmt = cellFrames[0].pixelFormat();
         return new AvifFrame(outputWidth, outputHeight,
                 cellFrames[0].bitDepth(), fmt, frameIndex, canvas);
     }
@@ -643,7 +642,7 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Combines alpha from raw luma plane into an 8-bit color frame.
     private static AvifFrame combineIntPlaneAlpha(
-            DecodedFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
+            DecodedFrame color, DecodedPlanes alphaPlanes, AvifPixelFormat alphaFmt, int frameIndex
     ) {
         IntBuffer colorPixels = color.intPixelBuffer();
         int width = color.width();
@@ -669,7 +668,7 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Combines alpha from raw luma plane into a 10/12-bit color frame.
     private static AvifFrame combineLongPlaneAlpha(
-            DecodedFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
+            DecodedFrame color, DecodedPlanes alphaPlanes, AvifPixelFormat alphaFmt, int frameIndex
     ) {
         LongBuffer colorPixels = color.longPixelBuffer();
         int width = color.width();

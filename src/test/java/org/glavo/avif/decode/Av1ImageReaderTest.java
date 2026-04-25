@@ -16,6 +16,7 @@
 package org.glavo.avif.decode;
 
 import org.glavo.avif.AvifBitDepth;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -34,7 +35,6 @@ import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
-import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
@@ -348,8 +348,8 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForSupportedCombinedStillPictureStreamsWithRealI422AndI444SequenceHeaders()
             throws IOException {
-        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I422, true);
-        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I444, true);
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, true);
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, true);
     }
 
     /// Verifies that the current still-picture first-pixel path also succeeds for parsed
@@ -359,12 +359,12 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsDecodedFrameForSupportedCombinedHighBitDepthStillPictureStreams() throws IOException {
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 10, true);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 12, true);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 10, true);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 12, true);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 10, true);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 12, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I420, 10, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I420, 12, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I422, 10, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I422, 12, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I444, 10, true);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I444, 12, true);
     }
 
     /// Verifies that the high-bit-depth still-picture first-pixel path also succeeds through
@@ -373,12 +373,12 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsDecodedFrameForSupportedStandaloneHighBitDepthStillPictureStreams() throws IOException {
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 10, false);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I420, 12, false);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 10, false);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I422, 12, false);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 10, false);
-        assertSupportedHighBitDepthStillPictureRoundTrip(PixelFormat.I444, 12, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I420, 10, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I420, 12, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I422, 10, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I422, 12, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I444, 10, false);
+        assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I444, 12, false);
     }
 
     /// Verifies that parsed combined still-picture streams can enable normative horizontal
@@ -387,10 +387,10 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsDecodedFrameForSupportedCombinedSuperResolvedStillPictureStreams() throws IOException {
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I400, true);
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I420, true);
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I422, true);
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I444, true);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I400, true);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I420, true);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I422, true);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I444, true);
     }
 
     /// Verifies that parsed standalone still-picture streams can enable normative horizontal
@@ -399,10 +399,10 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsDecodedFrameForSupportedStandaloneSuperResolvedStillPictureStreams() throws IOException {
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I400, false);
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I420, false);
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I422, false);
-        assertSupportedSuperResolvedStillPictureRoundTrip(PixelFormat.I444, false);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I400, false);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I420, false);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I422, false);
+        assertSupportedSuperResolvedStillPictureRoundTrip(AvifPixelFormat.I444, false);
     }
 
     /// Verifies that one super-resolved public still-picture decode refreshes reference state that
@@ -412,19 +412,19 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsStoredReferenceSurfaceForSuperResolvedShowExistingFrame() throws IOException {
         byte[] stream = concat(
-                obu(1, fullSuperResolvedSequenceHeaderPayload(PixelFormat.I420)),
+                obu(1, fullSuperResolvedSequenceHeaderPayload(AvifPixelFormat.I420)),
                 obu(6, fullSuperResolvedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
                 obu(3, showExistingFrameHeaderPayload(0))
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            assertOpaqueGrayStillPictureFrame(reader.readFrame(), PixelFormat.I420, 0);
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 0);
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
             assertTrue(firstSyntaxResult.assembly().frameHeader().superResolution().enabled());
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
-            assertOpaqueGrayStillPictureFrame(reader.readFrame(), PixelFormat.I420, 1);
+            assertOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 1);
             assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
@@ -439,7 +439,7 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsStoredReferenceSurfaceForActivePostfilterSuperResolvedShowExistingFrame() throws IOException {
         byte[] stream = concat(
-                obu(1, fullSuperResolvedRestorationSequenceHeaderPayload(PixelFormat.I400)),
+                obu(1, fullSuperResolvedRestorationSequenceHeaderPayload(AvifPixelFormat.I400)),
                 obu(6, fullActivePostfilterSuperResolvedStillPictureCombinedFramePayload(
                         ACTIVE_WIENER_RESTORATION_TILE_PAYLOAD
                 )),
@@ -514,8 +514,8 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForSupportedStandaloneStillPictureStreamsWithRealI422AndI444SequenceHeaders()
             throws IOException {
-        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I422, false);
-        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(PixelFormat.I444, false);
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, false);
+        assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, false);
     }
 
     /// Verifies that one real parsed `I422` or `I444` still-picture decode can immediately refresh
@@ -525,8 +525,8 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForShowExistingFrameBackedByRealParsedStillPicturesWithAdditionalChromaLayouts()
             throws IOException {
-        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, false);
-        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, false);
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, false);
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, false);
     }
 
     /// Verifies that one real parsed `I422` or `I444` still-picture decode can immediately refresh
@@ -536,8 +536,8 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForCombinedShowExistingFrameBackedByRealParsedStillPicturesWithAdditionalChromaLayouts()
             throws IOException {
-        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, true);
-        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, true);
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, true);
+        assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, true);
     }
 
     /// Verifies that real parsed high-bit-depth `I422` and `I444` still-picture decodes refresh
@@ -547,10 +547,10 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForShowExistingFrameBackedByRealParsedHighBitDepthStillPicturesWithAdditionalChromaLayouts()
             throws IOException {
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 10, false);
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 12, false);
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 10, false);
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 12, false);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, 10, false);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, 12, false);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, 10, false);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, 12, false);
     }
 
     /// Verifies that real parsed high-bit-depth `I422` and `I444` still-picture decodes refresh
@@ -560,10 +560,10 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForCombinedShowExistingFrameBackedByRealParsedHighBitDepthStillPicturesWithAdditionalChromaLayouts()
             throws IOException {
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 10, true);
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I422, 12, true);
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 10, true);
-        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(PixelFormat.I444, 12, true);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, 10, true);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I422, 12, true);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, 10, true);
+        assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, 12, true);
     }
 
     /// Verifies that one standalone `show_existing_frame` header can expose a reconstructed palette
@@ -621,11 +621,11 @@ final class Av1ImageReaderTest {
     void readFrameReturnsDecodedFrameForShowExistingFrameBackedByRealBitstreamDerivedPaletteReferenceSurfaceWithAdditionalChromaLayouts()
             throws Exception {
         assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 false
         );
         assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 false
         );
     }
@@ -638,11 +638,11 @@ final class Av1ImageReaderTest {
     void readFrameReturnsDecodedFrameForCombinedShowExistingFrameBackedByRealBitstreamDerivedPaletteReferenceSurfaceWithAdditionalChromaLayouts()
             throws Exception {
         assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 true
         );
         assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 true
         );
     }
@@ -653,9 +653,9 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsDecodedFrameForDirectParsedStandalonePaletteStillPictures() throws IOException {
-        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I420, false);
-        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I422, false);
-        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I444, false);
+        assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I420, false);
+        assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I422, false);
+        assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I444, false);
     }
 
     /// Verifies that direct parsed combined-frame palette still pictures reach public `DecodedFrame`
@@ -664,9 +664,9 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsDecodedFrameForDirectParsedCombinedPaletteStillPictures() throws IOException {
-        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I420, true);
-        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I422, true);
-        assertDirectParsedPaletteStillPictureRoundTrip(PixelFormat.I444, true);
+        assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I420, true);
+        assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I422, true);
+        assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I444, true);
     }
 
     /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
@@ -717,8 +717,8 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForStandaloneRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurface()
             throws IOException {
-        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I422, false);
-        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I444, false);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(AvifPixelFormat.I422, false);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(AvifPixelFormat.I444, false);
     }
 
     /// Verifies that the combined self-contained parsed inter success path also works under widened
@@ -728,8 +728,8 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForCombinedRealParsedInterFrameWithAdditionalChromaLayoutsBackedByParsedPrimaryReferenceSurface()
             throws IOException {
-        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I422, true);
-        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I444, true);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(AvifPixelFormat.I422, true);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(AvifPixelFormat.I444, true);
     }
 
     /// Verifies that one standalone real parsed `intrabc` key frame reconstructs through the public reader.
@@ -910,27 +910,27 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
     void readFrameReturnsDecodedFrameForRealMultiTileFirstPixelStillPictureStreams() throws IOException {
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 1, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 1, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 1, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 1, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 1, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 1, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 1, 2, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 1, 2, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 1, 2, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 1, 2, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 1, 2, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 1, 2, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 2, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 2, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 2, true, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 2, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 2, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 2, false, false);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I420, 2, 2, false, true);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I422, 2, 2, false, true);
-        assertRealMultiTileFirstPixelStillPictureRoundTrip(PixelFormat.I444, 2, 2, false, true);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I420, 2, 1, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I422, 2, 1, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I444, 2, 1, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I420, 2, 1, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I422, 2, 1, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I444, 2, 1, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I420, 1, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I422, 1, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I444, 1, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I420, 1, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I422, 1, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I444, 1, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I420, 2, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I422, 2, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I444, 2, 2, true, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I420, 2, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I422, 2, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I444, 2, 2, false, false);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I420, 2, 2, false, true);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I422, 2, 2, false, true);
+        assertRealMultiTileFirstPixelStillPictureRoundTrip(AvifPixelFormat.I444, 2, 2, false, true);
     }
 
     /// Asserts that one real bitstream-driven multi-tile still-picture stream reaches public output
@@ -943,7 +943,7 @@ final class Av1ImageReaderTest {
     /// @param splitTileGroups whether standalone tile data should be split across two explicit groups
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertRealMultiTileFirstPixelStillPictureRoundTrip(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int tileColumns,
             int tileRows,
             boolean combined,
@@ -993,7 +993,7 @@ final class Av1ImageReaderTest {
     /// @param splitTileGroups whether standalone tile data should be split across two explicit groups
     /// @return one real bitstream-driven multi-tile still-picture test stream
     private static byte[] createRealMultiTileStillPictureStream(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int tileColumns,
             int tileRows,
             boolean combined,
@@ -1106,8 +1106,8 @@ final class Av1ImageReaderTest {
     /// @throws Exception if synthetic reference-state injection fails
     @Test
     void readFrameReturnsDecodedFrameForShowExistingFrameBackedBySyntheticStoredReferenceSurfacesWithAdditionalChromaLayouts() throws Exception {
-        assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(PixelFormat.I422);
-        assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(PixelFormat.I444);
+        assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(AvifPixelFormat.I422);
+        assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(AvifPixelFormat.I444);
     }
 
     /// Verifies that combined `FRAME` `show_existing_frame` OBUs can expose synthetic stored
@@ -1116,8 +1116,8 @@ final class Av1ImageReaderTest {
     /// @throws Exception if synthetic reference-state injection fails
     @Test
     void readFrameReturnsStoredReferenceSurfaceForCombinedShowExistingFrameBackedBySyntheticStoredReferenceSurfacesWithAdditionalChromaLayouts() throws Exception {
-        assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(PixelFormat.I422);
-        assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(PixelFormat.I444);
+        assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(AvifPixelFormat.I422);
+        assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(AvifPixelFormat.I444);
     }
 
     /// Verifies that one standalone `show_existing_frame` header can expose one synthetic stored
@@ -1202,7 +1202,7 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameReturnsDecodedFrameForStoredHighBitDepthReferenceSurface() throws Exception {
         InjectedReferenceState referenceState =
-                createSyntheticStoredReferenceStateWithHighBitDepthSurface(PixelFormat.I444, 12, 2048);
+                createSyntheticStoredReferenceStateWithHighBitDepthSurface(AvifPixelFormat.I444, 12, 2048);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
                 Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
         byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
@@ -1403,7 +1403,7 @@ final class Av1ImageReaderTest {
     /// @return one reconstructed reference-slot state derived from the real palette fixture
     /// @throws IOException if the real fixture cannot be structurally decoded or reconstructed
     private static InjectedReferenceState createRealPaletteReferenceStateFromBitstreamFixture() throws IOException {
-        return createRealPaletteReferenceStateFromBitstreamFixture(PixelFormat.I420);
+        return createRealPaletteReferenceStateFromBitstreamFixture(AvifPixelFormat.I420);
     }
 
     /// Decodes one deterministic real palette tile payload into structural and reconstructed
@@ -1413,7 +1413,7 @@ final class Av1ImageReaderTest {
     /// @return one reconstructed reference-slot state derived from the real palette fixture
     /// @throws IOException if the real fixture cannot be structurally decoded or reconstructed
     private static InjectedReferenceState createRealPaletteReferenceStateFromBitstreamFixture(
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) throws IOException {
         FrameAssembly assembly = createRealPaletteSingleTileAssemblyFromFixture(pixelFormat);
         TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
@@ -1446,7 +1446,7 @@ final class Av1ImageReaderTest {
     ///
     /// @return injected reference-slot state for the real parsed inter-frame success path
     private static InjectedReferenceState[] createInterReferenceStatesForRealParsedInterFrame() {
-        return createInterReferenceStatesForRealParsedInterFrame(PixelFormat.I420);
+        return createInterReferenceStatesForRealParsedInterFrame(AvifPixelFormat.I420);
     }
 
     /// Creates injected reference-slot state for the real parsed inter-frame success path in the
@@ -1458,7 +1458,7 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the parsed chroma layout exposed by the inter sequence and stored surfaces
     /// @return injected reference-slot state for the requested parsed inter-frame success path
     private static InjectedReferenceState[] createInterReferenceStatesForRealParsedInterFrame(
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         SequenceHeader sequenceHeader = createFullInterSequenceHeader(pixelFormat);
         FrameHeader[] referenceFrameHeaders = createInterReferenceFrameHeaders();
@@ -1510,7 +1510,7 @@ final class Av1ImageReaderTest {
     ///
     /// @return one synthetic non-reduced `I420` sequence header compatible with parsed inter frames
     private static SequenceHeader createFullInterSequenceHeader() {
-        return createFullInterSequenceHeader(PixelFormat.I420);
+        return createFullInterSequenceHeader(AvifPixelFormat.I420);
     }
 
     /// Creates one synthetic non-reduced sequence header compatible with parsed inter-frame public
@@ -1518,7 +1518,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the parsed chroma layout exposed by the synthetic inter sequence
     /// @return one synthetic non-reduced sequence header compatible with parsed inter frames
-    private static SequenceHeader createFullInterSequenceHeader(PixelFormat pixelFormat) {
+    private static SequenceHeader createFullInterSequenceHeader(AvifPixelFormat pixelFormat) {
         return new SequenceHeader(
                 reducedStillPictureProfile(pixelFormat),
                 1024,
@@ -1563,8 +1563,8 @@ final class Av1ImageReaderTest {
                         false,
                         pixelFormat,
                         0,
-                        pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422,
-                        pixelFormat == PixelFormat.I420,
+                        pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422,
+                        pixelFormat == AvifPixelFormat.I420,
                         false
                 )
         );
@@ -1663,7 +1663,7 @@ final class Av1ImageReaderTest {
     /// real palette fixture used by block-header tests.
     ///
     /// @return one complete single-tile frame assembly whose tile bytes come from the real palette fixture
-    private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture(PixelFormat pixelFormat) {
+    private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture(AvifPixelFormat pixelFormat) {
         return createRealPaletteSingleTileAssemblyFromFixture(pixelFormat, PALETTE_BLOCK_TILE_PAYLOAD, 64, 64);
     }
 
@@ -1676,12 +1676,12 @@ final class Av1ImageReaderTest {
     /// @param codedHeight the coded frame height
     /// @return one complete single-tile frame assembly whose tile bytes come from the supplied fixture
     private static FrameAssembly createRealPaletteSingleTileAssemblyFromFixture(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] tilePayload,
             int codedWidth,
             int codedHeight
     ) {
-        if (pixelFormat == PixelFormat.I400) {
+        if (pixelFormat == AvifPixelFormat.I400) {
             throw new IllegalArgumentException("Real palette fixture expects I420, I422, or I444: " + pixelFormat);
         }
 
@@ -1729,8 +1729,8 @@ final class Av1ImageReaderTest {
                         true,
                         pixelFormat,
                         0,
-                        pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422,
-                        pixelFormat == PixelFormat.I420,
+                        pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422,
+                        pixelFormat == AvifPixelFormat.I420,
                         false
                 )
         );
@@ -1885,7 +1885,7 @@ final class Av1ImageReaderTest {
     /// @return one synthetic stored reference slot for the requested chroma layout
     /// @throws Exception if the base still-picture metadata cannot be captured
     private static InjectedReferenceState createSyntheticStoredReferenceStateWithAdditionalChromaLayout(
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) throws Exception {
         InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
         SequenceHeader sequenceHeader =
@@ -1915,7 +1915,7 @@ final class Av1ImageReaderTest {
     /// @return one synthetic stored reference slot for the requested high-bit-depth surface
     /// @throws Exception if the base still-picture metadata cannot be captured
     private static InjectedReferenceState createSyntheticStoredReferenceStateWithHighBitDepthSurface(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             int sampleValue
     ) throws Exception {
@@ -2041,7 +2041,7 @@ final class Av1ImageReaderTest {
     /// @param combined whether to use one combined `FRAME` OBU instead of standalone frame assembly
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean combined
     ) throws IOException {
         byte[] stream = combined
@@ -2070,7 +2070,7 @@ final class Av1ImageReaderTest {
     /// @param bitDepth the parsed decoded bit depth to expose
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertSupportedHighBitDepthStillPictureRoundTrip(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             boolean combined
     ) throws IOException {
@@ -2109,7 +2109,7 @@ final class Av1ImageReaderTest {
     /// @param combined whether to use one combined `FRAME` OBU instead of standalone frame assembly
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertSupportedSuperResolvedStillPictureRoundTrip(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean combined
     ) throws IOException {
         byte[] stream = combined
@@ -2183,7 +2183,7 @@ final class Av1ImageReaderTest {
     /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertRealParsedHighBitDepthStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             boolean combinedShowExisting
     ) throws IOException {
@@ -2224,7 +2224,7 @@ final class Av1ImageReaderTest {
     /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertRealParsedStillPictureShowExistingFrameRoundTripWithAdditionalChromaLayout(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean combinedShowExisting
     ) throws IOException {
         byte[] stream = concat(
@@ -2256,7 +2256,7 @@ final class Av1ImageReaderTest {
     /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
     /// @throws Exception if the real palette fixture cannot be decoded or injected
     private static void assertRealBitstreamDerivedPaletteReferenceSurfaceShowExistingFrameRoundTripWithAdditionalChromaLayout(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean combinedShowExisting
     ) throws Exception {
         InjectedReferenceState referenceState = createRealPaletteReferenceStateFromBitstreamFixture(pixelFormat);
@@ -2287,7 +2287,7 @@ final class Av1ImageReaderTest {
     /// @param combined whether the frame is carried by one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertDirectParsedPaletteStillPictureRoundTrip(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean combined
     ) throws IOException {
         int codedWidth = 16;
@@ -2370,7 +2370,7 @@ final class Av1ImageReaderTest {
     private static void assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(
             boolean combined
     ) throws IOException {
-        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(PixelFormat.I420, combined);
+        assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(AvifPixelFormat.I420, combined);
     }
 
     /// Asserts that one real parsed inter frame reconstructs through the public reader when the
@@ -2382,7 +2382,7 @@ final class Av1ImageReaderTest {
     /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean combined
     ) throws IOException {
         byte[] stream = concat(
@@ -2430,7 +2430,7 @@ final class Av1ImageReaderTest {
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     private static void assertRealParsedIntrabcFrameRoundTrip(boolean combined) throws IOException {
         byte[] stream = concat(
-                obu(1, fullSequenceHeaderPayload(PixelFormat.I420)),
+                obu(1, fullSequenceHeaderPayload(AvifPixelFormat.I420)),
                 combined
                         ? obu(6, fullIntrabcStillPictureCombinedFramePayload(INTRABC_BLOCK_TILE_PAYLOAD))
                         : concat(
@@ -2475,7 +2475,7 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the synthetic chroma layout to expose
     /// @throws Exception if synthetic reference-state injection fails
     private static void assertSyntheticStoredReferenceSurfaceShowExistingFrameRoundTrip(
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) throws Exception {
         InjectedReferenceState referenceState =
                 createSyntheticStoredReferenceStateWithAdditionalChromaLayout(pixelFormat);
@@ -2503,7 +2503,7 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the synthetic chroma layout to expose
     /// @throws Exception if synthetic reference-state injection fails
     private static void assertSyntheticStoredReferenceSurfaceCombinedShowExistingFrameRoundTrip(
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) throws Exception {
         InjectedReferenceState referenceState =
                 createSyntheticStoredReferenceStateWithAdditionalChromaLayout(pixelFormat);
@@ -2621,7 +2621,7 @@ final class Av1ImageReaderTest {
     /// @return one copied full sequence header with the requested chroma layout
     private static SequenceHeader copySequenceHeaderWithPixelFormat(
             SequenceHeader baseSequenceHeader,
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         return copySequenceHeaderWithPixelFormatAndBitDepth(
                 baseSequenceHeader,
@@ -2639,7 +2639,7 @@ final class Av1ImageReaderTest {
     /// @return one copied full sequence header with the requested chroma layout and bit depth
     private static SequenceHeader copySequenceHeaderWithPixelFormatAndBitDepth(
             SequenceHeader baseSequenceHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth
     ) {
         if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
@@ -2703,7 +2703,7 @@ final class Av1ImageReaderTest {
     /// @param frameHeader the frame header whose coded and render dimensions should be used
     /// @param pixelFormat the chroma layout to expose
     /// @return one neutral-gray decoded-plane snapshot for the requested chroma layout
-    private static DecodedPlanes createNeutralGrayDecodedPlanes(FrameHeader frameHeader, PixelFormat pixelFormat) {
+    private static DecodedPlanes createNeutralGrayDecodedPlanes(FrameHeader frameHeader, AvifPixelFormat pixelFormat) {
         FrameHeader.FrameSize frameSize = frameHeader.frameSize();
         int chromaWidth = switch (pixelFormat) {
             case I422 -> (frameSize.codedWidth() + 1) / 2;
@@ -2742,7 +2742,7 @@ final class Av1ImageReaderTest {
     /// @return one decoded-plane snapshot filled with the requested sample value
     private static DecodedPlanes createFilledDecodedPlanes(
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             int sampleValue
     ) {
@@ -2765,8 +2765,8 @@ final class Av1ImageReaderTest {
                 frameSize.renderWidth(),
                 frameSize.renderHeight(),
                 createFilledPlane(frameSize.codedWidth(), frameSize.height(), sampleValue),
-                pixelFormat == PixelFormat.I400 ? null : createFilledPlane(chromaWidth, chromaHeight, sampleValue),
-                pixelFormat == PixelFormat.I400 ? null : createFilledPlane(chromaWidth, chromaHeight, sampleValue)
+                pixelFormat == AvifPixelFormat.I400 ? null : createFilledPlane(chromaWidth, chromaHeight, sampleValue),
+                pixelFormat == AvifPixelFormat.I400 ? null : createFilledPlane(chromaWidth, chromaHeight, sampleValue)
         );
     }
 
@@ -2778,7 +2778,7 @@ final class Av1ImageReaderTest {
     /// @return one exact gradient surface for the injected stored inter reference slot
     private static DecodedPlanes createGradientInterReferenceDecodedPlanes(
             FrameHeader frameHeader,
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         FrameHeader.FrameSize frameSize = frameHeader.frameSize();
         int chromaWidth = switch (pixelFormat) {
@@ -2799,8 +2799,8 @@ final class Av1ImageReaderTest {
                 frameSize.renderWidth(),
                 frameSize.renderHeight(),
                 createGradientPlane(frameSize.codedWidth(), frameSize.height(), 16, 1, 2),
-                pixelFormat == PixelFormat.I400 ? null : createGradientPlane(chromaWidth, chromaHeight, 64, 2, 3),
-                pixelFormat == PixelFormat.I400 ? null : createGradientPlane(chromaWidth, chromaHeight, 160, 1, 2)
+                pixelFormat == AvifPixelFormat.I400 ? null : createGradientPlane(chromaWidth, chromaHeight, 64, 2, 3),
+                pixelFormat == AvifPixelFormat.I400 ? null : createGradientPlane(chromaWidth, chromaHeight, 160, 1, 2)
         );
     }
 
@@ -3058,7 +3058,7 @@ final class Av1ImageReaderTest {
     ///
     /// @return the parsed test-only full sequence header that enables `show_existing_frame`
     private static SequenceHeader parseFullSequenceHeader() throws IOException {
-        return parseFullSequenceHeader(PixelFormat.I420);
+        return parseFullSequenceHeader(AvifPixelFormat.I420);
     }
 
     /// Parses the test-only full sequence header that enables `show_existing_frame` while exposing
@@ -3066,7 +3066,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the requested public chroma layout
     /// @return the parsed test-only full sequence header that enables `show_existing_frame`
-    private static SequenceHeader parseFullSequenceHeader(PixelFormat pixelFormat) throws IOException {
+    private static SequenceHeader parseFullSequenceHeader(AvifPixelFormat pixelFormat) throws IOException {
         return new SequenceHeaderParser().parse(
                 new ObuPacket(
                         new ObuHeader(ObuType.SEQUENCE_HEADER, false, true, 0, 0),
@@ -3083,7 +3083,7 @@ final class Av1ImageReaderTest {
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertOpaqueGrayStillPictureFrame(@org.jetbrains.annotations.Nullable DecodedFrame decodedFrame, long expectedPresentationIndex) {
-        assertOpaqueGrayStillPictureFrame(decodedFrame, PixelFormat.I420, expectedPresentationIndex);
+        assertOpaqueGrayStillPictureFrame(decodedFrame, AvifPixelFormat.I420, expectedPresentationIndex);
     }
 
     /// Asserts that the reader returned one supported opaque gray still-picture frame with the
@@ -3094,7 +3094,7 @@ final class Av1ImageReaderTest {
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertOpaqueGrayStillPictureFrame(
             @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
-            PixelFormat expectedPixelFormat,
+            AvifPixelFormat expectedPixelFormat,
             long expectedPresentationIndex
     ) {
         assertStillPictureFrameFilledWith(decodedFrame, expectedPixelFormat, expectedPresentationIndex, OPAQUE_MID_GRAY);
@@ -3112,7 +3112,7 @@ final class Av1ImageReaderTest {
             @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
             FrameHeader frameHeader,
             int expectedBitDepth,
-            PixelFormat expectedPixelFormat,
+            AvifPixelFormat expectedPixelFormat,
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
@@ -3145,7 +3145,7 @@ final class Av1ImageReaderTest {
         assertNotNull(decodedFrame);
         assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
         DecodedFrame frame = decodedFrame;
-        assertDecodedStillPictureFrameMetadata(frame, PixelFormat.I420, expectedPresentationIndex);
+        assertDecodedStillPictureFrameMetadata(frame, AvifPixelFormat.I420, expectedPresentationIndex);
         assertArgbBlockEquals(frame, 0, 0, LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
     }
 
@@ -3222,7 +3222,7 @@ final class Av1ImageReaderTest {
             long expectedPresentationIndex,
             int expectedPixel
     ) {
-        assertStillPictureFrameFilledWith(decodedFrame, PixelFormat.I420, expectedPresentationIndex, expectedPixel);
+        assertStillPictureFrameFilledWith(decodedFrame, AvifPixelFormat.I420, expectedPresentationIndex, expectedPixel);
     }
 
     /// Asserts that the reader returned one still-picture frame filled with one constant pixel and
@@ -3234,7 +3234,7 @@ final class Av1ImageReaderTest {
     /// @param expectedPixel the expected constant packed ARGB pixel value
     private static void assertStillPictureFrameFilledWith(
             @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
-            PixelFormat expectedPixelFormat,
+            AvifPixelFormat expectedPixelFormat,
             long expectedPresentationIndex,
             int expectedPixel
     ) {
@@ -3274,7 +3274,7 @@ final class Av1ImageReaderTest {
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertDecodedStillPictureFrameMetadata(
             @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
-            PixelFormat expectedPixelFormat,
+            AvifPixelFormat expectedPixelFormat,
             long expectedPresentationIndex
     ) {
         assertDecodedStillPictureFrameMetadata(
@@ -3297,7 +3297,7 @@ final class Av1ImageReaderTest {
     private static void assertDecodedStillPictureFrameMetadata(
             @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
             int expectedBitDepth,
-            PixelFormat expectedPixelFormat,
+            AvifPixelFormat expectedPixelFormat,
             FrameType expectedFrameType,
             long expectedPresentationIndex
     ) {
@@ -3327,7 +3327,7 @@ final class Av1ImageReaderTest {
             int expectedBitDepth,
             int expectedWidth,
             int expectedHeight,
-            PixelFormat expectedPixelFormat,
+            AvifPixelFormat expectedPixelFormat,
             FrameType expectedFrameType,
             long expectedPresentationIndex
     ) {
@@ -3474,7 +3474,7 @@ final class Av1ImageReaderTest {
     /// @param reconstructedPlanes the decoded planes reconstructed with `intrabcLeaf`
     private static void assertIntrabcLeafCopiesSameFrameSamples(
             TilePartitionTreeReader.LeafNode intrabcLeaf,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             DecodedPlanes baselinePlanes,
             DecodedPlanes reconstructedPlanes
     ) {
@@ -3640,7 +3640,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the decoded chroma layout
     /// @return the base-2 chroma horizontal subsampling factor
-    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400, I420, I422 -> 1;
             case I444 -> 0;
@@ -3651,7 +3651,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the decoded chroma layout
     /// @return the base-2 chroma vertical subsampling factor
-    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400, I420 -> 1;
             case I422, I444 -> 0;
@@ -3805,7 +3805,7 @@ final class Av1ImageReaderTest {
     ///
     /// @return the reduced still-picture sequence header payload
     private static byte[] reducedStillPicturePayload() {
-        return reducedStillPicturePayload(PixelFormat.I420);
+        return reducedStillPicturePayload(AvifPixelFormat.I420);
     }
 
     /// Creates a reduced still-picture sequence header payload for one requested public chroma
@@ -3813,7 +3813,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the requested public chroma layout
     /// @return the reduced still-picture sequence header payload
-    private static byte[] reducedStillPicturePayload(PixelFormat pixelFormat) {
+    private static byte[] reducedStillPicturePayload(AvifPixelFormat pixelFormat) {
         return reducedStillPicturePayload(pixelFormat, 64, 64);
     }
 
@@ -3824,7 +3824,7 @@ final class Av1ImageReaderTest {
     /// @param codedWidth the requested coded frame width
     /// @param codedHeight the requested coded frame height
     /// @return the reduced still-picture sequence header payload
-    private static byte[] reducedStillPicturePayload(PixelFormat pixelFormat, int codedWidth, int codedHeight) {
+    private static byte[] reducedStillPicturePayload(AvifPixelFormat pixelFormat, int codedWidth, int codedHeight) {
         if (codedWidth < 1 || codedWidth > 1024) {
             throw new IllegalArgumentException("codedWidth out of supported fixture range: " + codedWidth);
         }
@@ -3858,7 +3858,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the requested public chroma layout
     /// @return the reduced still-picture sequence-profile value
-    private static int reducedStillPictureProfile(PixelFormat pixelFormat) {
+    private static int reducedStillPictureProfile(AvifPixelFormat pixelFormat) {
         return reducedStillPictureProfile(pixelFormat, 8);
     }
 
@@ -3868,7 +3868,7 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the requested public chroma layout
     /// @param bitDepth the requested decoded sample bit depth
     /// @return the still-picture fixture sequence-profile value
-    private static int reducedStillPictureProfile(PixelFormat pixelFormat, int bitDepth) {
+    private static int reducedStillPictureProfile(AvifPixelFormat pixelFormat, int bitDepth) {
         return switch (pixelFormat) {
             case I420 -> bitDepth == 12 ? 2 : 0;
             case I422 -> 2;
@@ -3885,7 +3885,7 @@ final class Av1ImageReaderTest {
     /// @param filmGrainPresent whether the sequence header should advertise film grain support
     private static void writeReducedStillPictureColorConfig(
             BitWriter writer,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean filmGrainPresent
     ) {
         writeReducedStillPictureColorConfig(writer, pixelFormat, 8, filmGrainPresent);
@@ -3900,7 +3900,7 @@ final class Av1ImageReaderTest {
     /// @param filmGrainPresent whether the sequence header should advertise film grain support
     private static void writeReducedStillPictureColorConfig(
             BitWriter writer,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             boolean filmGrainPresent
     ) {
@@ -3912,7 +3912,7 @@ final class Av1ImageReaderTest {
             writer.writeFlag(true);
         }
         if (profile != 1) {
-            writer.writeFlag(pixelFormat == PixelFormat.I400);
+            writer.writeFlag(pixelFormat == AvifPixelFormat.I400);
         }
         writer.writeFlag(false);
         switch (pixelFormat) {
@@ -3955,7 +3955,7 @@ final class Av1ImageReaderTest {
     ///
     /// @return one non-reduced still-picture-compatible sequence header payload
     private static byte[] fullSequenceHeaderPayload() {
-        return fullSequenceHeaderPayload(PixelFormat.I420);
+        return fullSequenceHeaderPayload(AvifPixelFormat.I420);
     }
 
     /// Creates one non-reduced still-picture-compatible sequence header payload that enables
@@ -3963,7 +3963,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the requested public chroma layout
     /// @return one non-reduced still-picture-compatible sequence header payload
-    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat) {
+    private static byte[] fullSequenceHeaderPayload(AvifPixelFormat pixelFormat) {
         return fullSequenceHeaderPayload(pixelFormat, false);
     }
 
@@ -3975,7 +3975,7 @@ final class Av1ImageReaderTest {
     /// @param codedWidth the requested coded frame width
     /// @param codedHeight the requested coded frame height
     /// @return one non-reduced still-picture-compatible sequence header payload
-    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, int codedWidth, int codedHeight) {
+    private static byte[] fullSequenceHeaderPayload(AvifPixelFormat pixelFormat, int codedWidth, int codedHeight) {
         return fullSequenceHeaderPayload(pixelFormat, 8, false, codedWidth, codedHeight);
     }
 
@@ -3986,7 +3986,7 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the requested public chroma layout
     /// @param bitDepth the requested decoded sample bit depth
     /// @return one non-reduced still-picture-compatible sequence header payload
-    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, int bitDepth) {
+    private static byte[] fullSequenceHeaderPayload(AvifPixelFormat pixelFormat, int bitDepth) {
         return fullSequenceHeaderPayload(pixelFormat, bitDepth, false);
     }
 
@@ -3997,7 +3997,7 @@ final class Av1ImageReaderTest {
     /// @param pixelFormat the requested public chroma layout
     /// @param filmGrainPresent whether frame headers in the stream may signal film grain
     /// @return one non-reduced still-picture-compatible sequence header payload
-    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, boolean filmGrainPresent) {
+    private static byte[] fullSequenceHeaderPayload(AvifPixelFormat pixelFormat, boolean filmGrainPresent) {
         return fullSequenceHeaderPayload(pixelFormat, 8, filmGrainPresent);
     }
 
@@ -4009,7 +4009,7 @@ final class Av1ImageReaderTest {
     /// @param bitDepth the requested decoded sample bit depth
     /// @param filmGrainPresent whether frame headers in the stream may signal film grain
     /// @return one non-reduced still-picture-compatible sequence header payload
-    private static byte[] fullSequenceHeaderPayload(PixelFormat pixelFormat, int bitDepth, boolean filmGrainPresent) {
+    private static byte[] fullSequenceHeaderPayload(AvifPixelFormat pixelFormat, int bitDepth, boolean filmGrainPresent) {
         return fullSequenceHeaderPayload(pixelFormat, bitDepth, filmGrainPresent, 64, 64);
     }
 
@@ -4024,7 +4024,7 @@ final class Av1ImageReaderTest {
     /// @param codedHeight the requested coded frame height
     /// @return one non-reduced still-picture-compatible sequence header payload
     private static byte[] fullSequenceHeaderPayload(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             boolean filmGrainPresent,
             int codedWidth,
@@ -4075,7 +4075,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the requested public chroma layout
     /// @return one non-reduced still-picture-compatible sequence header payload with super-resolution enabled
-    private static byte[] fullSuperResolvedSequenceHeaderPayload(PixelFormat pixelFormat) {
+    private static byte[] fullSuperResolvedSequenceHeaderPayload(AvifPixelFormat pixelFormat) {
         BitWriter writer = new BitWriter();
         writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
         writer.writeFlag(false);
@@ -4115,7 +4115,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param pixelFormat the requested public chroma layout
     /// @return one non-reduced still-picture-compatible sequence header payload with postfilters enabled
-    private static byte[] fullSuperResolvedRestorationSequenceHeaderPayload(PixelFormat pixelFormat) {
+    private static byte[] fullSuperResolvedRestorationSequenceHeaderPayload(AvifPixelFormat pixelFormat) {
         BitWriter writer = new BitWriter();
         writer.writeBits(reducedStillPictureProfile(pixelFormat), 3);
         writer.writeFlag(false);
@@ -4157,7 +4157,7 @@ final class Av1ImageReaderTest {
     /// @return one non-reduced still-picture-compatible `I420` sequence header payload with film grain enabled
     private static byte[] fullSequenceHeaderPayloadForFilmGrainStillPicture() {
         BitWriter writer = new BitWriter();
-        writer.writeBits(reducedStillPictureProfile(PixelFormat.I420), 3);
+        writer.writeBits(reducedStillPictureProfile(AvifPixelFormat.I420), 3);
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);

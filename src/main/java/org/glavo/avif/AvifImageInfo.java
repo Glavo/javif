@@ -15,7 +15,6 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -31,7 +30,7 @@ public final class AvifImageInfo {
     /// The decoded bit depth.
     private final AvifBitDepth bitDepth;
     /// The AV1 chroma sampling layout.
-    private final PixelFormat pixelFormat;
+    private final AvifPixelFormat pixelFormat;
     /// Whether an alpha auxiliary image is present.
     private final boolean alphaPresent;
     /// Whether the input is an animated image sequence.
@@ -55,7 +54,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -105,7 +104,7 @@ public final class AvifImageInfo {
     /// Returns the AV1 chroma sampling layout.
     ///
     /// @return the AV1 chroma sampling layout
-    public PixelFormat pixelFormat() {
+    public AvifPixelFormat pixelFormat() {
         return pixelFormat;
     }
 

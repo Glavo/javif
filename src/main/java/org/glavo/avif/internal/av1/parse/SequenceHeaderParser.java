@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.parse;
 import org.glavo.avif.decode.DecodeErrorCode;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodeStage;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -303,7 +303,7 @@ public final class SequenceHeaderParser {
         }
 
         boolean colorRange;
-        PixelFormat pixelFormat;
+        AvifPixelFormat pixelFormat;
         int chromaSamplePosition;
         boolean chromaSubsamplingX = false;
         boolean chromaSubsamplingY = false;
@@ -311,14 +311,14 @@ public final class SequenceHeaderParser {
 
         if (monochrome) {
             colorRange = reader.readFlag();
-            pixelFormat = PixelFormat.I400;
+            pixelFormat = AvifPixelFormat.I400;
             chromaSubsamplingX = true;
             chromaSubsamplingY = true;
             chromaSamplePosition = CHROMA_UNKNOWN;
         } else if (colorPrimaries == COLOR_PRI_BT709
                 && transferCharacteristics == TRANSFER_SRGB
                 && matrixCoefficients == MATRIX_IDENTITY) {
-            pixelFormat = PixelFormat.I444;
+            pixelFormat = AvifPixelFormat.I444;
             colorRange = true;
             if (profile != 1 && !(profile == 2 && bitDepth == 12)) {
                 fail("Identity matrix RGB signaling is only valid for profile 1 or profile 2 12-bit streams");
@@ -328,11 +328,11 @@ public final class SequenceHeaderParser {
             colorRange = reader.readFlag();
             switch (profile) {
                 case 0 -> {
-                    pixelFormat = PixelFormat.I420;
+                    pixelFormat = AvifPixelFormat.I420;
                     chromaSubsamplingX = true;
                     chromaSubsamplingY = true;
                 }
-                case 1 -> pixelFormat = PixelFormat.I444;
+                case 1 -> pixelFormat = AvifPixelFormat.I444;
                 case 2 -> {
                     if (bitDepth == 12) {
                         chromaSubsamplingX = reader.readFlag();
@@ -343,15 +343,15 @@ public final class SequenceHeaderParser {
                         chromaSubsamplingX = true;
                     }
                     pixelFormat = chromaSubsamplingX
-                            ? (chromaSubsamplingY ? PixelFormat.I420 : PixelFormat.I422)
-                            : PixelFormat.I444;
+                            ? (chromaSubsamplingY ? AvifPixelFormat.I420 : AvifPixelFormat.I422)
+                            : AvifPixelFormat.I444;
                 }
                 default -> throw new IllegalStateException("Unexpected profile: " + profile);
             }
             chromaSamplePosition = chromaSubsamplingX && chromaSubsamplingY ? readInt(reader, 2) : CHROMA_UNKNOWN;
         }
 
-        if (strictStdCompliance && matrixCoefficients == MATRIX_IDENTITY && pixelFormat != PixelFormat.I444) {
+        if (strictStdCompliance && matrixCoefficients == MATRIX_IDENTITY && pixelFormat != AvifPixelFormat.I444) {
             fail("Identity matrix coefficients require I444 chroma in strict mode");
         }
 

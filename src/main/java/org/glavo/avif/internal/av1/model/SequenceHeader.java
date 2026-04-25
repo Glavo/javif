@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.model;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -538,7 +538,7 @@ public final class SequenceHeader {
         /// Whether full-range color samples are used.
         private final boolean colorRange;
         /// The decoded chroma layout.
-        private final PixelFormat pixelFormat;
+        private final AvifPixelFormat pixelFormat;
         /// The AV1 chroma sample position code.
         private final int chromaSamplePosition;
         /// Whether chroma is subsampled horizontally.
@@ -570,7 +570,7 @@ public final class SequenceHeader {
                 int transferCharacteristics,
                 int matrixCoefficients,
                 boolean colorRange,
-                PixelFormat pixelFormat,
+                AvifPixelFormat pixelFormat,
                 int chromaSamplePosition,
                 boolean chromaSubsamplingX,
                 boolean chromaSubsamplingY,
@@ -642,7 +642,7 @@ public final class SequenceHeader {
         /// Returns the decoded chroma layout.
         ///
         /// @return the decoded chroma layout
-        public PixelFormat pixelFormat() {
+        public AvifPixelFormat pixelFormat() {
             return pixelFormat;
         }
 

@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.model;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -285,8 +285,8 @@ public enum BlockSize {
     ///
     /// @param pixelFormat the active sequence pixel format
     /// @return the largest chroma transform size allowed for this block size and pixel format, or `null`
-    public @Nullable TransformSize maxChromaTransformSize(PixelFormat pixelFormat) {
-        PixelFormat nonNullPixelFormat = java.util.Objects.requireNonNull(pixelFormat, "pixelFormat");
+    public @Nullable TransformSize maxChromaTransformSize(AvifPixelFormat pixelFormat) {
+        AvifPixelFormat nonNullPixelFormat = java.util.Objects.requireNonNull(pixelFormat, "pixelFormat");
         return switch (nonNullPixelFormat) {
             case I400 -> null;
             case I420 -> MAX_CHROMA_420_TRANSFORM_SIZES[ordinal()];

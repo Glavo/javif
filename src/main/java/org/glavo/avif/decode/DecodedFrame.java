@@ -16,6 +16,7 @@
 package org.glavo.avif.decode;
 
 import org.glavo.avif.AvifBitDepth;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.PixelBuffers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -36,7 +37,7 @@ public final class DecodedFrame {
     /// The decoded bit depth.
     private final AvifBitDepth bitDepth;
     /// The chroma layout of the decoded frame.
-    private final PixelFormat pixelFormat;
+    private final AvifPixelFormat pixelFormat;
     /// The AV1 frame type.
     private final FrameType frameType;
     /// Whether the frame is visible.
@@ -65,7 +66,7 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -92,7 +93,7 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -117,7 +118,7 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -162,7 +163,7 @@ public final class DecodedFrame {
     /// Returns the chroma layout of the decoded frame.
     ///
     /// @return the chroma layout
-    public PixelFormat pixelFormat() {
+    public AvifPixelFormat pixelFormat() {
         return pixelFormat;
     }
 

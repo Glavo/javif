@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -111,12 +111,12 @@ final class FrameReconstructorIntegrationTest {
     /// Verifies that one monochrome all-zero intra leaf reconstructs to midpoint DC samples.
     @Test
     void reconstructsMonochromeDcPredictedLeaf() {
-        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(PixelFormat.I400, createLeaf(true, false));
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(AvifPixelFormat.I400, createLeaf(true, false));
 
         DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertEquals(8, decodedPlanes.bitDepth());
-        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, decodedPlanes.pixelFormat());
         assertEquals(8, decodedPlanes.codedWidth());
         assertEquals(8, decodedPlanes.codedHeight());
         assertEquals(128, decodedPlanes.lumaPlane().sample(0, 0));
@@ -128,11 +128,11 @@ final class FrameReconstructorIntegrationTest {
     /// Verifies that one `I420` all-zero intra leaf reconstructs midpoint chroma as well as luma.
     @Test
     void reconstructsI420DcPredictedLeaf() {
-        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(PixelFormat.I420, createLeaf(true, true));
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(AvifPixelFormat.I420, createLeaf(true, true));
 
         DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertEquals(128, decodedPlanes.lumaPlane().sample(0, 0));
         assertEquals(128, decodedPlanes.lumaPlane().sample(7, 7));
         assertEquals(128, decodedPlanes.chromaUPlane().sample(0, 0));
@@ -147,7 +147,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticMonochromeLumaPaletteLeafDuringFrameReconstruction() {
         TilePartitionTreeReader.LeafNode leafNode = createMonochromeLeafWithLumaPalette();
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
-                createPaletteEnabledAssembly(PixelFormat.I400),
+                createPaletteEnabledAssembly(AvifPixelFormat.I400),
                 leafNode
         );
 
@@ -180,7 +180,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticI420ChromaPaletteLeafDuringFrameReconstruction() {
         TilePartitionTreeReader.LeafNode leafNode = createI420LeafWithChromaPalette();
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
-                createPaletteEnabledAssembly(PixelFormat.I420),
+                createPaletteEnabledAssembly(AvifPixelFormat.I420),
                 leafNode
         );
 
@@ -229,13 +229,13 @@ final class FrameReconstructorIntegrationTest {
                 {1, 0, 1, 0}
         };
         TilePartitionTreeReader.LeafNode leafNode = createWideChromaLeafWithChromaPalette(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 chromaPaletteU,
                 chromaPaletteV,
                 chromaPaletteIndices
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
-                createPaletteEnabledAssembly(PixelFormat.I422),
+                createPaletteEnabledAssembly(AvifPixelFormat.I422),
                 leafNode
         );
 
@@ -270,13 +270,13 @@ final class FrameReconstructorIntegrationTest {
                 {1, 0, 1, 0, 0, 1, 0, 1}
         };
         TilePartitionTreeReader.LeafNode leafNode = createWideChromaLeafWithChromaPalette(
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 chromaPaletteU,
                 chromaPaletteV,
                 chromaPaletteIndices
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
-                createPaletteEnabledAssembly(PixelFormat.I444),
+                createPaletteEnabledAssembly(AvifPixelFormat.I444),
                 leafNode
         );
 
@@ -298,28 +298,28 @@ final class FrameReconstructorIntegrationTest {
     /// syntax, then reconstructs exactly the palette-mapped samples exposed by the decoded block header.
     @Test
     void reconstructsBitstreamDerivedI420PaletteLeafDuringFrameReconstruction() {
-        assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat.I420);
+        assertBitstreamDerivedPaletteLeafReconstructsExactly(AvifPixelFormat.I420);
     }
 
     /// Verifies that the same deterministic real tile payload also reconstructs exactly under one
     /// wider-chroma `I422` sequence header.
     @Test
     void reconstructsBitstreamDerivedI422PaletteLeafDuringFrameReconstruction() {
-        assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat.I422);
+        assertBitstreamDerivedPaletteLeafReconstructsExactly(AvifPixelFormat.I422);
     }
 
     /// Verifies that the same deterministic real tile payload also reconstructs exactly under one
     /// wider-chroma `I444` sequence header.
     @Test
     void reconstructsBitstreamDerivedI444PaletteLeafDuringFrameReconstruction() {
-        assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat.I444);
+        assertBitstreamDerivedPaletteLeafReconstructsExactly(AvifPixelFormat.I444);
     }
 
     /// Verifies that one deterministic real inter tile payload now reconstructs from one stored
     /// `I420` reference surface instead of stopping at the old inter boundary.
     @Test
     void reconstructsBitstreamDerivedI420InterLeafFromStoredReferenceSurface() {
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I420, BITSTREAM_DERIVED_INTER_PAYLOAD, 64, 64, 0);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I420, BITSTREAM_DERIVED_INTER_PAYLOAD, 64, 64, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
         TilePartitionTreeReader.LeafNode leafNode = firstLeaf(syntaxDecodeResult.tileRoots(0));
 
@@ -347,7 +347,7 @@ final class FrameReconstructorIntegrationTest {
         );
 
         ReferenceSurfaceSnapshot baselineReferenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 64,
                 64,
                 createGradientPlane(64, 64, 17, 1, 3),
@@ -355,7 +355,7 @@ final class FrameReconstructorIntegrationTest {
                 createGradientPlane(32, 32, 149, 3, 4)
         );
         ReferenceSurfaceSnapshot offsetReferenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 64,
                 64,
                 createGradientPlane(64, 64, 34, 1, 3),
@@ -445,7 +445,7 @@ final class FrameReconstructorIntegrationTest {
         MotionVector motionVector = new MotionVector(2, 2);
         FrameHeader.InterpolationFilter interpolationFilter = FrameHeader.InterpolationFilter.BILINEAR;
         FrameAssembly assembly = createSuperResolvedInterAssembly(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 64,
                 72,
                 64,
@@ -477,7 +477,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
         DecodedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 64,
                 64,
                 referenceLumaPlane,
@@ -557,7 +557,7 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(assembly.frameHeader().superResolution().enabled());
         assertEquals(64, assembly.frameHeader().frameSize().codedWidth());
         assertEquals(72, assembly.frameHeader().frameSize().upscaledWidth());
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertEquals(72, decodedPlanes.codedWidth());
         assertEquals(64, decodedPlanes.codedHeight());
@@ -622,14 +622,14 @@ final class FrameReconstructorIntegrationTest {
                         blockSize.width4(),
                         blockSize.height4(),
                         lumaTransformSize,
-                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        blockSize.maxChromaTransformSize(AvifPixelFormat.I420),
                         false,
                         new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
                 ),
                 createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
         );
         FrameAssembly assembly = createInterAssembly(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new byte[0],
                 8,
                 8,
@@ -642,7 +642,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceChromaUPlane = createGradientPlane(4, 4, 41, 7, 11);
         DecodedPlane referenceChromaVPlane = createGradientPlane(4, 4, 83, 13, 3);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 8,
                 8,
                 referenceLumaPlane,
@@ -658,7 +658,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(FrameHeader.InterpolationFilter.SWITCHABLE, assembly.frameHeader().subpelFilterMode());
         assertEquals(horizontalInterpolationFilter, header.horizontalInterpolationFilter());
         assertEquals(verticalInterpolationFilter, header.verticalInterpolationFilter());
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertPlaneBlockEquals(
                 decodedPlanes.lumaPlane(),
@@ -770,13 +770,13 @@ final class FrameReconstructorIntegrationTest {
                         blockSize.width4(),
                         blockSize.height4(),
                         lumaTransformSize,
-                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        blockSize.maxChromaTransformSize(AvifPixelFormat.I420),
                         false,
                         new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
                 ),
                 createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
         );
-        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(PixelFormat.I420, 4, 4, false);
+        SequenceHeader sequenceHeader = createSyntheticSequenceHeader(AvifPixelFormat.I420, 4, 4, false);
         FrameHeader frameHeader = createSyntheticSuperResolvedInterFrameHeader(
                 4,
                 8,
@@ -798,7 +798,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 20, 40);
         DecodedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -20, -40);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 4,
                 4,
                 referenceLumaPlane,
@@ -931,14 +931,14 @@ final class FrameReconstructorIntegrationTest {
                         blockSize.width4(),
                         blockSize.height4(),
                         lumaTransformSize,
-                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        blockSize.maxChromaTransformSize(AvifPixelFormat.I420),
                         false,
                         new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
                 ),
                 createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
         );
         FrameAssembly assembly = createSuperResolvedInterAssembly(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 4,
                 8,
                 4,
@@ -952,7 +952,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceChromaUPlane = createGradientPlane(4, 2, 73, 29, 17);
         DecodedPlane referenceChromaVPlane = createGradientPlane(4, 2, 181, -19, 13);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredSuperResolvedReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 4,
                 8,
                 4,
@@ -1039,7 +1039,7 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(rasterDiffers(codedLuma, naiveCodedLuma));
         assertTrue(rasterDiffers(codedChromaU, naiveCodedChromaU));
         assertTrue(rasterDiffers(codedChromaV, naiveCodedChromaV));
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertEquals(8, decodedPlanes.codedWidth());
         assertEquals(4, decodedPlanes.codedHeight());
@@ -1054,7 +1054,7 @@ final class FrameReconstructorIntegrationTest {
     /// through reconstruction instead of requiring zero-residual normalization.
     @Test
     void reconstructsBitstreamDerivedI420InterLeafWithRealResidualOverlayFromStoredReferenceSurface() {
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I420, BITSTREAM_DERIVED_INTER_PAYLOAD, 64, 64, 0);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I420, BITSTREAM_DERIVED_INTER_PAYLOAD, 64, 64, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
         TilePartitionTreeReader.LeafNode decodedLeaf = firstLeaf(syntaxDecodeResult.tileRoots(0));
 
@@ -1079,7 +1079,7 @@ final class FrameReconstructorIntegrationTest {
         );
 
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 64,
                 64,
                 createGradientPlane(64, 64, 23, 2, 3),
@@ -1099,7 +1099,7 @@ final class FrameReconstructorIntegrationTest {
 
         assertEquals(baselineDecodedPlanes.codedWidth(), residualDecodedPlanes.codedWidth());
         assertEquals(baselineDecodedPlanes.codedHeight(), residualDecodedPlanes.codedHeight());
-        assertEquals(PixelFormat.I420, residualDecodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, residualDecodedPlanes.pixelFormat());
         assertTrue(residualDecodedPlanes.hasChroma());
     }
 
@@ -1110,10 +1110,10 @@ final class FrameReconstructorIntegrationTest {
         TilePartitionTreeReader.LeafNode sourceLeaf = createMonochromeLeafWithLumaPalette();
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new MotionVector(0, -32)
         );
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I400, new byte[0], 16, 8, 0);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I400, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
                 assembly,
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
@@ -1132,7 +1132,7 @@ final class FrameReconstructorIntegrationTest {
                 8
         );
 
-        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, decodedPlanes.pixelFormat());
         assertFalse(decodedPlanes.hasChroma());
         assertPlaneBlockEquals(decodedPlanes.lumaPlane(), 0, 0, expectedLumaSamples);
         assertPlaneBlockEquals(decodedPlanes.lumaPlane(), 8, 0, expectedLumaSamples);
@@ -1145,10 +1145,10 @@ final class FrameReconstructorIntegrationTest {
         TilePartitionTreeReader.LeafNode sourceLeaf = createI420LeafWithChromaPalette();
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new MotionVector(0, -32)
         );
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I420, new byte[0], 16, 8, 0);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I420, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
                 assembly,
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
@@ -1174,7 +1174,7 @@ final class FrameReconstructorIntegrationTest {
                 4
         );
 
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertPlaneFilled(decodedPlanes.lumaPlane(), 16, 8, 128);
         assertPlaneBlockEquals(requirePlane(decodedPlanes.chromaUPlane()), 0, 0, expectedChromaUSamples);
@@ -1188,7 +1188,7 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsSyntheticI444IntrabcLeafFromPreviouslyReconstructedSamples() {
         TilePartitionTreeReader.LeafNode sourceLeaf = createWideChromaLeafWithChromaPalette(
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 new int[]{24, 120},
                 new int[]{216, 72},
                 new int[][]{
@@ -1204,10 +1204,10 @@ final class FrameReconstructorIntegrationTest {
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 new MotionVector(0, -32)
         );
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I444, new byte[0], 16, 8, 0);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I444, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
                 assembly,
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
@@ -1233,7 +1233,7 @@ final class FrameReconstructorIntegrationTest {
                 8
         );
 
-        assertEquals(PixelFormat.I444, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I444, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertPlaneFilled(decodedPlanes.lumaPlane(), 16, 8, 128);
         assertPlaneBlockEquals(requirePlane(decodedPlanes.chromaUPlane()), 0, 0, expectedChromaUSamples);
@@ -1247,7 +1247,7 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsSyntheticI422IntrabcLeafFromPreviouslyReconstructedSamples() {
         TilePartitionTreeReader.LeafNode sourceLeaf = createWideChromaLeafWithChromaPalette(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 new int[]{48, 176},
                 new int[]{208, 80},
                 new int[][]{
@@ -1263,10 +1263,10 @@ final class FrameReconstructorIntegrationTest {
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 new MotionVector(0, -32)
         );
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I422, new byte[0], 16, 8, 0);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I422, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
                 assembly,
                 new TilePartitionTreeReader.Node[]{sourceLeaf, intrabcLeaf}
@@ -1292,7 +1292,7 @@ final class FrameReconstructorIntegrationTest {
                 4
         );
 
-        assertEquals(PixelFormat.I422, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I422, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertPlaneFilled(decodedPlanes.lumaPlane(), 16, 8, 128);
         assertPlaneBlockEquals(requirePlane(decodedPlanes.chromaUPlane()), 0, 0, expectedChromaUSamples);
@@ -1310,11 +1310,11 @@ final class FrameReconstructorIntegrationTest {
         MotionVector motionVector = new MotionVector(0, -36);
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(4, 0),
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 motionVector
         );
         FrameAssembly assembly = createInterAssembly(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new byte[0],
                 24,
                 8,
@@ -1388,7 +1388,7 @@ final class FrameReconstructorIntegrationTest {
                 8
         );
 
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertTrue(rasterDiffers(expectedChromaUSamples, integerAlignedChromaUSamples));
         assertTrue(rasterDiffers(expectedChromaVSamples, integerAlignedChromaVSamples));
@@ -1401,35 +1401,35 @@ final class FrameReconstructorIntegrationTest {
     /// the current bitstream-derived same-frame copy path.
     @Test
     void reconstructsBitstreamDerivedI400IntrabcLeafFromGeneratedHeaderFixture() {
-        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I400);
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(AvifPixelFormat.I400);
     }
 
     /// Verifies that the generated real `intrabc` payload reconstructs one `I420` leaf through the
     /// current bitstream-derived same-frame copy path.
     @Test
     void reconstructsBitstreamDerivedI420IntrabcLeafFromGeneratedHeaderFixture() {
-        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I420);
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(AvifPixelFormat.I420);
     }
 
     /// Verifies that the generated real `intrabc` payload reconstructs one `I422` leaf through the
     /// current bitstream-derived same-frame copy path.
     @Test
     void reconstructsBitstreamDerivedI422IntrabcLeafFromGeneratedHeaderFixture() {
-        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I422);
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(AvifPixelFormat.I422);
     }
 
     /// Verifies that the generated real `intrabc` payload reconstructs one `I444` leaf through the
     /// current bitstream-derived same-frame copy path.
     @Test
     void reconstructsBitstreamDerivedI444IntrabcLeafFromGeneratedHeaderFixture() {
-        assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat.I444);
+        assertBitstreamDerivedIntrabcLeafReconstructsExactly(AvifPixelFormat.I444);
     }
 
     /// Asserts that the generated real `intrabc` payload reconstructs one same-frame-copy leaf
     /// exactly against the current bilinear sampling oracle for one requested pixel format.
     ///
     /// @param pixelFormat the decoded chroma layout to cover
-    private static void assertBitstreamDerivedIntrabcLeafReconstructsExactly(PixelFormat pixelFormat) {
+    private static void assertBitstreamDerivedIntrabcLeafReconstructsExactly(AvifPixelFormat pixelFormat) {
         byte[] payload = readTileBlockHeaderFixture("intrabc");
         BlockPosition targetPosition = new BlockPosition(4, 0);
         int codedWidth = 24;
@@ -1449,7 +1449,7 @@ final class FrameReconstructorIntegrationTest {
         assertFalse(decodedLeaf.header().intra());
         assertTrue(decodedLeaf.header().useIntrabc());
         assertEquals(LumaIntraPredictionMode.DC, decodedLeaf.header().yMode());
-        if (pixelFormat == PixelFormat.I400) {
+        if (pixelFormat == AvifPixelFormat.I400) {
             assertNull(decodedLeaf.header().uvMode());
         } else {
             assertEquals(UvIntraPredictionMode.DC, decodedLeaf.header().uvMode());
@@ -1492,7 +1492,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(pixelFormat, zeroResidualPlanes.pixelFormat());
         assertPlaneBlockEquals(zeroResidualPlanes.lumaPlane(), lumaOriginX, lumaOriginY, expectedLumaSamples);
 
-        if (pixelFormat == PixelFormat.I400) {
+        if (pixelFormat == AvifPixelFormat.I400) {
             assertNull(zeroResidualPlanes.chromaUPlane());
             assertNull(zeroResidualPlanes.chromaVPlane());
         } else {
@@ -1593,11 +1593,11 @@ final class FrameReconstructorIntegrationTest {
                 new TransformResidualUnit[]{createAllZeroResidualUnit(position, TransformSize.TX_4X4)}
         );
         TilePartitionTreeReader.LeafNode leafNode = new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I400, new byte[0], 4, 4, 0, 1);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I400, new byte[0], 4, 4, 0, 1);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 4,
                 4,
                 createGradientPlane(4, 4, 0, 10, 20),
@@ -1605,7 +1605,7 @@ final class FrameReconstructorIntegrationTest {
                 null
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 4,
                 4,
                 createGradientPlane(4, 4, 100, 10, 20),
@@ -1618,7 +1618,7 @@ final class FrameReconstructorIntegrationTest {
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
 
-        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, decodedPlanes.pixelFormat());
         assertFalse(decodedPlanes.hasChroma());
         assertPlaneEquals(decodedPlanes.lumaPlane(), new int[][]{
                 {50, 60, 70, 80},
@@ -1635,7 +1635,7 @@ final class FrameReconstructorIntegrationTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_16X16;
         FrameAssembly assembly = createSkipModeInterAssembly(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 readTileBlockHeaderFixture("skip-mode-inter"),
                 16,
                 16,
@@ -1679,7 +1679,7 @@ final class FrameReconstructorIntegrationTest {
         );
 
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 16,
                 16,
                 createGradientPlane(16, 16, 0, 2, 4),
@@ -1687,7 +1687,7 @@ final class FrameReconstructorIntegrationTest {
                 null
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 16,
                 16,
                 createGradientPlane(16, 16, 100, 2, 4),
@@ -1708,7 +1708,7 @@ final class FrameReconstructorIntegrationTest {
                 expectedLuma[y][x] = (sample0 + sample1 + 1) >> 1;
             }
         }
-        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, decodedPlanes.pixelFormat());
         assertFalse(decodedPlanes.hasChroma());
         assertPlaneEquals(decodedPlanes.lumaPlane(), expectedLuma);
     }
@@ -1720,7 +1720,7 @@ final class FrameReconstructorIntegrationTest {
         byte[] payload = readTileBlockHeaderFixture("compound-inter-mode");
         BlockPosition position = new BlockPosition(4, 4);
         BlockSize blockSize = BlockSize.SIZE_16X16;
-        FrameAssembly assembly = createInterAssembly(PixelFormat.I400, payload, 64, 64, 0, 1);
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I400, payload, 64, 64, 0, 1);
         TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
@@ -1766,7 +1766,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceLumaPlane0 = createGradientPlane(64, 64, 11, 3, 5);
         DecodedPlane referenceLumaPlane1 = createGradientPlane(64, 64, 211, -2, -4);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 64,
                 64,
                 referenceLumaPlane0,
@@ -1774,7 +1774,7 @@ final class FrameReconstructorIntegrationTest {
                 null
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 64,
                 64,
                 referenceLumaPlane1,
@@ -1789,7 +1789,7 @@ final class FrameReconstructorIntegrationTest {
 
         int lumaOriginX = position.x4() << 2;
         int lumaOriginY = position.y4() << 2;
-        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, decodedPlanes.pixelFormat());
         assertFalse(decodedPlanes.hasChroma());
         assertPlaneBlockEquals(
                 decodedPlanes.lumaPlane(),
@@ -1881,14 +1881,14 @@ final class FrameReconstructorIntegrationTest {
                         blockSize.width4(),
                         blockSize.height4(),
                         lumaTransformSize,
-                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        blockSize.maxChromaTransformSize(AvifPixelFormat.I420),
                         false,
                         new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
                 ),
                 createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
         );
         FrameAssembly assembly = createInterAssembly(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new byte[0],
                 8,
                 8,
@@ -1905,7 +1905,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceChromaUPlane1 = createGradientPlane(4, 4, 184, -11, -5);
         DecodedPlane referenceChromaVPlane1 = createGradientPlane(4, 4, 221, -9, -7);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 8,
                 8,
                 referenceLumaPlane0,
@@ -1913,7 +1913,7 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane0
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 8,
                 8,
                 referenceLumaPlane1,
@@ -1929,7 +1929,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(FrameHeader.InterpolationFilter.SWITCHABLE, assembly.frameHeader().subpelFilterMode());
         assertEquals(horizontalInterpolationFilter, header.horizontalInterpolationFilter());
         assertEquals(verticalInterpolationFilter, header.verticalInterpolationFilter());
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertPlaneBlockEquals(
                 decodedPlanes.lumaPlane(),
@@ -2036,11 +2036,11 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsSyntheticI420LeafWithChromaUResidualOnly() {
         FrameSyntaxDecodeResult baselineSyntax = createSyntheticResult(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 createI420LeafWithChromaDcResiduals(0, 0)
         );
         FrameSyntaxDecodeResult residualSyntax = createSyntheticResult(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 createI420LeafWithChromaDcResiduals(64, 0)
         );
 
@@ -2061,11 +2061,11 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsSyntheticI420LeafWithChromaVResidualOnly() {
         FrameSyntaxDecodeResult baselineSyntax = createSyntheticResult(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 createI420LeafWithChromaDcResiduals(0, 0)
         );
         FrameSyntaxDecodeResult residualSyntax = createSyntheticResult(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 createI420LeafWithChromaDcResiduals(0, -64)
         );
 
@@ -2107,7 +2107,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(2, decodedLeaf.transformLayout().visibleHeight4());
         assertEquals(TransformSize.TX_4X4, decodedLeaf.transformLayout().chromaTransformSize());
         assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
-                createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
+                createAssembly(AvifPixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
                 decodedLeaf
         );
     }
@@ -2122,7 +2122,7 @@ final class FrameReconstructorIntegrationTest {
         int codedHeight = 5;
         FrameHeader.TransformMode transformMode = FrameHeader.TransformMode.LARGEST;
         byte[] payload = findPayloadForBitstreamDerivedChromaResidual(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 position,
                 blockSize,
                 codedWidth,
@@ -2130,7 +2130,7 @@ final class FrameReconstructorIntegrationTest {
                 transformMode
         );
         TilePartitionTreeReader.LeafNode decodedLeaf = decodeChromaLeafFromPayload(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 payload,
                 position,
                 blockSize,
@@ -2145,7 +2145,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(2, decodedLeaf.transformLayout().visibleHeight4());
         assertEquals(TransformSize.RTX_4X8, decodedLeaf.transformLayout().chromaTransformSize());
         assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
-                createAssembly(PixelFormat.I422, new byte[0], codedWidth, codedHeight, transformMode),
+                createAssembly(AvifPixelFormat.I422, new byte[0], codedWidth, codedHeight, transformMode),
                 decodedLeaf
         );
     }
@@ -2175,7 +2175,7 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(1, decodedLeaf.transformLayout().visibleHeight4());
         assertEquals(TransformSize.TX_4X4, decodedLeaf.transformLayout().chromaTransformSize());
         assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
-                createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
+                createAssembly(AvifPixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
                 decodedLeaf
         );
     }
@@ -2209,7 +2209,7 @@ final class FrameReconstructorIntegrationTest {
                         || hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaVUnits())
         );
         assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
-                createAssembly(PixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
+                createAssembly(AvifPixelFormat.I420, new byte[0], codedWidth, codedHeight, transformMode),
                 decodedLeaf
         );
     }
@@ -2224,7 +2224,7 @@ final class FrameReconstructorIntegrationTest {
         int codedHeight = 8;
         FrameHeader.TransformMode transformMode = FrameHeader.TransformMode.LARGEST;
         byte[] payload = findPayloadForBitstreamDerivedChromaResidual(
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 position,
                 blockSize,
                 codedWidth,
@@ -2232,7 +2232,7 @@ final class FrameReconstructorIntegrationTest {
                 transformMode
         );
         TilePartitionTreeReader.LeafNode decodedLeaf = decodeChromaLeafFromPayload(
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 payload,
                 position,
                 blockSize,
@@ -2251,7 +2251,7 @@ final class FrameReconstructorIntegrationTest {
                         || hasMultiCoefficientResidual(decodedLeaf.residualLayout().chromaVUnits())
         );
         assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
-                createAssembly(PixelFormat.I444, new byte[0], codedWidth, codedHeight, transformMode),
+                createAssembly(AvifPixelFormat.I444, new byte[0], codedWidth, codedHeight, transformMode),
                 decodedLeaf
         );
     }
@@ -2260,13 +2260,13 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsMonochromeFilterIntraDcLeaf() {
         TilePartitionTreeReader.LeafNode leaf = createLeaf(true, false, FilterIntraMode.DC);
-        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(PixelFormat.I400, leaf, true);
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(AvifPixelFormat.I400, leaf, true);
         assertEquals(FilterIntraMode.DC, leaf.header().filterIntraMode());
 
         DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
         assertEquals(8, decodedPlanes.bitDepth());
-        assertEquals(PixelFormat.I400, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, decodedPlanes.pixelFormat());
         assertEquals(8, decodedPlanes.codedWidth());
         assertEquals(8, decodedPlanes.codedHeight());
         assertEquals(128, decodedPlanes.lumaPlane().sample(0, 0));
@@ -2345,7 +2345,7 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsSyntheticI420StillPictureAcrossTwoTiles() {
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticMultiTileResult(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 16,
                 8,
                 new TilePartitionTreeReader.Node[]{createLeaf(new BlockPosition(0, 0), true, true)},
@@ -2387,7 +2387,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param leafNode the synthetic partition-tree leaf
     /// @return one synthetic frame result that carries a single tile leaf
     private static FrameSyntaxDecodeResult createSyntheticResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             TilePartitionTreeReader.LeafNode leafNode
     ) {
         return createSyntheticResult(pixelFormat, leafNode, false);
@@ -2400,7 +2400,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
     /// @return one synthetic frame result that carries a single tile leaf
     private static FrameSyntaxDecodeResult createSyntheticResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             TilePartitionTreeReader.LeafNode leafNode,
             boolean filterIntraEnabled
     ) {
@@ -2604,7 +2604,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param position the block origin in 4x4 units
     /// @return one synthetic palette-backed source leaf for the requested pixel format
     private static TilePartitionTreeReader.LeafNode createIntrabcSourceLeaf(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             BlockPosition position
     ) {
         switch (pixelFormat) {
@@ -2690,7 +2690,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param chromaPaletteIndices the unpacked chroma palette map in row-major order
     /// @return one synthetic wide-chroma leaf that carries one chroma palette
     private static TilePartitionTreeReader.LeafNode createWideChromaLeafWithChromaPalette(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             BlockPosition position
     ) {
         int[] chromaPaletteU;
@@ -2741,13 +2741,13 @@ final class FrameReconstructorIntegrationTest {
     /// @param chromaPaletteIndices the unpacked chroma palette map in row-major order
     /// @return one synthetic positioned wide-chroma leaf that carries one chroma palette
     private static TilePartitionTreeReader.LeafNode createWideChromaLeafWithChromaPalette(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             BlockPosition position,
             int[] chromaPaletteU,
             int[] chromaPaletteV,
             int[][] chromaPaletteIndices
     ) {
-        if (pixelFormat != PixelFormat.I422 && pixelFormat != PixelFormat.I444) {
+        if (pixelFormat != AvifPixelFormat.I422 && pixelFormat != AvifPixelFormat.I444) {
             throw new IllegalArgumentException("Wide-chroma palette helper expects I422 or I444: " + pixelFormat);
         }
         BlockSize blockSize = BlockSize.SIZE_8X8;
@@ -2806,7 +2806,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param chromaPaletteIndices the unpacked chroma palette map in row-major order
     /// @return one synthetic wide-chroma leaf that carries one chroma palette
     private static TilePartitionTreeReader.LeafNode createWideChromaLeafWithChromaPalette(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int[] chromaPaletteU,
             int[] chromaPaletteV,
             int[][] chromaPaletteIndices
@@ -2829,11 +2829,11 @@ final class FrameReconstructorIntegrationTest {
     /// @return one synthetic `intrabc` leaf
     private static TilePartitionTreeReader.LeafNode createIntrabcLeaf(
             BlockPosition position,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             MotionVector motionVector
     ) {
         BlockSize blockSize = BlockSize.SIZE_8X8;
-        boolean hasChroma = pixelFormat != PixelFormat.I400;
+        boolean hasChroma = pixelFormat != AvifPixelFormat.I400;
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
                 position,
                 blockSize,
@@ -2974,7 +2974,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param blockSize the coded luma block size
     /// @param pixelFormat the requested chroma layout
     /// @return the required synthetic chroma transform size
-    private static TransformSize requireChromaTransformSize(BlockSize blockSize, PixelFormat pixelFormat) {
+    private static TransformSize requireChromaTransformSize(BlockSize blockSize, AvifPixelFormat pixelFormat) {
         @Nullable TransformSize chromaTransformSize = blockSize.maxChromaTransformSize(pixelFormat);
         if (chromaTransformSize == null) {
             throw new IllegalArgumentException("No chroma transform size for " + pixelFormat + " " + blockSize);
@@ -2991,7 +2991,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param tileRoots the top-level roots for every tile in frame order
     /// @return one synthetic structural frame-decode result with caller-supplied tiles
     private static FrameSyntaxDecodeResult createSyntheticMultiTileResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int width,
             int height,
             TilePartitionTreeReader.Node[]... tileRoots
@@ -3339,7 +3339,7 @@ final class FrameReconstructorIntegrationTest {
     /// @return one tiny 4x4 monochrome frame decoded from the supplied tile payload
     private static FrameSyntaxDecodeResult decodeMonochromeFourByFourFrame(byte[] payload) {
         return new FrameSyntaxDecoder(null).decode(
-                createAssembly(PixelFormat.I400, payload, 4, 4, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY)
+                createAssembly(AvifPixelFormat.I400, payload, 4, 4, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY)
         );
     }
 
@@ -3347,7 +3347,7 @@ final class FrameReconstructorIntegrationTest {
     /// chroma layout after decoding its block-header palette state under one matching sequence header.
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
-    private static void assertBitstreamDerivedPaletteLeafReconstructsExactly(PixelFormat pixelFormat) {
+    private static void assertBitstreamDerivedPaletteLeafReconstructsExactly(AvifPixelFormat pixelFormat) {
         TileBlockHeaderReader.BlockHeader header =
                 decodePaletteEnabledHeaderFromPayload(pixelFormat, BITSTREAM_DERIVED_PALETTE_PAYLOAD);
         TilePartitionTreeReader.LeafNode paletteLeaf =
@@ -3407,7 +3407,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
     /// @return the exact visible chroma width reconstructed from the deterministic real palette fixture
-    private static int bitstreamDerivedPaletteChromaWidth(PixelFormat pixelFormat) {
+    private static int bitstreamDerivedPaletteChromaWidth(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I420, I422 -> 4;
             case I444 -> 8;
@@ -3422,7 +3422,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
     /// @return the exact visible chroma height reconstructed from the deterministic real palette fixture
-    private static int bitstreamDerivedPaletteChromaHeight(PixelFormat pixelFormat) {
+    private static int bitstreamDerivedPaletteChromaHeight(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I420 -> 4;
             case I422, I444 -> 8;
@@ -3439,7 +3439,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param payload the tile payload to decode structurally
     /// @return one palette-enabled block header decoded from the supplied tile payload
     private static TileBlockHeaderReader.BlockHeader decodePaletteEnabledHeaderFromPayload(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload
     ) {
         BlockPosition position = new BlockPosition(0, 0);
@@ -3463,7 +3463,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param header the real bitstream-derived palette block header
     /// @return one reconstruction-ready leaf that preserves the decoded palette state
     private static TilePartitionTreeReader.LeafNode createLeafWithBitstreamDerivedPaletteHeader(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             TileBlockHeaderReader.BlockHeader header
     ) {
         BlockPosition position = header.position();
@@ -3503,7 +3503,7 @@ final class FrameReconstructorIntegrationTest {
             FrameHeader.TransformMode transformMode
     ) {
         return findPayloadForBitstreamDerivedChromaResidual(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 position,
                 blockSize,
                 codedWidth,
@@ -3523,14 +3523,14 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return a deterministic payload whose decoded block carries one clipped chroma residual
     private static byte[] findPayloadForBitstreamDerivedChromaResidual(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             BlockPosition position,
             BlockSize blockSize,
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
     ) {
-        if (pixelFormat == PixelFormat.I420
+        if (pixelFormat == AvifPixelFormat.I420
                 && position.x4() == 0
                 && position.y4() == 0
                 && blockSize == BlockSize.SIZE_8X8
@@ -3539,7 +3539,7 @@ final class FrameReconstructorIntegrationTest {
                 && transformMode == FrameHeader.TransformMode.LARGEST) {
             return readFrameReconstructorFixture("i420-clipped");
         }
-        if (pixelFormat == PixelFormat.I420
+        if (pixelFormat == AvifPixelFormat.I420
                 && position.x4() == 1
                 && position.y4() == 1
                 && blockSize == BlockSize.SIZE_4X4
@@ -3548,7 +3548,7 @@ final class FrameReconstructorIntegrationTest {
                 && transformMode == FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY) {
             return readFrameReconstructorFixture("i420-fringe");
         }
-        if (pixelFormat == PixelFormat.I422
+        if (pixelFormat == AvifPixelFormat.I422
                 && position.x4() == 0
                 && position.y4() == 0
                 && blockSize == BlockSize.SIZE_8X8
@@ -3557,7 +3557,7 @@ final class FrameReconstructorIntegrationTest {
                 && transformMode == FrameHeader.TransformMode.LARGEST) {
             return readFrameReconstructorFixture("i422-clipped");
         }
-        if (pixelFormat == PixelFormat.I444
+        if (pixelFormat == AvifPixelFormat.I444
                 && position.x4() == 0
                 && position.y4() == 0
                 && blockSize == BlockSize.SIZE_8X8
@@ -3615,7 +3615,7 @@ final class FrameReconstructorIntegrationTest {
             FrameHeader.TransformMode transformMode
     ) {
         return decodeChromaLeafFromPayload(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 payload,
                 position,
                 blockSize,
@@ -3637,7 +3637,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return one chroma-carrying leaf decoded from the supplied tile payload
     private static TilePartitionTreeReader.LeafNode decodeChromaLeafFromPayload(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             BlockPosition position,
             BlockSize blockSize,
@@ -3668,7 +3668,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return one `intrabc`-capable leaf decoded from the supplied tile payload
     private static TilePartitionTreeReader.LeafNode decodeIntrabcEnabledLeafFromPayload(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             BlockPosition position,
             BlockSize blockSize,
@@ -3790,7 +3790,7 @@ final class FrameReconstructorIntegrationTest {
     /// @return whether the supplied decoded leaf produces any observable chroma-plane change
     private static boolean bitstreamDerivedLeafProducesChromaChange(
             TilePartitionTreeReader.LeafNode decodedLeaf,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
@@ -3844,7 +3844,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param pixelFormat the decoded chroma layout
     /// @return the horizontal chroma subsampling shift
-    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
         switch (pixelFormat) {
             case I400:
             case I444:
@@ -3861,7 +3861,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param pixelFormat the decoded chroma layout
     /// @return the vertical chroma subsampling shift
-    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
         switch (pixelFormat) {
             case I400:
             case I422:
@@ -4002,7 +4002,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param decodedPlanes the reconstructed planes returned by the frame reconstructor
     private static void assertLegacyDirectionalStillPicturePlanes(DecodedPlanes decodedPlanes) {
         assertEquals(8, decodedPlanes.bitDepth());
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertEquals(64, decodedPlanes.codedWidth());
         assertEquals(64, decodedPlanes.codedHeight());
         assertEquals(64, decodedPlanes.renderWidth());
@@ -4155,7 +4155,7 @@ final class FrameReconstructorIntegrationTest {
             int expectedHeight
     ) {
         assertEquals(8, decodedPlanes.bitDepth());
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertEquals(expectedWidth, decodedPlanes.codedWidth());
         assertEquals(expectedHeight, decodedPlanes.codedHeight());
         assertEquals(expectedWidth, decodedPlanes.renderWidth());
@@ -4384,7 +4384,7 @@ final class FrameReconstructorIntegrationTest {
             TilePartitionTreeReader.LeafNode zeroResidualLeaf,
             DecodedPlanes baseline,
             DecodedPlanes reconstructed,
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         int lumaOriginX = zeroResidualLeaf.header().position().x4() << 2;
         int lumaOriginY = zeroResidualLeaf.header().position().y4() << 2;
@@ -4396,7 +4396,7 @@ final class FrameReconstructorIntegrationTest {
         )) {
             return true;
         }
-        if (pixelFormat == PixelFormat.I400) {
+        if (pixelFormat == AvifPixelFormat.I400) {
             return false;
         }
 
@@ -4820,7 +4820,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
     /// @return one synthetic single-tile frame assembly
-    private static FrameAssembly createAssembly(PixelFormat pixelFormat) {
+    private static FrameAssembly createAssembly(AvifPixelFormat pixelFormat) {
         return createAssembly(pixelFormat, false);
     }
 
@@ -4829,7 +4829,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param pixelFormat the synthetic decoded chroma layout
     /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
     /// @return one synthetic single-tile frame assembly
-    private static FrameAssembly createAssembly(PixelFormat pixelFormat, boolean filterIntraEnabled) {
+    private static FrameAssembly createAssembly(AvifPixelFormat pixelFormat, boolean filterIntraEnabled) {
         return createAssembly(pixelFormat, new byte[0], 8, 8, FrameHeader.TransformMode.LARGEST, filterIntraEnabled);
     }
 
@@ -4838,7 +4838,7 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param pixelFormat the synthetic decoded chroma layout
     /// @return one synthetic single-tile frame assembly with palette-capable sequence features
-    private static FrameAssembly createPaletteEnabledAssembly(PixelFormat pixelFormat) {
+    private static FrameAssembly createPaletteEnabledAssembly(AvifPixelFormat pixelFormat) {
         return createPaletteEnabledAssembly(pixelFormat, 8, 8, FrameHeader.TransformMode.LARGEST);
     }
 
@@ -4851,7 +4851,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return one synthetic single-tile frame assembly
     private static FrameAssembly createAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -4870,7 +4870,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
     /// @return one synthetic single-tile frame assembly
     private static FrameAssembly createAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -4900,7 +4900,7 @@ final class FrameReconstructorIntegrationTest {
             FrameHeader.InterpolationFilter interpolationFilter
     ) {
         FrameAssembly assembly = createInterAssembly(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 BITSTREAM_DERIVED_INTER_PAYLOAD,
                 64,
                 64,
@@ -4938,7 +4938,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceChromaUPlane = createCheckerboardPlane(32, 32, 40, 200);
         DecodedPlane referenceChromaVPlane = createCheckerboardPlane(32, 32, 96, 160);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 64,
                 64,
                 referenceLumaPlane,
@@ -4962,7 +4962,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane decodedChromaUPlane = requirePlane(decodedPlanes.chromaUPlane());
         DecodedPlane decodedChromaVPlane = requirePlane(decodedPlanes.chromaVPlane());
 
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertEquals(subpelMotionVector, requireNonNullInterMotionVector(zeroResidualLeaf.header().motionVector0()).vector());
         assertPlaneBlockEquals(
@@ -5073,14 +5073,14 @@ final class FrameReconstructorIntegrationTest {
                         blockSize.width4(),
                         blockSize.height4(),
                         lumaTransformSize,
-                        blockSize.maxChromaTransformSize(PixelFormat.I420),
+                        blockSize.maxChromaTransformSize(AvifPixelFormat.I420),
                         false,
                         new TransformUnit[]{new TransformUnit(position, lumaTransformSize)}
                 ),
                 createResidualLayout(position, blockSize, new TransformResidualUnit[]{createAllZeroResidualUnit(position, lumaTransformSize)})
         );
         FrameAssembly assembly = createSuperResolvedInterAssembly(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 4,
                 8,
                 4,
@@ -5094,7 +5094,7 @@ final class FrameReconstructorIntegrationTest {
         DecodedPlane referenceChromaUPlane = createGradientPlane(2, 2, 60, 28, 17);
         DecodedPlane referenceChromaVPlane = createGradientPlane(2, 2, 180, -24, -13);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 4,
                 4,
                 referenceLumaPlane,
@@ -5111,7 +5111,7 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(assembly.frameHeader().superResolution().enabled());
         assertEquals(4, assembly.frameHeader().frameSize().codedWidth());
         assertEquals(8, assembly.frameHeader().frameSize().upscaledWidth());
-        assertEquals(PixelFormat.I420, decodedPlanes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
         assertTrue(decodedPlanes.hasChroma());
         assertEquals(8, decodedPlanes.codedWidth());
         assertEquals(4, decodedPlanes.codedHeight());
@@ -5141,7 +5141,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param referenceSlot the stored reference slot exposed as `LAST_FRAME`
     /// @return one synthetic single-tile inter frame assembly
     private static FrameAssembly createInterAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -5168,7 +5168,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param referenceSlot1 the stored reference slot exposed as `LAST2_FRAME`
     /// @return one synthetic single-tile compound-inter frame assembly
     private static FrameAssembly createInterAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -5199,7 +5199,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param subpelFilterMode the frame-level subpel interpolation filter
     /// @return one synthetic single-tile compound-inter frame assembly
     private static FrameAssembly createInterAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -5237,7 +5237,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param referenceSlot1 the stored reference slot exposed as `LAST2_FRAME`
     /// @return one synthetic single-tile skip-mode inter frame assembly
     private static FrameAssembly createSkipModeInterAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -5274,7 +5274,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param subpelFilterMode the frame-level subpel interpolation filter
     /// @return one synthetic single-tile inter or switch frame assembly with super-resolution enabled
     private static FrameAssembly createSuperResolvedInterAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int upscaledWidth,
             int codedHeight,
@@ -5313,7 +5313,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param subpelFilterMode the frame-level subpel interpolation filter
     /// @return one synthetic single-tile inter frame assembly
     private static FrameAssembly createInterAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -5347,7 +5347,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return one synthetic single-tile frame assembly with palette-capable sequence features
     private static FrameAssembly createPaletteEnabledAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
@@ -5365,7 +5365,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return one synthetic single-tile frame assembly with palette-capable sequence features
     private static FrameAssembly createPaletteEnabledAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -5407,7 +5407,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return one synthetic single-tile frame assembly with `intrabc` enabled
     private static FrameAssembly createIntrabcEnabledAssembly(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             byte[] payload,
             int codedWidth,
             int codedHeight,
@@ -5448,7 +5448,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param filterIntraEnabled whether the synthetic sequence enables `filter_intra`
     /// @return one synthetic sequence header for reconstruction integration tests
     private static SequenceHeader createSyntheticSequenceHeader(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             boolean filterIntraEnabled
@@ -5471,13 +5471,13 @@ final class FrameReconstructorIntegrationTest {
     /// @param screenContentTools the synthetic screen-content-tools mode
     /// @return one synthetic sequence header for reconstruction integration tests
     private static SequenceHeader createSyntheticSequenceHeader(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             boolean filterIntraEnabled,
             SequenceHeader.AdaptiveBoolean screenContentTools
     ) {
-        boolean monochrome = pixelFormat == PixelFormat.I400;
+        boolean monochrome = pixelFormat == AvifPixelFormat.I400;
         return new SequenceHeader(
                 0,
                 codedWidth,
@@ -5522,8 +5522,8 @@ final class FrameReconstructorIntegrationTest {
                         true,
                         pixelFormat,
                         0,
-                        pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422,
-                        pixelFormat == PixelFormat.I420,
+                        pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422,
+                        pixelFormat == AvifPixelFormat.I420,
                         false
                 )
         );
@@ -6304,7 +6304,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the synthetic frame transform mode
     /// @return one tile-local decode context used by monochrome residual integration helpers
     private static TileDecodeContext createTileContext(byte[] payload, FrameHeader.TransformMode transformMode) {
-        return TileDecodeContext.create(createAssembly(PixelFormat.I400, payload, 64, 64, transformMode), 0);
+        return TileDecodeContext.create(createAssembly(AvifPixelFormat.I400, payload, 64, 64, transformMode), 0);
     }
 
     /// Creates one tile-local decode context used by chroma integration helpers.
@@ -6317,7 +6317,7 @@ final class FrameReconstructorIntegrationTest {
     /// @return one tile-local decode context used by chroma integration helpers
     private static TileDecodeContext createTileContext(
             byte[] payload,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
@@ -6336,7 +6336,7 @@ final class FrameReconstructorIntegrationTest {
     /// @return one tile-local decode context with palette-capable sequence features
     private static TileDecodeContext createPaletteEnabledTileContext(
             byte[] payload,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
@@ -6358,7 +6358,7 @@ final class FrameReconstructorIntegrationTest {
     /// @return one tile-local decode context with `allow_intrabc` enabled
     private static TileDecodeContext createIntrabcEnabledTileContext(
             byte[] payload,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             FrameHeader.TransformMode transformMode
@@ -6572,7 +6572,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param chromaVPlane the chroma-V plane stored by the snapshot, or `null`
     /// @return one stored reference surface snapshot for inter reconstruction integration tests
     private static ReferenceSurfaceSnapshot createStoredReferenceSurfaceSnapshot(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             DecodedPlane lumaPlane,
@@ -6615,7 +6615,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param chromaVPlane the post-super-resolution chroma-V plane stored by the snapshot, or `null`
     /// @return one stored reference surface snapshot in the post-super-resolution domain
     private static ReferenceSurfaceSnapshot createStoredSuperResolvedReferenceSurfaceSnapshot(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int upscaledWidth,
             int codedHeight,

@@ -15,7 +15,6 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.PixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
@@ -106,7 +105,7 @@ final class AvifImageReaderTest {
             assertEquals(64, intFrame.width());
             assertEquals(64, intFrame.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
-            assertEquals(PixelFormat.I420, intFrame.pixelFormat());
+            assertEquals(AvifPixelFormat.I420, intFrame.pixelFormat());
             assertEquals(0, intFrame.frameIndex());
 
             IntBuffer pixelBuffer = intFrame.intPixelBuffer();
@@ -134,7 +133,7 @@ final class AvifImageReaderTest {
             assertEquals(1, info.width());
             assertEquals(1, info.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, info.bitDepth());
-            assertEquals(PixelFormat.I444, info.pixelFormat());
+            assertEquals(AvifPixelFormat.I444, info.pixelFormat());
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
@@ -154,7 +153,7 @@ final class AvifImageReaderTest {
             assertEquals(1, intFrame.width());
             assertEquals(1, intFrame.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
-            assertEquals(PixelFormat.I444, intFrame.pixelFormat());
+            assertEquals(AvifPixelFormat.I444, intFrame.pixelFormat());
 
             int[] pixels = intFrame.intPixels();
             assertEquals(1, pixels.length);

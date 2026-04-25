@@ -20,7 +20,7 @@ import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
 import org.glavo.avif.AvifImageInfo;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -928,7 +928,7 @@ public final class AvifContainerParser {
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
                 AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
-                s.pixelFormat != null ? s.pixelFormat : PixelFormat.I420, false, true, sampleCount, s.colr);
+                s.pixelFormat != null ? s.pixelFormat : AvifPixelFormat.I420, false, true, sampleCount, s.colr);
         return new AvifContainer(info,
                 payloads.toArray(byte[][]::new),
                 deltas.stream().mapToInt(Integer::intValue).toArray(),
@@ -1463,7 +1463,7 @@ public final class AvifContainerParser {
         /// The parsed image sequence bit depth.
         private int bitDepth;
         /// The parsed image sequence pixel format, or `null`.
-        private @Nullable PixelFormat pixelFormat;
+        private @Nullable AvifPixelFormat pixelFormat;
         /// The parsed image sequence color information, or `null`.
         private @Nullable AvifColorInfo colr;
         /// The parsed image sequence media timescale.
@@ -1683,17 +1683,17 @@ public final class AvifContainerParser {
         /// Returns the AV1 chroma sampling layout.
         ///
         /// @return the AV1 chroma sampling layout
-        private PixelFormat pixelFormat() {
+        private AvifPixelFormat pixelFormat() {
             if (monochrome) {
-                return PixelFormat.I400;
+                return AvifPixelFormat.I400;
             }
             if (chromaSubsamplingX && chromaSubsamplingY) {
-                return PixelFormat.I420;
+                return AvifPixelFormat.I420;
             }
             if (chromaSubsamplingX) {
-                return PixelFormat.I422;
+                return AvifPixelFormat.I422;
             }
-            return PixelFormat.I444;
+            return AvifPixelFormat.I444;
         }
 
         /// Constructs a minimal AV1 SEQUENCE_HEADER OBU from this configuration.

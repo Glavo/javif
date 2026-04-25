@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -121,7 +121,7 @@ public final class LoopFilterApplier {
     private static void applyPlane(
             PlaneBuffer plane,
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             LoopFilterBlockMap blockMap,
             int planeIndex
     ) {
@@ -144,7 +144,7 @@ public final class LoopFilterApplier {
     private static void applyPass(
             PlaneBuffer plane,
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             LoopFilterBlockMap blockMap,
             int planeIndex,
             int pass
@@ -603,7 +603,7 @@ public final class LoopFilterApplier {
     ///
     /// @param pixelFormat the decoded pixel format
     /// @return the chroma horizontal subsampling shift for one pixel format
-    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400, I444 -> 0;
             case I420, I422 -> 1;
@@ -614,7 +614,7 @@ public final class LoopFilterApplier {
     ///
     /// @param pixelFormat the decoded pixel format
     /// @return the chroma vertical subsampling shift for one pixel format
-    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400, I422, I444 -> 0;
             case I420 -> 1;

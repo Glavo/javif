@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// AV1 chroma sampling layouts exposed by decoded frame metadata.
+/// AVIF chroma sampling layouts exposed by image and frame metadata.
 @NotNullByDefault
-public enum PixelFormat {
+public enum AvifPixelFormat {
     /// Monochrome output with no chroma planes.
     I400,
     /// 4:2:0 subsampled chroma output.

@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -702,7 +702,7 @@ final class TileSyntaxReaderTest {
                         2,
                         2,
                         true,
-                        PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         0,
                         true,
                         true,

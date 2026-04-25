@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -298,7 +298,7 @@ final class FilterIntraLumaReconstructionPathTest {
                         2,
                         2,
                         true,
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         0,
                         true,
                         false,

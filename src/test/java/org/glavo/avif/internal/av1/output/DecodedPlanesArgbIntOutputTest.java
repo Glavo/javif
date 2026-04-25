@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.output;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -88,7 +88,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void convertsEightBitI400SamplesIntoOpaqueArgbPixels() throws ReflectiveOperationException {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 3,
                 2,
                 3,
@@ -126,7 +126,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void convertsEightBitI420SamplesUsingSharedChromaIntoOpaqueArgbPixels() throws ReflectiveOperationException {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 4,
                 2,
                 4,
@@ -169,7 +169,7 @@ final class DecodedPlanesArgbIntOutputTest {
             throws ReflectiveOperationException {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 4,
                 2,
                 4,
@@ -208,7 +208,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void convertsEightBitI444SamplesUsingPerPixelChromaIntoOpaqueArgbPixels() throws ReflectiveOperationException {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 4,
                 2,
                 4,

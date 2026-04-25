@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -72,16 +72,16 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
-        assertEquals(PixelFormat.I400, planes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, planes.pixelFormat());
         assertFalse(planes.hasChroma());
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
     }
@@ -94,17 +94,17 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 10, 4, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 10, 4, 4);
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), leaf)
         );
 
         assertEquals(10, planes.bitDepth());
-        assertEquals(PixelFormat.I400, planes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, planes.pixelFormat());
         assertFalse(planes.hasChroma());
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 512);
     }
@@ -116,16 +116,16 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
-        assertEquals(PixelFormat.I420, planes.pixelFormat());
+        assertEquals(AvifPixelFormat.I420, planes.pixelFormat());
         assertTrue(planes.hasChroma());
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
         DecodedPlane chromaU = planes.chromaUPlane();
@@ -144,16 +144,16 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I422),
+                createTransformLayout(position, size, AvifPixelFormat.I422),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.INTRA, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I422, FrameType.INTRA, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
-        assertEquals(PixelFormat.I422, planes.pixelFormat());
+        assertEquals(AvifPixelFormat.I422, planes.pixelFormat());
         assertTrue(planes.hasChroma());
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
         assertPlaneFilled(requirePlane(planes.chromaUPlane()), 2, 4, 128);
@@ -168,16 +168,16 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I444),
+                createTransformLayout(position, size, AvifPixelFormat.I444),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.INTRA, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I444, FrameType.INTRA, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
-        assertEquals(PixelFormat.I444, planes.pixelFormat());
+        assertEquals(AvifPixelFormat.I444, planes.pixelFormat());
         assertTrue(planes.hasChroma());
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 128);
         assertPlaneFilled(requirePlane(planes.chromaUPlane()), 4, 4, 128);
@@ -192,17 +192,17 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I444),
+                createTransformLayout(position, size, AvifPixelFormat.I444),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I444, 12, 4, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I444, 12, 4, 4);
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.INTRA, 4, 4), leaf)
         );
 
         assertEquals(12, planes.bitDepth());
-        assertEquals(PixelFormat.I444, planes.pixelFormat());
+        assertEquals(AvifPixelFormat.I444, planes.pixelFormat());
         assertTrue(planes.hasChroma());
         assertPlaneFilled(planes.lumaPlane(), 4, 4, 2048);
         assertPlaneFilled(requirePlane(planes.chromaUPlane()), 4, 4, 2048);
@@ -249,11 +249,11 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 8, 4);
         FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.KEY, 4, 8, 4);
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)
@@ -282,11 +282,11 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I420, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.INTRA, 4, 8, 4);
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)
@@ -314,14 +314,14 @@ final class FrameReconstructorTest {
                 {32, 80, 144, 208}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
-                createReferenceSurfaceSnapshot(PixelFormat.I400, referenceLuma, null, null);
+                createReferenceSurfaceSnapshot(AvifPixelFormat.I400, referenceLuma, null, null);
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(4, 8, 4, 0);
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
@@ -357,7 +357,7 @@ final class FrameReconstructorTest {
                 {40, 104, 196, 248, 212, 148, 104, 52}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createSuperResolvedReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 4,
                 8,
                 referenceLuma,
@@ -366,11 +366,11 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
                 4,
                 8,
@@ -428,18 +428,18 @@ final class FrameReconstructorTest {
                 {140, 80}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 referenceLuma,
                 referenceChromaU,
                 referenceChromaV
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, motionVector),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I420, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
                 4,
                 8,
@@ -541,7 +541,7 @@ final class FrameReconstructorTest {
                 {200, 84, 160, 44}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createSuperResolvedReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 4,
                 8,
                 referenceLuma,
@@ -550,11 +550,11 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, motionVector),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I420, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
                 4,
                 8,
@@ -642,18 +642,18 @@ final class FrameReconstructorTest {
                 {160, 161}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 referenceLuma,
                 referenceChromaU,
                 referenceChromaV
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, motionVector),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I420, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
                 FrameType.SWITCH,
                 4,
@@ -741,7 +741,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {0, 16, 32, 48, 64, 80, 96, 112},
                         {8, 24, 40, 56, 72, 88, 104, 120},
@@ -753,11 +753,11 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
                 FrameType.INTER,
                 4,
@@ -799,7 +799,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {0, 16, 32, 48, 64, 80, 96, 112},
                         {8, 24, 40, 56, 72, 88, 104, 120},
@@ -817,11 +817,11 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I420, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
                 FrameType.INTER,
                 4,
@@ -895,7 +895,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {10, 10, 10, 10},
                         {10, 10, 10, 10},
@@ -905,16 +905,16 @@ final class FrameReconstructorTest {
                 null,
                 null
         );
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 8, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(FrameType.INTER, 4, 8, 4, 0);
         TilePartitionTreeReader.LeafNode baselineLeaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
@@ -969,12 +969,12 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 8, 8, leaf)
         );
 
         assertFalse(planes.hasChroma());
@@ -1013,12 +1013,12 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.KEY, 8, 8, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1063,12 +1063,12 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(position, size, PixelFormat.I422),
+                createTransformLayout(position, size, AvifPixelFormat.I422),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I422, FrameType.KEY, 8, 8, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1113,12 +1113,12 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(position, size, PixelFormat.I444),
+                createTransformLayout(position, size, AvifPixelFormat.I444),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I444, FrameType.KEY, 8, 8, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1131,15 +1131,15 @@ final class FrameReconstructorTest {
     /// footprint when the coded block is clipped by the frame edge.
     @Test
     void reconstructsClippedKeyFramesWithLumaAndChromaPalettePredictionForAllChromaLayouts() {
-        assertClippedPalettePrediction(PixelFormat.I420);
-        assertClippedPalettePrediction(PixelFormat.I422);
-        assertClippedPalettePrediction(PixelFormat.I444);
+        assertClippedPalettePrediction(AvifPixelFormat.I420);
+        assertClippedPalettePrediction(AvifPixelFormat.I422);
+        assertClippedPalettePrediction(AvifPixelFormat.I444);
     }
 
     /// Asserts clipped luma and chroma palette reconstruction for one non-monochrome layout.
     ///
     /// @param pixelFormat the decoded chroma layout to test
-    private static void assertClippedPalettePrediction(PixelFormat pixelFormat) {
+    private static void assertClippedPalettePrediction(AvifPixelFormat pixelFormat) {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_8X8;
         int[] lumaPaletteColors = new int[]{24, 128, 232};
@@ -1207,7 +1207,7 @@ final class FrameReconstructorTest {
     @Test
     void reconstructsSingleTileWiderChromaKeyFramesWithChromaPaletteAndResidualOverlay() {
         assertChromaPaletteResidualOverlay(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {0, 1, 2, 0},
                         {1, 2, 0, 1},
@@ -1216,7 +1216,7 @@ final class FrameReconstructorTest {
                 }
         );
         assertChromaPaletteResidualOverlay(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 new int[][]{
                         {0, 1, 2, 0},
                         {1, 2, 0, 1},
@@ -1229,7 +1229,7 @@ final class FrameReconstructorTest {
                 }
         );
         assertChromaPaletteResidualOverlay(
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 new int[][]{
                         {0, 1, 2, 0, 1, 2, 0, 1},
                         {1, 2, 0, 1, 2, 0, 1, 2},
@@ -1279,21 +1279,21 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode baselineLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 8, 8, baselineLeaf)
         );
         DecodedPlanes residual = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 8, 8, residualLeaf)
         );
 
         assertFalse(baseline.hasChroma());
@@ -1309,21 +1309,21 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 4, 4, zeroResidualLeaf)
         ).lumaPlane();
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 4, 4, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1349,12 +1349,12 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 new ResidualLayout(position, size, new TransformResidualUnit[]{residualUnit})
         );
 
         DecodedPlane reconstructed = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 4, 4, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 4, 4, residualLeaf)
         ).lumaPlane();
         int[] dequantizedCoefficients = LumaDequantizer.dequantize(
                 residualUnit,
@@ -1385,16 +1385,16 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
-        SequenceHeader sequenceHeader = createSequenceHeader(PixelFormat.I400, 10, 4, 4);
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 10, 4, 4);
         FrameSyntaxDecodeResult baselineSyntax =
                 createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), zeroResidualLeaf);
         FrameSyntaxDecodeResult residualSyntax =
@@ -1416,21 +1416,21 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode negativeResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, -64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 4, 4, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 4, 4, negativeResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 4, 4, negativeResidualLeaf)
         );
 
         assertTrue(residualPlanes.hasChroma());
@@ -1459,21 +1459,21 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I422),
+                createTransformLayout(position, size, AvifPixelFormat.I422),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveChromaLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I422),
-                createChromaDcResidualLayout(position, size, PixelFormat.I422, 64, 0)
+                createTransformLayout(position, size, AvifPixelFormat.I422),
+                createChromaDcResidualLayout(position, size, AvifPixelFormat.I422, 64, 0)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I422, FrameType.INTRA, 4, 4, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.INTRA, 4, 4, positiveChromaLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I422, FrameType.INTRA, 4, 4, positiveChromaLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -1505,21 +1505,21 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I444),
+                createTransformLayout(position, size, AvifPixelFormat.I444),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode negativeChromaLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I444),
-                createChromaDcResidualLayout(position, size, PixelFormat.I444, 0, -64)
+                createTransformLayout(position, size, AvifPixelFormat.I444),
+                createChromaDcResidualLayout(position, size, AvifPixelFormat.I444, 0, -64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I444, FrameType.INTRA, 4, 4, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.INTRA, 4, 4, negativeChromaLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I444, FrameType.INTRA, 4, 4, negativeChromaLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -1539,21 +1539,21 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_16X16;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 16, 16, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 16, 16, zeroResidualLeaf)
         ).lumaPlane();
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 16, 16, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 16, 16, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1568,21 +1568,21 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_16X8;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 16, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 16, 8, zeroResidualLeaf)
         ).lumaPlane();
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 16, 8, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 16, 8, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1597,21 +1597,21 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_32X32;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 32, 32, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 32, 32, zeroResidualLeaf)
         ).lumaPlane();
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 32, 32, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 32, 32, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1626,21 +1626,21 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_64X64;
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 64, 64, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 64, 64, zeroResidualLeaf)
         ).lumaPlane();
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 64, 64, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 64, 64, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1667,21 +1667,21 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
         TilePartitionTreeReader.LeafNode positiveChromaLeaf = new TilePartitionTreeReader.LeafNode(
                 header,
-                createTransformLayout(position, size, PixelFormat.I420),
-                createChromaDcResidualLayout(position, size, PixelFormat.I420, 64, 0)
+                createTransformLayout(position, size, AvifPixelFormat.I420),
+                createChromaDcResidualLayout(position, size, AvifPixelFormat.I420, 64, 0)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 64, 64, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 64, 64, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 64, 64, positiveChromaLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 64, 64, positiveChromaLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -1711,12 +1711,12 @@ final class FrameReconstructorTest {
                         4,
                         -4
                 ),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.KEY, 4, 4, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1764,12 +1764,12 @@ final class FrameReconstructorTest {
                         4,
                         -4
                 ),
-                createTransformLayout(position, size, PixelFormat.I422),
+                createTransformLayout(position, size, AvifPixelFormat.I422),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I422, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I422, FrameType.KEY, 4, 4, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1821,12 +1821,12 @@ final class FrameReconstructorTest {
                         4,
                         -4
                 ),
-                createTransformLayout(position, size, PixelFormat.I444),
+                createTransformLayout(position, size, AvifPixelFormat.I444),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I444, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I444, FrameType.KEY, 4, 4, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1877,7 +1877,7 @@ final class FrameReconstructorTest {
                         4,
                         -4
                 ),
-                createTransformLayout(new BlockPosition(0, 0), BlockSize.SIZE_4X4, PixelFormat.I420),
+                createTransformLayout(new BlockPosition(0, 0), BlockSize.SIZE_4X4, AvifPixelFormat.I420),
                 createResidualLayout(new BlockPosition(0, 0), BlockSize.SIZE_4X4, true)
         );
         TilePartitionTreeReader.LeafNode topRightLeaf = new TilePartitionTreeReader.LeafNode(
@@ -1895,7 +1895,7 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(1, 0), BlockSize.SIZE_4X4, PixelFormat.I420),
+                createTransformLayout(new BlockPosition(1, 0), BlockSize.SIZE_4X4, AvifPixelFormat.I420),
                 createResidualLayout(new BlockPosition(1, 0), BlockSize.SIZE_4X4, true)
         );
         TilePartitionTreeReader.LeafNode bottomLeftDirectionalLeaf = new TilePartitionTreeReader.LeafNode(
@@ -1913,16 +1913,16 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 1), BlockSize.SIZE_4X4, PixelFormat.I420),
+                createTransformLayout(new BlockPosition(0, 1), BlockSize.SIZE_4X4, AvifPixelFormat.I420),
                 createResidualLayout(new BlockPosition(0, 1), BlockSize.SIZE_4X4, true)
         );
 
         DecodedPlanes baseline = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.KEY, 8, 8, topLeftLeaf, topRightLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.KEY, 8, 8, topLeftLeaf, topRightLeaf)
         );
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(
-                        PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         FrameType.KEY,
                         8,
                         8,
@@ -1986,17 +1986,17 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode topLeftLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(new BlockPosition(0, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(0, 0), size, 64)
         );
         TilePartitionTreeReader.LeafNode topMiddleLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(new BlockPosition(1, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(1, 0), size, true)
         );
         TilePartitionTreeReader.LeafNode topRightLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(new BlockPosition(2, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(new BlockPosition(2, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(2, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(2, 0), size, -64)
         );
         TilePartitionTreeReader.LeafNode baselineDirectionalLeaf = new TilePartitionTreeReader.LeafNode(
@@ -2014,7 +2014,7 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 1), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(0, 1), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(0, 1), size, true)
         );
         TilePartitionTreeReader.LeafNode positiveDirectionalLeaf = new TilePartitionTreeReader.LeafNode(
@@ -2032,14 +2032,14 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 1), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(0, 1), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(0, 1), size, 64)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         FrameType.KEY,
                         12,
                         8,
@@ -2051,7 +2051,7 @@ final class FrameReconstructorTest {
         );
         DecodedPlanes residual = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         FrameType.KEY,
                         12,
                         8,
@@ -2083,12 +2083,12 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leftTileLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(new BlockPosition(0, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(0, 0), size, 64)
         );
         TilePartitionTreeReader.LeafNode rightTileLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(new BlockPosition(1, 0), size, false, LumaIntraPredictionMode.DC, null, null, 0, 0, 0, 0),
-                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(1, 0), size, -64)
         );
         TilePartitionTreeReader.Node[] tileZeroRoots = new TilePartitionTreeReader.Node[]{leftTileLeaf};
@@ -2096,22 +2096,22 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane expectedAfterTileZero = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 4, leftTileLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 8, 4, leftTileLeaf)
         ).lumaPlane();
         DecodedPlane expectedAfterBothTiles = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I400, FrameType.KEY, 8, 4, leftTileLeaf, rightTileLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 8, 4, leftTileLeaf, rightTileLeaf)
         ).lumaPlane();
 
         MutablePlaneBuffer sharedLumaPlane = new MutablePlaneBuffer(8, 4, 8);
         FrameHeader frameHeader = createFrameHeader(FrameType.KEY, 8, 4);
 
-        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, PixelFormat.I400, frameHeader, tileZeroRoots);
+        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, AvifPixelFormat.I400, frameHeader, tileZeroRoots);
         DecodedPlane afterTileZero = sharedLumaPlane.toDecodedPlane();
 
         assertPlanesEqual(expectedAfterTileZero, afterTileZero);
         assertPlaneBlockFilled(afterTileZero, 4, 0, 4, 4, 0);
 
-        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, PixelFormat.I400, frameHeader, tileOneRoots);
+        reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, AvifPixelFormat.I400, frameHeader, tileOneRoots);
         DecodedPlane afterBothTiles = sharedLumaPlane.toDecodedPlane();
 
         assertPlanesEqual(expectedAfterBothTiles, afterBothTiles);
@@ -2125,7 +2125,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {0, 1, 2, 3, 4, 5, 6, 7},
                         {10, 11, 12, 13, 14, 15, 16, 17},
@@ -2141,12 +2141,12 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, new MotionVector(4, 4)),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 8, 8, 0, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
@@ -2173,7 +2173,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {10, 11, 12, 13},
                         {20, 21, 22, 23},
@@ -2191,12 +2191,12 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 4, 4, 0, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 4, 4, 0, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
@@ -2233,7 +2233,7 @@ final class FrameReconstructorTest {
                 {70, 78, 86, 94, 102, 110, 118, 126}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 referenceLuma,
                 null,
                 null
@@ -2249,12 +2249,12 @@ final class FrameReconstructorTest {
                         false,
                         -1
                 ),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 8, 8, 0, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
@@ -2294,7 +2294,7 @@ final class FrameReconstructorTest {
                 {148, 138, 128, 118}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 referenceLuma,
                 referenceChromaU,
                 referenceChromaV
@@ -2310,12 +2310,12 @@ final class FrameReconstructorTest {
                         true,
                         0
                 ),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 8, 8, 0, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 8, 8, 0, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
@@ -2362,17 +2362,17 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(0, 0), size, true)
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(new BlockPosition(1, 0), size, false, new MotionVector(0, -16)),
-                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(1, 0), size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 8, 4, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
@@ -2408,17 +2408,17 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I420),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I420),
                 createResidualLayout(new BlockPosition(0, 0), size, true)
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
-                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I420),
+                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I420),
                 createResidualLayout(new BlockPosition(1, 0), size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 8, 4, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
@@ -2467,17 +2467,17 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I444),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I444),
                 createResidualLayout(new BlockPosition(0, 0), size, true)
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
-                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I444),
+                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I444),
                 createResidualLayout(new BlockPosition(1, 0), size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I444, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I444, 8, 4, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
@@ -2520,17 +2520,17 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I422),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I422),
                 createResidualLayout(new BlockPosition(0, 0), size, true)
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
-                createTransformLayout(new BlockPosition(1, 0), size, PixelFormat.I422),
+                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I422),
                 createResidualLayout(new BlockPosition(1, 0), size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I422, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I422, 8, 4, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
@@ -2588,24 +2588,24 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(sourcePosition, sourceSize, PixelFormat.I400),
+                createTransformLayout(sourcePosition, sourceSize, AvifPixelFormat.I400),
                 createResidualLayout(sourcePosition, sourceSize, true)
         );
         BlockPosition intrabcPosition = new BlockPosition(4, 0);
         MotionVector motionVector = new MotionVector(0, -62);
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(intrabcPosition, BlockSize.SIZE_8X8, false, motionVector),
-                createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, PixelFormat.I400),
+                createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, AvifPixelFormat.I400),
                 createResidualLayout(intrabcPosition, BlockSize.SIZE_8X8, true)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baselinePlanes = reconstructor.reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 24, 8, 0, sourceLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 24, 8, 0, sourceLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
         DecodedPlanes planes = reconstructor.reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 24, 8, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 24, 8, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
@@ -2657,24 +2657,24 @@ final class FrameReconstructorTest {
                         0,
                         0
                 ),
-                createTransformLayout(sourcePosition, sourceSize, PixelFormat.I420),
+                createTransformLayout(sourcePosition, sourceSize, AvifPixelFormat.I420),
                 createResidualLayout(sourcePosition, sourceSize, true)
         );
         BlockPosition intrabcPosition = new BlockPosition(4, 0);
         MotionVector motionVector = new MotionVector(2, -62);
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(intrabcPosition, BlockSize.SIZE_8X8, true, motionVector),
-                createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, PixelFormat.I420),
+                createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, AvifPixelFormat.I420),
                 createResidualLayout(intrabcPosition, BlockSize.SIZE_8X8, true)
         );
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baselinePlanes = reconstructor.reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 24, 8, 0, sourceLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 24, 8, 0, sourceLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
         DecodedPlanes planes = reconstructor.reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 24, 8, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 24, 8, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
@@ -2721,7 +2721,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {0, 2, 4, 6},
                         {20, 22, 24, 26},
@@ -2732,7 +2732,7 @@ final class FrameReconstructorTest {
                 null
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {10, 12, 14, 16},
                         {30, 32, 34, 36},
@@ -2752,12 +2752,12 @@ final class FrameReconstructorTest {
                         MotionVector.zero(),
                         MotionVector.zero()
                 ),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, 1, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 4, 4, 0, 1, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
 
@@ -2779,9 +2779,9 @@ final class FrameReconstructorTest {
         int[][] reference0 = rampSamples(8, 8, 10, 3, 17);
         int[][] reference1 = rampSamples(8, 8, 180, -2, -9);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 =
-                createReferenceSurfaceSnapshot(PixelFormat.I400, reference0, null, null);
+                createReferenceSurfaceSnapshot(AvifPixelFormat.I400, reference0, null, null);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 =
-                createReferenceSurfaceSnapshot(PixelFormat.I400, reference1, null, null);
+                createReferenceSurfaceSnapshot(AvifPixelFormat.I400, reference1, null, null);
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createCompoundReferenceInterBlockHeader(
                         position,
@@ -2795,12 +2795,12 @@ final class FrameReconstructorTest {
                         false,
                         0
                 ),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, 1, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 8, 8, 0, 1, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
 
@@ -2816,9 +2816,9 @@ final class FrameReconstructorTest {
         int[][] reference0 = rampSamples(8, 8, 20, 7, 11);
         int[][] reference1 = rampSamples(8, 8, 220, -5, -13);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 =
-                createReferenceSurfaceSnapshot(PixelFormat.I400, reference0, null, null);
+                createReferenceSurfaceSnapshot(AvifPixelFormat.I400, reference0, null, null);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 =
-                createReferenceSurfaceSnapshot(PixelFormat.I400, reference1, null, null);
+                createReferenceSurfaceSnapshot(AvifPixelFormat.I400, reference1, null, null);
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createCompoundReferenceInterBlockHeader(
                         position,
@@ -2832,12 +2832,12 @@ final class FrameReconstructorTest {
                         true,
                         -1
                 ),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 8, 8, 0, 1, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 8, 8, 0, 1, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
         );
 
@@ -2852,7 +2852,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {0, 1, 2, 3, 4, 5, 6, 7},
                         {10, 11, 12, 13, 14, 15, 16, 17},
@@ -2868,13 +2868,13 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, new MotionVector(2, 6)),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         8,
                         8,
                         0,
@@ -2907,7 +2907,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {0, 1, 2, 3, 4, 5, 6, 7},
                         {10, 11, 12, 13, 14, 15, 16, 17},
@@ -2933,13 +2933,13 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, new MotionVector(2, 6)),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         8,
                         8,
                         0,
@@ -2994,7 +2994,7 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_16X16;
         int[][] lumaSamples = rampSamples(16, 32, 0, 1, 5);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 lumaSamples,
                 null,
                 null
@@ -3007,7 +3007,7 @@ final class FrameReconstructorTest {
                         0,
                         new MotionVector(-16, 0)
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(0, 0), size, true)
         );
         TilePartitionTreeReader.LeafNode obmcLeaf = new TilePartitionTreeReader.LeafNode(
@@ -3019,12 +3019,12 @@ final class FrameReconstructorTest {
                         MotionVector.zero(),
                         MotionMode.OBMC
                 ),
-                createTransformLayout(new BlockPosition(0, 4), size, PixelFormat.I400),
+                createTransformLayout(new BlockPosition(0, 4), size, AvifPixelFormat.I400),
                 createResidualLayout(new BlockPosition(0, 4), size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 16, 32, 0, aboveLeaf, obmcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 16, 32, 0, aboveLeaf, obmcLeaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
@@ -3049,7 +3049,7 @@ final class FrameReconstructorTest {
         int[][] chromaUSamples = rampSamples(16, 8, 40, 3, 7);
         int[][] chromaVSamples = rampSamples(16, 8, 200, -2, -5);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 lumaSamples,
                 chromaUSamples,
                 chromaVSamples
@@ -3062,7 +3062,7 @@ final class FrameReconstructorTest {
                         0,
                         new MotionVector(0, -16)
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, PixelFormat.I420),
+                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I420),
                 createResidualLayout(new BlockPosition(0, 0), size, true)
         );
         TilePartitionTreeReader.LeafNode obmcLeaf = new TilePartitionTreeReader.LeafNode(
@@ -3074,12 +3074,12 @@ final class FrameReconstructorTest {
                         MotionVector.zero(),
                         MotionMode.OBMC
                 ),
-                createTransformLayout(new BlockPosition(4, 0), size, PixelFormat.I420),
+                createTransformLayout(new BlockPosition(4, 0), size, AvifPixelFormat.I420),
                 createResidualLayout(new BlockPosition(4, 0), size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I420, 32, 16, 0, leftLeaf, obmcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 32, 16, 0, leftLeaf, obmcLeaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
@@ -3125,7 +3125,7 @@ final class FrameReconstructorTest {
         BlockPosition currentPosition = new BlockPosition(2, 2);
         int[][] lumaSamples = rampSamples(16, 16, 3, 5, 8);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 lumaSamples,
                 null,
                 null
@@ -3154,23 +3154,23 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode aboveLeaf = new TilePartitionTreeReader.LeafNode(
                 aboveHeader,
-                createTransformLayout(abovePosition, size, PixelFormat.I400),
+                createTransformLayout(abovePosition, size, AvifPixelFormat.I400),
                 createResidualLayout(abovePosition, size, true)
         );
         TilePartitionTreeReader.LeafNode leftLeaf = new TilePartitionTreeReader.LeafNode(
                 leftHeader,
-                createTransformLayout(leftPosition, size, PixelFormat.I400),
+                createTransformLayout(leftPosition, size, AvifPixelFormat.I400),
                 createResidualLayout(leftPosition, size, true)
         );
         TilePartitionTreeReader.LeafNode currentLeaf = new TilePartitionTreeReader.LeafNode(
                 currentHeader,
-                createTransformLayout(currentPosition, size, PixelFormat.I400),
+                createTransformLayout(currentPosition, size, AvifPixelFormat.I400),
                 createResidualLayout(currentPosition, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         16,
                         16,
                         0,
@@ -3229,20 +3229,20 @@ final class FrameReconstructorTest {
                 {70, 71, 72, 73, 74, 75, 76, 77}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 lumaSamples,
                 null,
                 null
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         8,
                         8,
                         0,
@@ -3292,7 +3292,7 @@ final class FrameReconstructorTest {
                 {712, 736, 760, 784, 808, 832, 856, 880}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 10,
                 lumaSamples,
                 null,
@@ -3300,13 +3300,13 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createHighBitInterFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         10,
                         8,
                         8,
@@ -3370,20 +3370,20 @@ final class FrameReconstructorTest {
                 {180, 181, 182, 183}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 lumaSamples,
                 chromaUSamples,
                 chromaVSamples
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, motionVector),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         8,
                         8,
                         0,
@@ -3461,7 +3461,7 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         MotionVector motionVector = new MotionVector(2, 2);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {0, 8, 16, 24, 32, 40, 48, 56},
                         {16, 24, 32, 40, 48, 56, 64, 72},
@@ -3486,7 +3486,7 @@ final class FrameReconstructorTest {
                 }
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {200, 192, 184, 176, 168, 160, 152, 144},
                         {184, 176, 168, 160, 152, 144, 136, 128},
@@ -3520,13 +3520,13 @@ final class FrameReconstructorTest {
                         motionVector,
                         motionVector
                 ),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         8,
                         8,
                         0,
@@ -3606,13 +3606,13 @@ final class FrameReconstructorTest {
                 {172, 140, 108, 76}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 lumaSamples0,
                 chromaUSamples0,
                 chromaVSamples0
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 lumaSamples1,
                 chromaUSamples1,
                 chromaVSamples1
@@ -3627,13 +3627,13 @@ final class FrameReconstructorTest {
                         motionVector0,
                         motionVector1
                 ),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         8,
                         8,
                         0,
@@ -3792,14 +3792,14 @@ final class FrameReconstructorTest {
                 {2456, 2424, 2392, 2360}
         };
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 12,
                 lumaSamples0,
                 chromaUSamples0,
                 chromaVSamples0
         );
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 12,
                 lumaSamples1,
                 chromaUSamples1,
@@ -3815,13 +3815,13 @@ final class FrameReconstructorTest {
                         motionVector0,
                         motionVector1
                 ),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
                 createInterFrameSyntaxDecodeResult(
-                        PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         12,
                         8,
                         8,
@@ -3945,7 +3945,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {10, 10, 10, 10},
                         {10, 10, 10, 10},
@@ -3957,12 +3957,12 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, 64)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, leaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 4, 4, 0, leaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
@@ -3985,14 +3985,14 @@ final class FrameReconstructorTest {
         BlockSize size = BlockSize.SIZE_4X4;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
-                createTransformLayout(position, size, PixelFormat.I400),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
                 createResidualLayout(position, size, true)
         );
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
                 () -> new FrameReconstructor().reconstruct(
-                        createInterFrameSyntaxDecodeResult(PixelFormat.I400, 4, 4, 0, leaf)
+                        createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 4, 4, 0, leaf)
                 )
         );
 
@@ -4006,7 +4006,7 @@ final class FrameReconstructorTest {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_4X4;
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {0, 1, 2, 3, 4, 5, 6, 7},
                         {10, 11, 12, 13, 14, 15, 16, 17},
@@ -4032,7 +4032,7 @@ final class FrameReconstructorTest {
         );
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, true, 0, new MotionVector(2, 6)),
-                createTransformLayout(position, size, PixelFormat.I420),
+                createTransformLayout(position, size, AvifPixelFormat.I420),
                 createResidualLayout(position, size, true)
         );
 
@@ -4040,7 +4040,7 @@ final class FrameReconstructorTest {
                 IllegalStateException.class,
                 () -> new FrameReconstructor().reconstruct(
                         createInterFrameSyntaxDecodeResult(
-                                PixelFormat.I420,
+                                AvifPixelFormat.I420,
                                 8,
                                 8,
                                 0,
@@ -4063,7 +4063,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level tile roots for tile `0`
     /// @return one synthetic structural frame-decode result
     private static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameType frameType,
             int width,
             int height,
@@ -4110,7 +4110,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level tile roots for tile `0`
     /// @return one synthetic structural inter frame-decode result
     private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int width,
             int height,
             int referenceSlot,
@@ -4149,7 +4149,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level tile roots for tile `0`
     /// @return one synthetic structural compound-inter frame-decode result
     private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int width,
             int height,
             int referenceSlot0,
@@ -4179,7 +4179,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level tile roots for tile `0`
     /// @return one synthetic structural compound-inter frame-decode result
     private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int width,
             int height,
             int referenceSlot0,
@@ -4215,7 +4215,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level tile roots for tile `0`
     /// @return one synthetic structural inter frame-decode result
     private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int width,
             int height,
             int referenceSlot,
@@ -4251,7 +4251,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level tile roots for tile `0`
     /// @return one synthetic structural inter frame-decode result
     private static FrameSyntaxDecodeResult createHighBitInterFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             int width,
             int height,
@@ -4289,7 +4289,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level tile roots for tile `0`
     /// @return one synthetic structural compound-inter frame-decode result
     private static FrameSyntaxDecodeResult createInterFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             int width,
             int height,
@@ -4321,7 +4321,7 @@ final class FrameReconstructorTest {
     /// @param width the frame width
     /// @param height the frame height
     /// @return one minimal reduced-still-picture sequence header
-    private static SequenceHeader createSequenceHeader(PixelFormat pixelFormat, int width, int height) {
+    private static SequenceHeader createSequenceHeader(AvifPixelFormat pixelFormat, int width, int height) {
         return createSequenceHeader(pixelFormat, 8, width, height);
     }
 
@@ -4333,7 +4333,7 @@ final class FrameReconstructorTest {
     /// @param width the frame width
     /// @param height the frame height
     /// @return one minimal reduced-still-picture sequence header
-    private static SequenceHeader createSequenceHeader(PixelFormat pixelFormat, int bitDepth, int width, int height) {
+    private static SequenceHeader createSequenceHeader(AvifPixelFormat pixelFormat, int bitDepth, int width, int height) {
         return new SequenceHeader(
                 sequenceProfile(pixelFormat, bitDepth),
                 width,
@@ -4370,7 +4370,7 @@ final class FrameReconstructorTest {
                 ),
                 new SequenceHeader.ColorConfig(
                         bitDepth,
-                        pixelFormat == PixelFormat.I400,
+                        pixelFormat == AvifPixelFormat.I400,
                         false,
                         2,
                         2,
@@ -4378,8 +4378,8 @@ final class FrameReconstructorTest {
                         true,
                         pixelFormat,
                         0,
-                        pixelFormat != PixelFormat.I444,
-                        pixelFormat == PixelFormat.I420,
+                        pixelFormat != AvifPixelFormat.I444,
+                        pixelFormat == AvifPixelFormat.I420,
                         false
                 )
         );
@@ -4391,7 +4391,7 @@ final class FrameReconstructorTest {
     /// @param pixelFormat the decoded chroma layout
     /// @param bitDepth the decoded sample bit depth
     /// @return one reduced-still-picture-compatible AV1 profile
-    private static int sequenceProfile(PixelFormat pixelFormat, int bitDepth) {
+    private static int sequenceProfile(AvifPixelFormat pixelFormat, int bitDepth) {
         return switch (pixelFormat) {
             case I400, I420 -> bitDepth == 12 ? 2 : 0;
             case I422 -> 2;
@@ -5416,7 +5416,7 @@ final class FrameReconstructorTest {
     /// @param chromaVSamples the chroma-V sample raster, or `null`
     /// @return one stored reference surface snapshot for synthetic inter reconstruction tests
     private static ReferenceSurfaceSnapshot createReferenceSurfaceSnapshot(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int[][] lumaSamples,
             @Nullable int[][] chromaUSamples,
             @Nullable int[][] chromaVSamples
@@ -5434,7 +5434,7 @@ final class FrameReconstructorTest {
     /// @param chromaVSamples the chroma-V sample raster, or `null`
     /// @return one stored reference surface snapshot for synthetic inter reconstruction tests
     private static ReferenceSurfaceSnapshot createReferenceSurfaceSnapshot(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             int[][] lumaSamples,
             @Nullable int[][] chromaUSamples,
@@ -5473,7 +5473,7 @@ final class FrameReconstructorTest {
     /// @param chromaVSamples the post-upscale chroma-V sample raster, or `null`
     /// @return one stored reference surface snapshot with super-resolution metadata
     private static ReferenceSurfaceSnapshot createSuperResolvedReferenceSurfaceSnapshot(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int upscaledWidth,
             int[][] lumaSamples,
@@ -5769,7 +5769,7 @@ final class FrameReconstructorTest {
     /// @param size the coded block size
     /// @param pixelFormat the active decoded chroma layout
     /// @return one transform layout that exactly covers one leaf block
-    private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, PixelFormat pixelFormat) {
+    private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, AvifPixelFormat pixelFormat) {
         TransformSize transformSize = size.maxLumaTransformSize();
         return new TransformLayout(
                 position,
@@ -5845,7 +5845,7 @@ final class FrameReconstructorTest {
     private static ResidualLayout createChromaDcResidualLayout(
             BlockPosition position,
             BlockSize size,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int chromaUDcCoefficient,
             int chromaVDcCoefficient
     ) {
@@ -5923,7 +5923,7 @@ final class FrameReconstructorTest {
     ///
     /// @param pixelFormat the non-monochrome decoded chroma layout to test
     /// @param chromaPaletteIndices the unpacked chroma palette index raster for the tested layout
-    private static void assertChromaPaletteResidualOverlay(PixelFormat pixelFormat, int[][] chromaPaletteIndices) {
+    private static void assertChromaPaletteResidualOverlay(AvifPixelFormat pixelFormat, int[][] chromaPaletteIndices) {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize size = BlockSize.SIZE_8X8;
         int[] chromaPaletteU = new int[]{48, 144, 216};
@@ -6062,7 +6062,7 @@ final class FrameReconstructorTest {
     /// @param lumaWidth the luma width in samples
     /// @param pixelFormat the decoded chroma layout
     /// @return the corresponding chroma width in samples
-    private static int chromaSampleWidth(int lumaWidth, PixelFormat pixelFormat) {
+    private static int chromaSampleWidth(int lumaWidth, AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400 -> throw new AssertionError("Expected chroma pixel format");
             case I420, I422 -> (lumaWidth + 1) >> 1;
@@ -6075,7 +6075,7 @@ final class FrameReconstructorTest {
     /// @param lumaHeight the luma height in samples
     /// @param pixelFormat the decoded chroma layout
     /// @return the corresponding chroma height in samples
-    private static int chromaSampleHeight(int lumaHeight, PixelFormat pixelFormat) {
+    private static int chromaSampleHeight(int lumaHeight, AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400 -> throw new AssertionError("Expected chroma pixel format");
             case I420 -> (lumaHeight + 1) >> 1;
@@ -6105,7 +6105,7 @@ final class FrameReconstructorTest {
     /// @param roots the top-level roots for one synthetic tile
     private static void reconstructSyntheticTileRootsIntoSharedLumaPlane(
             MutablePlaneBuffer sharedLumaPlane,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             TilePartitionTreeReader.Node[] roots
     ) {
@@ -6116,7 +6116,7 @@ final class FrameReconstructorTest {
                     MutablePlaneBuffer.class,
                     MutablePlaneBuffer.class,
                     MutablePlaneBuffer.class,
-                    PixelFormat.class,
+                    AvifPixelFormat.class,
                     FrameHeader.class,
                     int.class,
                     ReferenceSurfaceSnapshot[].class

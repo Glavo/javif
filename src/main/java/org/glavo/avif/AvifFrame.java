@@ -15,7 +15,6 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.PixelFormat;
 import org.glavo.avif.internal.PixelBuffers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -36,7 +35,7 @@ public final class AvifFrame {
     /// The decoded bit depth.
     private final AvifBitDepth bitDepth;
     /// The decoded AV1 chroma sampling layout.
-    private final PixelFormat pixelFormat;
+    private final AvifPixelFormat pixelFormat;
     /// The zero-based frame index.
     private final int frameIndex;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
@@ -52,7 +51,7 @@ public final class AvifFrame {
     /// @param pixelFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
-    public AvifFrame(int width, int height, AvifBitDepth bitDepth, PixelFormat pixelFormat, int frameIndex, int[] pixels) {
+    public AvifFrame(int width, int height, AvifBitDepth bitDepth, AvifPixelFormat pixelFormat, int frameIndex, int[] pixels) {
         this(width, height, bitDepth, pixelFormat, frameIndex,
                 PixelBuffers.immutableIntPixels(Objects.requireNonNull(pixels, "pixels")), null);
     }
@@ -65,7 +64,7 @@ public final class AvifFrame {
     /// @param pixelFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
-    public AvifFrame(int width, int height, AvifBitDepth bitDepth, PixelFormat pixelFormat, int frameIndex, long[] pixels) {
+    public AvifFrame(int width, int height, AvifBitDepth bitDepth, AvifPixelFormat pixelFormat, int frameIndex, long[] pixels) {
         this(width, height, bitDepth, pixelFormat, frameIndex,
                 null, PixelBuffers.immutableLongPixels(Objects.requireNonNull(pixels, "pixels")));
     }
@@ -85,7 +84,7 @@ public final class AvifFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int frameIndex,
             @Unmodifiable IntBuffer pixels
     ) {
@@ -107,7 +106,7 @@ public final class AvifFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int frameIndex,
             @Unmodifiable LongBuffer pixels
     ) {
@@ -127,7 +126,7 @@ public final class AvifFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int frameIndex,
             @Nullable @Unmodifiable IntBuffer intPixels,
             @Nullable @Unmodifiable LongBuffer longPixels
@@ -168,7 +167,7 @@ public final class AvifFrame {
     /// Returns the decoded AV1 chroma sampling layout.
     ///
     /// @return the decoded AV1 chroma sampling layout
-    public PixelFormat pixelFormat() {
+    public AvifPixelFormat pixelFormat() {
         return pixelFormat;
     }
 

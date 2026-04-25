@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
@@ -575,8 +576,8 @@ public final class BlockNeighborContext {
     ///
     /// @param pixelFormat the decoded sequence pixel format
     /// @return the horizontal chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingX(org.glavo.avif.decode.PixelFormat pixelFormat) {
-        org.glavo.avif.decode.PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
+        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         return switch (nonNullPixelFormat) {
             case I400, I444 -> 0;
             case I420, I422 -> 1;
@@ -587,8 +588,8 @@ public final class BlockNeighborContext {
     ///
     /// @param pixelFormat the decoded sequence pixel format
     /// @return the vertical chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingY(org.glavo.avif.decode.PixelFormat pixelFormat) {
-        org.glavo.avif.decode.PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
+        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         return switch (nonNullPixelFormat) {
             case I400, I422, I444 -> 0;
             case I420 -> 1;

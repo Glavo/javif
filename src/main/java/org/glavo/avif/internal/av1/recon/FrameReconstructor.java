@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -309,7 +309,7 @@ public final class FrameReconstructor {
         SequenceHeader sequenceHeader = assembly.sequenceHeader();
         FrameHeader frameHeader = assembly.frameHeader();
         FrameHeader.FrameSize frameSize = frameHeader.frameSize();
-        PixelFormat pixelFormat = sequenceHeader.colorConfig().pixelFormat();
+        AvifPixelFormat pixelFormat = sequenceHeader.colorConfig().pixelFormat();
 
         requireSupportedSequence(sequenceHeader, frameHeader, checkedSyntaxDecodeResult);
 
@@ -385,10 +385,10 @@ public final class FrameReconstructor {
                             + sequenceHeader.colorConfig().bitDepth()
             );
         }
-        if (sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I400
-                && sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I420
-                && sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I422
-                && sequenceHeader.colorConfig().pixelFormat() != PixelFormat.I444) {
+        if (sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I400
+                && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I420
+                && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I422
+                && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I444) {
             throw new IllegalStateException(
                     "Pixel reconstruction currently supports only I400/I420/I422/I444: "
                             + sequenceHeader.colorConfig().pixelFormat()
@@ -412,7 +412,7 @@ public final class FrameReconstructor {
     /// @param bitDepth the decoded sample bit depth
     /// @return one mutable chroma plane for the current supported pixel format, or `null`
     private static @Nullable MutablePlaneBuffer createChromaPlane(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader.FrameSize frameSize,
             int bitDepth
     ) {
@@ -451,7 +451,7 @@ public final class FrameReconstructor {
     /// @return one decoded-plane snapshot in the post-super-resolution domain
     private static DecodedPlanes applySuperResolution(
             int bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader.FrameSize frameSize,
             DecodedPlane lumaPlane,
             @Nullable DecodedPlane chromaUPlane,
@@ -483,7 +483,7 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param upscaledLumaWidth the post-super-resolution luma width
     /// @return the post-super-resolution chroma width for one pixel format
-    private static int upscaledChromaWidth(PixelFormat pixelFormat, int upscaledLumaWidth) {
+    private static int upscaledChromaWidth(AvifPixelFormat pixelFormat, int upscaledLumaWidth) {
         return switch (pixelFormat) {
             case I400 -> 0;
             case I420, I422 -> (upscaledLumaWidth + 1) >> 1;
@@ -807,7 +807,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
@@ -841,7 +841,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
@@ -892,7 +892,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
@@ -1053,7 +1053,7 @@ public final class FrameReconstructor {
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             ResidualLayout residualLayout,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
@@ -1071,7 +1071,7 @@ public final class FrameReconstructor {
                     header.hasChroma()
             );
         }
-        if (header.hasChroma() && pixelFormat == PixelFormat.I400) {
+        if (header.hasChroma() && pixelFormat == AvifPixelFormat.I400) {
             throw new IllegalStateException("Monochrome reconstruction encountered a block with chroma samples");
         }
         if (!header.hasChroma() && residualLayout.hasChromaUnits()) {
@@ -1186,7 +1186,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
@@ -1265,7 +1265,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
@@ -1403,7 +1403,7 @@ public final class FrameReconstructor {
             int subsamplingX,
             int subsamplingY,
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1480,7 +1480,7 @@ public final class FrameReconstructor {
             int subsamplingX,
             int subsamplingY,
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1556,7 +1556,7 @@ public final class FrameReconstructor {
             int[] mask,
             boolean above,
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
@@ -1675,7 +1675,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         DecodedPlane lumaSnapshot = lumaPlane.toDecodedPlane();
@@ -1764,7 +1764,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
@@ -1865,7 +1865,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
@@ -2264,7 +2264,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         InterIntraPredictionMode mode = Objects.requireNonNull(header.interIntraMode(), "header.interIntraMode()");
         int lumaX = header.position().x4() << 2;
@@ -2419,7 +2419,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
@@ -3472,7 +3472,7 @@ public final class FrameReconstructor {
     private static ReferenceSurfaceSnapshot requireReferenceSurfaceSnapshot(
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             int referenceFramePosition
     ) {
@@ -3513,7 +3513,7 @@ public final class FrameReconstructor {
     /// @param verticalInterpolationFilter the effective vertical interpolation filter mode
     private static void requireSupportedInterMotionVector(
             MotionVector motionVector,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean hasChroma,
             FrameHeader.InterpolationFilter horizontalInterpolationFilter,
             FrameHeader.InterpolationFilter verticalInterpolationFilter
@@ -3521,7 +3521,7 @@ public final class FrameReconstructor {
         MotionVector checkedMotionVector = Objects.requireNonNull(motionVector, "motionVector");
         boolean lumaFractional = (checkedMotionVector.rowQuarterPel() & 0x03) != 0
                 || (checkedMotionVector.columnQuarterPel() & 0x03) != 0;
-        if (!hasChroma || pixelFormat == PixelFormat.I400) {
+        if (!hasChroma || pixelFormat == AvifPixelFormat.I400) {
             if (lumaFractional
                     && (!supportsFixedFractionalInterFilter(horizontalInterpolationFilter)
                     || !supportsFixedFractionalInterFilter(verticalInterpolationFilter))) {
@@ -3556,7 +3556,7 @@ public final class FrameReconstructor {
     /// @param hasChroma whether the block carries chroma samples
     private static void requireSupportedIntrabcMotionVector(
             MotionVector motionVector,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean hasChroma
     ) {
         Objects.requireNonNull(motionVector, "motionVector");
@@ -3608,7 +3608,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaUPlane,
             MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int visibleChromaWidth,
             int visibleChromaHeight
     ) {
@@ -3807,7 +3807,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaVPlane,
             ResidualLayout residualLayout,
             FrameHeader frameHeader,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int qIndex
     ) {
         FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
@@ -3834,7 +3834,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaPlane,
             TransformResidualUnit[] residualUnits,
             ChromaDequantizer.Context dequantizationContext,
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
@@ -3864,7 +3864,7 @@ public final class FrameReconstructor {
     ///
     /// @param pixelFormat the active decoded chroma layout
     /// @return the horizontal chroma subsampling shift for one decoded pixel format
-    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400, I444 -> 0;
             case I420, I422 -> 1;
@@ -3875,7 +3875,7 @@ public final class FrameReconstructor {
     ///
     /// @param pixelFormat the active decoded chroma layout
     /// @return the vertical chroma subsampling shift for one decoded pixel format
-    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
         return switch (pixelFormat) {
             case I400, I422, I444 -> 0;
             case I420 -> 1;

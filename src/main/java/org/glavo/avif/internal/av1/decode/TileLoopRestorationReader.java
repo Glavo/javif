@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -68,7 +68,7 @@ final class TileLoopRestorationReader {
     private final FrameHeader frameHeader;
 
     /// The active decoded pixel format.
-    private final PixelFormat pixelFormat;
+    private final AvifPixelFormat pixelFormat;
 
     /// The frame-level restoration types.
     private final FrameHeader.RestorationType[] frameTypes;

@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.output;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -56,7 +56,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void convertsTenBitI400SamplesIntoOpaqueArgbLongPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 10,
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 3,
                 2,
                 3,
@@ -91,7 +91,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void convertsTwelveBitI444SamplesUsingPerPixelChromaIntoOpaqueArgbLongPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 12,
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 4,
                 2,
                 4,
@@ -125,7 +125,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void returnsDecodedFrameMetadataForTwelveBitI444Output() {
         DecodedPlanes planes = new DecodedPlanes(
                 12,
-                PixelFormat.I444,
+                AvifPixelFormat.I444,
                 2,
                 1,
                 2,
@@ -162,7 +162,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void rejectsEightBitDecodedPlanesForLongOutputOnlyEntryPointsOrSupportsThemExplicitly() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 3,
                 1,
                 3,

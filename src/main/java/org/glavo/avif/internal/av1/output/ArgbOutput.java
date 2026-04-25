@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.output;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -67,7 +67,7 @@ public final class ArgbOutput {
         int pixelCount = checkedPixelCount(renderWidth, renderHeight);
         int[] pixels = new int[pixelCount];
 
-        PixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
+        AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
         return switch (pixelFormat) {
             case I400 -> convertOpaqueI400(checkedDecodedPlanes.lumaPlane(), renderWidth, renderHeight, pixels, checkedTransform);
             case I420 -> convertOpaqueI420(
@@ -202,7 +202,7 @@ public final class ArgbOutput {
         int pixelCount = checkedPixelCount(renderWidth, renderHeight);
         long[] pixels = new long[pixelCount];
 
-        PixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
+        AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
         int bitDepth = checkedDecodedPlanes.bitDepth();
         return switch (pixelFormat) {
             case I400 -> convertOpaqueLongI400(

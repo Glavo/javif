@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -69,10 +69,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -101,10 +101,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, negativeChromaVLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, negativeChromaVLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -134,10 +134,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -181,10 +181,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 7, 5, baselineLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 7, 5, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 7, 5, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 7, 5, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -211,7 +211,7 @@ final class FrameReconstructorChromaResidualTest {
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
         );
 
         assertPlaneEquals(
@@ -261,10 +261,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 10, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 10, 8, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 10, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 10, 8, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -305,10 +305,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 16, baselineLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 16, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 16, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 16, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -385,10 +385,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 14, 14, baselineLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 14, 14, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 14, 14, residualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 14, 14, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -428,10 +428,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 32, 32, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 32, 32, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 32, 32, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 32, 32, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -462,10 +462,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 8, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(PixelFormat.I420, FrameType.INTRA, 16, 8, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 8, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -528,7 +528,7 @@ final class FrameReconstructorChromaResidualTest {
                         (visibleHeightPixels + 3) >> 2,
                         visibleWidthPixels,
                         visibleHeightPixels,
-                        PixelFormat.I400
+                        AvifPixelFormat.I400
                 ),
                 createMonochromeResidualLayout(
                         position,
@@ -600,7 +600,7 @@ final class FrameReconstructorChromaResidualTest {
                         visibleHeight4,
                         visibleWidthPixels,
                         visibleHeightPixels,
-                        PixelFormat.I420
+                        AvifPixelFormat.I420
                 ),
                 createResidualLayout(
                         position,
@@ -646,7 +646,7 @@ final class FrameReconstructorChromaResidualTest {
                         visibleHeight4,
                         visibleWidthPixels,
                         visibleHeightPixels,
-                        PixelFormat.I420
+                        AvifPixelFormat.I420
                 ),
                 createResidualLayout(position, size, lumaUnits, chromaUUnits, chromaVUnits)
         );
@@ -693,7 +693,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param roots the synthetic single-tile partition roots
     /// @return one structural frame result
     private static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameType frameType,
             int width,
             int height,
@@ -722,7 +722,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param width the frame width
     /// @param height the frame height
     /// @return one minimal reduced-still-picture sequence header
-    private static SequenceHeader createSequenceHeader(PixelFormat pixelFormat, int width, int height) {
+    private static SequenceHeader createSequenceHeader(AvifPixelFormat pixelFormat, int width, int height) {
         return new SequenceHeader(
                 0,
                 width,
@@ -759,7 +759,7 @@ final class FrameReconstructorChromaResidualTest {
                 ),
                 new SequenceHeader.ColorConfig(
                         8,
-                        pixelFormat == PixelFormat.I400,
+                        pixelFormat == AvifPixelFormat.I400,
                         false,
                         2,
                         2,
@@ -767,8 +767,8 @@ final class FrameReconstructorChromaResidualTest {
                         true,
                         pixelFormat,
                         0,
-                        pixelFormat != PixelFormat.I444,
-                        pixelFormat == PixelFormat.I420,
+                        pixelFormat != AvifPixelFormat.I444,
+                        pixelFormat == AvifPixelFormat.I420,
                         false
                 )
         );
@@ -926,7 +926,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param size the coded block size
     /// @param pixelFormat the active decoded chroma layout
     /// @return one transform layout that exactly covers one leaf block
-    private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, PixelFormat pixelFormat) {
+    private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, AvifPixelFormat pixelFormat) {
         return createTransformLayout(
                 position,
                 size,
@@ -955,7 +955,7 @@ final class FrameReconstructorChromaResidualTest {
             int visibleHeight4,
             int visibleWidthPixels,
             int visibleHeightPixels,
-            PixelFormat pixelFormat
+            AvifPixelFormat pixelFormat
     ) {
         TransformSize transformSize = size.maxLumaTransformSize();
         return new TransformLayout(
@@ -1098,7 +1098,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param size the coded block size
     /// @return the guaranteed-present `I420` chroma transform size
     private static TransformSize requireI420ChromaTransformSize(BlockSize size) {
-        TransformSize chromaTransformSize = size.maxChromaTransformSize(PixelFormat.I420);
+        TransformSize chromaTransformSize = size.maxChromaTransformSize(AvifPixelFormat.I420);
         assertNotNull(chromaTransformSize);
         return chromaTransformSize;
     }
@@ -1195,7 +1195,7 @@ final class FrameReconstructorChromaResidualTest {
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane baseline = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         FrameType.INTRA,
                         visibleWidthPixels,
                         visibleHeightPixels,
@@ -1204,7 +1204,7 @@ final class FrameReconstructorChromaResidualTest {
         ).lumaPlane();
         DecodedPlane residual = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         FrameType.INTRA,
                         visibleWidthPixels,
                         visibleHeightPixels,

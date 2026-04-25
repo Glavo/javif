@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -32,7 +32,7 @@ public final class DecodedPlanes {
     private final int bitDepth;
 
     /// The chroma layout of the decoded planes.
-    private final PixelFormat pixelFormat;
+    private final AvifPixelFormat pixelFormat;
 
     /// The stored luma width in samples.
     private final int codedWidth;
@@ -68,7 +68,7 @@ public final class DecodedPlanes {
     /// @param chromaVPlane the decoded chroma V plane, or `null` for monochrome output
     public DecodedPlanes(
             int bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight,
             int renderWidth,
@@ -120,7 +120,7 @@ public final class DecodedPlanes {
     /// Returns the chroma layout of the decoded planes.
     ///
     /// @return the chroma layout of the decoded planes
-    public PixelFormat pixelFormat() {
+    public AvifPixelFormat pixelFormat() {
         return pixelFormat;
     }
 
@@ -182,7 +182,7 @@ public final class DecodedPlanes {
 
     /// Validates the stored chroma-plane arrangement against the pixel format.
     private void validateChromaPlanes() {
-        if (pixelFormat == PixelFormat.I400) {
+        if (pixelFormat == AvifPixelFormat.I400) {
             if (chromaUPlane != null || chromaVPlane != null) {
                 throw new IllegalArgumentException("I400 output must not carry chroma planes");
             }
@@ -208,7 +208,7 @@ public final class DecodedPlanes {
     /// @param pixelFormat the chroma layout of the decoded planes
     /// @param codedWidth the coded luma width in samples
     /// @return the expected chroma width for one pixel format
-    private static int expectedChromaWidth(PixelFormat pixelFormat, int codedWidth) {
+    private static int expectedChromaWidth(AvifPixelFormat pixelFormat, int codedWidth) {
         return switch (pixelFormat) {
             case I400 -> 0;
             case I420, I422 -> (codedWidth + 1) / 2;
@@ -221,7 +221,7 @@ public final class DecodedPlanes {
     /// @param pixelFormat the chroma layout of the decoded planes
     /// @param codedHeight the coded luma height in samples
     /// @return the expected chroma height for one pixel format
-    private static int expectedChromaHeight(PixelFormat pixelFormat, int codedHeight) {
+    private static int expectedChromaHeight(AvifPixelFormat pixelFormat, int codedHeight) {
         return switch (pixelFormat) {
             case I400 -> 0;
             case I420 -> (codedHeight + 1) / 2;

@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.decode.DecodeErrorCode;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodeStage;
@@ -460,7 +461,7 @@ final class FrameHeaderParserTest {
                         2,
                         2,
                         false,
-                        org.glavo.avif.decode.PixelFormat.I420,
+                        AvifPixelFormat.I420,
                         0,
                         true,
                         true,

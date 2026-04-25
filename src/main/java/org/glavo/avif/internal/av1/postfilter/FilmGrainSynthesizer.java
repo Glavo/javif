@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
@@ -135,7 +135,7 @@ public final class FilmGrainSynthesizer {
     private static DecodedPlane applyChromaGrain(
             DecodedPlane chromaPlane,
             DecodedPlane lumaPlane,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int bitDepth,
             FrameHeader.FilmGrainParams filmGrain,
             boolean cbPlane
@@ -144,8 +144,8 @@ public final class FilmGrainSynthesizer {
         int maximumSample = (1 << bitDepth) - 1;
         int minimumSample = restrictedRangeMinimum(bitDepth, false, filmGrain.clipToRestrictedRange());
         int maximumClippedSample = restrictedRangeMaximum(bitDepth, false, filmGrain.clipToRestrictedRange());
-        int subSamplingX = pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422 ? 1 : 0;
-        int subSamplingY = pixelFormat == PixelFormat.I420 ? 1 : 0;
+        int subSamplingX = pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422 ? 1 : 0;
+        int subSamplingY = pixelFormat == AvifPixelFormat.I420 ? 1 : 0;
         for (int y = 0; y < chromaPlane.height(); y++) {
             for (int x = 0; x < chromaPlane.width(); x++) {
                 int chromaSample = chromaPlane.sample(x, y);

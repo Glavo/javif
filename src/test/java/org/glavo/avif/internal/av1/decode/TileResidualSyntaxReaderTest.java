@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -202,7 +202,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsAllZeroChromaResidualUnitsForMinimalI420Block() {
         byte[] payload = findPayloadForAllZeroMinimalI420ChromaResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -226,7 +226,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsDcOnlyChromaResidualUnitsForMinimalI420Block() {
         byte[] payload = findPayloadForDcOnlyMinimalI420ChromaResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -255,7 +255,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsMultiCoefficientChromaUResidualUnitForMinimalI420Block() {
         byte[] payload = findPayloadForMultiCoefficientMinimalI420ChromaUResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -280,7 +280,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsMultiCoefficientChromaUResidualUnitForLargerI420Block() {
         byte[] payload = findPayloadForMultiCoefficientLargerTransformI420ChromaUResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 16, 16);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST, 16, 16);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -308,7 +308,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsDcOnlyChromaResidualUnitsForMinimalI422Block() {
         byte[] payload = findPayloadForDcOnlyMinimalI422ChromaResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I422, FrameHeader.TransformMode.LARGEST);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I422, FrameHeader.TransformMode.LARGEST);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -318,7 +318,7 @@ final class TileResidualSyntaxReaderTest {
         TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
         TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
         ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
-        ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, PixelFormat.I422);
+        ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, AvifPixelFormat.I422);
         TransformResidualUnit expectedChromaU = expectedResidualLayout.chromaUUnits()[0];
         TransformResidualUnit expectedChromaV = expectedResidualLayout.chromaVUnits()[0];
 
@@ -338,7 +338,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsMultiCoefficientChromaUResidualUnitForLargerI422Block() {
         byte[] payload = findPayloadForMultiCoefficientLargerTransformI422ChromaUResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I422, FrameHeader.TransformMode.LARGEST, 16, 16);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I422, FrameHeader.TransformMode.LARGEST, 16, 16);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -349,7 +349,7 @@ final class TileResidualSyntaxReaderTest {
         TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
         ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
         ResidualLayout expectedResidualLayout =
-                decodeExpectedChromaResidualLayout(payload, PixelFormat.I422, BlockSize.SIZE_16X16, 16, 16);
+                decodeExpectedChromaResidualLayout(payload, AvifPixelFormat.I422, BlockSize.SIZE_16X16, 16, 16);
         TransformResidualUnit expectedChromaU = expectedResidualLayout.chromaUUnits()[0];
 
         assertTrue(header.hasChroma());
@@ -368,7 +368,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsNonZeroChromaResidualUnitsForMinimalI444Block() {
         byte[] payload = findPayloadForNonZeroMinimalI444ChromaResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I444, FrameHeader.TransformMode.LARGEST);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I444, FrameHeader.TransformMode.LARGEST);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -378,7 +378,7 @@ final class TileResidualSyntaxReaderTest {
         TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
         TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
         ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
-        ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, PixelFormat.I444);
+        ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, AvifPixelFormat.I444);
         TransformResidualUnit expectedChromaU = expectedResidualLayout.chromaUUnits()[0];
         TransformResidualUnit expectedChromaV = expectedResidualLayout.chromaVUnits()[0];
 
@@ -396,7 +396,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsDcOnlyChromaResidualUnitsForMinimalI420BlockWithOddFrameDimensions() {
         byte[] payload = findPayloadForDcOnlyMinimalI420ChromaResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 7, 7);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST, 7, 7);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -428,7 +428,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsClippedChromaResidualUnitsForMinimalI420BlockWithClippedVisibleChromaFootprint() {
         byte[] payload = findPayloadForDcOnlyMinimalI420ChromaResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 7, 5);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST, 7, 5);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -460,7 +460,7 @@ final class TileResidualSyntaxReaderTest {
     @Test
     void readsClippedChromaResidualUnitsForMinimalI422BlockWithClippedVisibleChromaFootprint() {
         byte[] payload = findPayloadForDcOnlyMinimalI422ChromaResidual();
-        TileDecodeContext tileContext = createTileContext(payload, PixelFormat.I422, FrameHeader.TransformMode.LARGEST, 7, 5);
+        TileDecodeContext tileContext = createTileContext(payload, AvifPixelFormat.I422, FrameHeader.TransformMode.LARGEST, 7, 5);
         TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
@@ -470,7 +470,7 @@ final class TileResidualSyntaxReaderTest {
         TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, BlockSize.SIZE_8X8, neighborContext, false);
         TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
         ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
-        ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, PixelFormat.I422, 7, 5);
+        ResidualLayout expectedResidualLayout = decodeExpectedMinimalChromaResidualLayout(payload, AvifPixelFormat.I422, 7, 5);
 
         assertTrue(header.hasChroma());
         assertEquals(2, transformLayout.visibleWidth4());
@@ -492,7 +492,7 @@ final class TileResidualSyntaxReaderTest {
     /// block-level chroma footprint.
     @Test
     void readsAllZeroMultiUnitChromaResidualsForSyntheticI420Leaf() {
-        TileDecodeContext tileContext = createTileContext(new byte[0], PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 16, 16);
+        TileDecodeContext tileContext = createTileContext(new byte[0], AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST, 16, 16);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
         BlockPosition position = new BlockPosition(0, 0);
@@ -531,7 +531,7 @@ final class TileResidualSyntaxReaderTest {
     /// their exact visible fringe footprints.
     @Test
     void readsClippedMultiUnitChromaResidualsForSyntheticI420Leaf() {
-        TileDecodeContext tileContext = createTileContext(new byte[0], PixelFormat.I420, FrameHeader.TransformMode.LARGEST, 14, 14);
+        TileDecodeContext tileContext = createTileContext(new byte[0], AvifPixelFormat.I420, FrameHeader.TransformMode.LARGEST, 14, 14);
         TileResidualSyntaxReader residualSyntaxReader = new TileResidualSyntaxReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
         BlockPosition position = new BlockPosition(0, 0);
@@ -665,11 +665,11 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I420` chroma residuals are both all-zero
     private static byte[] findPayloadForAllZeroMinimalI420ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I420, true, true);
+        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, true, true);
         if (isolatedPayload != null) {
             return isolatedPayload;
         }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(PixelFormat.I420, false, true);
+        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, false, true);
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
@@ -680,11 +680,11 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I420` chroma residuals are both DC-only and non-zero
     private static byte[] findPayloadForDcOnlyMinimalI420ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I420, true, false);
+        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, true, false);
         if (isolatedPayload != null) {
             return isolatedPayload;
         }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(PixelFormat.I420, false, false);
+        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, false, false);
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
@@ -695,11 +695,11 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I422` chroma residuals are both DC-only and non-zero
     private static byte[] findPayloadForDcOnlyMinimalI422ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I422, true, false);
+        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I422, true, false);
         if (isolatedPayload != null) {
             return isolatedPayload;
         }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(PixelFormat.I422, false, false);
+        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I422, false, false);
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
@@ -711,11 +711,11 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I444` chroma residuals include non-zero chroma tokens
     private static byte[] findPayloadForNonZeroMinimalI444ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(PixelFormat.I444, true, false);
+        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I444, true, false);
         if (isolatedPayload != null) {
             return isolatedPayload;
         }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(PixelFormat.I444, false, false);
+        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I444, false, false);
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
@@ -727,11 +727,11 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I420` chroma-U residual exposes one multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientMinimalI420ChromaUResidual() {
-        byte[] isolatedPayload = findPayloadForMultiCoefficientMinimalChromaUResidual(PixelFormat.I420, true);
+        byte[] isolatedPayload = findPayloadForMultiCoefficientMinimalChromaUResidual(AvifPixelFormat.I420, true);
         if (isolatedPayload != null) {
             return isolatedPayload;
         }
-        byte[] fallbackPayload = findPayloadForMultiCoefficientMinimalChromaUResidual(PixelFormat.I420, false);
+        byte[] fallbackPayload = findPayloadForMultiCoefficientMinimalChromaUResidual(AvifPixelFormat.I420, false);
         if (fallbackPayload != null) {
             return fallbackPayload;
         }
@@ -745,7 +745,7 @@ final class TileResidualSyntaxReaderTest {
     /// multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientLargerTransformI420ChromaUResidual() {
         byte[] isolatedPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 BlockSize.SIZE_16X16,
                 16,
                 16,
@@ -755,7 +755,7 @@ final class TileResidualSyntaxReaderTest {
             return isolatedPayload;
         }
         byte[] fallbackPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 BlockSize.SIZE_16X16,
                 16,
                 16,
@@ -774,7 +774,7 @@ final class TileResidualSyntaxReaderTest {
     /// multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientLargerTransformI422ChromaUResidual() {
         byte[] isolatedPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 BlockSize.SIZE_16X16,
                 16,
                 16,
@@ -784,7 +784,7 @@ final class TileResidualSyntaxReaderTest {
             return isolatedPayload;
         }
         byte[] fallbackPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                PixelFormat.I422,
+                AvifPixelFormat.I422,
                 BlockSize.SIZE_16X16,
                 16,
                 16,
@@ -803,12 +803,12 @@ final class TileResidualSyntaxReaderTest {
     /// @param requireAllZeroChroma whether both chroma units must be all-zero instead of DC-only
     /// @return the fixture-backed payload whose minimal chroma residuals match the requested mode, or `null`
     private static byte[] findPayloadForMinimalChromaResidual(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean requireAllZeroLuma,
             boolean requireAllZeroChroma
     ) {
         Objects.requireNonNull(pixelFormat, "pixelFormat");
-        if (pixelFormat == PixelFormat.I420) {
+        if (pixelFormat == AvifPixelFormat.I420) {
             if (requireAllZeroChroma) {
                 return readTileResidualFixture(requireAllZeroLuma
                         ? "i420-minimal-all-zero-isolated"
@@ -818,12 +818,12 @@ final class TileResidualSyntaxReaderTest {
                     ? "i420-minimal-dc-isolated"
                     : "i420-minimal-dc-fallback");
         }
-        if (pixelFormat == PixelFormat.I422 && !requireAllZeroChroma) {
+        if (pixelFormat == AvifPixelFormat.I422 && !requireAllZeroChroma) {
             return readTileResidualFixture(requireAllZeroLuma
                     ? "i422-minimal-dc-isolated"
                     : "i422-minimal-dc-fallback");
         }
-        if (pixelFormat == PixelFormat.I444 && !requireAllZeroChroma) {
+        if (pixelFormat == AvifPixelFormat.I444 && !requireAllZeroChroma) {
             return readTileResidualFixture(requireAllZeroLuma
                     ? "i444-minimal-nonzero-isolated"
                     : "i444-minimal-nonzero-fallback");
@@ -839,11 +839,11 @@ final class TileResidualSyntaxReaderTest {
     /// @return the fixture-backed payload whose minimal chroma-U residual exposes one multi-coefficient unit,
     /// or `null`
     private static byte[] findPayloadForMultiCoefficientMinimalChromaUResidual(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             boolean requireAllZeroLuma
     ) {
         Objects.requireNonNull(pixelFormat, "pixelFormat");
-        if (pixelFormat == PixelFormat.I420) {
+        if (pixelFormat == AvifPixelFormat.I420) {
             return readTileResidualFixture(requireAllZeroLuma
                     ? "i420-minimal-multi-u-isolated"
                     : "i420-minimal-multi-u-fallback");
@@ -862,7 +862,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return the fixture-backed payload whose larger-transform chroma-U residual exposes one multi-coefficient
     /// unit, or `null`
     private static byte[] findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             BlockSize blockSize,
             int codedWidth,
             int codedHeight,
@@ -873,12 +873,12 @@ final class TileResidualSyntaxReaderTest {
         if (blockSize != BlockSize.SIZE_16X16 || codedWidth != 16 || codedHeight != 16) {
             return null;
         }
-        if (pixelFormat == PixelFormat.I420) {
+        if (pixelFormat == AvifPixelFormat.I420) {
             return readTileResidualFixture(requireAllZeroLuma
                     ? "i420-tx8x8-multi-u-isolated"
                     : "i420-tx8x8-multi-u-fallback");
         }
-        if (pixelFormat == PixelFormat.I422) {
+        if (pixelFormat == AvifPixelFormat.I422) {
             return readTileResidualFixture(requireAllZeroLuma
                     ? "i422-rtx8x16-multi-u-isolated"
                     : "i422-rtx8x16-multi-u-fallback");
@@ -1014,7 +1014,7 @@ final class TileResidualSyntaxReaderTest {
     /// @param payload the collected tile entropy payload
     /// @return the expected minimal `I420` residual layout
     private static ResidualLayout decodeExpectedMinimalI420ResidualLayout(byte[] payload) {
-        return decodeExpectedMinimalChromaResidualLayout(payload, PixelFormat.I420);
+        return decodeExpectedMinimalChromaResidualLayout(payload, AvifPixelFormat.I420);
     }
 
     /// Decodes the expected minimal `I420` residual layout using a luma-only advance plus a chroma oracle.
@@ -1024,7 +1024,7 @@ final class TileResidualSyntaxReaderTest {
     /// @param codedHeight the synthetic coded frame height in pixels
     /// @return the expected minimal `I420` residual layout
     private static ResidualLayout decodeExpectedMinimalI420ResidualLayout(byte[] payload, int codedWidth, int codedHeight) {
-        return decodeExpectedMinimalChromaResidualLayout(payload, PixelFormat.I420, codedWidth, codedHeight);
+        return decodeExpectedMinimalChromaResidualLayout(payload, AvifPixelFormat.I420, codedWidth, codedHeight);
     }
 
     /// Decodes one expected currently supported `I420` residual layout for the supplied block size.
@@ -1040,7 +1040,7 @@ final class TileResidualSyntaxReaderTest {
             int codedWidth,
             int codedHeight
     ) {
-        return decodeExpectedChromaResidualLayout(payload, PixelFormat.I420, blockSize, codedWidth, codedHeight);
+        return decodeExpectedChromaResidualLayout(payload, AvifPixelFormat.I420, blockSize, codedWidth, codedHeight);
     }
 
     /// Decodes the expected minimal chroma residual layout using a luma-only advance plus a
@@ -1049,7 +1049,7 @@ final class TileResidualSyntaxReaderTest {
     /// @param payload the collected tile entropy payload
     /// @param pixelFormat the synthetic sequence pixel format
     /// @return the expected minimal chroma residual layout
-    private static ResidualLayout decodeExpectedMinimalChromaResidualLayout(byte[] payload, PixelFormat pixelFormat) {
+    private static ResidualLayout decodeExpectedMinimalChromaResidualLayout(byte[] payload, AvifPixelFormat pixelFormat) {
         return decodeExpectedMinimalChromaResidualLayout(payload, pixelFormat, DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT);
     }
 
@@ -1063,7 +1063,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return the expected minimal chroma residual layout
     private static ResidualLayout decodeExpectedMinimalChromaResidualLayout(
             byte[] payload,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int codedWidth,
             int codedHeight
     ) {
@@ -1080,7 +1080,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return the expected currently supported chroma residual layout
     private static ResidualLayout decodeExpectedChromaResidualLayout(
             byte[] payload,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             BlockSize blockSize,
             int codedWidth,
             int codedHeight
@@ -1717,7 +1717,7 @@ final class TileResidualSyntaxReaderTest {
     /// @param payload the collected tile entropy payload
     /// @return one synthetic tile-local decode context used by residual-syntax tests
     private static TileDecodeContext createTileContext(byte[] payload) {
-        return createTileContext(payload, PixelFormat.I400, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY);
+        return createTileContext(payload, AvifPixelFormat.I400, FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY);
     }
 
     /// Creates one synthetic tile-local decode context used by residual-syntax tests.
@@ -1726,7 +1726,7 @@ final class TileResidualSyntaxReaderTest {
     /// @param transformMode the synthetic frame transform mode
     /// @return one synthetic tile-local decode context used by residual-syntax tests
     private static TileDecodeContext createTileContext(byte[] payload, FrameHeader.TransformMode transformMode) {
-        return createTileContext(payload, PixelFormat.I400, transformMode);
+        return createTileContext(payload, AvifPixelFormat.I400, transformMode);
     }
 
     /// Creates one synthetic tile-local decode context used by residual-syntax tests.
@@ -1737,7 +1737,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return one synthetic tile-local decode context used by residual-syntax tests
     private static TileDecodeContext createTileContext(
             byte[] payload,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader.TransformMode transformMode
     ) {
         return createTileContext(payload, pixelFormat, transformMode, DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT);
@@ -1753,13 +1753,13 @@ final class TileResidualSyntaxReaderTest {
     /// @return one synthetic tile-local decode context used by residual-syntax tests
     private static TileDecodeContext createTileContext(
             byte[] payload,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader.TransformMode transformMode,
             int codedWidth,
             int codedHeight
     ) {
-        boolean chromaSubsamplingX = pixelFormat == PixelFormat.I420 || pixelFormat == PixelFormat.I422;
-        boolean chromaSubsamplingY = pixelFormat == PixelFormat.I420;
+        boolean chromaSubsamplingX = pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422;
+        boolean chromaSubsamplingY = pixelFormat == AvifPixelFormat.I420;
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 codedWidth,
@@ -1796,7 +1796,7 @@ final class TileResidualSyntaxReaderTest {
                 ),
                 new SequenceHeader.ColorConfig(
                         8,
-                        pixelFormat == PixelFormat.I400,
+                        pixelFormat == AvifPixelFormat.I400,
                         false,
                         2,
                         2,

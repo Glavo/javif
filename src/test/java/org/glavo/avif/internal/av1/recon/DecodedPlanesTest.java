@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -51,7 +51,7 @@ final class DecodedPlanesTest {
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new DecodedPlanes(8, PixelFormat.I400, 4, 4, 4, 4, luma, chroma, null)
+                () -> new DecodedPlanes(8, AvifPixelFormat.I400, 4, 4, 4, 4, luma, chroma, null)
         );
     }
 
@@ -62,7 +62,7 @@ final class DecodedPlanesTest {
         DecodedPlane chromaU = new DecodedPlane(3, 2, 3, filledSamples(6, (short) 2));
         DecodedPlane chromaV = new DecodedPlane(3, 2, 3, filledSamples(6, (short) 3));
 
-        DecodedPlanes planes = new DecodedPlanes(8, PixelFormat.I420, 5, 3, 5, 3, luma, chromaU, chromaV);
+        DecodedPlanes planes = new DecodedPlanes(8, AvifPixelFormat.I420, 5, 3, 5, 3, luma, chromaU, chromaV);
 
         assertTrue(planes.hasChroma());
         assertEquals(5, planes.codedWidth());
@@ -75,7 +75,7 @@ final class DecodedPlanesTest {
         DecodedPlane wrongChroma = new DecodedPlane(2, 2, 2, filledSamples(4, (short) 3));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new DecodedPlanes(8, PixelFormat.I420, 5, 3, 5, 3, luma, wrongChroma, chromaV)
+                () -> new DecodedPlanes(8, AvifPixelFormat.I420, 5, 3, 5, 3, luma, wrongChroma, chromaV)
         );
     }
 
@@ -84,10 +84,10 @@ final class DecodedPlanesTest {
     void monochromeDecodedPlanesDoNotReportChroma() {
         DecodedPlane luma = new DecodedPlane(4, 4, 4, filledSamples(16, (short) 5));
 
-        DecodedPlanes planes = new DecodedPlanes(10, PixelFormat.I400, 4, 4, 4, 4, luma, null, null);
+        DecodedPlanes planes = new DecodedPlanes(10, AvifPixelFormat.I400, 4, 4, 4, 4, luma, null, null);
 
         assertFalse(planes.hasChroma());
-        assertEquals(PixelFormat.I400, planes.pixelFormat());
+        assertEquals(AvifPixelFormat.I400, planes.pixelFormat());
         assertEquals(10, planes.bitDepth());
     }
 

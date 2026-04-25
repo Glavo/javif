@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.runtime;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
@@ -42,7 +42,7 @@ final class OutputFrameFactoryTest {
         assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
         assertEquals(1, frame.intPixels().length);
         assertTrue(frame.intPixelBuffer().isReadOnly());
-        assertFrameMetadata(frame, 8, PixelFormat.I400, FrameType.KEY, false, 5L);
+        assertFrameMetadata(frame, 8, AvifPixelFormat.I400, FrameType.KEY, false, 5L);
     }
 
     /// Verifies that 10-bit and 12-bit decoded planes both produce one public `DecodedFrame`.
@@ -66,12 +66,12 @@ final class OutputFrameFactoryTest {
         assertTrue(tenBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, tenBitFrame.longPixels().length);
         assertTrue(tenBitFrame.longPixelBuffer().isReadOnly());
-        assertFrameMetadata(tenBitFrame, 10, PixelFormat.I400, FrameType.INTRA, true, 8L);
+        assertFrameMetadata(tenBitFrame, 10, AvifPixelFormat.I400, FrameType.INTRA, true, 8L);
 
         assertTrue(twelveBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, twelveBitFrame.longPixels().length);
         assertTrue(twelveBitFrame.longPixelBuffer().isReadOnly());
-        assertFrameMetadata(twelveBitFrame, 12, PixelFormat.I400, FrameType.INTRA, false, 9L);
+        assertFrameMetadata(twelveBitFrame, 12, AvifPixelFormat.I400, FrameType.INTRA, false, 9L);
     }
 
     /// Verifies that stored reference surfaces are exposed through the existing-frame path as visible output.
@@ -89,7 +89,7 @@ final class OutputFrameFactoryTest {
         assertTrue(frame.bitDepth().isHighBitDepth());
         assertEquals(1, frame.longPixels().length);
         assertTrue(frame.longPixelBuffer().isReadOnly());
-        assertFrameMetadata(frame, 12, PixelFormat.I400, FrameType.SWITCH, true, 12L);
+        assertFrameMetadata(frame, 12, AvifPixelFormat.I400, FrameType.SWITCH, true, 12L);
     }
 
     /// Asserts public frame metadata on one runtime-created decoded frame.
@@ -103,7 +103,7 @@ final class OutputFrameFactoryTest {
     private static void assertFrameMetadata(
             DecodedFrame frame,
             int bitDepth,
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex

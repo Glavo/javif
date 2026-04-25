@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
@@ -556,8 +556,8 @@ public final class TileBlockHeaderReader {
     /// @param size the block size to test
     /// @return whether the supplied block has chroma samples in the active frame layout
     private boolean hasChroma(BlockPosition position, BlockSize size) {
-        PixelFormat pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
-        if (pixelFormat == PixelFormat.I400) {
+        AvifPixelFormat pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
+        if (pixelFormat == AvifPixelFormat.I400) {
             return false;
         }
         int subsamplingX = tileContext.sequenceHeader().colorConfig().chromaSubsamplingX() ? 1 : 0;
@@ -1039,7 +1039,7 @@ public final class TileBlockHeaderReader {
         if (!hasChroma) {
             return false;
         }
-        PixelFormat pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
+        AvifPixelFormat pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
         int chromaHorizontalAlignment = 4 << chromaSubsamplingX(pixelFormat);
         int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
         return Math.floorMod(nonNullMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
@@ -1050,8 +1050,8 @@ public final class TileBlockHeaderReader {
     ///
     /// @param pixelFormat the decoded pixel format to inspect
     /// @return the horizontal chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
-        PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
+        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         return switch (nonNullPixelFormat) {
             case I400, I444 -> 0;
             case I420, I422 -> 1;
@@ -1062,8 +1062,8 @@ public final class TileBlockHeaderReader {
     ///
     /// @param pixelFormat the decoded pixel format to inspect
     /// @return the vertical chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
-        PixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
+        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         return switch (nonNullPixelFormat) {
             case I400, I422, I444 -> 0;
             case I420 -> 1;

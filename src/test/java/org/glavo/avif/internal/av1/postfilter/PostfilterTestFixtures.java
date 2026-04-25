@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
@@ -54,7 +54,7 @@ final class PostfilterTestFixtures {
     /// @param chromaVSamples the chroma-V sample raster, or `null`
     /// @return one immutable decoded-plane snapshot
     static DecodedPlanes createDecodedPlanes(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             int[][] lumaSamples,
             @Nullable int[][] chromaUSamples,
             @Nullable int[][] chromaVSamples
@@ -83,7 +83,7 @@ final class PostfilterTestFixtures {
     /// @param filmGrain the normalized film-grain state
     /// @return one minimal frame header with caller-supplied postfilter and grain state
     static FrameHeader createFrameHeader(
-            PixelFormat pixelFormat,
+            AvifPixelFormat pixelFormat,
             FrameHeader.LoopFilterInfo loopFilter,
             FrameHeader.CdefInfo cdef,
             FrameHeader.RestorationInfo restoration,
@@ -486,7 +486,7 @@ final class PostfilterTestFixtures {
                         2,
                         2,
                         true,
-                        PixelFormat.I400,
+                        AvifPixelFormat.I400,
                         0,
                         true,
                         true,

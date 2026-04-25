@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -533,7 +533,7 @@ public final class CdefApplier {
     ///
     /// @param pixelFormat the decoded pixel format
     /// @return the horizontal chroma subsampling shift
-    private static int chromaSubsamplingX(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
         return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
             case I400, I444 -> 0;
             case I420, I422 -> 1;
@@ -544,7 +544,7 @@ public final class CdefApplier {
     ///
     /// @param pixelFormat the decoded pixel format
     /// @return the vertical chroma subsampling shift
-    private static int chromaSubsamplingY(PixelFormat pixelFormat) {
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
         return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
             case I400, I422, I444 -> 0;
             case I420 -> 1;

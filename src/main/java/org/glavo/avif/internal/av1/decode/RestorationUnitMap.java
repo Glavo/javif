@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -66,11 +66,11 @@ public final class RestorationUnitMap {
     public static RestorationUnitMap createEmpty(FrameAssembly assembly) {
         FrameAssembly checkedAssembly = Objects.requireNonNull(assembly, "assembly");
         FrameHeader frameHeader = checkedAssembly.frameHeader();
-        PixelFormat pixelFormat = checkedAssembly.sequenceHeader().colorConfig().pixelFormat();
+        AvifPixelFormat pixelFormat = checkedAssembly.sequenceHeader().colorConfig().pixelFormat();
         int[] columns = new int[3];
         int[] rows = new int[3];
         for (int plane = 0; plane < 3; plane++) {
-            if (plane > 0 && pixelFormat == PixelFormat.I400) {
+            if (plane > 0 && pixelFormat == AvifPixelFormat.I400) {
                 continue;
             }
             if (frameHeader.restoration().types()[plane] == FrameHeader.RestorationType.NONE) {
@@ -200,7 +200,7 @@ public final class RestorationUnitMap {
     /// @param pixelFormat the decoded pixel format
     /// @param lumaWidth the luma width in samples
     /// @return one chroma plane width for a luma width
-    private static int chromaWidth(PixelFormat pixelFormat, int lumaWidth) {
+    private static int chromaWidth(AvifPixelFormat pixelFormat, int lumaWidth) {
         return switch (pixelFormat) {
             case I400 -> 0;
             case I420, I422 -> (lumaWidth + 1) >> 1;
@@ -213,7 +213,7 @@ public final class RestorationUnitMap {
     /// @param pixelFormat the decoded pixel format
     /// @param lumaHeight the luma height in samples
     /// @return one chroma plane height for a luma height
-    private static int chromaHeight(PixelFormat pixelFormat, int lumaHeight) {
+    private static int chromaHeight(AvifPixelFormat pixelFormat, int lumaHeight) {
         return switch (pixelFormat) {
             case I400 -> 0;
             case I420 -> (lumaHeight + 1) >> 1;

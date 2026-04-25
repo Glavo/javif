@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -36,7 +36,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessPreservesDecodedSamplesWhenInLoopFiltersAreInactive() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {120, 121, 122, 123, 124, 125, 126, 127},
                         {128, 129, 130, 131, 132, 133, 134, 135},
@@ -61,7 +61,7 @@ final class FramePostprocessorTest {
                 }
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -98,7 +98,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveCdefFromDecodedBlockIndex() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -113,7 +113,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -149,7 +149,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessRejectsActiveCdefWithoutDecodedBlockIndex() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -164,7 +164,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(6, 0, new int[]{60}, new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -191,7 +191,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveLoopFilterFromDecodedEdges() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {40, 40, 40, 40, 44, 44, 44, 44},
                         {40, 40, 40, 40, 44, 44, 44, 44},
@@ -206,7 +206,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{12, 0},
                         0,
@@ -245,7 +245,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessRejectsActiveLoopFilter() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {32, 32, 32, 32},
                         {32, 32, 32, 32},
@@ -256,7 +256,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(new int[]{4, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -283,7 +283,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveWienerRestorationFromDecodedUnit() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -298,7 +298,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -333,7 +333,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveSelfGuidedRestorationFromDecodedUnit() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -348,7 +348,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -380,7 +380,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessRejectsActiveRestoration() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {32, 32, 32, 32},
                         {32, 32, 32, 32},
@@ -391,7 +391,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(

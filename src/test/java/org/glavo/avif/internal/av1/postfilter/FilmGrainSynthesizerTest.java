@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -33,7 +33,7 @@ final class FilmGrainSynthesizerTest {
     @Test
     void applyReturnsOriginalPlanesWhenFilmGrainIsDisabled() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new int[][]{
                         {128, 128, 128, 128},
                         {128, 128, 128, 128},
@@ -44,7 +44,7 @@ final class FilmGrainSynthesizerTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I400,
+                AvifPixelFormat.I400,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -68,7 +68,7 @@ final class FilmGrainSynthesizerTest {
     @Test
     void applyProducesDeterministicGrainAppliedCopy() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {128, 128, 128, 128, 128, 128, 128, 128},
                         {128, 128, 128, 128, 128, 128, 128, 128},
@@ -93,7 +93,7 @@ final class FilmGrainSynthesizerTest {
                 }
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -125,7 +125,7 @@ final class FilmGrainSynthesizerTest {
     @Test
     void applyClipsSynthesizedSamplesToRestrictedRange() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new int[][]{
                         {0, 255, 0, 255, 0, 255, 0, 255},
                         {255, 0, 255, 0, 255, 0, 255, 0},
@@ -150,7 +150,7 @@ final class FilmGrainSynthesizerTest {
                 }
         );
         FrameHeader unrestrictedFrameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -165,7 +165,7 @@ final class FilmGrainSynthesizerTest {
                 PostfilterTestFixtures.createFilmGrainParams(0x5678, false)
         );
         FrameHeader restrictedFrameHeader = PostfilterTestFixtures.createFrameHeader(
-                PixelFormat.I420,
+                AvifPixelFormat.I420,
                 unrestrictedFrameHeader.loopFilter(),
                 unrestrictedFrameHeader.cdef(),
                 unrestrictedFrameHeader.restoration(),
