@@ -18,6 +18,9 @@ These rules apply to all Java code written or modified in this repository.
 
 - Annotate immutable collections and arrays with JetBrains Annotations `@Unmodifiable`.
 - Annotate immutable collection views with JetBrains Annotations `@UnmodifiableView`.
+- Annotate immutable NIO buffers such as `ByteBuffer`, `IntBuffer`, `LongBuffer`, and other `Buffer`
+  subclasses with `@Unmodifiable`.
+- Annotate read-only or immutable views of NIO buffers with `@UnmodifiableView`.
 - For arrays, place the annotation on the array dimension, for example `String @Unmodifiable []`.
 - For multidimensional immutable arrays, annotate every immutable dimension, for example
   `int @Unmodifiable [] @Unmodifiable []`.
