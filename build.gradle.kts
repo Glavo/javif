@@ -64,6 +64,16 @@ tasks.withType<JavaCompile> {
     options.release.set(17)
 }
 
+val mainClassName = "org.glavo.avif.javafx.AvifViewerApp"
+
+tasks.register<JavaExec>("run") {
+    group = "application"
+    description = "Runs the JavaFX AVIF viewer."
+    dependsOn(tasks.classes)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set(mainClassName)
+}
+
 tasks.test {
     useJUnitPlatform()
     testLogging.showStandardStreams = true
