@@ -118,6 +118,60 @@ final class LumaDequantizerTest {
         assertArrayEquals(expected, dequantized);
     }
 
+    /// Verifies that luma quantization matrices scale DC and AC dequantizers.
+    @Test
+    void appliesLumaQuantizationMatrixScaling() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 2;
+        coefficients[1] = -3;
+
+        int[] dequantized = LumaDequantizer.dequantize(
+                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new LumaDequantizer.Context(2, 0, 8, true, 0)
+        );
+
+        int[] expected = new int[16];
+        expected[0] = 16;
+        expected[1] = -36;
+        assertArrayEquals(expected, dequantized);
+    }
+
+    /// Verifies that matrix index 15 preserves the non-qmatrix dequantization path.
+    @Test
+    void disablesLumaQuantizationMatrixForIndexFifteen() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 2;
+        coefficients[1] = -3;
+
+        int[] dequantized = LumaDequantizer.dequantize(
+                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new LumaDequantizer.Context(2, 0, 8, true, 15)
+        );
+
+        int[] expected = new int[16];
+        expected[0] = 16;
+        expected[1] = -27;
+        assertArrayEquals(expected, dequantized);
+    }
+
+    /// Verifies that extended coefficient levels follow AV1's 20-bit token and 24-bit product masks.
+    @Test
+    void masksExtendedCoefficientLevelsBeforeSaturation() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 0x100010;
+        coefficients[1] = -0x100010;
+
+        int[] dequantized = LumaDequantizer.dequantize(
+                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new LumaDequantizer.Context(255, 0, 8)
+        );
+
+        int[] expected = new int[16];
+        expected[0] = 21376;
+        expected[1] = -29248;
+        assertArrayEquals(expected, dequantized);
+    }
+
     /// Verifies that unsupported bit depths still fail fast in the current subset.
     @Test
     void rejectsUnsupportedBitDepths() {

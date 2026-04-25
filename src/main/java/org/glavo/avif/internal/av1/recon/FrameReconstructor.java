@@ -3871,7 +3871,9 @@ public final class FrameReconstructor {
                     new LumaDequantizer.Context(
                             header.qIndex(),
                             frameHeader.quantization().yDcDelta(),
-                            lumaPlane.bitDepth()
+                            lumaPlane.bitDepth(),
+                            frameHeader.quantization().useQuantizationMatrices(),
+                            frameHeader.quantization().quantizationMatrixY()
                     )
             );
             int[] residualSamples = InverseTransformer.reconstructResidualBlock(
@@ -3911,13 +3913,27 @@ public final class FrameReconstructor {
         reconstructChromaPlaneResiduals(
                 chromaUPlane,
                 residualLayout.chromaUUnits(),
-                new ChromaDequantizer.Context(qIndex, quantization.uDcDelta(), quantization.uAcDelta(), chromaUPlane.bitDepth()),
+                new ChromaDequantizer.Context(
+                        qIndex,
+                        quantization.uDcDelta(),
+                        quantization.uAcDelta(),
+                        chromaUPlane.bitDepth(),
+                        quantization.useQuantizationMatrices(),
+                        quantization.quantizationMatrixU()
+                ),
                 pixelFormat
         );
         reconstructChromaPlaneResiduals(
                 chromaVPlane,
                 residualLayout.chromaVUnits(),
-                new ChromaDequantizer.Context(qIndex, quantization.vDcDelta(), quantization.vAcDelta(), chromaVPlane.bitDepth()),
+                new ChromaDequantizer.Context(
+                        qIndex,
+                        quantization.vDcDelta(),
+                        quantization.vAcDelta(),
+                        chromaVPlane.bitDepth(),
+                        quantization.useQuantizationMatrices(),
+                        quantization.quantizationMatrixV()
+                ),
                 pixelFormat
         );
     }

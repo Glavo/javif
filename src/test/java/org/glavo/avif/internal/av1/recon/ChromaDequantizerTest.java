@@ -84,6 +84,42 @@ final class ChromaDequantizerTest {
         assertArrayEquals(expected, dequantized);
     }
 
+    /// Verifies that chroma quantization matrices use the chroma matrix class.
+    @Test
+    void appliesChromaQuantizationMatrixScaling() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 2;
+        coefficients[1] = -3;
+
+        int[] dequantized = ChromaDequantizer.dequantize(
+                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new ChromaDequantizer.Context(1, 1, 2, 10, true, 0)
+        );
+
+        int[] expected = new int[16];
+        expected[0] = 22;
+        expected[1] = -57;
+        assertArrayEquals(expected, dequantized);
+    }
+
+    /// Verifies that matrix index 15 preserves chroma's non-qmatrix dequantization path.
+    @Test
+    void disablesChromaQuantizationMatrixForIndexFifteen() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 2;
+        coefficients[1] = -3;
+
+        int[] dequantized = ChromaDequantizer.dequantize(
+                new TransformResidualUnit(new BlockPosition(0, 0), TransformSize.TX_4X4, 1, coefficients, 0x11),
+                new ChromaDequantizer.Context(1, 1, 2, 10, true, 15)
+        );
+
+        int[] expected = new int[16];
+        expected[0] = 20;
+        expected[1] = -39;
+        assertArrayEquals(expected, dequantized);
+    }
+
     /// Verifies that unsupported chroma bit depths still fail fast.
     @Test
     void rejectsUnsupportedBitDepths() {
