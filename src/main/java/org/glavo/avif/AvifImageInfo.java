@@ -29,7 +29,7 @@ public final class AvifImageInfo {
     /// The display height in pixels.
     private final int height;
     /// The decoded bit depth.
-    private final int bitDepth;
+    private final AvifBitDepth bitDepth;
     /// The AV1 chroma sampling layout.
     private final PixelFormat pixelFormat;
     /// Whether an alpha auxiliary image is present.
@@ -54,7 +54,7 @@ public final class AvifImageInfo {
     public AvifImageInfo(
             int width,
             int height,
-            int bitDepth,
+            AvifBitDepth bitDepth,
             PixelFormat pixelFormat,
             boolean alphaPresent,
             boolean animated,
@@ -67,16 +67,13 @@ public final class AvifImageInfo {
         if (height <= 0) {
             throw new IllegalArgumentException("height <= 0: " + height);
         }
-        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
-            throw new IllegalArgumentException("unsupported bitDepth: " + bitDepth);
-        }
         if (frameCount <= 0) {
             throw new IllegalArgumentException("frameCount <= 0: " + frameCount);
         }
 
         this.width = width;
         this.height = height;
-        this.bitDepth = bitDepth;
+        this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
         this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         this.alphaPresent = alphaPresent;
         this.animated = animated;
@@ -101,7 +98,7 @@ public final class AvifImageInfo {
     /// Returns the decoded bit depth.
     ///
     /// @return the decoded bit depth
-    public int bitDepth() {
+    public AvifBitDepth bitDepth() {
         return bitDepth;
     }
 

@@ -37,7 +37,7 @@ final class FramePixelBufferTest {
         AvifFrame frame = new AvifFrame(
                 1,
                 1,
-                8,
+                AvifBitDepth.EIGHT_BITS,
                 PixelFormat.I400,
                 0,
                 IntBuffer.wrap(new int[]{0x8040_2010}).asReadOnlyBuffer()
@@ -60,7 +60,7 @@ final class FramePixelBufferTest {
         AvifFrame frame = new AvifFrame(
                 1,
                 1,
-                10,
+                AvifBitDepth.TEN_BITS,
                 PixelFormat.I400,
                 0,
                 LongBuffer.wrap(new long[]{0xFFFF_8080_4040_0000L}).asReadOnlyBuffer()
@@ -83,7 +83,7 @@ final class FramePixelBufferTest {
         DecodedFrame intFrame = new DecodedFrame(
                 1,
                 1,
-                8,
+                AvifBitDepth.EIGHT_BITS,
                 PixelFormat.I400,
                 FrameType.KEY,
                 true,
@@ -93,7 +93,7 @@ final class FramePixelBufferTest {
         DecodedFrame longFrame = new DecodedFrame(
                 1,
                 1,
-                12,
+                AvifBitDepth.TWELVE_BITS,
                 PixelFormat.I400,
                 FrameType.KEY,
                 true,

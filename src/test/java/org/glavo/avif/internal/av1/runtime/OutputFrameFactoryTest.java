@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
+import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
@@ -38,7 +39,7 @@ final class OutputFrameFactoryTest {
 
         DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, frameHeader, false, 5L);
 
-        assertEquals(8, frame.bitDepth());
+        assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
         assertEquals(1, frame.intPixels().length);
         assertTrue(frame.intPixelBuffer().isReadOnly());
         assertFrameMetadata(frame, 8, PixelFormat.I400, FrameType.KEY, false, 5L);
@@ -62,12 +63,12 @@ final class OutputFrameFactoryTest {
                 9L
         );
 
-        assertTrue(tenBitFrame.bitDepth() == 10 || tenBitFrame.bitDepth() == 12);
+        assertTrue(tenBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, tenBitFrame.longPixels().length);
         assertTrue(tenBitFrame.longPixelBuffer().isReadOnly());
         assertFrameMetadata(tenBitFrame, 10, PixelFormat.I400, FrameType.INTRA, true, 8L);
 
-        assertTrue(twelveBitFrame.bitDepth() == 10 || twelveBitFrame.bitDepth() == 12);
+        assertTrue(twelveBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, twelveBitFrame.longPixels().length);
         assertTrue(twelveBitFrame.longPixelBuffer().isReadOnly());
         assertFrameMetadata(twelveBitFrame, 12, PixelFormat.I400, FrameType.INTRA, false, 9L);
@@ -85,7 +86,7 @@ final class OutputFrameFactoryTest {
 
         DecodedFrame frame = OutputFrameFactory.createExistingFrame(surfaceSnapshot, 12L);
 
-        assertTrue(frame.bitDepth() == 10 || frame.bitDepth() == 12);
+        assertTrue(frame.bitDepth().isHighBitDepth());
         assertEquals(1, frame.longPixels().length);
         assertTrue(frame.longPixelBuffer().isReadOnly());
         assertFrameMetadata(frame, 12, PixelFormat.I400, FrameType.SWITCH, true, 12L);
@@ -109,7 +110,7 @@ final class OutputFrameFactoryTest {
     ) {
         assertEquals(1, frame.width());
         assertEquals(1, frame.height());
-        assertEquals(bitDepth, frame.bitDepth());
+        assertEquals(AvifBitDepth.fromBits(bitDepth), frame.bitDepth());
         assertEquals(pixelFormat, frame.pixelFormat());
         assertEquals(frameType, frame.frameType());
         assertEquals(visible, frame.visible());

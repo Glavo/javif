@@ -170,7 +170,7 @@ final class LibavifTestDataCorpusTest {
     private static void assertInfo(ExpectedInfo expected, AvifImageInfo actual) {
         assertEquals(expected.width, actual.width());
         assertEquals(expected.height, actual.height());
-        assertEquals(expected.bitDepth, actual.bitDepth());
+        assertEquals(AvifBitDepth.fromBits(expected.bitDepth), actual.bitDepth());
         assertEquals(expected.pixelFormat, actual.pixelFormat());
         assertEquals(expected.alphaPresent, actual.alphaPresent());
         assertEquals(expected.animated, actual.animated());
@@ -185,7 +185,7 @@ final class LibavifTestDataCorpusTest {
     private static void assertFrame(ExpectedInfo expected, int frameIndex, AvifFrame actual) {
         assertTrue(actual.width() > 0);
         assertTrue(actual.height() > 0);
-        assertEquals(expected.bitDepth, actual.bitDepth());
+        assertEquals(AvifBitDepth.fromBits(expected.bitDepth), actual.bitDepth());
         assertEquals(expected.pixelFormat, actual.pixelFormat());
         assertEquals(frameIndex, actual.frameIndex());
     }

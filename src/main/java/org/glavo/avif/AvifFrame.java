@@ -34,7 +34,7 @@ public final class AvifFrame {
     /// The frame height in pixels.
     private final int height;
     /// The decoded bit depth.
-    private final int bitDepth;
+    private final AvifBitDepth bitDepth;
     /// The decoded AV1 chroma sampling layout.
     private final PixelFormat pixelFormat;
     /// The zero-based frame index.
@@ -52,7 +52,7 @@ public final class AvifFrame {
     /// @param pixelFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
-    public AvifFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, int[] pixels) {
+    public AvifFrame(int width, int height, AvifBitDepth bitDepth, PixelFormat pixelFormat, int frameIndex, int[] pixels) {
         this(width, height, bitDepth, pixelFormat, frameIndex,
                 PixelBuffers.immutableIntPixels(Objects.requireNonNull(pixels, "pixels")), null);
     }
@@ -65,7 +65,7 @@ public final class AvifFrame {
     /// @param pixelFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
-    public AvifFrame(int width, int height, int bitDepth, PixelFormat pixelFormat, int frameIndex, long[] pixels) {
+    public AvifFrame(int width, int height, AvifBitDepth bitDepth, PixelFormat pixelFormat, int frameIndex, long[] pixels) {
         this(width, height, bitDepth, pixelFormat, frameIndex,
                 null, PixelBuffers.immutableLongPixels(Objects.requireNonNull(pixels, "pixels")));
     }
@@ -84,7 +84,7 @@ public final class AvifFrame {
     public AvifFrame(
             int width,
             int height,
-            int bitDepth,
+            AvifBitDepth bitDepth,
             PixelFormat pixelFormat,
             int frameIndex,
             @Unmodifiable IntBuffer pixels
@@ -106,7 +106,7 @@ public final class AvifFrame {
     public AvifFrame(
             int width,
             int height,
-            int bitDepth,
+            AvifBitDepth bitDepth,
             PixelFormat pixelFormat,
             int frameIndex,
             @Unmodifiable LongBuffer pixels
@@ -126,7 +126,7 @@ public final class AvifFrame {
     private AvifFrame(
             int width,
             int height,
-            int bitDepth,
+            AvifBitDepth bitDepth,
             PixelFormat pixelFormat,
             int frameIndex,
             @Nullable @Unmodifiable IntBuffer intPixels,
@@ -137,7 +137,7 @@ public final class AvifFrame {
         }
         this.width = width;
         this.height = height;
-        this.bitDepth = bitDepth;
+        this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
         this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         this.frameIndex = frameIndex;
         this.intPixels = intPixels;
@@ -161,7 +161,7 @@ public final class AvifFrame {
     /// Returns the decoded bit depth.
     ///
     /// @return the decoded bit depth
-    public int bitDepth() {
+    public AvifBitDepth bitDepth() {
         return bitDepth;
     }
 

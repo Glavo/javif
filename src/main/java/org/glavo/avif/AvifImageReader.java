@@ -346,10 +346,10 @@ public final class AvifImageReader implements AutoCloseable {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cells", null);
         }
         DecodedFrame firstCell = cellFrames[0];
-        if (firstCell.bitDepth() == 8) {
+        if (firstCell.bitDepth().isEightBit()) {
             return composeGridIntFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
         }
-        if (firstCell.bitDepth() == 10 || firstCell.bitDepth() == 12) {
+        if (firstCell.bitDepth().isHighBitDepth()) {
             throw unsupported("Grid composition for 10/12-bit frames is not implemented in this slice", null);
         }
         throw unsupported("Unsupported grid cell bit depth: " + firstCell.bitDepth(), null);
@@ -440,7 +440,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frame the raw decoded frame
     /// @return the transformed frame, or the same frame when no transforms are present
     private AvifFrame applyTransforms(AvifFrame frame) {
-        if (frame.bitDepth() == 8) {
+        if (frame.bitDepth().isEightBit()) {
             if (!container.hasClapCrop() && container.rotationCode() <= 0 && container.mirrorAxis() < 0) {
                 return frame;
             }
@@ -579,7 +579,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frameIndex the zero-based AVIF frame index
     /// @return an AVIF public frame
     private static AvifFrame adaptFrame(DecodedFrame frame, int frameIndex) {
-        if (frame.bitDepth() == 8) {
+        if (frame.bitDepth().isEightBit()) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -589,7 +589,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.intPixelBuffer()
             );
         }
-        if (frame.bitDepth() == 10 || frame.bitDepth() == 12) {
+        if (frame.bitDepth().isHighBitDepth()) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -627,10 +627,10 @@ public final class AvifImageReader implements AutoCloseable {
             if (alphaPlanes == null) {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha planes not available", null);
             }
-            if (colorFrame.bitDepth() == 8) {
+            if (colorFrame.bitDepth().isEightBit()) {
                 return combineIntPlaneAlpha(colorFrame, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
             }
-            if (colorFrame.bitDepth() == 10 || colorFrame.bitDepth() == 12) {
+            if (colorFrame.bitDepth().isHighBitDepth()) {
                 return combineLongPlaneAlpha(colorFrame, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
             }
             throw unsupported("Unsupported alpha color frame bit depth: " + colorFrame.bitDepth(), null);
@@ -649,13 +649,13 @@ public final class AvifImageReader implements AutoCloseable {
         int width = color.width();
         int height = color.height();
         DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
-        int maxSample = (1 << color.bitDepth()) - 1;
+        int maxSample = color.bitDepth().maxSampleValue();
         int[] combined = new int[width * height];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int alphaSample = lumaPlane.sample(x, y);
                 int alpha8;
-                if (color.bitDepth() == 8) {
+                if (color.bitDepth().isEightBit()) {
                     alpha8 = alphaSample;
                 } else {
                     alpha8 = (alphaSample * 255 + maxSample / 2) / maxSample;
@@ -675,14 +675,14 @@ public final class AvifImageReader implements AutoCloseable {
         int width = color.width();
         int height = color.height();
         DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
-        int maxSample = (1 << color.bitDepth()) - 1;
+        int maxSample = color.bitDepth().maxSampleValue();
         long maxSampleL = maxSample;
         long[] combined = new long[width * height];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int alphaSample = lumaPlane.sample(x, y);
                 long alpha16;
-                if (color.bitDepth() <= 8) {
+                if (color.bitDepth().isEightBit()) {
                     alpha16 = (alphaSample * maxSampleL + 128) / 255;
                 } else {
                     alpha16 = alphaSample;

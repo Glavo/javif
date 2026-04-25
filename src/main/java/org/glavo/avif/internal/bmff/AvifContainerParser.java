@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifColorInfo;
+import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
 import org.glavo.avif.AvifImageInfo;
@@ -152,7 +153,7 @@ public final class AvifContainerParser {
         AvifImageInfo info = new AvifImageInfo(
                 ispe.width,
                 ispe.height,
-                av1Config.bitDepth(),
+                AvifBitDepth.fromBits(av1Config.bitDepth()),
                 av1Config.pixelFormat(),
                 alphaPresent,
                 false,
@@ -276,7 +277,7 @@ public final class AvifContainerParser {
         AvifImageInfo info = new AvifImageInfo(
                 outputWidth,
                 outputHeight,
-                representativeAv1C.bitDepth(),
+                AvifBitDepth.fromBits(representativeAv1C.bitDepth()),
                 representativeAv1C.pixelFormat(),
                 alphaPresent,
                 false,
@@ -926,7 +927,7 @@ public final class AvifContainerParser {
         AvifImageInfo info = new AvifImageInfo(
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
-                s.bitDepth > 0 ? s.bitDepth : 8,
+                AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
                 s.pixelFormat != null ? s.pixelFormat : PixelFormat.I420, false, true, sampleCount, s.colr);
         return new AvifContainer(info,
                 payloads.toArray(byte[][]::new),

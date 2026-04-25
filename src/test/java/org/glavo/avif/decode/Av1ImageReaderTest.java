@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.decode;
 
+import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -976,7 +977,7 @@ final class Av1ImageReaderTest {
                     FrameType.KEY,
                     0
             );
-            assertEquals(8, decodedFrame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
             assertTileFirstPixelsMatchReference(decodedFrame, referenceSurfaceSnapshot, tileColumns, tileRows);
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
@@ -1214,7 +1215,7 @@ final class Av1ImageReaderTest {
             }
 
             DecodedFrame decodedFrame = reader.readFrame();
-            assertTrue(decodedFrame.bitDepth() == 10 || decodedFrame.bitDepth() == 12);
+            assertTrue(decodedFrame.bitDepth().isHighBitDepth());
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
@@ -2209,8 +2210,8 @@ final class Av1ImageReaderTest {
             assertDecodedStillPictureFrameMetadata(reusedFrame, bitDepth, pixelFormat, FrameType.KEY, 1);
             assertNotNull(firstFrame);
             assertNotNull(reusedFrame);
-            assertTrue(firstFrame.bitDepth() == 10 || firstFrame.bitDepth() == 12);
-            assertTrue(reusedFrame.bitDepth() == 10 || reusedFrame.bitDepth() == 12);
+            assertTrue(firstFrame.bitDepth().isHighBitDepth());
+            assertTrue(reusedFrame.bitDepth().isHighBitDepth());
             assertArrayEquals(firstFrame.longPixels(), reusedFrame.longPixels());
             assertNull(reader.readFrame());
         });
@@ -2241,8 +2242,8 @@ final class Av1ImageReaderTest {
             assertOpaqueGrayStillPictureFrame(reusedFrame, pixelFormat, 1);
             assertNotNull(firstFrame);
             assertNotNull(reusedFrame);
-            assertEquals(8, firstFrame.bitDepth());
-            assertEquals(8, reusedFrame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, firstFrame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, reusedFrame.bitDepth());
             assertArrayEquals(firstFrame.intPixels(), reusedFrame.intPixels());
             assertNull(reader.readFrame());
         });
@@ -3122,7 +3123,7 @@ final class Av1ImageReaderTest {
                 FrameType.KEY,
                 expectedPresentationIndex
         );
-        assertTrue(decodedFrame.bitDepth() == 10 || decodedFrame.bitDepth() == 12);
+        assertTrue(decodedFrame.bitDepth().isHighBitDepth());
 
         DecodedPlanes decodedPlanes = createFilledDecodedPlanes(
                 frameHeader,
@@ -3142,7 +3143,7 @@ final class Av1ImageReaderTest {
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
-        assertEquals(8, decodedFrame.bitDepth());
+        assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
         DecodedFrame frame = decodedFrame;
         assertDecodedStillPictureFrameMetadata(frame, PixelFormat.I420, expectedPresentationIndex);
         assertArgbBlockEquals(frame, 0, 0, LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
@@ -3171,10 +3172,10 @@ final class Av1ImageReaderTest {
                 expectedPresentationIndex
         );
         if (decodedPlanes.bitDepth() == 8) {
-            assertEquals(8, decodedFrame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
             assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(decodedPlanes), decodedFrame.intPixels());
         } else {
-            assertTrue(decodedFrame.bitDepth() == 10 || decodedFrame.bitDepth() == 12);
+            assertTrue(decodedFrame.bitDepth().isHighBitDepth());
             assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes), decodedFrame.longPixels());
         }
     }
@@ -3203,10 +3204,10 @@ final class Av1ImageReaderTest {
                 expectedPresentationIndex
         );
         if (synthesizedPlanes.bitDepth() == 8) {
-            assertEquals(8, decodedFrame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
             assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(synthesizedPlanes), decodedFrame.intPixels());
         } else {
-            assertTrue(decodedFrame.bitDepth() == 10 || decodedFrame.bitDepth() == 12);
+            assertTrue(decodedFrame.bitDepth().isHighBitDepth());
             assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(synthesizedPlanes), decodedFrame.longPixels());
         }
     }
@@ -3238,7 +3239,7 @@ final class Av1ImageReaderTest {
             int expectedPixel
     ) {
         assertNotNull(decodedFrame);
-        assertEquals(8, decodedFrame.bitDepth());
+        assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
         DecodedFrame frame = decodedFrame;
         assertDecodedStillPictureFrameMetadata(frame, expectedPixelFormat, expectedPresentationIndex);
 
@@ -3333,7 +3334,7 @@ final class Av1ImageReaderTest {
         assertNotNull(decodedFrame);
         assertEquals(expectedWidth, decodedFrame.width());
         assertEquals(expectedHeight, decodedFrame.height());
-        assertEquals(expectedBitDepth, decodedFrame.bitDepth());
+        assertEquals(AvifBitDepth.fromBits(expectedBitDepth), decodedFrame.bitDepth());
         assertEquals(expectedPixelFormat, decodedFrame.pixelFormat());
         assertEquals(expectedFrameType, decodedFrame.frameType());
         assertTrue(decodedFrame.visible());

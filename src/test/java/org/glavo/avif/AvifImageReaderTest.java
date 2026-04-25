@@ -101,11 +101,11 @@ final class AvifImageReaderTest {
         try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage())) {
             AvifFrame frame = reader.readFrame();
 
-            assertEquals(8, frame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
             AvifFrame intFrame = frame;
             assertEquals(64, intFrame.width());
             assertEquals(64, intFrame.height());
-            assertEquals(8, intFrame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
             assertEquals(PixelFormat.I420, intFrame.pixelFormat());
             assertEquals(0, intFrame.frameIndex());
 
@@ -133,7 +133,7 @@ final class AvifImageReaderTest {
 
             assertEquals(1, info.width());
             assertEquals(1, info.height());
-            assertEquals(8, info.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, info.bitDepth());
             assertEquals(PixelFormat.I444, info.pixelFormat());
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
@@ -149,11 +149,11 @@ final class AvifImageReaderTest {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE))) {
             AvifFrame frame = reader.readFrame();
 
-            assertEquals(8, frame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
             AvifFrame intFrame = frame;
             assertEquals(1, intFrame.width());
             assertEquals(1, intFrame.height());
-            assertEquals(8, intFrame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
             assertEquals(PixelFormat.I444, intFrame.pixelFormat());
 
             int[] pixels = intFrame.intPixels();
@@ -173,7 +173,9 @@ final class AvifImageReaderTest {
 
             assertTrue(info.width() > 0);
             assertTrue(info.height() > 0);
-            assertTrue(info.bitDepth() == 8 || info.bitDepth() == 10 || info.bitDepth() == 12);
+            assertTrue(info.bitDepth() == AvifBitDepth.EIGHT_BITS
+                    || info.bitDepth() == AvifBitDepth.TEN_BITS
+                    || info.bitDepth() == AvifBitDepth.TWELVE_BITS);
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
@@ -190,7 +192,9 @@ final class AvifImageReaderTest {
 
             assertTrue(info.width() > 0);
             assertTrue(info.height() > 0);
-            assertTrue(info.bitDepth() == 8 || info.bitDepth() == 10 || info.bitDepth() == 12);
+            assertTrue(info.bitDepth() == AvifBitDepth.EIGHT_BITS
+                    || info.bitDepth() == AvifBitDepth.TEN_BITS
+                    || info.bitDepth() == AvifBitDepth.TWELVE_BITS);
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
@@ -213,7 +217,9 @@ final class AvifImageReaderTest {
 
             assertTrue(info.width() > 0);
             assertTrue(info.height() > 0);
-            assertTrue(info.bitDepth() == 8 || info.bitDepth() == 10 || info.bitDepth() == 12);
+            assertTrue(info.bitDepth() == AvifBitDepth.EIGHT_BITS
+                    || info.bitDepth() == AvifBitDepth.TEN_BITS
+                    || info.bitDepth() == AvifBitDepth.TWELVE_BITS);
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
@@ -274,7 +280,7 @@ final class AvifImageReaderTest {
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
-            assertEquals(8, frame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
             assertEquals(64, frame.width());
             assertEquals(64, frame.height());
             assertNull(reader.readFrame());
@@ -369,14 +375,14 @@ final class AvifImageReaderTest {
 
             assertEquals(64, info.width());
             assertEquals(64, info.height());
-            assertEquals(8, info.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, info.bitDepth());
             assertTrue(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
-            assertEquals(8, frame.bitDepth());
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
             AvifFrame intFrame = frame;
 
             int[] pixels = intFrame.intPixels();

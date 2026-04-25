@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
+import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
@@ -168,7 +169,7 @@ public final class ArgbOutput {
         return new DecodedFrame(
                 checkedDecodedPlanes.renderWidth(),
                 checkedDecodedPlanes.renderHeight(),
-                checkedDecodedPlanes.bitDepth(),
+                AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),
                 checkedDecodedPlanes.pixelFormat(),
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),
@@ -311,7 +312,7 @@ public final class ArgbOutput {
         return new DecodedFrame(
                 checkedDecodedPlanes.renderWidth(),
                 checkedDecodedPlanes.renderHeight(),
-                checkedDecodedPlanes.bitDepth(),
+                AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),
                 checkedDecodedPlanes.pixelFormat(),
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),

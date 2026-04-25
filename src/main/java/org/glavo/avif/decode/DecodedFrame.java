@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.decode;
 
+import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.internal.PixelBuffers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -33,7 +34,7 @@ public final class DecodedFrame {
     /// The output frame height in pixels.
     private final int height;
     /// The decoded bit depth.
-    private final int bitDepth;
+    private final AvifBitDepth bitDepth;
     /// The chroma layout of the decoded frame.
     private final PixelFormat pixelFormat;
     /// The AV1 frame type.
@@ -63,7 +64,7 @@ public final class DecodedFrame {
     public DecodedFrame(
             int width,
             int height,
-            int bitDepth,
+            AvifBitDepth bitDepth,
             PixelFormat pixelFormat,
             FrameType frameType,
             boolean visible,
@@ -90,7 +91,7 @@ public final class DecodedFrame {
     public DecodedFrame(
             int width,
             int height,
-            int bitDepth,
+            AvifBitDepth bitDepth,
             PixelFormat pixelFormat,
             FrameType frameType,
             boolean visible,
@@ -115,7 +116,7 @@ public final class DecodedFrame {
     private DecodedFrame(
             int width,
             int height,
-            int bitDepth,
+            AvifBitDepth bitDepth,
             PixelFormat pixelFormat,
             FrameType frameType,
             boolean visible,
@@ -128,7 +129,7 @@ public final class DecodedFrame {
         }
         this.width = width;
         this.height = height;
-        this.bitDepth = bitDepth;
+        this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
         this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         this.frameType = Objects.requireNonNull(frameType, "frameType");
         this.visible = visible;
@@ -154,7 +155,7 @@ public final class DecodedFrame {
     /// Returns the decoded bit depth.
     ///
     /// @return the decoded bit depth
-    public int bitDepth() {
+    public AvifBitDepth bitDepth() {
         return bitDepth;
     }
 

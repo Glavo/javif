@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
+import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.decode.PixelFormat;
@@ -266,7 +267,7 @@ final class DecodedPlanesArgbIntOutputTest {
 
         assertEquals(planes.renderWidth(), frame.width());
         assertEquals(planes.renderHeight(), frame.height());
-        assertEquals(planes.bitDepth(), frame.bitDepth());
+        assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
         assertEquals(planes.pixelFormat(), frame.pixelFormat());
 
         OutputInvoker invoker = requireOutputInvoker();
