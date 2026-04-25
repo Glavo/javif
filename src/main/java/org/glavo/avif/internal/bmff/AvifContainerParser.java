@@ -208,6 +208,12 @@ public final class AvifContainerParser {
                     0
             );
         }
+        HashSet<Integer> uniqueCellIds = new HashSet<>(expectedCellCount);
+        for (int cellId : cellIds) {
+            if (!uniqueCellIds.add(cellId)) {
+                throw parseFailed("grid dimg cell is referenced more than once: " + cellId, 0);
+            }
+        }
 
         ImageSpatialExtents representativeIspe = null;
         Av1Config representativeAv1C = null;
@@ -218,6 +224,9 @@ public final class AvifContainerParser {
             Item cellItem = meta.item(cellId);
             if (cellItem == null) {
                 throw parseFailed("grid dimg cell item not found: " + cellId, 0);
+            }
+            if (cellItem.sharedDerivedImageReference) {
+                throw unsupported("Grid cell item is shared by multiple derived images: " + cellId, null);
             }
             if (!"av01".equals(cellItem.type)) {
                 throw unsupported("Unsupported grid cell item type: " + cellItem.type, null);
@@ -934,9 +943,13 @@ public final class AvifContainerParser {
     private void parseMoov(BoxInput input) throws AvifDecodeException {
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
-            if ("trak".equals(child.type())) {
+            if ("trak".equals(child.type()) && meta.moovState.seqHeaderObu == null) {
+                MoovState snapshot = meta.moovState.copy();
                 BoxInput trakPayload = input.slice(child.payloadOffset(), child.payloadSize());
                 parseMoovTrack(trakPayload);
+                if (meta.moovState.seqHeaderObu == null) {
+                    meta.moovState.copyFrom(snapshot);
+                }
             }
             input.skipBoxPayload(child);
         }
@@ -1238,6 +1251,9 @@ public final class AvifContainerParser {
                     toItem.auxForId = fromItem.id;
                 }
                 if ("dimg".equals(reference.type())) {
+                    if (toItem.dimgForId != 0 && toItem.dimgForId != fromItem.id) {
+                        toItem.sharedDerivedImageReference = true;
+                    }
                     toItem.dimgForId = fromItem.id;
                     fromItem.dimgCellIds.add(toItem.id);
                 }
@@ -1254,8 +1270,9 @@ public final class AvifContainerParser {
     /// @param itemId the master image item id
     /// @return the alpha auxiliary item, or `null`
     private @Nullable Item findAlphaItem(int itemId) {
+        Item masterItem = meta.item(itemId);
         for (Item item : meta.items.values()) {
-            if (item.auxForId == itemId) {
+            if (item.auxForId == itemId || (masterItem != null && masterItem.auxForId == item.id)) {
                 AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
                 if (aux != null && "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha".equals(aux.type)) {
                     return item;
@@ -1438,18 +1455,61 @@ public final class AvifContainerParser {
     /// Mutable parser state for AVIS moov parsing.
     @NotNullByDefault
     private static final class MoovState {
+        /// The parsed image sequence width.
         private int width;
+        /// The parsed image sequence height.
         private int height;
+        /// The parsed image sequence bit depth.
         private int bitDepth;
+        /// The parsed image sequence pixel format, or `null`.
         private @Nullable PixelFormat pixelFormat;
+        /// The parsed image sequence color information, or `null`.
         private @Nullable AvifColorInfo colr;
+        /// The parsed image sequence media timescale.
         private int mediaTimescale;
+        /// The parsed image sequence media duration.
         private long mediaDuration;
+        /// The parsed AV1 sequence header OBU, or `null` before an AV1 track is found.
         private byte @Nullable [] seqHeaderObu;
+        /// The parsed sample timing deltas.
         private final List<Integer> sampleDeltas = new ArrayList<>();
+        /// The parsed chunk offsets.
         private final List<Integer> chunkOffsets = new ArrayList<>();
+        /// The parsed sample sizes.
         private final List<Integer> sampleSizes = new ArrayList<>();
+        /// The parsed sync sample indices.
         private final List<Integer> syncSamples = new ArrayList<>();
+
+        /// Creates a copy of this sequence track state.
+        ///
+        /// @return an independent copy of this state
+        private MoovState copy() {
+            MoovState copy = new MoovState();
+            copy.copyFrom(this);
+            return copy;
+        }
+
+        /// Copies all values from another sequence track state.
+        ///
+        /// @param other the source state
+        private void copyFrom(MoovState other) {
+            width = other.width;
+            height = other.height;
+            bitDepth = other.bitDepth;
+            pixelFormat = other.pixelFormat;
+            colr = other.colr;
+            mediaTimescale = other.mediaTimescale;
+            mediaDuration = other.mediaDuration;
+            seqHeaderObu = other.seqHeaderObu == null ? null : other.seqHeaderObu.clone();
+            sampleDeltas.clear();
+            sampleDeltas.addAll(other.sampleDeltas);
+            chunkOffsets.clear();
+            chunkOffsets.addAll(other.chunkOffsets);
+            sampleSizes.clear();
+            sampleSizes.addAll(other.sampleSizes);
+            syncSamples.clear();
+            syncSamples.addAll(other.syncSamples);
+        }
     }
 
     /// Mutable parser state for one item.
@@ -1473,6 +1533,8 @@ public final class AvifContainerParser {
         private int dimgForId;
         /// The dimg cell item ids for a grid item, in row-major order.
         private final List<Integer> dimgCellIds = new ArrayList<>();
+        /// Whether this cell item is referenced by multiple derived-image items.
+        private boolean sharedDerivedImageReference;
         /// The progressive dependency item ids from `prog` references.
         private final List<Integer> progDeps = new ArrayList<>();
 

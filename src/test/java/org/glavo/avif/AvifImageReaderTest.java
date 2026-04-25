@@ -379,19 +379,14 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that a libavif fixture named for a missing alpha ispe parses through the public reader.
+    /// Verifies that a libavif fixture with an alpha auxiliary item missing ispe is rejected.
     ///
-    /// @throws IOException if the fixture cannot be read or parsed
+    /// @throws IOException if the fixture cannot be read
     @Test
-    void openParsesAlphaNoIspeFixtureInfo() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ALPHA_NOISPE_FIXTURE))) {
-            AvifImageInfo info = reader.info();
-
-            assertTrue(info.width() > 0);
-            assertTrue(info.height() > 0);
-            assertFalse(info.animated());
-            assertEquals(1, info.frameCount());
-        }
+    void rejectsAlphaMissingIspeFixture() throws IOException {
+        byte[] bytes = testResourceBytes(LIBAVIF_ALPHA_NOISPE_FIXTURE);
+        AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
     /// Verifies that truncated ispe payload is rejected.
