@@ -11,6 +11,9 @@ fixture for a left-edge Paeth corruption case in libavif `draw_points_idat.avif`
 Residual reconstruction applies AV1 luma/chroma quantization matrices, handles
 extended coefficient token magnitudes, and has focused coverage for larger
 `I420` and `I444` chroma-transform fixtures.
+AVIS sequence support now includes random indexed frame reads that do not disturb
+sequential playback state, and public metadata exposes sequence timescale,
+duration, and per-frame durations.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -43,8 +46,8 @@ behavior where the feature is in scope.
 - Decide the public API scope for gain maps and depth images. If included,
   parse and expose their metadata and decoded planes instead of only validating
   primary-image decode behavior.
-- Improve AVIS support beyond sequential playback: random access, timing
-  accuracy, alpha sequences, and multi-sample edge cases.
+- Improve AVIS support beyond random access: timing accuracy validation, alpha
+  sequences, and multi-sample edge cases.
 - Add incremental/streaming input behavior instead of requiring the full source
   to be buffered before parsing.
 - Define and test behavior for layered/scalable AVIF and operating-point

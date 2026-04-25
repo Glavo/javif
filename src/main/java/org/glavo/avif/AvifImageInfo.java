@@ -41,6 +41,12 @@ public final class AvifImageInfo {
     private final boolean animated;
     /// The number of frames advertised by the container.
     private final int frameCount;
+    /// The media timescale for animated sequences, or zero when absent.
+    private final int mediaTimescale;
+    /// The total media duration in media timescale units, or zero when absent.
+    private final long mediaDuration;
+    /// Per-frame durations in media timescale units.
+    private final int @Unmodifiable [] frameDurations;
     /// The parsed color information, or `null`.
     private final @Nullable AvifColorInfo colorInfo;
     /// The embedded ICC profile payload, or `null`.
@@ -99,6 +105,56 @@ public final class AvifImageInfo {
             byte @Nullable [] exif,
             byte @Nullable [] xmp
     ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                pixelFormat,
+                alphaPresent,
+                animated,
+                frameCount,
+                colorInfo,
+                iccProfile,
+                exif,
+                xmp,
+                0,
+                0,
+                null
+        );
+    }
+
+    /// Creates image metadata with embedded metadata payloads and sequence timing.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
+    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
+    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
+            int mediaTimescale,
+            long mediaDuration,
+            int @Nullable [] frameDurations
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -108,6 +164,12 @@ public final class AvifImageInfo {
         if (frameCount <= 0) {
             throw new IllegalArgumentException("frameCount <= 0: " + frameCount);
         }
+        if (mediaTimescale < 0) {
+            throw new IllegalArgumentException("mediaTimescale < 0: " + mediaTimescale);
+        }
+        if (mediaDuration < 0) {
+            throw new IllegalArgumentException("mediaDuration < 0: " + mediaDuration);
+        }
 
         this.width = width;
         this.height = height;
@@ -116,6 +178,9 @@ public final class AvifImageInfo {
         this.alphaPresent = alphaPresent;
         this.animated = animated;
         this.frameCount = frameCount;
+        this.mediaTimescale = mediaTimescale;
+        this.mediaDuration = mediaDuration;
+        this.frameDurations = immutableFrameDurations(frameDurations);
         this.colorInfo = colorInfo;
         this.iccProfile = immutableBytes(iccProfile);
         this.exif = immutableBytes(exif);
@@ -171,6 +236,35 @@ public final class AvifImageInfo {
         return frameCount;
     }
 
+    /// Returns the media timescale for animated sequences.
+    ///
+    /// A value of zero means the container did not expose sequence timing.
+    ///
+    /// @return the media timescale, or zero when absent
+    public int mediaTimescale() {
+        return mediaTimescale;
+    }
+
+    /// Returns the total media duration for animated sequences.
+    ///
+    /// The value is expressed in `mediaTimescale()` units. A value of zero means the container did
+    /// not expose sequence timing.
+    ///
+    /// @return the total media duration, or zero when absent
+    public long mediaDuration() {
+        return mediaDuration;
+    }
+
+    /// Returns per-frame durations for animated sequences.
+    ///
+    /// Values are expressed in `mediaTimescale()` units. Still images and inputs without timing
+    /// metadata return an empty array.
+    ///
+    /// @return per-frame durations in media timescale units
+    public int @Unmodifiable [] frameDurations() {
+        return frameDurations.clone();
+    }
+
     /// Returns the parsed color information.
     ///
     /// @return the parsed color information, or `null`
@@ -211,6 +305,23 @@ public final class AvifImageInfo {
             return null;
         }
         return ByteBuffer.wrap(Arrays.copyOf(bytes, bytes.length)).asReadOnlyBuffer();
+    }
+
+    /// Creates immutable storage for optional frame-duration data.
+    ///
+    /// @param frameDurations the source frame durations, or `null`
+    /// @return immutable frame-duration storage
+    private static int @Unmodifiable [] immutableFrameDurations(int @Nullable [] frameDurations) {
+        if (frameDurations == null || frameDurations.length == 0) {
+            return new int[0];
+        }
+        int[] result = frameDurations.clone();
+        for (int duration : result) {
+            if (duration < 0) {
+                throw new IllegalArgumentException("frameDurations contains a negative duration: " + duration);
+            }
+        }
+        return result;
     }
 
     /// Returns a read-only view over immutable payload storage.

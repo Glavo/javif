@@ -1112,6 +1112,7 @@ public final class AvifContainerParser {
         }
         int ts = s.mediaTimescale > 0 ? s.mediaTimescale : 30;
         long dur = s.mediaDuration > 0 ? s.mediaDuration : sampleCount;
+        int[] frameDeltas = deltas.stream().mapToInt(Integer::intValue).toArray();
         AvifImageInfo info = new AvifImageInfo(
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
@@ -1123,10 +1124,13 @@ public final class AvifContainerParser {
                 s.colr,
                 s.iccProfile,
                 null,
-                null);
+                null,
+                ts,
+                dur,
+                frameDeltas);
         return new AvifContainer(info,
                 payloads.toArray(byte[][]::new),
-                deltas.stream().mapToInt(Integer::intValue).toArray(),
+                frameDeltas,
                 sampleCount, ts, dur);
     }
 

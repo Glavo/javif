@@ -282,6 +282,13 @@ final class AvifImageReaderTest {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
             assertEquals(5, info.frameCount());
+            assertTrue(info.mediaTimescale() > 0);
+            assertTrue(info.mediaDuration() > 0);
+            int[] frameDurations = info.frameDurations();
+            assertEquals(5, frameDurations.length);
+            assertTrue(allPositive(frameDurations));
+            frameDurations[0] = 0;
+            assertTrue(info.frameDurations()[0] > 0);
 
             List<AvifFrame> frames = reader.readAllFrames();
             assertEquals(5, frames.size());
@@ -293,6 +300,41 @@ final class AvifImageReaderTest {
                 assertEquals(150, f.height());
                 assertEquals(i, f.frameIndex());
             }
+        }
+    }
+
+    /// Returns whether every duration is positive.
+    ///
+    /// @param durations the durations to inspect
+    /// @return whether every duration is positive
+    private static boolean allPositive(int[] durations) {
+        for (int duration : durations) {
+            if (duration <= 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Verifies that indexed AVIS sequence reads do not disturb sequential playback state.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
+            AvifFrame third = reader.readFrame(3);
+            assertEquals(3, third.frameIndex());
+
+            AvifFrame firstSequential = reader.readFrame();
+            assertNotNull(firstSequential);
+            assertEquals(0, firstSequential.frameIndex());
+
+            AvifFrame secondRandom = reader.readFrame(1);
+            assertEquals(1, secondRandom.frameIndex());
+
+            AvifFrame secondSequential = reader.readFrame();
+            assertNotNull(secondSequential);
+            assertEquals(1, secondSequential.frameIndex());
         }
     }
 

@@ -198,7 +198,9 @@ public final class AvifImageReader implements AutoCloseable {
         if (nextFrameIndex >= container.info().frameCount()) {
             return null;
         }
-        AvifFrame frame = readFrame(nextFrameIndex);
+        AvifFrame frame = container.isSequence()
+                ? readSequenceFrameSequential(nextFrameIndex)
+                : readFrame(nextFrameIndex);
         nextFrameIndex++;
         return frame;
     }
@@ -221,7 +223,7 @@ public final class AvifImageReader implements AutoCloseable {
             );
         }
         if (container.isSequence()) {
-            return readSequenceFrame(frameIndex);
+            return readSequenceFrameRandomAccess(frameIndex);
         }
         if (container.isGrid()) {
             return readGridFrame(frameIndex);
@@ -256,19 +258,22 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Decodes a single frame from an image sequence.
+    /// Decodes the next frame from an image sequence using the persistent sequential AV1 reader.
     ///
     /// @param frameIndex the zero-based frame index
     /// @return the decoded frame
     /// @throws IOException if decoding fails
-    private AvifFrame readSequenceFrame(int frameIndex) throws IOException {
+    private AvifFrame readSequenceFrameSequential(int frameIndex) throws IOException {
         @Unmodifiable ByteBuffer @Nullable [] payloads = container.samplePayloads();
         if (payloads == null || frameIndex >= payloads.length) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        if (frameIndex < sequenceAv1FrameIndex) {
-            throw new AvifDecodeException(AvifErrorCode.UNSUPPORTED_FEATURE,
-                    "Random-access sequence decoding is not implemented in this slice", null);
+        if (frameIndex != sequenceAv1FrameIndex && sequenceAv1Reader != null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    "Sequential AVIF sequence reader is out of sync at frame " + frameIndex,
+                    null
+            );
         }
         if (sequenceAv1Reader == null) {
             sequenceAv1Reader = Av1ImageReader.open(
@@ -289,6 +294,39 @@ public final class AvifImageReader implements AutoCloseable {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence produced no frame: " + frameIndex, null);
             sequenceAv1FrameIndex++;
             return adaptFrame(decodedFrame, sequenceAv1Reader.lastPlanes(), container.info().colorInfo(), frameIndex);
+        } catch (AvifDecodeException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, e.getMessage(), null, e);
+        }
+    }
+
+    /// Decodes one image-sequence frame without mutating the persistent sequential AV1 reader.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return the decoded frame
+    /// @throws IOException if decoding fails
+    private AvifFrame readSequenceFrameRandomAccess(int frameIndex) throws IOException {
+        @Unmodifiable ByteBuffer @Nullable [] payloads = container.samplePayloads();
+        if (payloads == null || frameIndex >= payloads.length) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        try (Av1ImageReader randomAccessReader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffers(payloads),
+                config.av1DecoderConfig()
+        )) {
+            DecodedFrame decodedFrame = null;
+            for (int index = 0; index <= frameIndex; index++) {
+                decodedFrame = randomAccessReader.readFrame();
+                if (decodedFrame == null) {
+                    throw new AvifDecodeException(
+                            AvifErrorCode.AV1_DECODE_FAILED,
+                            "Sequence ended before frame " + frameIndex,
+                            null
+                    );
+                }
+            }
+            return adaptFrame(decodedFrame, randomAccessReader.lastPlanes(), container.info().colorInfo(), frameIndex);
         } catch (AvifDecodeException e) {
             throw e;
         } catch (IOException e) {
