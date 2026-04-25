@@ -56,6 +56,7 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.bytedeco:ffmpeg-platform:8.0.1-1.5.13")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
