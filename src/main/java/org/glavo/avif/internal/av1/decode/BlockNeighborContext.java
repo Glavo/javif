@@ -871,7 +871,7 @@ public final class BlockNeighborContext {
                 checkedDirection == 0 ? leftInterpolationFilterHorizontal[y4] : leftInterpolationFilterVertical[y4]
         )
                 : INTERPOLATION_FILTER_UNSET;
-        int contextBase = ((checkedDirection << 1) + (referenceFrame1 >= 0 ? 1 : 0)) << 2;
+        int contextBase = referenceFrame1 >= 0 ? 4 : 0;
         if (aboveFilter == leftFilter) {
             return contextBase + (aboveFilter & 0xFF);
         }

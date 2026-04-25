@@ -840,9 +840,9 @@ public final class AvifContainerParser {
         int cleanApertureWidthD = checkedU32ToInt(input.readU32(), input.offset() - 4);
         int cleanApertureHeightN = checkedU32ToInt(input.readU32(), input.offset() - 4);
         int cleanApertureHeightD = checkedU32ToInt(input.readU32(), input.offset() - 4);
-        int horizOffN = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int horizOffN = (int) input.readU32();
         int horizOffD = checkedU32ToInt(input.readU32(), input.offset() - 4);
-        int vertOffN = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        int vertOffN = (int) input.readU32();
         int vertOffD = checkedU32ToInt(input.readU32(), input.offset() - 4);
         if (cleanApertureWidthD <= 0 || cleanApertureHeightD <= 0 || horizOffD <= 0 || vertOffD <= 0) {
             throw parseFailed("clap denominator values must be positive", input.offset());
@@ -980,11 +980,7 @@ public final class AvifContainerParser {
         }
         input.readU32();
         input.skip(4);
-        if (fb.version == 1) {
-            input.readU64();
-        } else {
-            input.readU32();
-        }
+        input.skip(fb.version == 1 ? 8 : 4);
         input.skip(52);
         long w = input.readU32();
         long h = input.readU32();
@@ -1225,9 +1221,22 @@ public final class AvifContainerParser {
                 if (property instanceof OpaqueProperty && essential) {
                     item.hasUnsupportedEssentialProperty = true;
                 }
+                if (!essential && isTransformativeProperty(property)) {
+                    throw parseFailed("Transformative item property must be marked essential", input.offset());
+                }
                 item.properties.add(property);
             }
         }
+    }
+
+    /// Returns whether a parsed item property changes the rendered image geometry.
+    ///
+    /// @param property the parsed item property
+    /// @return whether the property is a transformative item property
+    private static boolean isTransformativeProperty(Property property) {
+        return property instanceof CleanAperture
+                || property instanceof ImageRotation
+                || property instanceof ImageMirror;
     }
 
     /// Parses an `iref` box.

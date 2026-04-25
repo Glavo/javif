@@ -145,6 +145,57 @@ final class FramePostprocessorTest {
         assertEquals(64, decodedPlanes.lumaPlane().sample(3, 3));
     }
 
+    /// Verifies that skipped blocks that omit CDEF side syntax use the AV1 default CDEF index.
+    @Test
+    void postprocessUsesDefaultCdefIndexWhenBlockIndexIsOmitted() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 64, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(6, 2, new int[]{60, 0, 0, 0}, new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, -1);
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertNotSame(decodedPlanes, postprocessed);
+        assertTrue(postprocessed.lumaPlane().sample(3, 3) < 64);
+        assertEquals(64, decodedPlanes.lumaPlane().sample(3, 3));
+    }
+
     /// Verifies that active CDEF fails explicitly when decoded block indices are unavailable.
     @Test
     void postprocessRejectsActiveCdefWithoutDecodedBlockIndex() {

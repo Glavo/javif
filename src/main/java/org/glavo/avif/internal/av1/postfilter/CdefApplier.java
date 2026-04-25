@@ -31,8 +31,9 @@ import java.util.Objects;
 /// Applies the current CDEF stage of the postfilter pipeline.
 ///
 /// This implementation applies a deterministic CDEF subset from decoded frame-level strengths and
-/// block-level `cdefIndex` syntax. It keeps inactive CDEF as an identity transform and rejects
-/// active CDEF when block syntax is unavailable instead of silently preserving filtered frames.
+/// block-level `cdefIndex` syntax. It keeps inactive CDEF as an identity transform, uses the AV1
+/// default CDEF index for skipped blocks that omit the side syntax, and rejects active CDEF when
+/// block syntax is unavailable instead of silently preserving filtered frames.
 @NotNullByDefault
 public final class CdefApplier {
     /// The luma CDEF unit size in samples.
@@ -185,7 +186,7 @@ public final class CdefApplier {
             int unitColumns,
             int unitRows
     ) {
-        int defaultIndex = cdef.bits() == 0 ? 0 : -1;
+        int defaultIndex = 0;
         int[] cdefIndices = new int[unitColumns * unitRows];
         Arrays.fill(cdefIndices, defaultIndex);
         for (int tileIndex = 0; tileIndex < syntaxDecodeResult.tileCount(); tileIndex++) {

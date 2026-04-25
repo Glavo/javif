@@ -299,7 +299,7 @@ final class AvifImageReaderTest {
                 box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty(), transform),
                 fullBox("ipma", 0, 0,
                         u32(1), u16(1),
-                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, 0x04}
+                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, (byte) 0x84}
                 )
         );
         byte[] metaFull = fullBox("meta", 0, 0,

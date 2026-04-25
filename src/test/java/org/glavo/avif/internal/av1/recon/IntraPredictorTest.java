@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for the currently supported intra-prediction paths.
 @NotNullByDefault
@@ -212,6 +213,23 @@ final class IntraPredictorTest {
                         {80, 100, 112}
                 }
         );
+    }
+
+    /// Verifies that large smooth blocks are predicted through 64x64 sub-kernel regions.
+    @Test
+    void smoothPredictionSplitsLargeBlocksIntoSupportedKernelRegions() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(129, 129, 8);
+        for (int i = 1; i < 129; i++) {
+            plane.setSample(i, 0, 96);
+            plane.setSample(0, i, 160);
+        }
+
+        IntraPredictor.predictLuma(plane, 1, 1, 128, 128, LumaIntraPredictionMode.SMOOTH, 0);
+
+        assertEquals(128, plane.sample(1, 1));
+        assertTrue(plane.sample(64, 1) > 0);
+        assertTrue(plane.sample(65, 65) > 0);
+        assertTrue(plane.sample(128, 128) > 0);
     }
 
     /// Verifies that filter-intra prediction applies the recursive 4x2 tap tables in raster order.

@@ -206,9 +206,9 @@ final class BlockNeighborContextTest {
         BlockPosition position = new BlockPosition(4, 4);
 
         assertEquals(3, context.interpolationFilterContext(position, 0, -1, 0));
-        assertEquals(11, context.interpolationFilterContext(position, 0, -1, 1));
+        assertEquals(3, context.interpolationFilterContext(position, 0, -1, 1));
         assertEquals(7, context.interpolationFilterContext(position, 0, 4, 0));
-        assertEquals(15, context.interpolationFilterContext(position, 0, 4, 1));
+        assertEquals(7, context.interpolationFilterContext(position, 0, 4, 1));
 
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
@@ -220,9 +220,9 @@ final class BlockNeighborContextTest {
                 FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
         ));
         assertEquals(0, context.interpolationFilterContext(position, 0, -1, 0));
-        assertEquals(9, context.interpolationFilterContext(position, 0, -1, 1));
+        assertEquals(1, context.interpolationFilterContext(position, 0, -1, 1));
         assertEquals(4, context.interpolationFilterContext(position, 0, 4, 0));
-        assertEquals(13, context.interpolationFilterContext(position, 0, 4, 1));
+        assertEquals(5, context.interpolationFilterContext(position, 0, 4, 1));
 
         context.updateFromBlockHeader(compoundInterBlock(
                 new BlockPosition(2, 4),
@@ -236,9 +236,9 @@ final class BlockNeighborContextTest {
                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
         ));
         assertEquals(3, context.interpolationFilterContext(position, 0, -1, 0));
-        assertEquals(11, context.interpolationFilterContext(position, 0, -1, 1));
+        assertEquals(3, context.interpolationFilterContext(position, 0, -1, 1));
         assertEquals(7, context.interpolationFilterContext(position, 0, 4, 0));
-        assertEquals(15, context.interpolationFilterContext(position, 0, 4, 1));
+        assertEquals(7, context.interpolationFilterContext(position, 0, 4, 1));
 
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
@@ -250,9 +250,9 @@ final class BlockNeighborContextTest {
                 FrameHeader.InterpolationFilter.SWITCHABLE
         ));
         assertEquals(2, context.interpolationFilterContext(position, 4, -1, 0));
-        assertEquals(8, context.interpolationFilterContext(position, 4, -1, 1));
+        assertEquals(0, context.interpolationFilterContext(position, 4, -1, 1));
         assertEquals(6, context.interpolationFilterContext(position, 4, 0, 0));
-        assertEquals(12, context.interpolationFilterContext(position, 4, 0, 1));
+        assertEquals(4, context.interpolationFilterContext(position, 4, 0, 1));
     }
 
     /// Verifies provisional inter-mode contexts derive stable mode and DRL contexts from neighbors.

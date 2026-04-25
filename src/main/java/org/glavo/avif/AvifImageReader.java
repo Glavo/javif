@@ -349,7 +349,7 @@ public final class AvifImageReader implements AutoCloseable {
             return composeGridIntFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
         }
         if (firstCell.bitDepth().isHighBitDepth()) {
-            throw unsupported("Grid composition for 10/12-bit frames is not implemented in this slice", null);
+            return composeGridLongFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
         }
         throw unsupported("Unsupported grid cell bit depth: " + firstCell.bitDepth(), null);
     }
@@ -385,9 +385,68 @@ public final class AvifImageReader implements AutoCloseable {
                 }
                 for (int cy = 0; cy < cellHeight; cy++) {
                     int destRow = yOffset + cy;
+                    if (destRow >= outputHeight) {
+                        break;
+                    }
                     int destCol = cellX;
+                    if (destCol >= outputWidth) {
+                        break;
+                    }
                     int srcRow = cy * cellWidth;
-                    for (int cx = 0; cx < cellWidth; cx++) {
+                    int copyWidth = Math.min(cellWidth, outputWidth - destCol);
+                    for (int cx = 0; cx < copyWidth; cx++) {
+                        canvas[destRow * outputWidth + destCol + cx] = cellPixels.get(srcRow + cx);
+                    }
+                }
+            }
+            yOffset += maxCellHeight;
+        }
+        AvifPixelFormat fmt = cellFrames[0].pixelFormat();
+        return new AvifFrame(outputWidth, outputHeight,
+                cellFrames[0].bitDepth(), fmt, frameIndex, canvas);
+    }
+
+    /// Composes 10/12-bit grid cell frames into a single canvas.
+    ///
+    /// @param cellFrames the decoded high-bit-depth cell frames
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the output width
+    /// @param outputHeight the output height
+    /// @param frameIndex the zero-based frame index
+    /// @return the composed frame
+    private static AvifFrame composeGridLongFrames(
+            DecodedFrame[] cellFrames, int rows, int columns,
+            int outputWidth, int outputHeight, int frameIndex
+    ) {
+        long[] canvas = new long[outputWidth * outputHeight];
+        int yOffset = 0;
+        for (int row = 0; row < rows; row++) {
+            int maxCellHeight = 0;
+            for (int col = 0; col < columns; col++) {
+                int cellIndex = row * columns + col;
+                DecodedFrame cellFrame = cellFrames[cellIndex];
+                LongBuffer cellPixels = cellFrame.longPixelBuffer();
+                int cellWidth = cellFrame.width();
+                int cellHeight = cellFrame.height();
+                maxCellHeight = Math.max(maxCellHeight, cellHeight);
+                int cellX = 0;
+                for (int prevCol = 0; prevCol < col; prevCol++) {
+                    DecodedFrame prevFrame = cellFrames[row * columns + prevCol];
+                    cellX += prevFrame.width();
+                }
+                for (int cy = 0; cy < cellHeight; cy++) {
+                    int destRow = yOffset + cy;
+                    if (destRow >= outputHeight) {
+                        break;
+                    }
+                    int destCol = cellX;
+                    if (destCol >= outputWidth) {
+                        break;
+                    }
+                    int srcRow = cy * cellWidth;
+                    int copyWidth = Math.min(cellWidth, outputWidth - destCol);
+                    for (int cx = 0; cx < copyWidth; cx++) {
                         canvas[destRow * outputWidth + destCol + cx] = cellPixels.get(srcRow + cx);
                     }
                 }

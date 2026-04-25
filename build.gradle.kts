@@ -78,6 +78,10 @@ tasks.register<JavaExec>("run") {
 tasks.test {
     useJUnitPlatform()
     testLogging.showStandardStreams = true
+    systemProperty(
+        "org.bytedeco.javacpp.cachedir",
+        layout.buildDirectory.dir("javacpp-cache").get().asFile.absolutePath,
+    )
 }
 
 val dav1dCommit = "c5726277ffa8764665ea08f865e46912a41f2309"

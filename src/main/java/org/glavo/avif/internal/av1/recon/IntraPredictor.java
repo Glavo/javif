@@ -34,6 +34,9 @@ final class IntraPredictor {
             90, 180, 45, 135, 113, 157, 203, 67
     };
 
+    /// The maximum axis length passed to one AV1 intra-prediction kernel invocation.
+    private static final int MAX_INTRA_PREDICTION_AXIS_SIZE = 64;
+
     /// The AV1 directional derivative table indexed by half-angle.
     private static final int @Unmodifiable [] DIRECTIONAL_DERIVATIVES = {
             0,
@@ -443,6 +446,10 @@ final class IntraPredictor {
         if (height <= 0) {
             throw new IllegalArgumentException("height <= 0: " + height);
         }
+        if (width > MAX_INTRA_PREDICTION_AXIS_SIZE || height > MAX_INTRA_PREDICTION_AXIS_SIZE) {
+            predictLargeBlock(plane, x, y, width, height, mode, angleDelta);
+            return;
+        }
 
         if (mode.usesDirectionalPrediction(angleDelta)) {
             predictDirectional(plane, x, y, width, height, mode, angleDelta);
@@ -470,6 +477,33 @@ final class IntraPredictor {
             case SMOOTH -> predictSmooth(plane, x, y, width, height, top, left);
             case SMOOTH_VERTICAL -> predictSmoothVertical(plane, x, y, width, height, top, left);
             case SMOOTH_HORIZONTAL -> predictSmoothHorizontal(plane, x, y, width, height, top, left);
+        }
+    }
+
+    /// Reconstructs a large intra block through 64x64-or-smaller prediction-kernel regions.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param mode the supported internal prediction mode
+    /// @param angleDelta the signed directional angle delta
+    private static void predictLargeBlock(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            PredictionMode mode,
+            int angleDelta
+    ) {
+        for (int offsetY = 0; offsetY < height; offsetY += MAX_INTRA_PREDICTION_AXIS_SIZE) {
+            int subHeight = Math.min(MAX_INTRA_PREDICTION_AXIS_SIZE, height - offsetY);
+            for (int offsetX = 0; offsetX < width; offsetX += MAX_INTRA_PREDICTION_AXIS_SIZE) {
+                int subWidth = Math.min(MAX_INTRA_PREDICTION_AXIS_SIZE, width - offsetX);
+                predict(plane, x + offsetX, y + offsetY, subWidth, subHeight, mode, angleDelta);
+            }
         }
     }
 

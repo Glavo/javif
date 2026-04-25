@@ -9,7 +9,7 @@ postprocessed decoded planes for composition. Runtime dependency is `java.base` 
 **Image types supported:**
 - Primary still images (`av01`)
 - Alpha auxiliary images (non-premultiplied ARGB combining)
-- Grid derived images (cell composition)
+- Grid derived images (8-bit and 10/12-bit cell composition)
 - Progressive still images (`prog` references)
 - AVIS animated sequences (keyframe decode, frame count/dimensions/timing metadata)
 
@@ -27,16 +27,20 @@ postprocessed decoded planes for composition. Runtime dependency is `java.base` 
 **Parsing robustness:** parser tests cover truncation, overflow, duplicate unique boxes, invalid
 references, missing required properties, and essential unknown property rejection.
 
-**Test fixtures:** `white_1x1.avif`, `extended_pixi.avif`, `colors_sdr_srgb.avif`,
-`paris_icc_exif_xmp.avif`, `abc_color_irot_alpha_NOirot.avif`, `sofa_grid1x5_420.avif`,
-`draw_points_idat_progressive.avif`, `colors-animated-8bpc.avif`,
-plus synthetic still-image, alpha, grid, and irot tests.
+**Test fixtures:** all AVIF files copied from libavif `tests/data` have explicit corpus
+expectations. The corpus now decodes the libavif IO still-image samples, 10/12-bit grid samples,
+and animated alpha/depth/keyframe samples that previously failed. Fixtures that remain expected
+failures match libavif strict parsing or documented unsupported behavior.
 
 **Known gaps:**
 - AV1 `I444` pixel-accuracy tracked separately from AVIF container coverage.
 - ICC profiles, transfer-function conversion, and full color-management/display adaptation are not
   implemented; decoded ARGB output currently applies only AV1/nclx-style matrix and range handling.
-- Grid and transform composition: 8-bit only; 10/12-bit deferred (planes exposed for future use).
+- Container-level `clap`/`irot`/`imir` transform composition is still 8-bit only.
+- Gain map, depth, audio, encoder, CLI, and incremental IO behaviors from libavif are not exposed
+  as public APIs here; tests currently validate primary-image decode behavior for those fixtures.
+- External dav1d `checkasm` and fuzz harnesses are not one-to-one Java ports; the Java suite keeps
+  equivalent targeted parser, entropy, reconstruction, postfilter, and AV1 reader tests.
 
 ## Validation
 
