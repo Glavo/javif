@@ -84,6 +84,8 @@ public final class Av1ImageReader implements AutoCloseable {
     private long nextPresentationIndex;
     /// Whether this reader has already been closed.
     private boolean closed;
+    /// The postprocessed decoded planes from the most recent frame, or `null`.
+    private @Nullable DecodedPlanes lastPlanes;
 
     /// Creates a sequential image reader.
     ///
@@ -180,6 +182,13 @@ public final class Av1ImageReader implements AutoCloseable {
                 continue;
             }
         }
+    }
+
+    /// Returns the postprocessed decoded planes from the most recently decoded frame.
+    ///
+    /// @return the postprocessed planes, or `null` if no frame has been decoded yet
+    public @Nullable DecodedPlanes lastPlanes() {
+        return lastPlanes;
     }
 
     /// Reads all decoded frames from the source until end-of-stream.
@@ -462,6 +471,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 Objects.requireNonNull(postprocessedPlanes, "postprocessedPlanes"),
                 frameHeader
         );
+        lastPlanes = presentationPlanes;
         return OutputFrameFactory.createFrame(
                 presentationPlanes,
                 frameHeader,

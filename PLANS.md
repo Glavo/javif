@@ -3,8 +3,8 @@
 ## Status
 
 `org.glavo.avif` provides a public reader API (`AvifImageReader`) that parses AVIF containers,
-extracts AV1 item payloads, and decodes them through the pure-Java `org.glavo.avif.decode` AV1
-reader. Runtime dependency is `java.base` only.
+decodes AV1 payloads through the pure-Java `org.glavo.avif.decode` reader, and exposes
+postprocessed decoded planes for composition. Runtime dependency is `java.base` only.
 
 **Image types supported:**
 - Primary still images (`av01`)
@@ -18,6 +18,8 @@ reader. Runtime dependency is `java.base` only.
 - Reference types: `auxl`, `dimg`, `prog`
 - Properties: `ispe`, `av1C`, `colr nclx`, `auxC`, `pixi`, `pasp`, `clap`, `irot`, `imir`, `a1op`
 - Transforms applied post-decode: `clap` (crop), `irot` (rotate), `imir` (mirror) — 8-bit only
+- Postprocessed decoded planes exposed via `Av1ImageReader.lastPlanes()` for direct plane access
+- AV1 inter-frame warped motion boundary clamp fixed (`horizontalInterpolate`/`verticalInterpolate`)
 
 **Parsing robustness:** parser tests cover truncation, overflow, duplicate unique boxes, invalid
 references, missing required properties, and essential unknown property rejection.
@@ -29,14 +31,7 @@ plus synthetic still-image, alpha, grid, and irot tests.
 
 **Known gaps:**
 - AV1 `I444` pixel-accuracy tracked separately from AVIF container coverage.
-- Grid and transform composition: 8-bit only; 10/12-bit deferred.
-
-## Remaining Work
-
-1. **Improve AV1 integration for AVIF composition** — expose postprocessed planes before
-   ARGB packing for reuse in alpha, grid, and transform paths.
-   - Expose postprocessed planes before ARGB packing for reuse in alpha, grid, and transform paths.
-   - Keep public AV1 reader behavior unchanged.
+- Grid and transform composition: 8-bit only; 10/12-bit deferred (planes exposed for future use).
 
 ## Validation
 

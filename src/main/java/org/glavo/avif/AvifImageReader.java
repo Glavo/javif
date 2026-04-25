@@ -20,6 +20,8 @@ import org.glavo.avif.decode.ArgbLongFrame;
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.PixelFormat;
+import org.glavo.avif.internal.av1.recon.DecodedPlane;
+import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
 import org.glavo.avif.internal.io.BufferedInput;
@@ -617,11 +619,15 @@ public final class AvifImageReader implements AutoCloseable {
             if (alphaFrame.width() != colorFrame.width() || alphaFrame.height() != colorFrame.height()) {
                 throw unsupported("Alpha with different decoded dimensions than master image", null);
             }
-            if (colorFrame instanceof ArgbIntFrame colorInt && alphaFrame instanceof ArgbIntFrame alphaInt) {
-                return combineIntFrames(colorInt, alphaInt, frameIndex);
+            DecodedPlanes alphaPlanes = alphaReader.lastPlanes();
+            if (alphaPlanes == null) {
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha planes not available", null);
             }
-            if (colorFrame instanceof ArgbLongFrame colorLong && alphaFrame instanceof ArgbLongFrame alphaLong) {
-                return combineLongFrames(colorLong, alphaLong, frameIndex);
+            if (colorFrame instanceof ArgbIntFrame colorInt) {
+                return combineIntPlaneAlpha(colorInt, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
+            }
+            if (colorFrame instanceof ArgbLongFrame colorLong) {
+                return combineLongPlaneAlpha(colorLong, alphaPlanes, alphaFrame.pixelFormat(), frameIndex);
             }
             throw unsupported("Alpha and color frame pixel formats do not match", null);
         } catch (AvifDecodeException exception) {
@@ -631,52 +637,57 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Combines an 8-bit alpha frame into an 8-bit color frame yielding non-premultiplied ARGB.
-    ///
-    /// @param color the decoded color frame
-    /// @param alpha the decoded alpha frame
-    /// @param frameIndex the zero-based AVIF frame index
-    /// @return the combined frame
-    private static AvifIntFrame combineIntFrames(ArgbIntFrame color, ArgbIntFrame alpha, int frameIndex) {
+    /// Combines alpha from raw luma plane into an 8-bit color frame.
+    private static AvifIntFrame combineIntPlaneAlpha(
+            ArgbIntFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
+    ) {
         int[] colorPixels = color.pixels();
-        int[] alphaPixels = alpha.pixels();
-        int pixelCount = colorPixels.length;
-        if (alphaPixels.length != pixelCount) {
-            throw new IllegalArgumentException("Alpha and color pixel counts do not match");
+        int width = color.width();
+        int height = color.height();
+        DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
+        int maxSample = (1 << color.bitDepth()) - 1;
+        int[] combined = new int[width * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int alphaSample = lumaPlane.sample(x, y);
+                int alpha8;
+                if (color.bitDepth() == 8) {
+                    alpha8 = alphaSample;
+                } else {
+                    alpha8 = (alphaSample * 255 + maxSample / 2) / maxSample;
+                }
+                int i = y * width + x;
+                combined[i] = (colorPixels[i] & 0x00FFFFFF) | (alpha8 << 24);
+            }
         }
-        int[] combined = new int[pixelCount];
-        for (int i = 0; i < pixelCount; i++) {
-            int alphaLuma = alphaPixels[i] & 0xFF;
-            combined[i] = (colorPixels[i] & 0x00FFFFFF) | (alphaLuma << 24);
-        }
-        return new AvifIntFrame(
-                color.width(), color.height(), color.bitDepth(), color.pixelFormat(),
-                frameIndex, combined
-        );
+        return new AvifIntFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
-    /// Combines a 10/12-bit alpha frame into a 10/12-bit color frame yielding non-premultiplied ARGB.
-    ///
-    /// @param color the decoded color frame
-    /// @param alpha the decoded alpha frame
-    /// @param frameIndex the zero-based AVIF frame index
-    /// @return the combined frame
-    private static AvifLongFrame combineLongFrames(ArgbLongFrame color, ArgbLongFrame alpha, int frameIndex) {
+    /// Combines alpha from raw luma plane into a 10/12-bit color frame.
+    private static AvifLongFrame combineLongPlaneAlpha(
+            ArgbLongFrame color, DecodedPlanes alphaPlanes, PixelFormat alphaFmt, int frameIndex
+    ) {
         long[] colorPixels = color.pixels();
-        long[] alphaPixels = alpha.pixels();
-        int pixelCount = colorPixels.length;
-        if (alphaPixels.length != pixelCount) {
-            throw new IllegalArgumentException("Alpha and color pixel counts do not match");
+        int width = color.width();
+        int height = color.height();
+        DecodedPlane lumaPlane = alphaPlanes.lumaPlane();
+        int maxSample = (1 << color.bitDepth()) - 1;
+        long maxSampleL = maxSample;
+        long[] combined = new long[width * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int alphaSample = lumaPlane.sample(x, y);
+                long alpha16;
+                if (color.bitDepth() <= 8) {
+                    alpha16 = (alphaSample * maxSampleL + 128) / 255;
+                } else {
+                    alpha16 = alphaSample;
+                }
+                int i = y * width + x;
+                combined[i] = (colorPixels[i] & 0x0000FFFF_FFFFFFFFL) | ((alpha16 & maxSampleL) << 48);
+            }
         }
-        long[] combined = new long[pixelCount];
-        for (int i = 0; i < pixelCount; i++) {
-            long alphaLuma = alphaPixels[i] & 0xFFFFL;
-            combined[i] = (colorPixels[i] & 0x0000FFFF_FFFFFFFFL) | (alphaLuma << 48);
-        }
-        return new AvifLongFrame(
-                color.width(), color.height(), color.bitDepth(), color.pixelFormat(),
-                frameIndex, combined
-        );
+        return new AvifLongFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
     /// Creates an unsupported-feature exception.
