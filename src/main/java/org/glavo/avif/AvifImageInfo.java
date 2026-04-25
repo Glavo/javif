@@ -47,6 +47,20 @@ public final class AvifImageInfo {
     private final long mediaDuration;
     /// Per-frame durations in media timescale units.
     private final int @Unmodifiable [] frameDurations;
+    /// The clean-aperture crop x coordinate, or -1 when absent.
+    private final int cleanApertureCropX;
+    /// The clean-aperture crop y coordinate, or -1 when absent.
+    private final int cleanApertureCropY;
+    /// The clean-aperture crop width, or -1 when absent.
+    private final int cleanApertureCropWidth;
+    /// The clean-aperture crop height, or -1 when absent.
+    private final int cleanApertureCropHeight;
+    /// The clockwise rotation code from the `irot` property, or -1 when absent.
+    private final int rotationCode;
+    /// The mirror axis from the `imir` property, or -1 when absent.
+    private final int mirrorAxis;
+    /// Auxiliary image type strings associated with the primary image.
+    private final String @Unmodifiable [] auxiliaryImageTypes;
     /// The parsed color information, or `null`.
     private final @Nullable AvifColorInfo colorInfo;
     /// The embedded ICC profile payload, or `null`.
@@ -155,6 +169,77 @@ public final class AvifImageInfo {
             long mediaDuration,
             int @Nullable [] frameDurations
     ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                pixelFormat,
+                alphaPresent,
+                animated,
+                frameCount,
+                colorInfo,
+                iccProfile,
+                exif,
+                xmp,
+                mediaTimescale,
+                mediaDuration,
+                frameDurations,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                null
+        );
+    }
+
+    /// Creates image metadata with embedded metadata payloads, sequence timing, transforms, and auxiliary types.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
+    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
+    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
+    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
+    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
+    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
+    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
+            int mediaTimescale,
+            long mediaDuration,
+            int @Nullable [] frameDurations,
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight,
+            int rotationCode,
+            int mirrorAxis,
+            String @Nullable [] auxiliaryImageTypes
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -169,6 +254,17 @@ public final class AvifImageInfo {
         }
         if (mediaDuration < 0) {
             throw new IllegalArgumentException("mediaDuration < 0: " + mediaDuration);
+        }
+        if (!isAbsentCleanAperture(cleanApertureCropX, cleanApertureCropY, cleanApertureCropWidth, cleanApertureCropHeight)
+                && (cleanApertureCropX < 0 || cleanApertureCropY < 0
+                || cleanApertureCropWidth <= 0 || cleanApertureCropHeight <= 0)) {
+            throw new IllegalArgumentException("Invalid clean-aperture crop parameters");
+        }
+        if (rotationCode < -1 || rotationCode > 3) {
+            throw new IllegalArgumentException("rotationCode must be -1 or between 0 and 3: " + rotationCode);
+        }
+        if (mirrorAxis < -1 || mirrorAxis > 1) {
+            throw new IllegalArgumentException("mirrorAxis must be -1, 0, or 1: " + mirrorAxis);
         }
 
         int @Unmodifiable [] checkedFrameDurations = immutableFrameDurations(frameDurations);
@@ -188,6 +284,13 @@ public final class AvifImageInfo {
         this.mediaTimescale = mediaTimescale;
         this.mediaDuration = mediaDuration;
         this.frameDurations = checkedFrameDurations;
+        this.cleanApertureCropX = cleanApertureCropX;
+        this.cleanApertureCropY = cleanApertureCropY;
+        this.cleanApertureCropWidth = cleanApertureCropWidth;
+        this.cleanApertureCropHeight = cleanApertureCropHeight;
+        this.rotationCode = rotationCode;
+        this.mirrorAxis = mirrorAxis;
+        this.auxiliaryImageTypes = immutableAuxiliaryImageTypes(auxiliaryImageTypes);
         this.colorInfo = colorInfo;
         this.iccProfile = immutableBytes(iccProfile);
         this.exif = immutableBytes(exif);
@@ -272,6 +375,78 @@ public final class AvifImageInfo {
         return frameDurations.clone();
     }
 
+    /// Returns whether a clean-aperture crop is present.
+    ///
+    /// @return whether a clean-aperture crop is present
+    public boolean hasCleanApertureCrop() {
+        return cleanApertureCropX >= 0;
+    }
+
+    /// Returns the clean-aperture crop x coordinate.
+    ///
+    /// A value of -1 means no clean-aperture crop is present.
+    ///
+    /// @return the clean-aperture crop x coordinate, or -1 when absent
+    public int cleanApertureCropX() {
+        return cleanApertureCropX;
+    }
+
+    /// Returns the clean-aperture crop y coordinate.
+    ///
+    /// A value of -1 means no clean-aperture crop is present.
+    ///
+    /// @return the clean-aperture crop y coordinate, or -1 when absent
+    public int cleanApertureCropY() {
+        return cleanApertureCropY;
+    }
+
+    /// Returns the clean-aperture crop width.
+    ///
+    /// A value of -1 means no clean-aperture crop is present.
+    ///
+    /// @return the clean-aperture crop width, or -1 when absent
+    public int cleanApertureCropWidth() {
+        return cleanApertureCropWidth;
+    }
+
+    /// Returns the clean-aperture crop height.
+    ///
+    /// A value of -1 means no clean-aperture crop is present.
+    ///
+    /// @return the clean-aperture crop height, or -1 when absent
+    public int cleanApertureCropHeight() {
+        return cleanApertureCropHeight;
+    }
+
+    /// Returns the clockwise rotation code from the `irot` property.
+    ///
+    /// Values 0 through 3 represent 0, 90, 180, and 270 degrees clockwise.
+    /// A value of -1 means the property is absent.
+    ///
+    /// @return the rotation code, or -1 when absent
+    public int rotationCode() {
+        return rotationCode;
+    }
+
+    /// Returns the mirror axis from the `imir` property.
+    ///
+    /// A value of 0 mirrors over the vertical axis, 1 mirrors over the horizontal axis,
+    /// and -1 means the property is absent.
+    ///
+    /// @return the mirror axis, or -1 when absent
+    public int mirrorAxis() {
+        return mirrorAxis;
+    }
+
+    /// Returns auxiliary image type strings associated with the primary image.
+    ///
+    /// The returned array includes alpha auxiliary image types when present.
+    ///
+    /// @return auxiliary image type strings associated with the primary image
+    public String @Unmodifiable [] auxiliaryImageTypes() {
+        return auxiliaryImageTypes.clone();
+    }
+
     /// Returns the parsed color information.
     ///
     /// @return the parsed color information, or `null`
@@ -329,6 +504,40 @@ public final class AvifImageInfo {
             }
         }
         return result;
+    }
+
+    /// Creates immutable storage for auxiliary image type strings.
+    ///
+    /// @param auxiliaryImageTypes the source auxiliary image type strings, or `null`
+    /// @return immutable auxiliary image type storage
+    private static String @Unmodifiable [] immutableAuxiliaryImageTypes(String @Nullable [] auxiliaryImageTypes) {
+        if (auxiliaryImageTypes == null || auxiliaryImageTypes.length == 0) {
+            return new String[0];
+        }
+        String[] result = auxiliaryImageTypes.clone();
+        for (String auxiliaryImageType : result) {
+            Objects.requireNonNull(auxiliaryImageType, "auxiliaryImageTypes element");
+        }
+        return result;
+    }
+
+    /// Returns whether clean-aperture parameters represent an absent property.
+    ///
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate
+    /// @param cleanApertureCropWidth the clean-aperture crop width
+    /// @param cleanApertureCropHeight the clean-aperture crop height
+    /// @return whether the clean-aperture property is absent
+    private static boolean isAbsentCleanAperture(
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight
+    ) {
+        return cleanApertureCropX == -1
+                && cleanApertureCropY == -1
+                && cleanApertureCropWidth == -1
+                && cleanApertureCropHeight == -1;
     }
 
     /// Returns a read-only view over immutable payload storage.

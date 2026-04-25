@@ -13,7 +13,8 @@ extended coefficient token magnitudes, and has focused coverage for larger
 `I420` and `I444` chroma-transform fixtures.
 AVIS sequence support now includes random indexed frame reads that do not disturb
 sequential playback state, and public metadata exposes sequence timescale,
-duration, and per-frame durations.
+duration, per-frame durations, primary-image transform properties, and auxiliary
+image type strings.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -55,8 +56,8 @@ behavior where the feature is in scope.
 
 ### Public API And Metadata
 
-- Expose remaining image metadata, especially transform properties, timing, and
-  auxiliary image relationships.
+- Expose remaining image metadata, especially gain/depth descriptors and richer
+  auxiliary-image relationships beyond associated type strings.
 - Provide explicit output choices for raw planes, display-converted RGB, and
   high-bit-depth buffers without unnecessary copies.
 - Review alpha semantics, premultiplication metadata, and buffer immutability

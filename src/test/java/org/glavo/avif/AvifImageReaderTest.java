@@ -50,6 +50,9 @@ final class AvifImageReaderTest {
     /// The expected packed opaque gray pixel produced by the supported still-picture payload.
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
 
+    /// The alpha auxiliary image type URN used by AVIF alpha items.
+    private static final String AUXILIARY_ALPHA_TYPE = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha";
+
     /// The smallest still-image fixture copied from libavif's test data into test resources.
     private static final String LIBAVIF_WHITE_1X1_FIXTURE = "libavif-test-data/white_1x1.avif";
 
@@ -316,6 +319,20 @@ final class AvifImageReaderTest {
         return true;
     }
 
+    /// Returns whether an array contains the expected value.
+    ///
+    /// @param values the array to search
+    /// @param expected the expected value
+    /// @return whether the array contains the expected value
+    private static boolean contains(String[] values, String expected) {
+        for (String value : values) {
+            if (expected.equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Verifies that indexed AVIS sequence reads do not disturb sequential playback state.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
@@ -348,10 +365,34 @@ final class AvifImageReaderTest {
             AvifImageInfo info = reader.info();
             assertEquals(64, info.width());
             assertEquals(64, info.height());
+            assertFalse(info.hasCleanApertureCrop());
+            assertEquals(1, info.rotationCode());
+            assertEquals(-1, info.mirrorAxis());
+            assertEquals(0, info.auxiliaryImageTypes().length);
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
             assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
+            assertEquals(64, frame.width());
+            assertEquals(64, frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that an imir mirror transform is exposed through public metadata.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameExposesImirTransformMetadata() throws IOException {
+        byte[] bytes = minimalAvifWithTransform("imir", (byte) 1);
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifImageInfo info = reader.info();
+            assertFalse(info.hasCleanApertureCrop());
+            assertEquals(-1, info.rotationCode());
+            assertEquals(1, info.mirrorAxis());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
             assertEquals(64, frame.width());
             assertEquals(64, frame.height());
             assertNull(reader.readFrame());
@@ -425,8 +466,13 @@ final class AvifImageReaderTest {
 
             assertTrue(info.width() > 0);
             assertTrue(info.height() > 0);
+            assertTrue(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
+            String[] auxiliaryImageTypes = info.auxiliaryImageTypes();
+            assertTrue(contains(auxiliaryImageTypes, AUXILIARY_ALPHA_TYPE));
+            auxiliaryImageTypes[0] = "mutated";
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -450,6 +496,7 @@ final class AvifImageReaderTest {
             assertTrue(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -795,7 +842,7 @@ final class AvifImageReaderTest {
     ///
     /// @return the auxC property bytes
     private static byte[] auxCAlphaProperty() {
-        byte[] urns = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        byte[] urns = (AUXILIARY_ALPHA_TYPE + "\0").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
         return fullBox("auxC", 0, 0, urns);
     }
 

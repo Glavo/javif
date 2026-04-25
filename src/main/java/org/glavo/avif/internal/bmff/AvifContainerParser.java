@@ -156,6 +156,7 @@ public final class AvifContainerParser {
 
         byte[] payload = mergeItemExtents(primaryItem);
         MetadataPayloads metadata = collectMetadataPayloads(primaryItem);
+        int[] transformParams = extractTransformParams(primaryItem, ispe.width, ispe.height);
         AvifImageInfo info = new AvifImageInfo(
                 ispe.width,
                 ispe.height,
@@ -167,9 +168,18 @@ public final class AvifContainerParser {
                 primaryItem.firstProperty(AvifColorInfo.class),
                 metadata.iccProfile,
                 metadata.exif,
-                metadata.xmp
+                metadata.xmp,
+                0,
+                0,
+                null,
+                transformParams[0],
+                transformParams[1],
+                transformParams[2],
+                transformParams[3],
+                transformParams[4],
+                transformParams[5],
+                auxiliaryImageTypes(primaryItem.id)
         );
-        int[] transformParams = extractTransformParams(primaryItem, ispe.width, ispe.height);
 
         return new AvifContainer(info, payload, alphaPayload,
                 transformParams[0], transformParams[1], transformParams[2], transformParams[3],
@@ -185,6 +195,7 @@ public final class AvifContainerParser {
         GridPayloads colorGrid = parseGridPayloads(gridItem);
         AlphaPayloads alphaPayloads = parseGridAlphaPayloads(gridItem, colorGrid);
         MetadataPayloads metadata = collectMetadataPayloads(gridItem);
+        int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
 
         AvifImageInfo info = new AvifImageInfo(
                 colorGrid.outputWidth,
@@ -197,10 +208,19 @@ public final class AvifContainerParser {
                 gridItem.firstProperty(AvifColorInfo.class),
                 metadata.iccProfile,
                 metadata.exif,
-                metadata.xmp
+                metadata.xmp,
+                0,
+                0,
+                null,
+                transforms[0],
+                transforms[1],
+                transforms[2],
+                transforms[3],
+                transforms[4],
+                transforms[5],
+                auxiliaryImageTypes(gridItem.id)
         );
 
-        int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
         return new AvifContainer(info, colorGrid.cellPayloads,
                 alphaPayloads.alphaItemPayload,
                 alphaPayloads.gridCellPayloads,
@@ -1493,6 +1513,24 @@ public final class AvifContainerParser {
             }
         }
         return null;
+    }
+
+    /// Returns auxiliary image type strings associated with one master image item.
+    ///
+    /// @param itemId the master image item id
+    /// @return auxiliary image type strings
+    private String[] auxiliaryImageTypes(int itemId) {
+        Item masterItem = meta.item(itemId);
+        ArrayList<String> types = new ArrayList<>();
+        for (Item item : meta.items.values()) {
+            if (item.auxForId == itemId || (masterItem != null && masterItem.auxForId == item.id)) {
+                AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
+                if (aux != null && !types.contains(aux.type)) {
+                    types.add(aux.type);
+                }
+            }
+        }
+        return types.toArray(String[]::new);
     }
 
     /// Merges item extents into one contiguous payload.
