@@ -561,6 +561,42 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that AVIS sample extraction follows the `stsc` sample-to-chunk table.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceWithSampleToChunkTable() throws IOException {
+        assertMinimalAvisSequence(minimalAvisSequenceWithSplitChunks(false));
+    }
+
+    /// Verifies that AVIS sample extraction supports `co64` chunk offsets.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceWithCo64ChunkOffsets() throws IOException {
+        assertMinimalAvisSequence(minimalAvisSequenceWithSplitChunks(true));
+    }
+
+    /// Verifies that malformed AVIS timing tables are rejected.
+    @Test
+    void rejectsAnimatedSequenceWithIncompleteTimingTable() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 2, 1))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that malformed AVIS sample-to-chunk tables are rejected.
+    @Test
+    void rejectsAnimatedSequenceWithSampleToChunkTableStartingAfterFirstChunk() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithSplitChunks(false, 3, 2))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
     /// Verifies that AVIS alpha auxiliary tracks are exposed and decoded as raw planes.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
@@ -638,6 +674,33 @@ final class AvifImageReaderTest {
             }
         }
         return false;
+    }
+
+    /// Asserts the synthetic minimal AVIS sequence.
+    ///
+    /// @param bytes the sequence bytes
+    /// @throws IOException if the sequence cannot be read or decoded
+    private static void assertMinimalAvisSequence(byte[] bytes) throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.animated());
+            assertEquals(64, info.width());
+            assertEquals(64, info.height());
+            assertEquals(3, info.frameCount());
+            assertEquals(30, info.mediaTimescale());
+            assertEquals(3, info.mediaDuration());
+
+            List<AvifFrame> frames = reader.readAllFrames();
+            assertEquals(3, frames.size());
+            for (int i = 0; i < frames.size(); i++) {
+                AvifFrame frame = frames.get(i);
+                assertEquals(64, frame.width());
+                assertEquals(64, frame.height());
+                assertEquals(i, frame.frameIndex());
+                assertEquals(OPAQUE_MID_GRAY, frame.intPixelBuffer().get(0));
+            }
+            assertNull(reader.readFrame());
+        }
     }
 
     /// Verifies that indexed AVIS sequence reads do not disturb sequential playback state.
@@ -1355,6 +1418,213 @@ final class AvifImageReaderTest {
         return concat(ftyp, meta, box("mdat", av1Payload));
     }
 
+    /// Creates a minimal AVIS sequence with two chunks and padding between them.
+    ///
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithSplitChunks(boolean useCo64) {
+        return minimalAvisSequenceWithSplitChunks(useCo64, 3, 1);
+    }
+
+    /// Creates a minimal AVIS sequence with configurable timing and sample-to-chunk tables.
+    ///
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithSplitChunks(
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk
+    ) {
+        byte[] sample0 = av1StillPicturePayload();
+        byte[] sample1 = av1StillPicturePayload();
+        byte[] sample2 = av1StillPicturePayload();
+        byte[] chunkPadding = new byte[]{0x55, 0x66, 0x77, 0x00, 0x11};
+        byte[] mdatPayload = concat(sample0, chunkPadding, sample1, sample2);
+
+        byte[] ftyp = sequenceFileTypeBox();
+        byte[] firstMoov = minimalAvisMoovBox(
+                new int[]{0, 0},
+                useCo64,
+                timingSampleCount,
+                firstStscChunk,
+                sample0.length,
+                sample1.length,
+                sample2.length
+        );
+        int chunk0Offset = ftyp.length + firstMoov.length + 8;
+        int chunk1Offset = chunk0Offset + sample0.length + chunkPadding.length;
+        byte[] moov = minimalAvisMoovBox(
+                new int[]{chunk0Offset, chunk1Offset},
+                useCo64,
+                timingSampleCount,
+                firstStscChunk,
+                sample0.length,
+                sample1.length,
+                sample2.length
+        );
+        return concat(ftyp, moov, box("mdat", mdatPayload));
+    }
+
+    /// Creates a minimal AVIS `moov` box.
+    ///
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param sampleSizes the sample sizes
+    /// @return the `moov` box bytes
+    private static byte[] minimalAvisMoovBox(
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int... sampleSizes
+    ) {
+        return box(
+                "moov",
+                box("trak", trackHeaderBox(), mediaBox(chunkOffsets, useCo64, timingSampleCount, firstStscChunk, sampleSizes))
+        );
+    }
+
+    /// Creates a minimal AVIS track header.
+    ///
+    /// @return the `tkhd` box bytes
+    private static byte[] trackHeaderBox() {
+        return fullBox(
+                "tkhd",
+                0,
+                7,
+                new byte[8],
+                u32(1),
+                u32(0),
+                u32(3),
+                new byte[52],
+                u32(64 << 16),
+                u32(64 << 16)
+        );
+    }
+
+    /// Creates a minimal AVIS media box.
+    ///
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param sampleSizes the sample sizes
+    /// @return the `mdia` box bytes
+    private static byte[] mediaBox(
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int... sampleSizes
+    ) {
+        return box(
+                "mdia",
+                mediaHeaderBox(),
+                box("minf", sampleTableBox(chunkOffsets, useCo64, timingSampleCount, firstStscChunk, sampleSizes))
+        );
+    }
+
+    /// Creates a minimal AVIS media header.
+    ///
+    /// @return the `mdhd` box bytes
+    private static byte[] mediaHeaderBox() {
+        return fullBox("mdhd", 0, 0, u32(0), u32(0), u32(30), u32(3), u16(0), u16(0));
+    }
+
+    /// Creates a minimal AVIS sample table.
+    ///
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param sampleSizes the sample sizes
+    /// @return the `stbl` box bytes
+    private static byte[] sampleTableBox(
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int... sampleSizes
+    ) {
+        return box(
+                "stbl",
+                sampleDescriptionBox(),
+                timeToSampleBox(timingSampleCount),
+                sampleToChunkBox(firstStscChunk),
+                chunkOffsetBox(chunkOffsets, useCo64),
+                sampleSizeBox(sampleSizes)
+        );
+    }
+
+    /// Creates a minimal AVIS sample-description box.
+    ///
+    /// @return the `stsd` box bytes
+    private static byte[] sampleDescriptionBox() {
+        return fullBox("stsd", 0, 0, u32(1), av01SampleEntry());
+    }
+
+    /// Creates a minimal `av01` sample entry.
+    ///
+    /// @return the `av01` sample entry bytes
+    private static byte[] av01SampleEntry() {
+        return box("av01", new byte[24], u16(64), u16(64), new byte[50], av1ConfigProperty(), colorProperty());
+    }
+
+    /// Creates a constant frame-duration sample table.
+    ///
+    /// @param sampleCount the sample count
+    /// @return the `stts` box bytes
+    private static byte[] timeToSampleBox(int sampleCount) {
+        return fullBox("stts", 0, 0, u32(1), u32(sampleCount), u32(1));
+    }
+
+    /// Creates a sample-to-chunk table with one sample in the first chunk and two in the second.
+    ///
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @return the `stsc` box bytes
+    private static byte[] sampleToChunkBox(int firstStscChunk) {
+        return fullBox(
+                "stsc",
+                0,
+                0,
+                u32(2),
+                u32(firstStscChunk), u32(1), u32(1),
+                u32(2), u32(2), u32(1)
+        );
+    }
+
+    /// Creates a 32-bit or 64-bit chunk-offset table.
+    ///
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @return the chunk-offset box bytes
+    private static byte[] chunkOffsetBox(int[] chunkOffsets, boolean useCo64) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        payload.writeBytes(u32(chunkOffsets.length));
+        for (int chunkOffset : chunkOffsets) {
+            payload.writeBytes(useCo64 ? u64(chunkOffset) : u32(chunkOffset));
+        }
+        return fullBox(useCo64 ? "co64" : "stco", 0, 0, payload.toByteArray());
+    }
+
+    /// Creates a sample-size table.
+    ///
+    /// @param sampleSizes the sample sizes
+    /// @return the `stsz` box bytes
+    private static byte[] sampleSizeBox(int... sampleSizes) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        payload.writeBytes(u32(0));
+        payload.writeBytes(u32(sampleSizes.length));
+        for (int sampleSize : sampleSizes) {
+            payload.writeBytes(u32(sampleSize));
+        }
+        return fullBox("stsz", 0, 0, payload.toByteArray());
+    }
+
     /// Creates the AVIF file type box used by the minimal test image.
     ///
     /// @return the file type box bytes
@@ -1366,6 +1636,20 @@ final class AvifImageReaderTest {
                 fourCc("avif"),
                 fourCc("mif1"),
                 fourCc("miaf")
+        );
+    }
+
+    /// Creates an AVIS file type box used by minimal sequence tests.
+    ///
+    /// @return the AVIS file type box bytes
+    private static byte[] sequenceFileTypeBox() {
+        return box(
+                "ftyp",
+                fourCc("avis"),
+                u32(0),
+                fourCc("avis"),
+                fourCc("avif"),
+                fourCc("msf1")
         );
     }
 
@@ -1660,6 +1944,16 @@ final class AvifImageReaderTest {
         return output.toByteArray();
     }
 
+    /// Encodes an unsigned 64-bit integer.
+    ///
+    /// @param value the unsigned value
+    /// @return the encoded bytes
+    private static byte[] u64(long value) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        writeU64(output, value);
+        return output.toByteArray();
+    }
+
     /// Writes an unsigned 32-bit integer.
     ///
     /// @param output the destination byte stream
@@ -1669,6 +1963,21 @@ final class AvifImageReaderTest {
         output.write(value >>> 16);
         output.write(value >>> 8);
         output.write(value);
+    }
+
+    /// Writes an unsigned 64-bit integer.
+    ///
+    /// @param output the destination byte stream
+    /// @param value the unsigned value
+    private static void writeU64(ByteArrayOutputStream output, long value) {
+        output.write((int) (value >>> 56));
+        output.write((int) (value >>> 48));
+        output.write((int) (value >>> 40));
+        output.write((int) (value >>> 32));
+        output.write((int) (value >>> 24));
+        output.write((int) (value >>> 16));
+        output.write((int) (value >>> 8));
+        output.write((int) value);
     }
 
     /// Writes an unsigned LEB128 value.

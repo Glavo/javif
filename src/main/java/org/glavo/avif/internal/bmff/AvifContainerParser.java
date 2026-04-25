@@ -1259,28 +1259,104 @@ public final class AvifContainerParser {
         if (track.sampleSizes.isEmpty()) {
             throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, label + " has no samples", null);
         }
+        if (track.chunkOffsets.isEmpty()) {
+            throw new AvifDecodeException(AvifErrorCode.BMFF_PARSE_FAILED, label + " has no chunk offsets", null);
+        }
         int sampleCount = track.sampleSizes.size();
-        int chunkOff = track.chunkOffsets.isEmpty() ? 0 : track.chunkOffsets.get(0);
-        int bytesOff = 0;
+        if (!track.sampleDeltas.isEmpty() && track.sampleDeltas.size() != sampleCount) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    label + " timing table does not cover all samples",
+                    null
+            );
+        }
         byte[][] payloads = new byte[sampleCount][];
         int[] deltas = new int[sampleCount];
-        for (int i = 0; i < sampleCount; i++) {
-            int size = track.sampleSizes.get(i);
-            long offset = (long) chunkOff + bytesOff;
-            if (offset + size > source.length) {
-                throw new AvifDecodeException(
-                        AvifErrorCode.TRUNCATED_DATA,
-                        label + " sample outside source: " + i,
-                        offset
+
+        int sampleIndex = 0;
+        if (track.sampleToChunkEntries.isEmpty()) {
+            sampleIndex = copySequentialChunkSamples(track, label, payloads, deltas, sampleIndex, 0, sampleCount);
+        } else {
+            int entryIndex = 0;
+            for (int chunkIndex = 1; chunkIndex <= track.chunkOffsets.size() && sampleIndex < sampleCount; chunkIndex++) {
+                while (entryIndex + 1 < track.sampleToChunkEntries.size()
+                        && chunkIndex >= track.sampleToChunkEntries.get(entryIndex + 1).firstChunk) {
+                    entryIndex++;
+                }
+                SampleToChunkEntry entry = track.sampleToChunkEntries.get(entryIndex);
+                sampleIndex = copySequentialChunkSamples(
+                        track,
+                        label,
+                        payloads,
+                        deltas,
+                        sampleIndex,
+                        chunkIndex - 1,
+                        Math.min(sampleCount, sampleIndex + entry.samplesPerChunk)
                 );
             }
-            byte[] payload = new byte[size];
-            System.arraycopy(source, (int) offset, payload, 0, size);
-            payloads[i] = payload;
-            bytesOff += size;
-            deltas[i] = i < track.sampleDeltas.size() ? track.sampleDeltas.get(i) : 1;
+        }
+        if (sampleIndex != sampleCount) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    label + " sample-to-chunk table does not cover all samples",
+                    null
+            );
         }
         return new SequencePayloads(payloads, deltas, sampleCount);
+    }
+
+    /// Copies sequential samples from one chunk.
+    ///
+    /// @param track the parsed track state
+    /// @param label the diagnostic label
+    /// @param payloads the destination sample payloads
+    /// @param deltas the destination frame deltas
+    /// @param firstSampleIndex the first sample index to copy
+    /// @param chunkIndex the zero-based chunk index
+    /// @param exclusiveSampleEnd the exclusive sample index end
+    /// @return the next uncopied sample index
+    /// @throws AvifDecodeException if the chunk sample data is outside the source
+    private int copySequentialChunkSamples(
+            MoovState track,
+            String label,
+            byte[][] payloads,
+            int[] deltas,
+            int firstSampleIndex,
+            int chunkIndex,
+            int exclusiveSampleEnd
+    ) throws AvifDecodeException {
+        long offset = track.chunkOffsets.get(chunkIndex);
+        int sampleIndex = firstSampleIndex;
+        while (sampleIndex < exclusiveSampleEnd) {
+            int size = track.sampleSizes.get(sampleIndex);
+            payloads[sampleIndex] = copySequenceSample(label, sampleIndex, offset, size);
+            deltas[sampleIndex] = sampleIndex < track.sampleDeltas.size() ? track.sampleDeltas.get(sampleIndex) : 1;
+            offset += size;
+            sampleIndex++;
+        }
+        return sampleIndex;
+    }
+
+    /// Copies one AVIS sample payload.
+    ///
+    /// @param label the diagnostic label
+    /// @param sampleIndex the zero-based sample index
+    /// @param offset the absolute payload offset
+    /// @param size the sample size in bytes
+    /// @return the copied sample payload
+    /// @throws AvifDecodeException if the sample is outside the source
+    private byte[] copySequenceSample(String label, int sampleIndex, long offset, int size)
+            throws AvifDecodeException {
+        if (offset < 0 || size < 0 || offset > source.length || size > source.length - offset) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.TRUNCATED_DATA,
+                    label + " sample outside source: " + sampleIndex,
+                    offset
+            );
+        }
+        byte[] payload = new byte[size];
+        System.arraycopy(source, (int) offset, payload, 0, size);
+        return payload;
     }
 
     /// Extracts auxiliary sample payloads and validates the sample count.
@@ -1430,6 +1506,8 @@ public final class AvifContainerParser {
                 case "stsd" -> parseMoovStsd(payload);
                 case "stts" -> parseMoovStts(payload);
                 case "stco" -> parseMoovStco(payload);
+                case "co64" -> parseMoovCo64(payload);
+                case "stsc" -> parseMoovStsc(payload);
                 case "stsz" -> parseMoovStsz(payload);
                 case "stss" -> parseMoovStss(payload);
                 default -> {}
@@ -1516,6 +1594,46 @@ public final class AvifContainerParser {
         int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
         for (int i = 0; i < n; i++)
             meta.moovState.chunkOffsets.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
+    }
+
+    /// Parses `co64` for 64-bit chunk offsets.
+    private void parseMoovCo64(BoxInput input) throws AvifDecodeException {
+        input.skip(4);
+        int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        for (int i = 0; i < n; i++)
+            meta.moovState.chunkOffsets.add(checkedU64ToInt(input.readU64(), input.offset() - 8));
+    }
+
+    /// Parses `stsc` for sample-to-chunk layout.
+    private void parseMoovStsc(BoxInput input) throws AvifDecodeException {
+        input.skip(4);
+        int n = checkedU32ToInt(input.readU32(), input.offset() - 4);
+        for (int i = 0; i < n; i++) {
+            int firstChunk = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            int samplesPerChunk = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            int sampleDescriptionIndex = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            if (firstChunk <= 0) {
+                throw parseFailed("stsc first_chunk must be positive", input.offset() - 12);
+            }
+            if (i == 0 && firstChunk != 1) {
+                throw parseFailed("stsc first entry must start at chunk 1", input.offset() - 12);
+            }
+            if (samplesPerChunk <= 0) {
+                throw parseFailed("stsc samples_per_chunk must be positive", input.offset() - 8);
+            }
+            if (sampleDescriptionIndex <= 0) {
+                throw parseFailed("stsc sample_description_index must be positive", input.offset() - 4);
+            }
+            if (!meta.moovState.sampleToChunkEntries.isEmpty()) {
+                SampleToChunkEntry previous = meta.moovState.sampleToChunkEntries.get(
+                        meta.moovState.sampleToChunkEntries.size() - 1
+                );
+                if (firstChunk <= previous.firstChunk) {
+                    throw parseFailed("stsc first_chunk entries must be strictly increasing", input.offset() - 12);
+                }
+            }
+            meta.moovState.sampleToChunkEntries.add(new SampleToChunkEntry(firstChunk, samplesPerChunk));
+        }
     }
 
     /// Parses `stsz` for sample sizes.
@@ -2128,6 +2246,24 @@ public final class AvifContainerParser {
         }
     }
 
+    /// One `stsc` sample-to-chunk entry.
+    @NotNullByDefault
+    private static final class SampleToChunkEntry {
+        /// The one-based first chunk using this layout.
+        private final int firstChunk;
+        /// The number of samples stored in each covered chunk.
+        private final int samplesPerChunk;
+
+        /// Creates one sample-to-chunk entry.
+        ///
+        /// @param firstChunk the one-based first chunk using this layout
+        /// @param samplesPerChunk the number of samples stored in each covered chunk
+        private SampleToChunkEntry(int firstChunk, int samplesPerChunk) {
+            this.firstChunk = firstChunk;
+            this.samplesPerChunk = samplesPerChunk;
+        }
+    }
+
     /// Parsed `tmap` metadata version fields.
     @NotNullByDefault
     private static final class ToneMapMetadataVersions {
@@ -2247,6 +2383,8 @@ public final class AvifContainerParser {
         private final List<Integer> sampleDeltas = new ArrayList<>();
         /// The parsed chunk offsets.
         private final List<Integer> chunkOffsets = new ArrayList<>();
+        /// The parsed sample-to-chunk entries.
+        private final List<SampleToChunkEntry> sampleToChunkEntries = new ArrayList<>();
         /// The parsed sample sizes.
         private final List<Integer> sampleSizes = new ArrayList<>();
         /// The parsed sync sample indices.
@@ -2279,6 +2417,8 @@ public final class AvifContainerParser {
             sampleDeltas.addAll(other.sampleDeltas);
             chunkOffsets.clear();
             chunkOffsets.addAll(other.chunkOffsets);
+            sampleToChunkEntries.clear();
+            sampleToChunkEntries.addAll(other.sampleToChunkEntries);
             sampleSizes.clear();
             sampleSizes.addAll(other.sampleSizes);
             syncSamples.clear();

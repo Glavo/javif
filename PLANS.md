@@ -8,7 +8,8 @@ runtime dependency beyond `java.base`.
 Supported public behavior now includes still images, grids, progressive still
 images, basic AVIS sequences, embedded ICC/Exif/XMP metadata, structured
 auxiliary-image metadata, gain-map descriptors, random indexed AVIS reads, and
-raw plane access for:
+AVIS sample tables with `stsc`, `stco`, and `co64` chunk layouts plus basic
+`stts` sample coverage validation. Public raw plane access is available for:
 
 - color still images, grids, and AVIS frames
 - alpha single items, grids, and AVIS auxiliary tracks
@@ -39,7 +40,8 @@ and validation breadth.
   8/10/12-bit inputs.
 - Implement gain-map tone mapping and display adaptation on top of the existing
   gain-map descriptors and raw gain-map plane decoding.
-- Improve AVIS sequence handling: timing validation and multi-sample edge cases.
+- Improve AVIS sequence handling: edit-list behavior, duration reconciliation,
+  and remaining multi-track edge cases.
 - Define and test layered/scalable AVIF and operating-point selection.
 - Add incremental or streaming input behavior instead of requiring the complete
   source to be buffered before parsing.
