@@ -1476,20 +1476,10 @@ public final class AvifContainerParser {
                 parseMoovTrack(trakPayload);
                 MoovState parsedTrack = meta.moovState.copy();
                 if (isMoovImageTrack(parsedTrack)) {
-                    if (parsedTrack.auxiliaryType != null && !meta.moovAuxiliaryTypes.contains(parsedTrack.auxiliaryType)) {
-                        meta.moovAuxiliaryTypes.add(parsedTrack.auxiliaryType);
-                    }
-                    if (AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(parsedTrack.auxiliaryType)
-                            && meta.moovAlphaState == null) {
-                        meta.moovAlphaState = parsedTrack;
-                    }
-                    if (AvifAuxiliaryImageInfo.DEPTH_TYPE.equals(parsedTrack.auxiliaryType)
-                            && meta.moovDepthState == null) {
-                        meta.moovDepthState = parsedTrack;
-                    }
-                    if (selectedTrack.seqHeaderObu != null
-                            || parsedTrack.seqHeaderObu == null
-                            || parsedTrack.auxiliaryType != null) {
+                    if (parsedTrack.auxiliaryType != null) {
+                        meta.moovAuxiliaryCandidates.add(parsedTrack);
+                        meta.moovState.copyFrom(selectedTrack);
+                    } else if (selectedTrack.seqHeaderObu != null || parsedTrack.seqHeaderObu == null) {
                         meta.moovState.copyFrom(selectedTrack);
                     }
                 } else {
@@ -1498,6 +1488,7 @@ public final class AvifContainerParser {
             }
             input.skipBoxPayload(child);
         }
+        resolveMoovAuxiliaryTracks();
     }
 
     /// Returns whether a parsed `trak` can be used as an AVIS image-sequence track.
@@ -1512,14 +1503,53 @@ public final class AvifContainerParser {
                 || ("auxv".equals(handlerType) && track.auxiliaryType != null);
     }
 
+    /// Resolves AVIS auxiliary tracks against the selected color track.
+    private void resolveMoovAuxiliaryTracks() {
+        meta.moovAuxiliaryTypes.clear();
+        meta.moovAlphaState = null;
+        meta.moovDepthState = null;
+        for (MoovState candidate : meta.moovAuxiliaryCandidates) {
+            if (candidate.seqHeaderObu == null || !auxiliaryTrackMatchesColor(candidate, meta.moovState)) {
+                continue;
+            }
+            if (!meta.moovAuxiliaryTypes.contains(candidate.auxiliaryType)) {
+                meta.moovAuxiliaryTypes.add(candidate.auxiliaryType);
+            }
+            if (AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(candidate.auxiliaryType) && meta.moovAlphaState == null) {
+                meta.moovAlphaState = candidate;
+            }
+            if (AvifAuxiliaryImageInfo.DEPTH_TYPE.equals(candidate.auxiliaryType) && meta.moovDepthState == null) {
+                meta.moovDepthState = candidate;
+            }
+        }
+    }
+
+    /// Returns whether an auxiliary AVIS track is associated with the selected color track.
+    ///
+    /// @param auxiliaryTrack the candidate auxiliary track
+    /// @param colorTrack the selected color track
+    /// @return whether the auxiliary track applies to the selected color track
+    private static boolean auxiliaryTrackMatchesColor(MoovState auxiliaryTrack, MoovState colorTrack) {
+        return auxiliaryTrack.auxiliaryForTrackIds.isEmpty()
+                || (colorTrack.trackId != 0 && auxiliaryTrack.auxiliaryForTrackIds.contains(colorTrack.trackId));
+    }
+
     /// Parses a `trak` box and extracts video track metadata.
     private void parseMoovTrack(BoxInput input) throws AvifDecodeException {
         boolean edtsSeen = false;
+        boolean trefSeen = false;
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
                 case "tkhd" -> parseMoovTkhd(payload);
+                case "tref" -> {
+                    if (trefSeen) {
+                        throw parseFailed("Box[trak] contains a duplicate unique box of type 'tref'", child.offset());
+                    }
+                    trefSeen = true;
+                    parseMoovTref(payload);
+                }
                 case "edts" -> {
                     if (edtsSeen) {
                         throw parseFailed("Box[trak] contains a duplicate unique box of type 'edts'", child.offset());
@@ -1542,7 +1572,7 @@ public final class AvifContainerParser {
         } else {
             input.skip(8);
         }
-        input.readU32();
+        meta.moovState.trackId = checkedU32ToInt(input.readU32(), input.offset() - 4);
         input.skip(4);
         meta.moovState.trackDuration = fb.version == 1 ? readTrackDuration64(input) : readTrackDuration32(input);
         input.skip(52);
@@ -1555,6 +1585,45 @@ public final class AvifContainerParser {
         }
         if (height > 0 && meta.moovState.height == 0) {
             meta.moovState.height = height;
+        }
+    }
+
+    /// Parses a `tref` box for AVIS track references.
+    ///
+    /// @param input the tref box payload
+    /// @throws AvifDecodeException if the box is malformed
+    private void parseMoovTref(BoxInput input) throws AvifDecodeException {
+        while (input.hasRemaining()) {
+            BoxHeader child = input.readBoxHeader();
+            BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
+            switch (child.type()) {
+                case "auxl" -> parseMoovTrackReference(payload, meta.moovState.auxiliaryForTrackIds, "auxl");
+                default -> {}
+            }
+            input.skipBoxPayload(child);
+        }
+    }
+
+    /// Parses one track-reference type box.
+    ///
+    /// @param input the reference box payload
+    /// @param target the destination track-id list
+    /// @param type the reference box type
+    /// @throws AvifDecodeException if the reference payload is malformed
+    private static void parseMoovTrackReference(
+            BoxInput input,
+            List<Integer> target,
+            String type
+    ) throws AvifDecodeException {
+        if (input.remaining() == 0 || (input.remaining() & 3) != 0) {
+            throw parseFailed("Box[tref]/" + type + " must contain one or more 32-bit track IDs", input.offset());
+        }
+        while (input.hasRemaining()) {
+            int trackId = checkedU32ToInt(input.readU32(), input.offset() - 4);
+            if (trackId <= 0) {
+                throw parseFailed("Box[tref]/" + type + " track_ID must be positive", input.offset() - 4);
+            }
+            target.add(trackId);
         }
     }
 
@@ -2530,6 +2599,8 @@ public final class AvifContainerParser {
         private final List<EntityGroup> entityGroups = new ArrayList<>();
         /// Auxiliary image type strings parsed from AVIS auxiliary tracks.
         private final List<String> moovAuxiliaryTypes = new ArrayList<>();
+        /// Parsed AVIS auxiliary track candidates.
+        private final List<MoovState> moovAuxiliaryCandidates = new ArrayList<>();
         /// The parsed AVIS alpha auxiliary track state, or `null`.
         private @Nullable MoovState moovAlphaState;
         /// The parsed AVIS depth auxiliary track state, or `null`.
@@ -2559,6 +2630,8 @@ public final class AvifContainerParser {
     /// Mutable parser state for AVIS moov parsing.
     @NotNullByDefault
     private static final class MoovState {
+        /// The parsed track ID from `tkhd`, or zero when absent.
+        private int trackId;
         /// The parsed image sequence width.
         private int width;
         /// The parsed image sequence height.
@@ -2589,6 +2662,8 @@ public final class AvifContainerParser {
         private byte @Nullable [] seqHeaderObu;
         /// The AVIS auxiliary track type, or `null` for the selected color track.
         private @Nullable String auxiliaryType;
+        /// The `tref/auxl` color track IDs referenced by this auxiliary track.
+        private final List<Integer> auxiliaryForTrackIds = new ArrayList<>();
         /// The parsed sample timing deltas.
         private final List<Integer> sampleDeltas = new ArrayList<>();
         /// The parsed chunk offsets.
@@ -2613,6 +2688,7 @@ public final class AvifContainerParser {
         ///
         /// @param other the source state
         private void copyFrom(MoovState other) {
+            trackId = other.trackId;
             width = other.width;
             height = other.height;
             bitDepth = other.bitDepth;
@@ -2628,6 +2704,8 @@ public final class AvifContainerParser {
             editListSegmentDuration = other.editListSegmentDuration;
             seqHeaderObu = other.seqHeaderObu == null ? null : other.seqHeaderObu.clone();
             auxiliaryType = other.auxiliaryType;
+            auxiliaryForTrackIds.clear();
+            auxiliaryForTrackIds.addAll(other.auxiliaryForTrackIds);
             sampleDeltas.clear();
             sampleDeltas.addAll(other.sampleDeltas);
             chunkOffsets.clear();

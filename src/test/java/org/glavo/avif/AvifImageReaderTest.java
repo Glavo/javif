@@ -594,6 +594,36 @@ final class AvifImageReaderTest {
         assertMinimalAvisSequence(minimalAvisSequenceWithIgnoredLeadingTrack("auxv"));
     }
 
+    /// Verifies that AVIS auxiliary tracks with mismatched references are ignored.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceIgnoresMismatchedAuxiliaryReference() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithReferencedAlphaTrack(false))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.animated());
+            assertFalse(info.alphaPresent());
+            assertEquals(0, info.auxiliaryImageTypes().length);
+            assertNotNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that AVIS auxiliary tracks are bound through matching `tref/auxl` references.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceUsesMatchingAuxiliaryReference() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithReferencedAlphaTrack(true))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.animated());
+            assertTrue(info.alphaPresent());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
+            assertNotNull(reader.readRawAlphaPlanes(0));
+        }
+    }
+
     /// Verifies that AVIS media duration falls back to summed frame durations when `mdhd` omits it.
     ///
     /// @throws IOException if the synthetic sequence cannot be read or decoded
@@ -677,6 +707,16 @@ final class AvifImageReaderTest {
         AvifDecodeException exception = assertThrows(
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(minimalAvisSequenceWithDuplicateMediaHandler())
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that malformed AVIS track references are rejected.
+    @Test
+    void rejectsAnimatedSequenceWithMalformedTrackReference() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithMalformedTrackReference())
         );
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
@@ -1670,6 +1710,44 @@ final class AvifImageReaderTest {
         return concat(ftyp, moov, box("mdat", mdatPayload));
     }
 
+    /// Creates a minimal AVIS sequence with an optionally matching alpha track reference.
+    ///
+    /// @param includeMatchingAlpha whether to include a correctly referenced alpha track after a mismatched one
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithReferencedAlphaTrack(boolean includeMatchingAlpha) {
+        byte[] sample0 = av1StillPicturePayload();
+        byte[] sample1 = av1StillPicturePayload();
+        byte[] sample2 = av1StillPicturePayload();
+        byte[] chunkPadding = new byte[]{0x55, 0x66, 0x77, 0x00, 0x11};
+        byte[] colorMdatPayload = concat(sample0, chunkPadding, sample1, sample2);
+        byte[] alphaMdatPayload = includeMatchingAlpha
+                ? concat(sample0, chunkPadding, sample1, sample2)
+                : new byte[0];
+        byte[] ftyp = sequenceFileTypeBox();
+
+        byte[] firstMoov = minimalAvisMoovBoxWithReferencedAlphaTrack(
+                new int[]{0, 0},
+                new int[]{0, 0},
+                includeMatchingAlpha,
+                sample0.length,
+                sample1.length,
+                sample2.length
+        );
+        int colorChunk0Offset = ftyp.length + firstMoov.length + 8;
+        int colorChunk1Offset = colorChunk0Offset + sample0.length + chunkPadding.length;
+        int alphaChunk0Offset = colorChunk1Offset + sample1.length + sample2.length;
+        int alphaChunk1Offset = alphaChunk0Offset + sample0.length + chunkPadding.length;
+        byte[] moov = minimalAvisMoovBoxWithReferencedAlphaTrack(
+                new int[]{colorChunk0Offset, colorChunk1Offset},
+                new int[]{alphaChunk0Offset, alphaChunk1Offset},
+                includeMatchingAlpha,
+                sample0.length,
+                sample1.length,
+                sample2.length
+        );
+        return concat(ftyp, moov, box("mdat", concat(colorMdatPayload, alphaMdatPayload)));
+    }
+
     /// Creates a minimal AVIS sequence with duplicate `mdia` handler boxes.
     ///
     /// @return the complete AVIS test file bytes
@@ -1682,6 +1760,35 @@ final class AvifImageReaderTest {
                         sample.length,
                         sample.length,
                         sample.length
+                )
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with a malformed `tref/auxl` reference box.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithMalformedTrackReference() {
+        byte[] sample = av1StillPicturePayload();
+        return concat(
+                sequenceFileTypeBox(),
+                box(
+                        "moov",
+                        avisTrackBox(
+                                2,
+                                "auxv",
+                                box("tref", box("auxl", new byte[]{0, 0, 0})),
+                                AUXILIARY_ALPHA_TYPE,
+                                new int[]{0, 0},
+                                false,
+                                2,
+                                1,
+                                2,
+                                1,
+                                2,
+                                null,
+                                sample.length,
+                                sample.length
+                        )
                 )
         );
     }
@@ -1722,6 +1829,71 @@ final class AvifImageReaderTest {
                 sampleSizes
         );
         return box("moov", ignoredTrack, imageTrack);
+    }
+
+    /// Creates a minimal AVIS `moov` box with mismatched and optionally matching alpha tracks.
+    ///
+    /// @param colorChunkOffsets the absolute color track chunk offsets
+    /// @param alphaChunkOffsets the absolute alpha track chunk offsets
+    /// @param includeMatchingAlpha whether to include a matching alpha track
+    /// @param sampleSizes the color and matching alpha sample sizes
+    /// @return the `moov` box bytes
+    private static byte[] minimalAvisMoovBoxWithReferencedAlphaTrack(
+            int[] colorChunkOffsets,
+            int[] alphaChunkOffsets,
+            boolean includeMatchingAlpha,
+            int... sampleSizes
+    ) {
+        byte[] colorTrack = avisTrackBox(
+                1,
+                "pict",
+                null,
+                null,
+                colorChunkOffsets,
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                sampleSizes
+        );
+        byte[] mismatchedAlphaTrack = avisTrackBox(
+                2,
+                "auxv",
+                trackReferenceBox("auxl", 99),
+                AUXILIARY_ALPHA_TYPE,
+                new int[]{0, 0},
+                false,
+                2,
+                1,
+                2,
+                1,
+                2,
+                null,
+                sampleSizes[0],
+                sampleSizes[1]
+        );
+        if (!includeMatchingAlpha) {
+            return box("moov", colorTrack, mismatchedAlphaTrack);
+        }
+        byte[] matchingAlphaTrack = avisTrackBox(
+                3,
+                "auxv",
+                trackReferenceBox("auxl", 1),
+                AUXILIARY_ALPHA_TYPE,
+                alphaChunkOffsets,
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                sampleSizes
+        );
+        return box("moov", colorTrack, mismatchedAlphaTrack, matchingAlphaTrack);
     }
 
     /// Creates a minimal AVIS `moov` box with duplicate media handler boxes.
@@ -1811,12 +1983,62 @@ final class AvifImageReaderTest {
             byte @Nullable [] editList,
             int... sampleSizes
     ) {
+        return avisTrackBox(
+                1,
+                handlerType,
+                null,
+                null,
+                chunkOffsets,
+                useCo64,
+                timingSampleCount,
+                firstStscChunk,
+                mediaDuration,
+                sampleDelta,
+                trackDuration,
+                editList,
+                sampleSizes
+        );
+    }
+
+    /// Creates a minimal AVIS track box.
+    ///
+    /// @param trackId the track ID written to `tkhd`
+    /// @param handlerType the optional media handler type
+    /// @param trackReference the optional `tref` box
+    /// @param auxiliaryType the optional `auxi` auxiliary type
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param trackDuration the duration written to `tkhd`
+    /// @param editList the optional `edts` box
+    /// @param sampleSizes the sample sizes
+    /// @return the `trak` box bytes
+    private static byte[] avisTrackBox(
+            int trackId,
+            @Nullable String handlerType,
+            byte @Nullable [] trackReference,
+            @Nullable String auxiliaryType,
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
+            int trackDuration,
+            byte @Nullable [] editList,
+            int... sampleSizes
+    ) {
         return box(
                 "trak",
-                trackHeaderBox(trackDuration),
+                trackHeaderBox(trackId, trackDuration),
+                trackReference == null ? new byte[0] : trackReference,
                 editList == null ? new byte[0] : editList,
                 mediaBox(
                         handlerType,
+                        auxiliaryType,
                         chunkOffsets,
                         useCo64,
                         timingSampleCount,
@@ -1833,12 +2055,21 @@ final class AvifImageReaderTest {
     /// @param trackDuration the duration written to `tkhd`
     /// @return the `tkhd` box bytes
     private static byte[] trackHeaderBox(int trackDuration) {
+        return trackHeaderBox(1, trackDuration);
+    }
+
+    /// Creates a minimal AVIS track header.
+    ///
+    /// @param trackId the track ID written to `tkhd`
+    /// @param trackDuration the duration written to `tkhd`
+    /// @return the `tkhd` box bytes
+    private static byte[] trackHeaderBox(int trackId, int trackDuration) {
         return fullBox(
                 "tkhd",
                 0,
                 7,
                 new byte[8],
-                u32(1),
+                u32(trackId),
                 u32(0),
                 u32(trackDuration),
                 new byte[52],
@@ -1920,11 +2151,48 @@ final class AvifImageReaderTest {
             int sampleDelta,
             int... sampleSizes
     ) {
+        return mediaBox(
+                handlerType,
+                null,
+                chunkOffsets,
+                useCo64,
+                timingSampleCount,
+                firstStscChunk,
+                mediaDuration,
+                sampleDelta,
+                sampleSizes
+        );
+    }
+
+    /// Creates a minimal AVIS media box.
+    ///
+    /// @param handlerType the optional media handler type
+    /// @param auxiliaryType the optional `auxi` auxiliary type
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param sampleSizes the sample sizes
+    /// @return the `mdia` box bytes
+    private static byte[] mediaBox(
+            @Nullable String handlerType,
+            @Nullable String auxiliaryType,
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
+            int... sampleSizes
+    ) {
         return box(
                 "mdia",
                 mediaHeaderBox(mediaDuration),
                 handlerType == null ? new byte[0] : handlerBox(handlerType),
                 box("minf", sampleTableBox(
+                        auxiliaryType,
                         chunkOffsets,
                         useCo64,
                         timingSampleCount,
@@ -1960,9 +2228,31 @@ final class AvifImageReaderTest {
             int sampleDelta,
             int... sampleSizes
     ) {
+        return sampleTableBox(null, chunkOffsets, useCo64, timingSampleCount, firstStscChunk, sampleDelta, sampleSizes);
+    }
+
+    /// Creates a minimal AVIS sample table.
+    ///
+    /// @param auxiliaryType the optional `auxi` auxiliary type
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param sampleSizes the sample sizes
+    /// @return the `stbl` box bytes
+    private static byte[] sampleTableBox(
+            @Nullable String auxiliaryType,
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int sampleDelta,
+            int... sampleSizes
+    ) {
         return box(
                 "stbl",
-                sampleDescriptionBox(),
+                sampleDescriptionBox(auxiliaryType),
                 timeToSampleBox(timingSampleCount, sampleDelta),
                 sampleToChunkBox(firstStscChunk),
                 chunkOffsetBox(chunkOffsets, useCo64),
@@ -1974,14 +2264,61 @@ final class AvifImageReaderTest {
     ///
     /// @return the `stsd` box bytes
     private static byte[] sampleDescriptionBox() {
-        return fullBox("stsd", 0, 0, u32(1), av01SampleEntry());
+        return sampleDescriptionBox(null);
+    }
+
+    /// Creates a minimal AVIS sample-description box.
+    ///
+    /// @param auxiliaryType the optional `auxi` auxiliary type
+    /// @return the `stsd` box bytes
+    private static byte[] sampleDescriptionBox(@Nullable String auxiliaryType) {
+        return fullBox("stsd", 0, 0, u32(1), av01SampleEntry(auxiliaryType));
     }
 
     /// Creates a minimal `av01` sample entry.
     ///
     /// @return the `av01` sample entry bytes
     private static byte[] av01SampleEntry() {
-        return box("av01", new byte[24], u16(64), u16(64), new byte[50], av1ConfigProperty(), colorProperty());
+        return av01SampleEntry(null);
+    }
+
+    /// Creates a minimal `av01` sample entry.
+    ///
+    /// @param auxiliaryType the optional `auxi` auxiliary type
+    /// @return the `av01` sample entry bytes
+    private static byte[] av01SampleEntry(@Nullable String auxiliaryType) {
+        return box(
+                "av01",
+                new byte[24],
+                u16(64),
+                u16(64),
+                new byte[50],
+                av1ConfigProperty(),
+                colorProperty(),
+                auxiliaryType == null ? new byte[0] : auxiliarySampleEntryBox(auxiliaryType)
+        );
+    }
+
+    /// Creates an `auxi` sample-entry box.
+    ///
+    /// @param auxiliaryType the auxiliary image type string
+    /// @return the `auxi` sample-entry box bytes
+    private static byte[] auxiliarySampleEntryBox(String auxiliaryType) {
+        byte[] urns = (auxiliaryType + "\0").getBytes(StandardCharsets.ISO_8859_1);
+        return fullBox("auxi", 0, 0, urns);
+    }
+
+    /// Creates a track-reference box.
+    ///
+    /// @param referenceType the four-character reference type
+    /// @param trackIds the referenced track IDs
+    /// @return the `tref` box bytes
+    private static byte[] trackReferenceBox(String referenceType, int... trackIds) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        for (int trackId : trackIds) {
+            payload.writeBytes(u32(trackId));
+        }
+        return box("tref", box(referenceType, payload.toByteArray()));
     }
 
     /// Creates a constant frame-duration sample table.
