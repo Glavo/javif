@@ -15,8 +15,9 @@ Implemented:
   decode errors.
 - A bounded big-endian BMFF parser for `ftyp`, root `meta`, `hdlr`, `pitm`, `iloc`, `iinf/infe`,
   `iprp/ipco/ipma`, `iref`, `idat`, `ispe`, `av1C`, `colr nclx`, and `auxC`.
-- Property parsing for `pixi`, `pasp`, `clap`, `irot`, and `imir` (parsed and stored; transforms not
-  yet applied at output time).
+- Property parsing for `pixi`, `pasp`, `clap`, `irot`, and `imir`.
+- Transform application for `clap` (cropping), `irot` (rotation), and `imir` (mirror) applied
+  post-decode to the output canvas (8-bit frames only).
 - Primary `av01` item extraction from file-backed extents and `idat` construction-method extents.
 - A simple still-image decode path that returns `AvifIntFrame` or `AvifLongFrame`.
 - Alpha auxiliary image support: resolves `auxl` references, decodes alpha AV1 payloads
@@ -27,20 +28,14 @@ Implemented:
 - Parser robustness tests covering truncation, overflow, duplicate unique boxes, invalid references,
   missing required properties, and essential unknown property rejection.
 - Synthetic AVIF tests covering minimal still-image metadata parsing, primary AV1 item decoding,
-  alpha decoding, and parser error paths.
+  alpha decoding, parser error paths, grid composition, and irot rotation transforms.
 - Real libavif fixture tests for `white_1x1.avif`, `extended_pixi.avif`, `colors_sdr_srgb.avif`,
   `paris_icc_exif_xmp.avif`, `abc_color_irot_alpha_NOirot.avif`, and `sofa_grid1x5_420.avif`.
 - Known gap: AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
 
 ## Remaining Work
 
-1. Apply clean-aperture, pixel-aspect-ratio, rotation, and mirror transforms in the final output
-   (property parsing for these already exists).
-   - Apply `clap` cropping after grid composition or primary decode.
-   - Apply `irot` rotation and `imir` mirror to the final canvas.
-   - Expose `pasp` pixel aspect ratio through the metadata API.
-
-2. Add progressive and layered still images.
+1. Add progressive and layered still images.
    - Parse item references and properties that describe progressive/layered AVIF still images.
    - Expose deterministic frame ordering for layers while keeping `info()` accurate.
    - Reject unsupported layering modes with stable diagnostics.

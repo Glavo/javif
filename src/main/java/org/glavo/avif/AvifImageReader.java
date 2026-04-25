@@ -226,10 +226,13 @@ public final class AvifImageReader implements AutoCloseable {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item produced no frame", null);
             }
             byte @Nullable [] alphaPayload = container.alphaItemPayload();
+            AvifFrame rawFrame;
             if (alphaPayload != null) {
-                return adaptFrameWithAlpha(colorFrame, alphaPayload, frameIndex);
+                rawFrame = adaptFrameWithAlpha(colorFrame, alphaPayload, frameIndex);
+            } else {
+                rawFrame = adaptFrame(colorFrame, frameIndex);
             }
-            return adaptFrame(colorFrame, frameIndex);
+            return applyTransforms(rawFrame);
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -269,8 +272,9 @@ public final class AvifImageReader implements AutoCloseable {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
             }
         }
-        return composeGridFrames(cellFrames, container.gridRows(), container.gridColumns(),
+        AvifFrame rawFrame = composeGridFrames(cellFrames, container.gridRows(), container.gridColumns(),
                 container.gridOutputWidth(), container.gridOutputHeight(), frameIndex);
+        return applyTransforms(rawFrame);
     }
 
     /// Composes decoded grid cell frames into a single canvas.
@@ -371,6 +375,142 @@ public final class AvifImageReader implements AutoCloseable {
         if (closed) {
             throw new AvifDecodeException(AvifErrorCode.CLOSED, "AvifImageReader is closed", null);
         }
+    }
+
+    /// Applies container-level transforms (clap, irot, imir) to a decoded frame.
+    ///
+    /// @param frame the raw decoded frame
+    /// @return the transformed frame, or the same frame when no transforms are present
+    private AvifFrame applyTransforms(AvifFrame frame) {
+        if (frame instanceof AvifIntFrame intFrame) {
+            int[] pixels = intFrame.pixels();
+            int width = intFrame.width();
+            int height = intFrame.height();
+
+            if (container.hasClapCrop()) {
+                int[] cropped = applyClapCropInt(pixels, width, height,
+                        container.clapCropX(), container.clapCropY(),
+                        container.clapCropWidth(), container.clapCropHeight());
+                pixels = cropped;
+                width = container.clapCropWidth();
+                height = container.clapCropHeight();
+            }
+
+            int rotation = container.rotationCode();
+            if (rotation > 0) {
+                int[] rotated = applyRotationInt(pixels, width, height, rotation);
+                pixels = rotated;
+                if (rotation == 1 || rotation == 3) {
+                    int tmp = width;
+                    width = height;
+                    height = tmp;
+                }
+            }
+
+            int mirror = container.mirrorAxis();
+            if (mirror >= 0) {
+                pixels = applyMirrorInt(pixels, width, height, mirror);
+            }
+
+            if (pixels != intFrame.pixels()) {
+                return new AvifIntFrame(width, height, intFrame.bitDepth(),
+                        intFrame.pixelFormat(), intFrame.frameIndex(), pixels);
+            }
+        }
+        return frame;
+    }
+
+    /// Applies a clean-aperture crop to 8-bit pixels.
+    ///
+    /// @param pixels the source pixel array
+    /// @param srcWidth the source width
+    /// @param srcHeight the source height
+    /// @param cropX the crop x offset
+    /// @param cropY the crop y offset
+    /// @param cropWidth the crop width
+    /// @param cropHeight the crop height
+    /// @return the cropped pixel array
+    private static int[] applyClapCropInt(
+            int[] pixels, int srcWidth, int srcHeight,
+            int cropX, int cropY, int cropWidth, int cropHeight
+    ) {
+        int[] result = new int[cropWidth * cropHeight];
+        for (int y = 0; y < cropHeight; y++) {
+            int srcRow = (cropY + y) * srcWidth + cropX;
+            int destRow = y * cropWidth;
+            System.arraycopy(pixels, srcRow, result, destRow, cropWidth);
+        }
+        return result;
+    }
+
+    /// Applies rotation to 8-bit pixels.
+    ///
+    /// @param pixels the source pixel array
+    /// @param width the source width
+    /// @param height the source height
+    /// @param rotation the rotation code (1=90° CW, 2=180°, 3=270° CW)
+    /// @return the rotated pixel array
+    private static int[] applyRotationInt(int[] pixels, int width, int height, int rotation) {
+        return switch (rotation) {
+            case 1 -> {
+                int newWidth = height;
+                int newHeight = width;
+                int[] result = new int[newWidth * newHeight];
+                for (int y = 0; y < newHeight; y++) {
+                    for (int x = 0; x < newWidth; x++) {
+                        result[y * newWidth + x] = pixels[(height - 1 - x) * width + y];
+                    }
+                }
+                yield result;
+            }
+            case 2 -> {
+                int[] result = new int[width * height];
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        result[y * width + x] = pixels[(height - 1 - y) * width + (width - 1 - x)];
+                    }
+                }
+                yield result;
+            }
+            case 3 -> {
+                int newWidth = height;
+                int newHeight = width;
+                int[] result = new int[newWidth * newHeight];
+                for (int y = 0; y < newHeight; y++) {
+                    for (int x = 0; x < newWidth; x++) {
+                        result[y * newWidth + x] = pixels[x * width + (width - 1 - y)];
+                    }
+                }
+                yield result;
+            }
+            default -> pixels;
+        };
+    }
+
+    /// Applies mirroring to 8-bit pixels.
+    ///
+    /// @param pixels the source pixel array
+    /// @param width the source width
+    /// @param height the source height
+    /// @param axis the mirror axis (0=vertical, 1=horizontal)
+    /// @return the mirrored pixel array
+    private static int[] applyMirrorInt(int[] pixels, int width, int height, int axis) {
+        int[] result = new int[width * height];
+        if (axis == 0) {
+            for (int y = 0; y < height; y++) {
+                int srcRow = (height - 1 - y) * width;
+                int destRow = y * width;
+                System.arraycopy(pixels, srcRow, result, destRow, width);
+            }
+        } else {
+            for (int y = 0; y < height; y++) {
+                int rowBase = y * width;
+                for (int x = 0; x < width; x++) {
+                    result[rowBase + x] = pixels[rowBase + (width - 1 - x)];
+                }
+            }
+        }
+        return result;
     }
 
     /// Adapts an AV1 decoded frame to the AVIF public frame model.

@@ -149,7 +149,11 @@ public final class AvifContainerParser {
                 1,
                 primaryItem.firstProperty(AvifColorInfo.class)
         );
-        return new AvifContainer(info, payload, alphaPayload);
+        int[] transformParams = extractTransformParams(primaryItem, ispe.width, ispe.height);
+
+        return new AvifContainer(info, payload, alphaPayload,
+                transformParams[0], transformParams[1], transformParams[2], transformParams[3],
+                transformParams[4], transformParams[5]);
     }
 
     /// Parses a grid derived image container.
@@ -262,7 +266,58 @@ public final class AvifContainerParser {
         );
 
         byte[][] payloads = cellPayloads.toArray(byte[][]::new);
-        return new AvifContainer(info, payloads, rows, columns, outputWidth, outputHeight);
+        int[] transforms = extractTransformParams(gridItem, outputWidth, outputHeight);
+        return new AvifContainer(info, payloads, rows, columns, outputWidth, outputHeight,
+                transforms[0], transforms[1], transforms[2], transforms[3],
+                transforms[4], transforms[5]);
+    }
+
+    /// Extracts transform parameters from the properties of one item.
+    ///
+    /// @param item the item whose properties are searched
+    /// @param imageWidth the image width before clap
+    /// @param imageHeight the image height before clap
+    /// @return an array of [clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis]
+    private static int[] extractTransformParams(Item item, int imageWidth, int imageHeight) {
+        int clapCropX = -1;
+        int clapCropY = -1;
+        int clapCropWidth = -1;
+        int clapCropHeight = -1;
+        int rotationCode = -1;
+        int mirrorAxis = -1;
+
+        CleanAperture clap = item.firstProperty(CleanAperture.class);
+        if (clap != null) {
+            clapCropX = clap.horizOffN / clap.horizOffD;
+            clapCropY = clap.vertOffN / clap.vertOffD;
+            clapCropWidth = (clap.cleanApertureWidthN + clap.cleanApertureWidthD - 1) / clap.cleanApertureWidthD;
+            clapCropHeight = (clap.cleanApertureHeightN + clap.cleanApertureHeightD - 1) / clap.cleanApertureHeightD;
+            if (clapCropX < 0 || clapCropY < 0
+                    || clapCropWidth <= 0 || clapCropHeight <= 0
+                    || clapCropX + clapCropWidth > imageWidth
+                    || clapCropY + clapCropHeight > imageHeight) {
+                clapCropWidth = Math.min(clapCropWidth, imageWidth - clapCropX);
+                clapCropHeight = Math.min(clapCropHeight, imageHeight - clapCropY);
+                if (clapCropWidth <= 0 || clapCropHeight <= 0) {
+                    clapCropX = -1;
+                    clapCropY = -1;
+                    clapCropWidth = -1;
+                    clapCropHeight = -1;
+                }
+            }
+        }
+
+        ImageRotation irot = item.firstProperty(ImageRotation.class);
+        if (irot != null) {
+            rotationCode = irot.rotation;
+        }
+
+        ImageMirror imir = item.firstProperty(ImageMirror.class);
+        if (imir != null) {
+            mirrorAxis = imir.axis;
+        }
+
+        return new int[]{clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis};
     }
 
     /// Computes grid output width from cell ispe dimensions.

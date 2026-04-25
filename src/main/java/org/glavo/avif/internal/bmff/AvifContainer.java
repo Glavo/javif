@@ -45,20 +45,55 @@ public final class AvifContainer {
     /// Grid output height, or -1 if to be computed from cells.
     private final int gridOutputHeight;
 
+    /// The clean-aperture crop x offset, or -1.
+    private final int clapCropX;
+    /// The clean-aperture crop y offset, or -1.
+    private final int clapCropY;
+    /// The clean-aperture crop width, or -1.
+    private final int clapCropWidth;
+    /// The clean-aperture crop height, or -1.
+    private final int clapCropHeight;
+    /// The rotation code (0, 1, 2, 3), or -1.
+    private final int rotationCode;
+    /// The mirror axis (0 or 1), or -1.
+    private final int mirrorAxis;
+
     /// Creates parsed AVIF container data without an alpha image or grid.
     ///
     /// @param info the parsed image metadata
     /// @param primaryItemPayload the primary image AV1 OBU payload
     public AvifContainer(AvifImageInfo info, byte[] primaryItemPayload) {
-        this(info, primaryItemPayload, null);
+        this(info, primaryItemPayload, null, -1, -1, -1, -1, -1, -1);
     }
 
-    /// Creates parsed AVIF container data with an optional alpha image.
+    /// Creates parsed AVIF container data with an optional alpha image and transforms.
     ///
     /// @param info the parsed image metadata
     /// @param primaryItemPayload the primary image AV1 OBU payload
     /// @param alphaItemPayload the alpha auxiliary image AV1 OBU payload, or `null`
     public AvifContainer(AvifImageInfo info, byte[] primaryItemPayload, byte @Nullable [] alphaItemPayload) {
+        this(info, primaryItemPayload, alphaItemPayload, -1, -1, -1, -1, -1, -1);
+    }
+
+    /// Creates parsed AVIF container data with an optional alpha image and transforms.
+    ///
+    /// @param info the parsed image metadata
+    /// @param primaryItemPayload the primary image AV1 OBU payload
+    /// @param alphaItemPayload the alpha auxiliary image AV1 OBU payload, or `null`
+    /// @param clapCropX the clean-aperture x offset, or -1
+    /// @param clapCropY the clean-aperture y offset, or -1
+    /// @param clapCropWidth the clean-aperture width, or -1
+    /// @param clapCropHeight the clean-aperture height, or -1
+    /// @param rotationCode the rotation code, or -1
+    /// @param mirrorAxis the mirror axis, or -1
+    public AvifContainer(
+            AvifImageInfo info,
+            byte[] primaryItemPayload,
+            byte @Nullable [] alphaItemPayload,
+            int clapCropX, int clapCropY,
+            int clapCropWidth, int clapCropHeight,
+            int rotationCode, int mirrorAxis
+    ) {
         this.info = Objects.requireNonNull(info, "info");
         this.primaryItemPayload = Arrays.copyOf(
                 Objects.requireNonNull(primaryItemPayload, "primaryItemPayload"),
@@ -73,6 +108,12 @@ public final class AvifContainer {
         this.gridColumns = 0;
         this.gridOutputWidth = 0;
         this.gridOutputHeight = 0;
+        this.clapCropX = clapCropX;
+        this.clapCropY = clapCropY;
+        this.clapCropWidth = clapCropWidth;
+        this.clapCropHeight = clapCropHeight;
+        this.rotationCode = rotationCode;
+        this.mirrorAxis = mirrorAxis;
     }
 
     /// Creates parsed AVIF container data for a grid derived image.
@@ -91,6 +132,35 @@ public final class AvifContainer {
             int gridOutputWidth,
             int gridOutputHeight
     ) {
+        this(info, gridCellPayloads, gridRows, gridColumns, gridOutputWidth, gridOutputHeight,
+                -1, -1, -1, -1, -1, -1);
+    }
+
+    /// Creates parsed AVIF container data for a grid derived image with transforms.
+    ///
+    /// @param info the parsed image metadata
+    /// @param gridCellPayloads the grid cell AV1 OBU payloads in row-major order
+    /// @param gridRows the grid row count
+    /// @param gridColumns the grid column count
+    /// @param gridOutputWidth the grid output width, or -1
+    /// @param gridOutputHeight the grid output height, or -1
+    /// @param clapCropX the clean-aperture x offset, or -1
+    /// @param clapCropY the clean-aperture y offset, or -1
+    /// @param clapCropWidth the clean-aperture width, or -1
+    /// @param clapCropHeight the clean-aperture height, or -1
+    /// @param rotationCode the rotation code, or -1
+    /// @param mirrorAxis the mirror axis, or -1
+    public AvifContainer(
+            AvifImageInfo info,
+            byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
+            int gridRows,
+            int gridColumns,
+            int gridOutputWidth,
+            int gridOutputHeight,
+            int clapCropX, int clapCropY,
+            int clapCropWidth, int clapCropHeight,
+            int rotationCode, int mirrorAxis
+    ) {
         this.info = Objects.requireNonNull(info, "info");
         Objects.requireNonNull(gridCellPayloads, "gridCellPayloads");
         if (gridRows <= 0) {
@@ -107,6 +177,12 @@ public final class AvifContainer {
         this.gridColumns = gridColumns;
         this.gridOutputWidth = gridOutputWidth;
         this.gridOutputHeight = gridOutputHeight;
+        this.clapCropX = clapCropX;
+        this.clapCropY = clapCropY;
+        this.clapCropWidth = clapCropWidth;
+        this.clapCropHeight = clapCropHeight;
+        this.rotationCode = rotationCode;
+        this.mirrorAxis = mirrorAxis;
     }
 
     /// Returns the parsed image metadata.
@@ -179,5 +255,54 @@ public final class AvifContainer {
     /// @return the grid output height, or -1 if to be computed
     public int gridOutputHeight() {
         return gridOutputHeight;
+    }
+
+    /// Returns whether a clean-aperture crop is present.
+    ///
+    /// @return whether a clean-aperture crop is present
+    public boolean hasClapCrop() {
+        return clapCropX >= 0;
+    }
+
+    /// Returns the clean-aperture crop x offset.
+    ///
+    /// @return the clean-aperture crop x offset
+    public int clapCropX() {
+        return clapCropX;
+    }
+
+    /// Returns the clean-aperture crop y offset.
+    ///
+    /// @return the clean-aperture crop y offset
+    public int clapCropY() {
+        return clapCropY;
+    }
+
+    /// Returns the clean-aperture crop width.
+    ///
+    /// @return the clean-aperture crop width
+    public int clapCropWidth() {
+        return clapCropWidth;
+    }
+
+    /// Returns the clean-aperture crop height.
+    ///
+    /// @return the clean-aperture crop height
+    public int clapCropHeight() {
+        return clapCropHeight;
+    }
+
+    /// Returns the rotation code.
+    ///
+    /// @return the rotation code (0, 1, 2, 3), or -1
+    public int rotationCode() {
+        return rotationCode;
+    }
+
+    /// Returns the mirror axis.
+    ///
+    /// @return the mirror axis (0 or 1), or -1
+    public int mirrorAxis() {
+        return mirrorAxis;
     }
 }
