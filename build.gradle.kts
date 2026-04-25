@@ -73,6 +73,10 @@ tasks.register<JavaExec>("run") {
     dependsOn(tasks.classes)
     classpath = sourceSets["test"].runtimeClasspath
     mainClass.set(mainClassName)
+
+    if (this.javaVersion >= JavaVersion.VERSION_25) {
+        jvmArgs("--enable-native-access=javafx.graphics")
+    }
 }
 
 tasks.test {
