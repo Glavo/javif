@@ -20,7 +20,6 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.UnmodifiableView;
 
 import java.nio.LongBuffer;
-import java.util.Arrays;
 import java.util.Objects;
 
 /// Decoded frame backed by packed `long` ARGB pixels.
@@ -28,30 +27,6 @@ import java.util.Objects;
 public final class ArgbLongFrame extends DecodedFrame {
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format.
     private final @Unmodifiable LongBuffer pixels;
-
-    /// Creates a decoded `long`-backed ARGB frame.
-    ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
-    /// @param presentationIndex the zero-based presentation index
-    /// @param pixels the packed non-premultiplied ARGB pixels
-    public ArgbLongFrame(
-            int width,
-            int height,
-            int bitDepth,
-            PixelFormat pixelFormat,
-            FrameType frameType,
-            boolean visible,
-            long presentationIndex,
-            long[] pixels
-    ) {
-        super(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex);
-        this.pixels = immutablePixels(Objects.requireNonNull(pixels, "pixels"));
-    }
 
     /// Creates a decoded `long`-backed ARGB frame from immutable pixel storage.
     ///
@@ -97,11 +72,4 @@ public final class ArgbLongFrame extends DecodedFrame {
         return pixels.slice();
     }
 
-    /// Creates immutable storage for pixel arrays.
-    ///
-    /// @param pixels the source pixels
-    /// @return immutable pixel storage
-    private static @Unmodifiable LongBuffer immutablePixels(long[] pixels) {
-        return LongBuffer.wrap(Arrays.copyOf(pixels, pixels.length)).asReadOnlyBuffer();
-    }
 }

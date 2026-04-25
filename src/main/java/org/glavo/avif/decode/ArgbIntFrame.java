@@ -20,7 +20,6 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.UnmodifiableView;
 
 import java.nio.IntBuffer;
-import java.util.Arrays;
 import java.util.Objects;
 
 /// Decoded frame backed by packed `int` ARGB pixels.
@@ -28,30 +27,6 @@ import java.util.Objects;
 public final class ArgbIntFrame extends DecodedFrame {
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.
     private final @Unmodifiable IntBuffer pixels;
-
-    /// Creates a decoded `int`-backed ARGB frame.
-    ///
-    /// @param width the output frame width in pixels
-    /// @param height the output frame height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout
-    /// @param frameType the AV1 frame type
-    /// @param visible whether the frame is visible
-    /// @param presentationIndex the zero-based presentation index
-    /// @param pixels the packed non-premultiplied ARGB pixels
-    public ArgbIntFrame(
-            int width,
-            int height,
-            int bitDepth,
-            PixelFormat pixelFormat,
-            FrameType frameType,
-            boolean visible,
-            long presentationIndex,
-            int[] pixels
-    ) {
-        super(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex);
-        this.pixels = immutablePixels(Objects.requireNonNull(pixels, "pixels"));
-    }
 
     /// Creates a decoded `int`-backed ARGB frame from immutable pixel storage.
     ///
@@ -97,11 +72,4 @@ public final class ArgbIntFrame extends DecodedFrame {
         return pixels.slice();
     }
 
-    /// Creates immutable storage for pixel arrays.
-    ///
-    /// @param pixels the source pixels
-    /// @return immutable pixel storage
-    private static @Unmodifiable IntBuffer immutablePixels(int[] pixels) {
-        return IntBuffer.wrap(Arrays.copyOf(pixels, pixels.length)).asReadOnlyBuffer();
-    }
 }
