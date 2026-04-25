@@ -17,7 +17,11 @@ package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Immutable metadata for one parsed AVIF image.
@@ -39,6 +43,12 @@ public final class AvifImageInfo {
     private final int frameCount;
     /// The parsed color information, or `null`.
     private final @Nullable AvifColorInfo colorInfo;
+    /// The embedded ICC profile payload, or `null`.
+    private final @Nullable @Unmodifiable ByteBuffer iccProfile;
+    /// The embedded Exif metadata payload, or `null`.
+    private final @Nullable @Unmodifiable ByteBuffer exif;
+    /// The embedded XMP metadata payload, or `null`.
+    private final @Nullable @Unmodifiable ByteBuffer xmp;
 
     /// Creates image metadata.
     ///
@@ -60,6 +70,35 @@ public final class AvifImageInfo {
             int frameCount,
             @Nullable AvifColorInfo colorInfo
     ) {
+        this(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount, colorInfo, null, null, null);
+    }
+
+    /// Creates image metadata with embedded ICC, Exif, and XMP payloads.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -78,6 +117,9 @@ public final class AvifImageInfo {
         this.animated = animated;
         this.frameCount = frameCount;
         this.colorInfo = colorInfo;
+        this.iccProfile = immutableBytes(iccProfile);
+        this.exif = immutableBytes(exif);
+        this.xmp = immutableBytes(xmp);
     }
 
     /// Returns the display width in pixels.
@@ -134,5 +176,48 @@ public final class AvifImageInfo {
     /// @return the parsed color information, or `null`
     public @Nullable AvifColorInfo colorInfo() {
         return colorInfo;
+    }
+
+    /// Returns the embedded ICC profile payload.
+    ///
+    /// @return a read-only view of the embedded ICC profile payload, or `null`
+    public @Nullable @UnmodifiableView ByteBuffer iccProfile() {
+        return byteView(iccProfile);
+    }
+
+    /// Returns the embedded Exif metadata payload.
+    ///
+    /// The returned payload excludes the AVIF `exif_tiff_header_offset` field
+    /// and matches the Exif byte sequence exposed by libavif.
+    ///
+    /// @return a read-only view of the embedded Exif metadata payload, or `null`
+    public @Nullable @UnmodifiableView ByteBuffer exif() {
+        return byteView(exif);
+    }
+
+    /// Returns the embedded XMP metadata payload.
+    ///
+    /// @return a read-only view of the embedded XMP metadata payload, or `null`
+    public @Nullable @UnmodifiableView ByteBuffer xmp() {
+        return byteView(xmp);
+    }
+
+    /// Creates immutable byte-buffer storage for one optional payload.
+    ///
+    /// @param bytes the source bytes, or `null`
+    /// @return immutable byte-buffer storage, or `null`
+    private static @Nullable @Unmodifiable ByteBuffer immutableBytes(byte @Nullable [] bytes) {
+        if (bytes == null) {
+            return null;
+        }
+        return ByteBuffer.wrap(Arrays.copyOf(bytes, bytes.length)).asReadOnlyBuffer();
+    }
+
+    /// Returns a read-only view over immutable payload storage.
+    ///
+    /// @param bytes the immutable payload storage, or `null`
+    /// @return a read-only view, or `null`
+    private static @Nullable @UnmodifiableView ByteBuffer byteView(@Nullable @Unmodifiable ByteBuffer bytes) {
+        return bytes == null ? null : bytes.slice();
     }
 }

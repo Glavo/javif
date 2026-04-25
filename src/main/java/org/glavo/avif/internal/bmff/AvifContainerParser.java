@@ -26,7 +26,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -37,6 +39,9 @@ import java.util.Set;
 /// Parser for the AVIF primary-item subset of BMFF.
 @NotNullByDefault
 public final class AvifContainerParser {
+    /// The MIME content type used by AVIF XMP metadata items.
+    private static final String XMP_CONTENT_TYPE = "application/rdf+xml";
+
     /// The source bytes.
     private final byte @Unmodifiable [] source;
     /// The parsed metadata state.
@@ -150,6 +155,7 @@ public final class AvifContainerParser {
         }
 
         byte[] payload = mergeItemExtents(primaryItem);
+        MetadataPayloads metadata = collectMetadataPayloads(primaryItem);
         AvifImageInfo info = new AvifImageInfo(
                 ispe.width,
                 ispe.height,
@@ -158,7 +164,10 @@ public final class AvifContainerParser {
                 alphaPresent,
                 false,
                 1,
-                primaryItem.firstProperty(AvifColorInfo.class)
+                primaryItem.firstProperty(AvifColorInfo.class),
+                metadata.iccProfile,
+                metadata.exif,
+                metadata.xmp
         );
         int[] transformParams = extractTransformParams(primaryItem, ispe.width, ispe.height);
 
@@ -175,6 +184,7 @@ public final class AvifContainerParser {
     private AvifContainer parseGridContainer(Item gridItem) throws AvifDecodeException {
         GridPayloads colorGrid = parseGridPayloads(gridItem);
         AlphaPayloads alphaPayloads = parseGridAlphaPayloads(gridItem, colorGrid);
+        MetadataPayloads metadata = collectMetadataPayloads(gridItem);
 
         AvifImageInfo info = new AvifImageInfo(
                 colorGrid.outputWidth,
@@ -184,7 +194,10 @@ public final class AvifContainerParser {
                 alphaPayloads.present(),
                 false,
                 1,
-                gridItem.firstProperty(AvifColorInfo.class)
+                gridItem.firstProperty(AvifColorInfo.class),
+                metadata.iccProfile,
+                metadata.exif,
+                metadata.xmp
         );
 
         int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
@@ -426,6 +439,48 @@ public final class AvifContainerParser {
                     null
             );
         }
+    }
+
+    /// Collects metadata payloads associated with one rendered image item.
+    ///
+    /// @param imageItem the color or grid image item
+    /// @return the associated metadata payloads
+    /// @throws AvifDecodeException if metadata item extents are malformed
+    private MetadataPayloads collectMetadataPayloads(Item imageItem) throws AvifDecodeException {
+        byte[] iccProfile = null;
+        IccColorProfile iccProperty = imageItem.firstProperty(IccColorProfile.class);
+        if (iccProperty != null) {
+            iccProfile = iccProperty.profile();
+        }
+
+        byte[] exif = null;
+        byte[] xmp = null;
+        for (Item item : meta.items.values()) {
+            if (item.descForId != imageItem.id) {
+                continue;
+            }
+            if (exif == null && "Exif".equals(item.type)) {
+                exif = exifPayload(item);
+            } else if (xmp == null
+                    && "mime".equals(item.type)
+                    && (XMP_CONTENT_TYPE.equals(item.contentType) || "XMP".equals(item.name))) {
+                xmp = mergeItemExtents(item);
+            }
+        }
+        return new MetadataPayloads(iccProfile, exif, xmp);
+    }
+
+    /// Reads and normalizes an Exif metadata item.
+    ///
+    /// @param item the Exif item
+    /// @return the Exif payload without the AVIF Exif header offset field
+    /// @throws AvifDecodeException if the Exif item is malformed
+    private byte[] exifPayload(Item item) throws AvifDecodeException {
+        byte[] payload = mergeItemExtents(item);
+        if (payload.length < 4) {
+            throw parseFailed("Exif item is missing exif_tiff_header_offset: " + item.id, 0);
+        }
+        return Arrays.copyOfRange(payload, 4, payload.length);
     }
 
     /// Extracts transform parameters from the properties of one item.
@@ -760,6 +815,13 @@ public final class AvifContainerParser {
         input.skip(2);
         Item item = meta.requireItem(itemId);
         item.type = input.readFourCc();
+        item.name = readNullTerminatedString(input);
+        if ("mime".equals(item.type)) {
+            item.contentType = readNullTerminatedString(input);
+            if (input.hasRemaining()) {
+                item.contentEncoding = readNullTerminatedString(input);
+            }
+        }
     }
 
     /// Parses an `iprp` box.
@@ -878,6 +940,13 @@ public final class AvifContainerParser {
     /// @throws AvifDecodeException if the property is malformed
     private static Property parseColr(BoxInput input) throws AvifDecodeException {
         String colourType = input.readFourCc();
+        if ("prof".equals(colourType) || "rICC".equals(colourType)) {
+            byte[] profile = input.readBytes(input.remaining());
+            if (profile.length == 0) {
+                throw parseFailed("ICC color profile payload is empty", input.offset());
+            }
+            return new IccColorProfile(profile);
+        }
         if (!"nclx".equals(colourType)) {
             return new OpaqueProperty("colr");
         }
@@ -1047,7 +1116,14 @@ public final class AvifContainerParser {
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
                 AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
-                s.pixelFormat != null ? s.pixelFormat : AvifPixelFormat.I420, false, true, sampleCount, s.colr);
+                s.pixelFormat != null ? s.pixelFormat : AvifPixelFormat.I420,
+                false,
+                true,
+                sampleCount,
+                s.colr,
+                s.iccProfile,
+                null,
+                null);
         return new AvifContainer(info,
                 payloads.toArray(byte[][]::new),
                 deltas.stream().mapToInt(Integer::intValue).toArray(),
@@ -1209,6 +1285,7 @@ public final class AvifContainerParser {
                 case "colr" -> {
                     Property p = parseColr(payload);
                     if (p instanceof ColorProperty cp) meta.moovState.colr = cp.colorInfo;
+                    if (p instanceof IccColorProfile icc) meta.moovState.iccProfile = icc.profile();
                 }
                 default -> {}
             }
@@ -1388,6 +1465,9 @@ public final class AvifContainerParser {
                 }
                 if ("prog".equals(reference.type())) {
                     fromItem.progDeps.add(toItem.id);
+                }
+                if ("cdsc".equals(reference.type())) {
+                    fromItem.descForId = toItem.id;
                 }
             }
             input.skipBoxPayload(reference);
@@ -1594,6 +1674,8 @@ public final class AvifContainerParser {
         private @Nullable AvifPixelFormat pixelFormat;
         /// The parsed image sequence color information, or `null`.
         private @Nullable AvifColorInfo colr;
+        /// The parsed image sequence ICC profile payload, or `null`.
+        private byte @Nullable [] iccProfile;
         /// The parsed image sequence media timescale.
         private int mediaTimescale;
         /// The parsed image sequence media duration.
@@ -1627,6 +1709,7 @@ public final class AvifContainerParser {
             bitDepth = other.bitDepth;
             pixelFormat = other.pixelFormat;
             colr = other.colr;
+            iccProfile = other.iccProfile == null ? null : other.iccProfile.clone();
             mediaTimescale = other.mediaTimescale;
             mediaDuration = other.mediaDuration;
             seqHeaderObu = other.seqHeaderObu == null ? null : other.seqHeaderObu.clone();
@@ -1755,6 +1838,28 @@ public final class AvifContainerParser {
         }
     }
 
+    /// Parsed image metadata payloads.
+    @NotNullByDefault
+    private static final class MetadataPayloads {
+        /// The ICC profile payload, or `null`.
+        private final byte @Nullable [] iccProfile;
+        /// The Exif metadata payload, or `null`.
+        private final byte @Nullable [] exif;
+        /// The XMP metadata payload, or `null`.
+        private final byte @Nullable [] xmp;
+
+        /// Creates parsed metadata payloads.
+        ///
+        /// @param iccProfile the ICC profile payload, or `null`
+        /// @param exif the Exif metadata payload, or `null`
+        /// @param xmp the XMP metadata payload, or `null`
+        private MetadataPayloads(byte @Nullable [] iccProfile, byte @Nullable [] exif, byte @Nullable [] xmp) {
+            this.iccProfile = iccProfile;
+            this.exif = exif;
+            this.xmp = xmp;
+        }
+    }
+
     /// Mutable parser state for one item.
     @NotNullByDefault
     private static final class Item {
@@ -1762,6 +1867,12 @@ public final class AvifContainerParser {
         private final int id;
         /// The item type.
         private String type = "";
+        /// The item name from `infe`.
+        private String name = "";
+        /// The MIME content type for `mime` items, or an empty string.
+        private String contentType = "";
+        /// The MIME content encoding for `mime` items, or an empty string.
+        private String contentEncoding = "";
         /// Whether the item extents are stored in `idat`.
         private boolean idatStored;
         /// The item extents.
@@ -1772,6 +1883,8 @@ public final class AvifContainerParser {
         private boolean hasUnsupportedEssentialProperty;
         /// The master image item id for auxiliary items.
         private int auxForId;
+        /// The image item id described by this metadata item, or 0.
+        private int descForId;
         /// The grid item id for dimg cell items, or 0.
         private int dimgForId;
         /// The dimg cell item ids for a grid item, in row-major order.
@@ -1844,7 +1957,7 @@ public final class AvifContainerParser {
 
     /// Marker interface for parsed item properties.
     @NotNullByDefault
-    private sealed interface Property permits ImageSpatialExtents, Av1Config, ColorProperty, AuxiliaryType, OpaqueProperty, PixelInformation, PixelAspectRatio, CleanAperture, ImageRotation, ImageMirror, OperatingPoint {
+    private sealed interface Property permits ImageSpatialExtents, Av1Config, ColorProperty, IccColorProfile, AuxiliaryType, OpaqueProperty, PixelInformation, PixelAspectRatio, CleanAperture, ImageRotation, ImageMirror, OperatingPoint {
     }
 
     /// Parsed `ispe` item property.
@@ -2007,6 +2120,23 @@ public final class AvifContainerParser {
         } while (v != 0);
     }
 
+    /// Reads one null-terminated UTF-8 string.
+    ///
+    /// @param input the source input
+    /// @return the decoded string without the terminator
+    /// @throws AvifDecodeException if the string is not terminated within this input
+    private static String readNullTerminatedString(BoxInput input) throws AvifDecodeException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        while (input.hasRemaining()) {
+            int value = input.readU8();
+            if (value == 0) {
+                return output.toString(StandardCharsets.UTF_8);
+            }
+            output.write(value);
+        }
+        throw parseFailed("unterminated BMFF string", input.offset());
+    }
+
     /// Minimal MSB-first bit writer for sequence header construction.
     @NotNullByDefault
     private static final class SeqBitWriter {
@@ -2041,6 +2171,27 @@ public final class AvifContainerParser {
         /// @param colorInfo the parsed color information
         private ColorProperty(AvifColorInfo colorInfo) {
             this.colorInfo = Objects.requireNonNull(colorInfo, "colorInfo");
+        }
+    }
+
+    /// Parsed `colr` item property carrying an ICC profile.
+    @NotNullByDefault
+    private static final class IccColorProfile implements Property {
+        /// The ICC profile payload.
+        private final byte @Unmodifiable [] profile;
+
+        /// Creates an ICC color profile property.
+        ///
+        /// @param profile the ICC profile payload
+        private IccColorProfile(byte[] profile) {
+            this.profile = profile.clone();
+        }
+
+        /// Returns a copy of the ICC profile payload.
+        ///
+        /// @return the ICC profile payload
+        private byte @Unmodifiable [] profile() {
+            return profile.clone();
         }
     }
 

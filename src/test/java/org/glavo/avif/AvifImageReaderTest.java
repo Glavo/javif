@@ -22,7 +22,9 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -90,6 +92,17 @@ final class AvifImageReaderTest {
             }
             return input.readAllBytes();
         }
+    }
+
+    /// Copies all remaining bytes from a buffer into an array without changing the source position.
+    ///
+    /// @param buffer the source buffer
+    /// @return the remaining bytes
+    private static byte[] remainingBytes(ByteBuffer buffer) {
+        ByteBuffer view = buffer.slice();
+        byte[] bytes = new byte[view.remaining()];
+        view.get(bytes);
+        return bytes;
     }
 
     /// Verifies that the primary AV1 item payload is decoded through the migrated AV1 decoder.
@@ -222,6 +235,23 @@ final class AvifImageReaderTest {
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
+
+            ByteBuffer iccProfile = info.iccProfile();
+            assertNotNull(iccProfile);
+            assertTrue(iccProfile.isReadOnly());
+            assertTrue(iccProfile.remaining() > 128);
+
+            ByteBuffer exif = info.exif();
+            assertNotNull(exif);
+            assertTrue(exif.isReadOnly());
+            assertTrue(exif.remaining() > 0);
+
+            ByteBuffer xmp = info.xmp();
+            assertNotNull(xmp);
+            assertTrue(xmp.isReadOnly());
+            assertTrue(xmp.remaining() > 0);
+            String xmpText = new String(remainingBytes(xmp), StandardCharsets.UTF_8);
+            assertTrue(xmpText.contains("x:xmpmeta") || xmpText.contains("rdf:RDF"));
         }
     }
 

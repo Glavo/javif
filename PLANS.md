@@ -4,7 +4,8 @@
 
 The project has a pure-Java AVIF reader backed by the in-tree AV1 decoder. It
 currently covers common still images, alpha, grids, progressive still images,
-and basic AVIS sequences with no runtime dependency beyond `java.base`.
+basic AVIS sequences, and embedded ICC, Exif, and XMP metadata exposure with no
+runtime dependency beyond `java.base`.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -28,9 +29,9 @@ behavior where the feature is in scope.
 
 ### AVIF Container Semantics
 
-- Implement full color management: ICC profiles, transfer functions, nclx
-  primaries/transfer/matrix handling, range conversion, and display-ready RGB
-  adaptation across 8/10/12-bit inputs.
+- Implement full color management: apply ICC profiles, transfer functions,
+  nclx primaries/transfer/matrix handling, range conversion, and display-ready
+  RGB adaptation across 8/10/12-bit inputs.
 - Decide the public API scope for gain maps and depth images. If included,
   parse and expose their metadata and decoded planes instead of only validating
   primary-image decode behavior.
@@ -43,9 +44,8 @@ behavior where the feature is in scope.
 
 ### Public API And Metadata
 
-- Expose image metadata that is currently parsed or skipped internally,
-  including ICC, Exif, XMP, transform properties, timing, and auxiliary image
-  relationships.
+- Expose remaining image metadata, especially transform properties, timing, and
+  auxiliary image relationships.
 - Provide explicit output choices for raw planes, display-converted RGB, and
   high-bit-depth buffers without unnecessary copies.
 - Review alpha semantics, premultiplication metadata, and buffer immutability
