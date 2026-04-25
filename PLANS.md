@@ -2,9 +2,10 @@
 
 ## Status
 
-The first AVIF still-image slice is implemented. `org.glavo.avif` is exported and provides a
-reader API that parses a primary AV1 image item from a BMFF AVIF container, extracts its payload,
-and decodes it through the migrated `org.glavo.avif.decode` AV1 reader.
+The primary still-image path is hardened and alpha auxiliary images are supported.
+`org.glavo.avif` is exported and provides a reader API that parses an AVIF container,
+extracts primary and alpha AV1 item payloads, and decodes them through the migrated
+`org.glavo.avif.decode` AV1 reader.
 
 Implemented:
 
@@ -14,43 +15,39 @@ Implemented:
   decode errors.
 - A bounded big-endian BMFF parser for `ftyp`, root `meta`, `hdlr`, `pitm`, `iloc`, `iinf/infe`,
   `iprp/ipco/ipma`, `iref`, `idat`, `ispe`, `av1C`, `colr nclx`, and `auxC`.
+- Property parsing for `pixi`, `pasp`, `clap`, `irot`, and `imir` (parsed and stored; transforms not
+  yet applied at output time).
 - Primary `av01` item extraction from file-backed extents and `idat` construction-method extents.
 - A simple still-image decode path that returns `AvifIntFrame` or `AvifLongFrame`.
-- Synthetic AVIF tests covering minimal still-image metadata parsing and primary AV1 item decoding.
-- A real libavif `white_1x1.avif` fixture test covering metadata parsing and the public read-frame
-  path.
+- Alpha auxiliary image support: resolves `auxl` references, decodes alpha AV1 payloads
+  independently, and combines color and alpha planes into non-premultiplied ARGB output.
+- Parser robustness tests covering truncation, overflow, duplicate unique boxes, invalid references,
+  missing required properties, and essential unknown property rejection.
+- Synthetic AVIF tests covering minimal still-image metadata parsing, primary AV1 item decoding,
+  alpha decoding, and parser error paths.
+- Real libavif fixture tests for `white_1x1.avif`, `extended_pixi.avif`, `colors_sdr_srgb.avif`,
+  `paris_icc_exif_xmp.avif`, and `abc_color_irot_alpha_NOirot.avif`.
+- Known gap: AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
 
 ## Remaining Work
 
-1. Harden the primary still-image path against real libavif fixtures.
-   - Add parser tests for truncation, overflow, duplicate unique boxes, invalid references, missing
-     required properties, and unsupported essential properties.
-   - Expand real still-image fixture coverage beyond `white_1x1.avif` and fix compatibility gaps in
-     currently parsed boxes.
-   - Add support for `pixi`, `pasp`, `clap`, `irot`, and `imir` metadata needed by common files.
-   - Track the current AV1 `I444` pixel-accuracy gap separately from AVIF container coverage.
-
-2. Add alpha auxiliary images.
-   - Resolve `auxl` references from the primary image to alpha items.
-   - Decode alpha AV1 payloads independently.
-   - Combine color and alpha planes into non-premultiplied ARGB output.
-
-3. Add derived image support.
+1. Add derived image support.
    - Parse and validate `grid` item payloads.
    - Decode grid cell items and compose the final canvas.
-   - Apply clean-aperture, pixel-aspect-ratio, rotation, and mirror transforms in the final output.
+   - Apply clean-aperture, pixel-aspect-ratio, rotation, and mirror transforms in the final output
+     (property parsing for these already exists).
 
-4. Add progressive and layered still images.
+2. Add progressive and layered still images.
    - Parse item references and properties that describe progressive/layered AVIF still images.
    - Expose deterministic frame ordering for layers while keeping `info()` accurate.
    - Reject unsupported layering modes with stable diagnostics.
 
-5. Add AVIS image sequences.
+3. Add AVIS image sequences.
    - Parse `moov`, tracks, sample tables, sync samples, durations, and sample dependencies.
    - Decode sequential and indexed frames using nearest-keyframe state.
    - Expose frame count, animation status, and timing metadata in the public API.
 
-6. Improve AV1 integration for AVIF composition.
+4. Improve AV1 integration for AVIF composition.
    - Add an internal path that exposes postprocessed planes before ARGB packing.
    - Reuse that plane path for alpha, grid, and transform composition.
    - Keep public AV1 reader behavior unchanged.
