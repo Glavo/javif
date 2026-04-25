@@ -17,10 +17,10 @@ duration, per-frame durations, primary-image transform properties, and auxiliary
 image type strings. Auxiliary image metadata is also exposed through structured
 descriptors that include item id, auxiliary type, item type, dimensions, bit
 depth, and pixel format when available. The public reader can also expose raw
-decoded color planes for non-grid still images and AVIS frames, plus raw luma
-planes for single alpha auxiliary items. Image metadata now includes `tmap`
-gain-map descriptors when the `tmap` brand and preferred `altr` relationship
-are present.
+decoded color planes for still images, grid-derived still images, and AVIS
+frames, plus raw luma planes for single alpha auxiliary items and alpha grids.
+Image metadata now includes `tmap` gain-map descriptors when the `tmap` brand
+and preferred `altr` relationship are present.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -64,9 +64,8 @@ behavior where the feature is in scope.
 
 - Expose remaining image metadata, especially depth descriptors and decoded
   gain-map planes where they belong in the public API.
-- Complete explicit output choices for grid raw planes, alpha-grid and sequence
-  alpha planes, display-converted RGB, and high-bit-depth buffers without
-  unnecessary copies.
+- Complete explicit output choices for sequence alpha planes, display-converted
+  RGB, and high-bit-depth buffers without unnecessary copies.
 - Review alpha semantics, premultiplication metadata, and buffer immutability
   annotations across all public APIs.
 

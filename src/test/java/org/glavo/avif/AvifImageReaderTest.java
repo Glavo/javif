@@ -77,6 +77,10 @@ final class AvifImageReaderTest {
     /// A 1x5 grid image fixture copied from libavif's test data.
     private static final String LIBAVIF_SOFA_GRID_1X5_FIXTURE = "libavif-test-data/sofa_grid1x5_420.avif";
 
+    /// A grid image fixture copied from libavif's test data with an alpha grid.
+    private static final String LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE =
+            "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif";
+
     /// A progressive still-image fixture copied from libavif's test data using idat.
     private static final String LIBAVIF_PROGRESSIVE_FIXTURE =
             "libavif-test-data/draw_points_idat_progressive.avif";
@@ -655,14 +659,57 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that grid raw-plane composition has an explicit unsupported-feature boundary.
+    /// Verifies that grid raw-plane composition exposes the composed raw canvas.
     ///
-    /// @throws IOException if the fixture cannot be read
+    /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void readRawColorPlanesRejectsGridFixture() throws IOException {
+    void readRawColorPlanesComposesGridFixture() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_SOFA_GRID_1X5_FIXTURE))) {
-            AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> reader.readRawColorPlanes(0));
-            assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+            AvifPlanes planes = reader.readRawColorPlanes(0);
+
+            assertEquals(AvifBitDepth.EIGHT_BITS, planes.bitDepth());
+            assertEquals(AvifPixelFormat.I420, planes.pixelFormat());
+            assertEquals(1024, planes.codedWidth());
+            assertEquals(770, planes.codedHeight());
+            assertEquals(1024, planes.renderWidth());
+            assertEquals(770, planes.renderHeight());
+            assertEquals(1024, planes.lumaPlane().width());
+            assertEquals(770, planes.lumaPlane().height());
+            assertTrue(planes.lumaPlane().sampleBuffer().isReadOnly());
+
+            AvifPlane chromaU = planes.chromaUPlane();
+            AvifPlane chromaV = planes.chromaVPlane();
+            assertNotNull(chromaU);
+            assertNotNull(chromaV);
+            assertEquals(512, chromaU.width());
+            assertEquals(385, chromaU.height());
+            assertEquals(512, chromaV.width());
+            assertEquals(385, chromaV.height());
+        }
+    }
+
+    /// Verifies that alpha-grid raw-plane composition exposes a single alpha canvas.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawAlphaPlanesComposesAlphaGridFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE)
+        )) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.alphaPresent());
+
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertEquals(info.width(), alphaPlanes.codedWidth());
+            assertEquals(info.height(), alphaPlanes.codedHeight());
+            assertEquals(info.width(), alphaPlanes.renderWidth());
+            assertEquals(info.height(), alphaPlanes.renderHeight());
+            assertFalse(alphaPlanes.hasChroma());
+            assertEquals(info.width(), alphaPlanes.lumaPlane().width());
+            assertEquals(info.height(), alphaPlanes.lumaPlane().height());
+            assertTrue(alphaPlanes.lumaPlane().sampleBuffer().isReadOnly());
         }
     }
 

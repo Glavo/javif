@@ -272,11 +272,11 @@ public final class AvifImageReader implements AutoCloseable {
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        if (container.isGrid()) {
-            throw unsupported("Raw color planes for grid-derived AVIF images are not implemented", null);
-        }
         if (container.isSequence()) {
             return readSequenceRawColorPlanes(frameIndex);
+        }
+        if (container.isGrid()) {
+            return readGridRawColorPlanes(frameIndex);
         }
         if (frameIndex != 0) {
             throw new AvifDecodeException(
@@ -323,8 +323,9 @@ public final class AvifImageReader implements AutoCloseable {
         if (alphaPayload != null) {
             return alphaPlanesFromDecodedImage(decodeRawColorPlanes(alphaPayload, "Alpha auxiliary AV1 item"));
         }
-        if (container.gridAlphaCellPayloads() != null) {
-            throw unsupported("Raw alpha planes for alpha grids are not implemented", null);
+        @Unmodifiable ByteBuffer @Nullable [] alphaCellPayloads = container.gridAlphaCellPayloads();
+        if (alphaCellPayloads != null) {
+            return readGridRawAlphaPlanes(alphaCellPayloads);
         }
         return null;
     }
@@ -404,6 +405,74 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
+    /// Decodes raw color planes for one grid-derived still image.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return raw decoded color planes composed from grid cells
+    /// @throws IOException if decoding fails
+    private AvifPlanes readGridRawColorPlanes(int frameIndex) throws IOException {
+        @Unmodifiable ByteBuffer @Nullable [] cellPayloads = container.gridCellPayloads();
+        if (cellPayloads == null || cellPayloads.length == 0) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cell payloads", null);
+        }
+        AvifPlanes[] cellPlanes = decodeGridRawColorPlanes(cellPayloads);
+        return composeGridRawColorPlanes(
+                cellPlanes,
+                container.gridRows(),
+                container.gridColumns(),
+                container.gridOutputWidth(),
+                container.gridOutputHeight()
+        );
+    }
+
+    /// Decodes grid cell payloads into raw color planes.
+    ///
+    /// @param cellPayloads the cell payloads
+    /// @return decoded raw color planes for each cell
+    /// @throws IOException if one cell cannot be decoded
+    private AvifPlanes[] decodeGridRawColorPlanes(@Unmodifiable ByteBuffer @Unmodifiable [] cellPayloads)
+            throws IOException {
+        AvifPlanes[] cellPlanes = new AvifPlanes[cellPayloads.length];
+        for (int i = 0; i < cellPayloads.length; i++) {
+            ByteBuffer payload = cellPayloads[i];
+            if (payload == null) {
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid cell payload is null: " + i, null);
+            }
+            cellPlanes[i] = decodeRawColorPlanes(payload, "Grid cell " + i);
+        }
+        return cellPlanes;
+    }
+
+    /// Decodes and composes raw alpha planes for an alpha grid.
+    ///
+    /// @param alphaCellPayloads the alpha grid cell payloads
+    /// @return composed raw alpha planes
+    /// @throws IOException if one alpha grid cell cannot be decoded
+    private AvifPlanes readGridRawAlphaPlanes(@Unmodifiable ByteBuffer @Unmodifiable [] alphaCellPayloads)
+            throws IOException {
+        AvifPlanes[] cellPlanes = decodeGridRawColorPlanes(alphaCellPayloads);
+        AvifBitDepth bitDepth = cellPlanes[0].bitDepth();
+        validateGridRawAlphaPlaneCells(cellPlanes, bitDepth);
+        AvifPlane lumaPlane = composeGridPlane(
+                lumaPlanes(cellPlanes),
+                container.gridAlphaRows(),
+                container.gridAlphaColumns(),
+                container.gridAlphaOutputWidth(),
+                container.gridAlphaOutputHeight()
+        );
+        return new AvifPlanes(
+                bitDepth,
+                AvifPixelFormat.I400,
+                container.gridAlphaOutputWidth(),
+                container.gridAlphaOutputHeight(),
+                container.gridAlphaOutputWidth(),
+                container.gridAlphaOutputHeight(),
+                lumaPlane,
+                null,
+                null
+        );
+    }
+
     /// Decodes one AV1 payload and returns raw color planes.
     ///
     /// @param payload the AV1 payload to decode
@@ -457,6 +526,220 @@ public final class AvifImageReader implements AutoCloseable {
                 null,
                 null
         );
+    }
+
+    /// Composes decoded grid cell raw planes into one canvas.
+    ///
+    /// @param cellPlanes the decoded cell planes in row-major order
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the output luma width
+    /// @param outputHeight the output luma height
+    /// @return composed raw color planes
+    private static AvifPlanes composeGridRawColorPlanes(
+            AvifPlanes[] cellPlanes,
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight
+    ) {
+        if (cellPlanes.length != rows * columns) {
+            throw new IllegalArgumentException("grid cell count does not match rows * columns");
+        }
+        AvifPlanes firstCell = cellPlanes[0];
+        AvifBitDepth bitDepth = firstCell.bitDepth();
+        AvifPixelFormat pixelFormat = firstCell.pixelFormat();
+        validateGridRawPlaneCells(cellPlanes, bitDepth, pixelFormat);
+
+        AvifPlane lumaPlane = composeGridPlane(lumaPlanes(cellPlanes), rows, columns, outputWidth, outputHeight);
+        if (pixelFormat == AvifPixelFormat.I400) {
+            return new AvifPlanes(bitDepth, pixelFormat, outputWidth, outputHeight, outputWidth, outputHeight,
+                    lumaPlane, null, null);
+        }
+
+        int chromaWidth = expectedChromaWidth(pixelFormat, outputWidth);
+        int chromaHeight = expectedChromaHeight(pixelFormat, outputHeight);
+        AvifPlane chromaUPlane = composeGridPlane(chromaUPlanes(cellPlanes), rows, columns, chromaWidth, chromaHeight);
+        AvifPlane chromaVPlane = composeGridPlane(chromaVPlanes(cellPlanes), rows, columns, chromaWidth, chromaHeight);
+        return new AvifPlanes(bitDepth, pixelFormat, outputWidth, outputHeight, outputWidth, outputHeight,
+                lumaPlane, chromaUPlane, chromaVPlane);
+    }
+
+    /// Validates that all grid cells share the same raw-plane format.
+    ///
+    /// @param cellPlanes the decoded cell planes
+    /// @param bitDepth the expected bit depth
+    /// @param pixelFormat the expected pixel format
+    private static void validateGridRawPlaneCells(
+            AvifPlanes[] cellPlanes,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat
+    ) {
+        for (AvifPlanes cellPlane : cellPlanes) {
+            if (cellPlane.bitDepth() != bitDepth) {
+                throw new IllegalArgumentException("grid cell bit depth mismatch");
+            }
+            if (cellPlane.pixelFormat() != pixelFormat) {
+                throw new IllegalArgumentException("grid cell pixel format mismatch");
+            }
+        }
+    }
+
+    /// Validates that all alpha grid cells share the same bit depth.
+    ///
+    /// @param cellPlanes the decoded alpha cell planes
+    /// @param bitDepth the expected bit depth
+    private static void validateGridRawAlphaPlaneCells(AvifPlanes[] cellPlanes, AvifBitDepth bitDepth) {
+        for (AvifPlanes cellPlane : cellPlanes) {
+            if (cellPlane.bitDepth() != bitDepth) {
+                throw new IllegalArgumentException("alpha grid cell bit depth mismatch");
+            }
+        }
+    }
+
+    /// Returns luma planes for all grid cells.
+    ///
+    /// @param cellPlanes the decoded cell planes
+    /// @return luma planes in row-major order
+    private static AvifPlane[] lumaPlanes(AvifPlanes[] cellPlanes) {
+        AvifPlane[] result = new AvifPlane[cellPlanes.length];
+        for (int i = 0; i < cellPlanes.length; i++) {
+            result[i] = cellPlanes[i].lumaPlane();
+        }
+        return result;
+    }
+
+    /// Returns chroma U planes for all grid cells.
+    ///
+    /// @param cellPlanes the decoded cell planes
+    /// @return chroma U planes in row-major order
+    private static AvifPlane[] chromaUPlanes(AvifPlanes[] cellPlanes) {
+        AvifPlane[] result = new AvifPlane[cellPlanes.length];
+        for (int i = 0; i < cellPlanes.length; i++) {
+            AvifPlane plane = cellPlanes[i].chromaUPlane();
+            if (plane == null) {
+                throw new IllegalArgumentException("grid cell chroma U plane is missing");
+            }
+            result[i] = plane;
+        }
+        return result;
+    }
+
+    /// Returns chroma V planes for all grid cells.
+    ///
+    /// @param cellPlanes the decoded cell planes
+    /// @return chroma V planes in row-major order
+    private static AvifPlane[] chromaVPlanes(AvifPlanes[] cellPlanes) {
+        AvifPlane[] result = new AvifPlane[cellPlanes.length];
+        for (int i = 0; i < cellPlanes.length; i++) {
+            AvifPlane plane = cellPlanes[i].chromaVPlane();
+            if (plane == null) {
+                throw new IllegalArgumentException("grid cell chroma V plane is missing");
+            }
+            result[i] = plane;
+        }
+        return result;
+    }
+
+    /// Composes one plane from row-major grid cell planes.
+    ///
+    /// @param cellPlanes the cell planes
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the output plane width
+    /// @param outputHeight the output plane height
+    /// @return composed plane
+    private static AvifPlane composeGridPlane(
+            AvifPlane[] cellPlanes,
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight
+    ) {
+        short[] samples = new short[outputWidth * outputHeight];
+        int yOffset = 0;
+        for (int row = 0; row < rows; row++) {
+            int maxCellHeight = 0;
+            for (int col = 0; col < columns; col++) {
+                int cellIndex = row * columns + col;
+                AvifPlane cellPlane = cellPlanes[cellIndex];
+                maxCellHeight = Math.max(maxCellHeight, cellPlane.height());
+                int cellX = gridPlaneCellX(cellPlanes, row, col, columns);
+                copyGridPlaneCell(samples, outputWidth, outputHeight, cellPlane, cellX, yOffset);
+            }
+            yOffset += maxCellHeight;
+        }
+        return new AvifPlane(outputWidth, outputHeight, outputWidth, samples);
+    }
+
+    /// Copies one grid cell plane into the destination plane canvas.
+    ///
+    /// @param destination the destination samples
+    /// @param outputWidth the output plane width
+    /// @param outputHeight the output plane height
+    /// @param cellPlane the source cell plane
+    /// @param xOffset the destination x offset
+    /// @param yOffset the destination y offset
+    private static void copyGridPlaneCell(
+            short[] destination,
+            int outputWidth,
+            int outputHeight,
+            AvifPlane cellPlane,
+            int xOffset,
+            int yOffset
+    ) {
+        if (xOffset >= outputWidth || yOffset >= outputHeight) {
+            return;
+        }
+        int copyWidth = Math.min(cellPlane.width(), outputWidth - xOffset);
+        int copyHeight = Math.min(cellPlane.height(), outputHeight - yOffset);
+        for (int y = 0; y < copyHeight; y++) {
+            int destinationBase = (yOffset + y) * outputWidth + xOffset;
+            for (int x = 0; x < copyWidth; x++) {
+                destination[destinationBase + x] = (short) cellPlane.sample(x, y);
+            }
+        }
+    }
+
+    /// Returns the x offset of one grid cell plane.
+    ///
+    /// @param cellPlanes the row-major cell planes
+    /// @param row the grid row
+    /// @param col the grid column
+    /// @param columns the grid column count
+    /// @return the plane x offset
+    private static int gridPlaneCellX(AvifPlane[] cellPlanes, int row, int col, int columns) {
+        int cellX = 0;
+        for (int prevCol = 0; prevCol < col; prevCol++) {
+            cellX += cellPlanes[row * columns + prevCol].width();
+        }
+        return cellX;
+    }
+
+    /// Returns the expected chroma width for one pixel format.
+    ///
+    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param codedWidth the coded luma width in samples
+    /// @return the expected chroma width
+    private static int expectedChromaWidth(AvifPixelFormat pixelFormat, int codedWidth) {
+        return switch (pixelFormat) {
+            case I400 -> 0;
+            case I420, I422 -> (codedWidth + 1) / 2;
+            case I444 -> codedWidth;
+        };
+    }
+
+    /// Returns the expected chroma height for one pixel format.
+    ///
+    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param codedHeight the coded luma height in samples
+    /// @return the expected chroma height
+    private static int expectedChromaHeight(AvifPixelFormat pixelFormat, int codedHeight) {
+        return switch (pixelFormat) {
+            case I400 -> 0;
+            case I420 -> (codedHeight + 1) / 2;
+            case I422, I444 -> codedHeight;
+        };
     }
 
     /// Decodes one image-sequence frame without mutating the persistent sequential AV1 reader.
