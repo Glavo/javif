@@ -198,6 +198,27 @@ public final class TransformResidualUnit {
         return position;
     }
 
+    /// Returns a copy of this residual unit with a replaced position.
+    ///
+    /// @param position the replacement residual-unit position
+    /// @return a copy of this residual unit with a replaced position
+    public TransformResidualUnit withPosition(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        if (this.position.x4() == nonNullPosition.x4() && this.position.y4() == nonNullPosition.y4()) {
+            return this;
+        }
+        return new TransformResidualUnit(
+                nonNullPosition,
+                size,
+                transformType,
+                endOfBlockIndex,
+                coefficients,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                coefficientContextByte
+        );
+    }
+
     /// Returns the transform size used by this residual unit.
     ///
     /// @return the transform size used by this residual unit

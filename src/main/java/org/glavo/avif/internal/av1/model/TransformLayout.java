@@ -214,6 +214,30 @@ public final class TransformLayout {
         return position;
     }
 
+    /// Returns a copy of this transform layout offset by the supplied 4x4-unit delta.
+    ///
+    /// @param deltaX4 the X-axis offset in 4x4 units
+    /// @param deltaY4 the Y-axis offset in 4x4 units
+    /// @return a copy of this transform layout offset by the supplied 4x4-unit delta
+    public TransformLayout withOffset(int deltaX4, int deltaY4) {
+        if (deltaX4 == 0 && deltaY4 == 0) {
+            return this;
+        }
+        return new TransformLayout(
+                position.offset(deltaX4, deltaY4),
+                blockSize,
+                visibleWidth4,
+                visibleHeight4,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                maxLumaTransformSize,
+                chromaTransformSize,
+                variableLumaTransformTree,
+                offsetUnits(lumaUnits, deltaX4, deltaY4),
+                offsetUnits(chromaUnits, deltaX4, deltaY4)
+        );
+    }
+
     /// Returns the coded block size that owns this transform layout.
     ///
     /// @return the coded block size that owns this transform layout
@@ -311,5 +335,20 @@ public final class TransformLayout {
             return new TransformUnit[0];
         }
         return new TransformUnit[]{new TransformUnit(position, chromaTransformSize)};
+    }
+
+    /// Returns transform units offset by the supplied 4x4-unit delta.
+    ///
+    /// @param units the source transform units
+    /// @param deltaX4 the X-axis offset in 4x4 units
+    /// @param deltaY4 the Y-axis offset in 4x4 units
+    /// @return transform units offset by the supplied 4x4-unit delta
+    private static TransformUnit[] offsetUnits(TransformUnit[] units, int deltaX4, int deltaY4) {
+        TransformUnit[] offsetUnits = new TransformUnit[units.length];
+        for (int i = 0; i < units.length; i++) {
+            TransformUnit unit = units[i];
+            offsetUnits[i] = unit.withPosition(unit.position().offset(deltaX4, deltaY4));
+        }
+        return offsetUnits;
     }
 }

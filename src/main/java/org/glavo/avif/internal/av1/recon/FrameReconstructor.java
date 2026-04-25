@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -321,7 +322,10 @@ public final class FrameReconstructor {
         @Nullable MutablePlaneBuffer chromaUPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
         @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
 
-        TilePartitionTreeReader.Node[][] tileRootsByTile = checkedSyntaxDecodeResult.tileRoots();
+        TilePartitionTreeReader.Node[][] tileRootsByTile = FrameLocalPartitionTrees.create(
+                assembly,
+                checkedSyntaxDecodeResult.tileRoots()
+        );
         DecodedBlockMap decodedBlockMap = DecodedBlockMap.create(tileRootsByTile, frameSize.codedWidth(), frameSize.height());
         for (TilePartitionTreeReader.Node[] tileRoots : tileRootsByTile) {
             for (TilePartitionTreeReader.Node root : tileRoots) {

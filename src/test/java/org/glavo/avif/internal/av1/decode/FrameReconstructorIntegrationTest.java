@@ -2346,16 +2346,16 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticI420StillPictureAcrossTwoTiles() {
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticMultiTileResult(
                 AvifPixelFormat.I420,
-                16,
+                128,
                 8,
-                new TilePartitionTreeReader.Node[]{createLeaf(new BlockPosition(0, 0), true, true)},
-                new TilePartitionTreeReader.Node[]{createLeaf(new BlockPosition(2, 0), true, true)}
+                createTileRowLeaves(8),
+                createTileRowLeaves(8)
         );
 
         assertEquals(2, syntaxDecodeResult.tileCount());
         DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(syntaxDecodeResult);
 
-        assertStillPicturePlanesFilledWith(decodedPlanes, 128, 16, 8);
+        assertStillPicturePlanesFilledWith(decodedPlanes, 128, 128, 8);
     }
 
     /// Verifies that the legacy reduced still-picture combined fixture now survives structural
@@ -2472,6 +2472,18 @@ final class FrameReconstructorIntegrationTest {
             boolean hasChroma
     ) {
         return createLeaf(position, allZeroResidual, hasChroma, null);
+    }
+
+    /// Creates one row of local tile-relative `8x8` leaves.
+    ///
+    /// @param leafCount the number of leaves to create
+    /// @return one row of local tile-relative `8x8` leaves
+    private static TilePartitionTreeReader.Node[] createTileRowLeaves(int leafCount) {
+        TilePartitionTreeReader.Node[] leaves = new TilePartitionTreeReader.Node[leafCount];
+        for (int i = 0; i < leafCount; i++) {
+            leaves[i] = createLeaf(new BlockPosition(i * 2, 0), true, true);
+        }
+        return leaves;
     }
 
     /// Creates one synthetic partition-tree leaf at one caller-supplied block position.

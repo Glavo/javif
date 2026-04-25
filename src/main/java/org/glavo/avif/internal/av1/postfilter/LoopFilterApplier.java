@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -783,7 +784,11 @@ public final class LoopFilterApplier {
                     (decodedPlanes.codedWidth() + MI_SIZE - 1) / MI_SIZE,
                     (decodedPlanes.codedHeight() + MI_SIZE - 1) / MI_SIZE
             );
-            for (TilePartitionTreeReader.Node[] tileRoots : syntaxDecodeResult.tileRoots()) {
+            TilePartitionTreeReader.Node[][] frameLocalTileRoots = FrameLocalPartitionTrees.create(
+                    syntaxDecodeResult.assembly(),
+                    syntaxDecodeResult.tileRoots()
+            );
+            for (TilePartitionTreeReader.Node[] tileRoots : frameLocalTileRoots) {
                 for (TilePartitionTreeReader.Node root : tileRoots) {
                     map.addNode(root);
                 }

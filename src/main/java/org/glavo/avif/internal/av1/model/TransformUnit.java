@@ -44,6 +44,18 @@ public final class TransformUnit {
         return position;
     }
 
+    /// Returns a copy of this transform unit with a replaced position.
+    ///
+    /// @param position the replacement transform-unit position
+    /// @return a copy of this transform unit with a replaced position
+    public TransformUnit withPosition(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        if (this.position.x4() == nonNullPosition.x4() && this.position.y4() == nonNullPosition.y4()) {
+            return this;
+        }
+        return new TransformUnit(nonNullPosition, size);
+    }
+
     /// Returns the transform size used by this transform unit.
     ///
     /// @return the transform size used by this transform unit

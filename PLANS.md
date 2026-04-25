@@ -5,7 +5,9 @@
 The project has a pure-Java AVIF reader backed by the in-tree AV1 decoder. It
 currently covers common still images, alpha, grids, progressive still images,
 basic AVIS sequences, and embedded ICC, Exif, and XMP metadata exposure with no
-runtime dependency beyond `java.base`.
+runtime dependency beyond `java.base`. Reconstruction now uses frame-local
+partition-tree views for full-frame output and postfilters, and has a regression
+fixture for a left-edge Paeth corruption case in libavif `draw_points_idat.avif`.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -16,7 +18,9 @@ behavior where the feature is in scope.
 
 ### AV1 Reconstruction Correctness
 
-- Close the tracked `I444` pixel-accuracy gap with reference-image assertions.
+- Close the remaining `I444` pixel-accuracy gap with broader reference-image
+  assertions; the current coverage only protects the `draw_points_idat.avif`
+  left-edge Paeth regression.
 - Implement or remove remaining reconstruction boundaries that can still fail
   as `NOT_IMPLEMENTED`, especially CFL chroma prediction, inter palette blocks,
   unsupported inter-intra block sizes, and any remaining inverse-transform size
@@ -24,8 +28,9 @@ behavior where the feature is in scope.
 - Audit inter prediction, compound prediction, warped motion, restoration,
   super-resolution, CDEF, loop filter, and film grain against dav1d behavior
   using focused reference fixtures.
-- Add regression fixtures for real-world AVIF files that currently decode with
-  visible corruption even when parsing succeeds.
+- Add more regression fixtures for real-world AVIF files that currently decode
+  with visible corruption even when parsing succeeds, especially larger still
+  images where residual, transform, or postfilter behavior is still incomplete.
 
 ### AVIF Container Semantics
 

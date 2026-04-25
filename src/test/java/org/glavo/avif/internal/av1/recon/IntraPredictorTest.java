@@ -116,6 +116,47 @@ final class IntraPredictorTest {
         );
     }
 
+    /// Verifies that Paeth prediction on the left frame edge uses the available top references.
+    @Test
+    void paethPredictionUsesTopReferencesOnLeftFrameEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(0, 0, 76);
+        plane.setSample(1, 0, 51);
+        plane.setSample(2, 0, 99);
+
+        IntraPredictor.predictLuma(plane, 0, 1, 3, 2, LumaIntraPredictionMode.PAETH, 0);
+
+        assertBlockEquals(
+                plane,
+                0,
+                1,
+                new int[][]{
+                        {76, 51, 99},
+                        {76, 51, 99}
+                }
+        );
+    }
+
+    /// Verifies that Paeth prediction on the top frame edge uses the available left references.
+    @Test
+    void paethPredictionUsesLeftReferencesOnTopFrameEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        plane.setSample(0, 0, 90);
+        plane.setSample(0, 1, 80);
+
+        IntraPredictor.predictLuma(plane, 1, 0, 2, 2, LumaIntraPredictionMode.PAETH, 0);
+
+        assertBlockEquals(
+                plane,
+                1,
+                0,
+                new int[][]{
+                        {90, 90},
+                        {80, 80}
+                }
+        );
+    }
+
     /// Verifies that smooth prediction blends top, left, right, and bottom references with AV1 weights.
     @Test
     void smoothPredictionInterpolatesReferenceEdges() {

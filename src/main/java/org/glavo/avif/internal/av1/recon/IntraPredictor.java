@@ -712,12 +712,6 @@ final class IntraPredictor {
         if (x > 0 && y > 0) {
             return plane.sample(x - 1, y - 1);
         }
-        if (x > 0) {
-            return plane.sample(x - 1, y);
-        }
-        if (y > 0) {
-            return plane.sample(x, y - 1);
-        }
         return defaultSample;
     }
 

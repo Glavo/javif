@@ -25,6 +25,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.IntBuffer;
 import java.util.Arrays;
 import java.util.stream.Stream;
 
@@ -145,6 +146,30 @@ final class LibavifImageIoReferenceTest {
             assertEquals(AvifBitDepth.TEN_BITS, frame.bitDepth());
             assertEquals(34, frame.width());
             assertEquals(12, frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that the clipped left-edge Paeth block in `draw_points_idat.avif` remains red.
+    ///
+    /// @throws IOException if the AVIF resource cannot be decoded
+    @Test
+    void drawPointsIdatKeepsLeftEdgePaethRowsRed() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes("libavif-test-data/draw_points_idat.avif"))) {
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(33, frame.width());
+            assertEquals(11, frame.height());
+            IntBuffer pixels = frame.intPixelBuffer();
+            for (int y = 8; y < 11; y++) {
+                for (int x = 0; x < 11; x++) {
+                    int argb = pixels.get(y * frame.width() + x);
+                    assertTrue(((argb >>> 24) & 0xFF) >= 240);
+                    assertTrue(((argb >>> 16) & 0xFF) >= 240);
+                    assertTrue(((argb >>> 8) & 0xFF) <= 8);
+                    assertTrue((argb & 0xFF) <= 8);
+                }
+            }
             assertNull(reader.readFrame());
         }
     }

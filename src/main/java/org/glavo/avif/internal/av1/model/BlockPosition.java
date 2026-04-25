@@ -16,20 +16,21 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
-/// A block origin expressed in local tile-relative 4x4 units.
+/// A block origin expressed in 4x4 units within the caller's active coordinate space.
 @NotNullByDefault
 public final class BlockPosition {
-    /// The local tile-relative X coordinate in 4x4 units.
+    /// The X coordinate in 4x4 units.
     private final int x4;
 
-    /// The local tile-relative Y coordinate in 4x4 units.
+    /// The Y coordinate in 4x4 units.
     private final int y4;
 
-    /// Creates a block origin expressed in local tile-relative 4x4 units.
+    /// Creates a block origin expressed in 4x4 units.
     ///
-    /// @param x4 the local tile-relative X coordinate in 4x4 units
-    /// @param y4 the local tile-relative Y coordinate in 4x4 units
+    /// @param x4 the X coordinate in 4x4 units
+    /// @param y4 the Y coordinate in 4x4 units
     public BlockPosition(int x4, int y4) {
         if (x4 < 0) {
             throw new IllegalArgumentException("x4 < 0: " + x4);
@@ -41,30 +42,30 @@ public final class BlockPosition {
         this.y4 = y4;
     }
 
-    /// Returns the local tile-relative X coordinate in 4x4 units.
+    /// Returns the X coordinate in 4x4 units.
     ///
-    /// @return the local tile-relative X coordinate in 4x4 units
+    /// @return the X coordinate in 4x4 units
     public int x4() {
         return x4;
     }
 
-    /// Returns the local tile-relative Y coordinate in 4x4 units.
+    /// Returns the Y coordinate in 4x4 units.
     ///
-    /// @return the local tile-relative Y coordinate in 4x4 units
+    /// @return the Y coordinate in 4x4 units
     public int y4() {
         return y4;
     }
 
-    /// Returns the local tile-relative X coordinate in 8x8 units.
+    /// Returns the X coordinate in 8x8 units.
     ///
-    /// @return the local tile-relative X coordinate in 8x8 units
+    /// @return the X coordinate in 8x8 units
     public int x8() {
         return x4 >> 1;
     }
 
-    /// Returns the local tile-relative Y coordinate in 8x8 units.
+    /// Returns the Y coordinate in 8x8 units.
     ///
-    /// @return the local tile-relative Y coordinate in 8x8 units
+    /// @return the Y coordinate in 8x8 units
     public int y8() {
         return y4 >> 1;
     }
@@ -76,5 +77,28 @@ public final class BlockPosition {
     /// @return a new block position offset by the supplied 4x4-unit delta
     public BlockPosition offset(int deltaX4, int deltaY4) {
         return new BlockPosition(x4 + deltaX4, y4 + deltaY4);
+    }
+
+    /// Returns whether another object represents the same 4x4 coordinate.
+    ///
+    /// @param object the object to compare with this position
+    /// @return whether another object represents the same 4x4 coordinate
+    @Override
+    public boolean equals(@Nullable Object object) {
+        if (this == object) {
+            return true;
+        }
+        if (!(object instanceof BlockPosition other)) {
+            return false;
+        }
+        return x4 == other.x4 && y4 == other.y4;
+    }
+
+    /// Returns a hash code derived from the 4x4 coordinate.
+    ///
+    /// @return a hash code derived from the 4x4 coordinate
+    @Override
+    public int hashCode() {
+        return 31 * x4 + y4;
     }
 }

@@ -87,6 +87,24 @@ public final class ResidualLayout {
         return position;
     }
 
+    /// Returns a copy of this residual layout offset by the supplied 4x4-unit delta.
+    ///
+    /// @param deltaX4 the X-axis offset in 4x4 units
+    /// @param deltaY4 the Y-axis offset in 4x4 units
+    /// @return a copy of this residual layout offset by the supplied 4x4-unit delta
+    public ResidualLayout withOffset(int deltaX4, int deltaY4) {
+        if (deltaX4 == 0 && deltaY4 == 0) {
+            return this;
+        }
+        return new ResidualLayout(
+                position.offset(deltaX4, deltaY4),
+                blockSize,
+                offsetUnits(lumaUnits, deltaX4, deltaY4),
+                offsetUnits(chromaUUnits, deltaX4, deltaY4),
+                offsetUnits(chromaVUnits, deltaX4, deltaY4)
+        );
+    }
+
     /// Returns the coded block size that owns this residual layout.
     ///
     /// @return the coded block size that owns this residual layout
@@ -120,5 +138,24 @@ public final class ResidualLayout {
     /// @return whether this residual layout carries any modeled chroma residual units
     public boolean hasChromaUnits() {
         return chromaUUnits.length != 0;
+    }
+
+    /// Returns residual units offset by the supplied 4x4-unit delta.
+    ///
+    /// @param units the source residual units
+    /// @param deltaX4 the X-axis offset in 4x4 units
+    /// @param deltaY4 the Y-axis offset in 4x4 units
+    /// @return residual units offset by the supplied 4x4-unit delta
+    private static TransformResidualUnit[] offsetUnits(
+            TransformResidualUnit[] units,
+            int deltaX4,
+            int deltaY4
+    ) {
+        TransformResidualUnit[] offsetUnits = new TransformResidualUnit[units.length];
+        for (int i = 0; i < units.length; i++) {
+            TransformResidualUnit unit = units[i];
+            offsetUnits[i] = unit.withPosition(unit.position().offset(deltaX4, deltaY4));
+        }
+        return offsetUnits;
     }
 }

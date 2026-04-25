@@ -2648,6 +2648,63 @@ public final class TileBlockHeaderReader {
             return position;
         }
 
+        /// Returns a copy of this decoded block header with a replaced position.
+        ///
+        /// @param position the replacement block origin
+        /// @return a copy of this decoded block header with a replaced position
+        public BlockHeader withPosition(BlockPosition position) {
+            BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+            if (this.position.x4() == nonNullPosition.x4() && this.position.y4() == nonNullPosition.y4()) {
+                return this;
+            }
+            return new BlockHeader(
+                    nonNullPosition,
+                    size,
+                    hasChroma,
+                    skip,
+                    skipMode,
+                    intra,
+                    useIntrabc,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    singleInterMode,
+                    compoundInterMode,
+                    drlIndex,
+                    motionVector0,
+                    motionVector1,
+                    motionMode,
+                    horizontalInterpolationFilter,
+                    verticalInterpolationFilter,
+                    compoundPredictionType,
+                    compoundMaskSign,
+                    compoundWedgeIndex,
+                    interIntra,
+                    interIntraMode,
+                    interIntraWedge,
+                    interIntraWedgeIndex,
+                    segmentPredicted,
+                    segmentId,
+                    cdefIndex,
+                    qIndex,
+                    deltaLfValues,
+                    yMode,
+                    uvMode,
+                    yPaletteSize,
+                    uvPaletteSize,
+                    yPaletteColors,
+                    uPaletteColors,
+                    vPaletteColors,
+                    yPaletteIndices,
+                    uvPaletteIndices,
+                    filterIntraMode,
+                    yAngle,
+                    uvAngle,
+                    cflAlphaU,
+                    cflAlphaV
+            );
+        }
+
         /// Returns the decoded block size.
         ///
         /// @return the decoded block size
