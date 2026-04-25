@@ -163,6 +163,7 @@ public final class AvifContainerParser {
         byte[] payload = mergeItemExtents(primaryItem);
         MetadataPayloads metadata = collectMetadataPayloads(primaryItem);
         int[] transformParams = extractTransformParams(primaryItem, ispe.width, ispe.height);
+        GainMapPayloads gainMapPayloads = gainMapPayloads(primaryItem.id);
         AvifImageInfo info = new AvifImageInfo(
                 ispe.width,
                 ispe.height,
@@ -186,10 +187,14 @@ public final class AvifContainerParser {
                 transformParams[5],
                 null,
                 auxiliaryImages(primaryItem.id),
-                gainMapInfo(primaryItem.id)
+                gainMapPayloads.info
         );
 
         return new AvifContainer(info, payload, alphaPayload,
+                gainMapPayloads.itemPayload,
+                gainMapPayloads.gridCellPayloads,
+                gainMapPayloads.gridRows, gainMapPayloads.gridColumns,
+                gainMapPayloads.gridOutputWidth, gainMapPayloads.gridOutputHeight,
                 transformParams[0], transformParams[1], transformParams[2], transformParams[3],
                 transformParams[4], transformParams[5]);
     }
@@ -204,6 +209,7 @@ public final class AvifContainerParser {
         AlphaPayloads alphaPayloads = parseGridAlphaPayloads(gridItem, colorGrid);
         MetadataPayloads metadata = collectMetadataPayloads(gridItem);
         int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
+        GainMapPayloads gainMapPayloads = gainMapPayloads(gridItem.id);
 
         AvifImageInfo info = new AvifImageInfo(
                 colorGrid.outputWidth,
@@ -228,12 +234,16 @@ public final class AvifContainerParser {
                 transforms[5],
                 null,
                 auxiliaryImages(gridItem.id),
-                gainMapInfo(gridItem.id)
+                gainMapPayloads.info
         );
 
         return new AvifContainer(info, colorGrid.cellPayloads,
                 alphaPayloads.alphaItemPayload,
                 alphaPayloads.gridCellPayloads,
+                gainMapPayloads.itemPayload,
+                gainMapPayloads.gridCellPayloads,
+                gainMapPayloads.gridRows, gainMapPayloads.gridColumns,
+                gainMapPayloads.gridOutputWidth, gainMapPayloads.gridOutputHeight,
                 colorGrid.rows, colorGrid.columns, colorGrid.outputWidth, colorGrid.outputHeight,
                 alphaPayloads.gridRows, alphaPayloads.gridColumns,
                 alphaPayloads.gridOutputWidth, alphaPayloads.gridOutputHeight,
@@ -1155,7 +1165,7 @@ public final class AvifContainerParser {
                 s.height > 0 ? s.height : 1,
                 AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
                 s.pixelFormat != null ? s.pixelFormat : AvifPixelFormat.I420,
-                false,
+                meta.moovAuxiliaryTypes.contains(AvifAuxiliaryImageInfo.ALPHA_TYPE),
                 true,
                 sampleCount,
                 s.colr,
@@ -1164,7 +1174,14 @@ public final class AvifContainerParser {
                 null,
                 ts,
                 dur,
-                frameDeltas);
+                frameDeltas,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                meta.moovAuxiliaryTypes.toArray(String[]::new));
         return new AvifContainer(info,
                 payloads.toArray(byte[][]::new),
                 frameDeltas,
@@ -1180,12 +1197,19 @@ public final class AvifContainerParser {
     private void parseMoov(BoxInput input) throws AvifDecodeException {
         while (input.hasRemaining()) {
             BoxHeader child = input.readBoxHeader();
-            if ("trak".equals(child.type()) && meta.moovState.seqHeaderObu == null) {
-                MoovState snapshot = meta.moovState.copy();
+            if ("trak".equals(child.type())) {
+                MoovState selectedTrack = meta.moovState.copy();
+                meta.moovState.copyFrom(new MoovState());
                 BoxInput trakPayload = input.slice(child.payloadOffset(), child.payloadSize());
                 parseMoovTrack(trakPayload);
-                if (meta.moovState.seqHeaderObu == null) {
-                    meta.moovState.copyFrom(snapshot);
+                MoovState parsedTrack = meta.moovState.copy();
+                if (parsedTrack.auxiliaryType != null && !meta.moovAuxiliaryTypes.contains(parsedTrack.auxiliaryType)) {
+                    meta.moovAuxiliaryTypes.add(parsedTrack.auxiliaryType);
+                }
+                if (selectedTrack.seqHeaderObu != null
+                        || parsedTrack.seqHeaderObu == null
+                        || parsedTrack.auxiliaryType != null) {
+                    meta.moovState.copyFrom(selectedTrack);
                 }
             }
             input.skipBoxPayload(child);
@@ -1328,10 +1352,24 @@ public final class AvifContainerParser {
                     if (p instanceof ColorProperty cp) meta.moovState.colr = cp.colorInfo;
                     if (p instanceof IccColorProfile icc) meta.moovState.iccProfile = icc.profile();
                 }
+                case "auxi" -> meta.moovState.auxiliaryType = parseMoovAuxiliaryType(payload);
                 default -> {}
             }
             input.skipBoxPayload(child);
         }
+    }
+
+    /// Parses an `auxi` sample-entry box for an AVIS auxiliary track.
+    ///
+    /// @param input the box payload input
+    /// @return the auxiliary image type string
+    /// @throws AvifDecodeException if the box is malformed or unsupported
+    private static String parseMoovAuxiliaryType(BoxInput input) throws AvifDecodeException {
+        FullBox fullBox = readFullBox(input);
+        if (fullBox.version != 0 || fullBox.flags != 0) {
+            throw unsupported("Unsupported auxi version/flags", input.offset());
+        }
+        return readNullTerminatedString(input);
     }
 
     /// Parses `stts` for sample timing deltas.
@@ -1585,14 +1623,14 @@ public final class AvifContainerParser {
         return new AvifAuxiliaryImageInfo(item.id, auxiliaryType.type, item.type, width, height, bitDepth, pixelFormat);
     }
 
-    /// Returns the gain-map descriptor associated with one base image item.
+    /// Returns the gain-map descriptor and decodable payloads associated with one base image item.
     ///
     /// @param baseItemId the base image item id
-    /// @return the gain-map descriptor, or `null`
+    /// @return the gain-map descriptor and payloads, or empty data
     /// @throws AvifDecodeException if the `tmap` metadata payload is malformed
-    private @Nullable AvifGainMapInfo gainMapInfo(int baseItemId) throws AvifDecodeException {
+    private GainMapPayloads gainMapPayloads(int baseItemId) throws AvifDecodeException {
         if (!tmapBrandSeen) {
-            return null;
+            return GainMapPayloads.empty();
         }
         for (Item item : meta.items.values()) {
             if (!"tmap".equals(item.type) || item.hasUnsupportedEssentialProperty) {
@@ -1611,39 +1649,93 @@ public final class AvifContainerParser {
             }
             Item gainMapItem = meta.item(gainMapItemId);
             if (gainMapItem == null || gainMapItem.hasUnsupportedEssentialProperty) {
-                return null;
+                return GainMapPayloads.empty();
             }
 
             ToneMapMetadataVersions versions = toneMapMetadataVersions(item);
             ItemDimensions toneMappedDimensions = itemDimensions(item);
+
+            if ("grid".equals(gainMapItem.type)) {
+                GridPayloads grid = parseGridPayloads(gainMapItem);
+                AvifGainMapInfo info = gainMapInfo(
+                        item,
+                        baseItemId,
+                        gainMapItem,
+                        toneMappedDimensions,
+                        new ItemDimensions(grid.outputWidth, grid.outputHeight),
+                        AvifBitDepth.fromBits(grid.representativeAv1C.bitDepth()),
+                        grid.representativeAv1C.pixelFormat(),
+                        versions
+                );
+                return GainMapPayloads.grid(info, grid);
+            }
+
             ItemDimensions gainMapDimensions = itemDimensions(gainMapItem);
-            @Nullable Av1Config gainMapAv1Config = itemAv1Config(gainMapItem);
+            @Nullable Av1Config gainMapAv1Config = "av01".equals(gainMapItem.type)
+                    ? itemAv1Config(gainMapItem)
+                    : null;
             @Nullable AvifBitDepth gainMapBitDepth = gainMapAv1Config != null
                     ? AvifBitDepth.fromBits(gainMapAv1Config.bitDepth())
                     : null;
             @Nullable AvifPixelFormat gainMapPixelFormat = gainMapAv1Config != null
                     ? gainMapAv1Config.pixelFormat()
                     : null;
-
-            return new AvifGainMapInfo(
-                    item.id,
+            AvifGainMapInfo info = gainMapInfo(
+                    item,
                     baseItemId,
-                    gainMapItemId,
-                    item.type,
-                    gainMapItem.type,
-                    toneMappedDimensions.width,
-                    toneMappedDimensions.height,
-                    gainMapDimensions.width,
-                    gainMapDimensions.height,
+                    gainMapItem,
+                    toneMappedDimensions,
+                    gainMapDimensions,
                     gainMapBitDepth,
                     gainMapPixelFormat,
-                    versions.version,
-                    versions.minimumVersion,
-                    versions.writerVersion,
-                    versions.supported()
+                    versions
             );
+            if ("av01".equals(gainMapItem.type)) {
+                return GainMapPayloads.item(info, mergeItemExtents(gainMapItem));
+            }
+            return GainMapPayloads.descriptorOnly(info);
         }
-        return null;
+        return GainMapPayloads.empty();
+    }
+
+    /// Creates a gain-map descriptor from parsed association metadata.
+    ///
+    /// @param toneMappedItem the `tmap` derived image item
+    /// @param baseItemId the base image item id
+    /// @param gainMapItem the gain-map image item
+    /// @param toneMappedDimensions the tone-mapped item dimensions
+    /// @param gainMapDimensions the gain-map item dimensions
+    /// @param gainMapBitDepth the gain-map AV1 bit depth, or `null`
+    /// @param gainMapPixelFormat the gain-map AV1 pixel format, or `null`
+    /// @param versions the parsed tone-map metadata version fields
+    /// @return a gain-map descriptor
+    private static AvifGainMapInfo gainMapInfo(
+            Item toneMappedItem,
+            int baseItemId,
+            Item gainMapItem,
+            ItemDimensions toneMappedDimensions,
+            ItemDimensions gainMapDimensions,
+            @Nullable AvifBitDepth gainMapBitDepth,
+            @Nullable AvifPixelFormat gainMapPixelFormat,
+            ToneMapMetadataVersions versions
+    ) {
+        return new AvifGainMapInfo(
+                toneMappedItem.id,
+                baseItemId,
+                gainMapItem.id,
+                toneMappedItem.type,
+                gainMapItem.type,
+                toneMappedDimensions.width,
+                toneMappedDimensions.height,
+                gainMapDimensions.width,
+                gainMapDimensions.height,
+                gainMapBitDepth,
+                gainMapPixelFormat,
+                versions.version,
+                versions.minimumVersion,
+                versions.writerVersion,
+                versions.supported()
+        );
     }
 
     /// Parses only the version fields from one `tmap` metadata payload.
@@ -1946,6 +2038,8 @@ public final class AvifContainerParser {
         private final List<Property> properties = new ArrayList<>();
         /// Parsed entity groups from `grpl`.
         private final List<EntityGroup> entityGroups = new ArrayList<>();
+        /// Auxiliary image type strings parsed from AVIS auxiliary tracks.
+        private final List<String> moovAuxiliaryTypes = new ArrayList<>();
         /// The optional `idat` payload for construction method 1.
         private @Nullable byte[] idat;
         /// The parsed AVIS moov state.
@@ -1989,6 +2083,8 @@ public final class AvifContainerParser {
         private long mediaDuration;
         /// The parsed AV1 sequence header OBU, or `null` before an AV1 track is found.
         private byte @Nullable [] seqHeaderObu;
+        /// The AVIS auxiliary track type, or `null` for the selected color track.
+        private @Nullable String auxiliaryType;
         /// The parsed sample timing deltas.
         private final List<Integer> sampleDeltas = new ArrayList<>();
         /// The parsed chunk offsets.
@@ -2020,6 +2116,7 @@ public final class AvifContainerParser {
             mediaTimescale = other.mediaTimescale;
             mediaDuration = other.mediaDuration;
             seqHeaderObu = other.seqHeaderObu == null ? null : other.seqHeaderObu.clone();
+            auxiliaryType = other.auxiliaryType;
             sampleDeltas.clear();
             sampleDeltas.addAll(other.sampleDeltas);
             chunkOffsets.clear();
@@ -2142,6 +2239,101 @@ public final class AvifContainerParser {
         /// @return whether alpha is present
         private boolean present() {
             return alphaItemPayload != null || gridCellPayloads != null;
+        }
+    }
+
+    /// Parsed gain-map descriptor and decodable image payloads.
+    @NotNullByDefault
+    private static final class GainMapPayloads {
+        /// The public gain-map descriptor, or `null`.
+        private final @Nullable AvifGainMapInfo info;
+        /// The standalone gain-map item payload, or `null`.
+        private final byte @Nullable [] itemPayload;
+        /// The gain-map grid cell AV1 OBU payloads in row-major order, or `null`.
+        private final byte @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads;
+        /// The gain-map grid row count.
+        private final int gridRows;
+        /// The gain-map grid column count.
+        private final int gridColumns;
+        /// The gain-map grid reconstructed output width.
+        private final int gridOutputWidth;
+        /// The gain-map grid reconstructed output height.
+        private final int gridOutputHeight;
+
+        /// Creates parsed gain-map payloads.
+        ///
+        /// @param info the public gain-map descriptor, or `null`
+        /// @param itemPayload the standalone gain-map item payload, or `null`
+        /// @param gridCellPayloads the gain-map grid cell AV1 OBU payloads, or `null`
+        /// @param gridRows the gain-map grid row count
+        /// @param gridColumns the gain-map grid column count
+        /// @param gridOutputWidth the gain-map grid reconstructed output width
+        /// @param gridOutputHeight the gain-map grid reconstructed output height
+        private GainMapPayloads(
+                @Nullable AvifGainMapInfo info,
+                byte @Nullable [] itemPayload,
+                byte @Unmodifiable [] @Nullable @Unmodifiable [] gridCellPayloads,
+                int gridRows,
+                int gridColumns,
+                int gridOutputWidth,
+                int gridOutputHeight
+        ) {
+            this.info = info;
+            this.itemPayload = itemPayload;
+            this.gridCellPayloads = gridCellPayloads;
+            this.gridRows = gridRows;
+            this.gridColumns = gridColumns;
+            this.gridOutputWidth = gridOutputWidth;
+            this.gridOutputHeight = gridOutputHeight;
+        }
+
+        /// Creates empty gain-map payloads.
+        ///
+        /// @return empty gain-map payloads
+        private static GainMapPayloads empty() {
+            return new GainMapPayloads(null, null, null, 0, 0, 0, 0);
+        }
+
+        /// Creates descriptor-only gain-map payloads.
+        ///
+        /// @param info the public gain-map descriptor
+        /// @return descriptor-only gain-map payloads
+        private static GainMapPayloads descriptorOnly(AvifGainMapInfo info) {
+            return new GainMapPayloads(Objects.requireNonNull(info, "info"), null, null, 0, 0, 0, 0);
+        }
+
+        /// Creates gain-map payloads from one standalone item.
+        ///
+        /// @param info the public gain-map descriptor
+        /// @param itemPayload the standalone gain-map item payload
+        /// @return gain-map payloads for the item
+        private static GainMapPayloads item(AvifGainMapInfo info, byte[] itemPayload) {
+            return new GainMapPayloads(
+                    Objects.requireNonNull(info, "info"),
+                    Objects.requireNonNull(itemPayload, "itemPayload"),
+                    null,
+                    0,
+                    0,
+                    0,
+                    0
+            );
+        }
+
+        /// Creates gain-map payloads from grid data.
+        ///
+        /// @param info the public gain-map descriptor
+        /// @param grid the parsed gain-map grid
+        /// @return gain-map payloads for the grid
+        private static GainMapPayloads grid(AvifGainMapInfo info, GridPayloads grid) {
+            return new GainMapPayloads(
+                    Objects.requireNonNull(info, "info"),
+                    null,
+                    grid.cellPayloads,
+                    grid.rows,
+                    grid.columns,
+                    grid.outputWidth,
+                    grid.outputHeight
+            );
         }
     }
 

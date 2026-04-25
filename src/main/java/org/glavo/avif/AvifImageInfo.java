@@ -622,7 +622,7 @@ public final class AvifImageInfo {
     ///
     /// The returned descriptor is present only when the file advertises the `tmap` brand and the
     /// `tmap` item is the preferred alternative to the primary image item. The descriptor does not
-    /// imply that gain-map pixels have been decoded or applied.
+    /// imply that gain-map pixels have been tone-mapped or applied to the base image.
     ///
     /// @return the gain-map descriptor, or `null`
     public @Nullable AvifGainMapInfo gainMapInfo() {

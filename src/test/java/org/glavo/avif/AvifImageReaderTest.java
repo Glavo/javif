@@ -53,6 +53,8 @@ final class AvifImageReaderTest {
 
     /// The alpha auxiliary image type URN used by AVIF alpha items.
     private static final String AUXILIARY_ALPHA_TYPE = AvifAuxiliaryImageInfo.ALPHA_TYPE;
+    /// The depth auxiliary image type URN used by AVIF depth items.
+    private static final String AUXILIARY_DEPTH_TYPE = AvifAuxiliaryImageInfo.DEPTH_TYPE;
 
     /// The smallest still-image fixture copied from libavif's test data into test resources.
     private static final String LIBAVIF_WHITE_1X1_FIXTURE = "libavif-test-data/white_1x1.avif";
@@ -88,8 +90,20 @@ final class AvifImageReaderTest {
     /// An animated 8bpc AVIS image sequence fixture copied from libavif's test data.
     private static final String LIBAVIF_ANIMATED_FIXTURE = "libavif-test-data/colors-animated-8bpc.avif";
 
+    /// An animated 8bpc AVIS image sequence fixture with an alpha auxiliary track.
+    private static final String LIBAVIF_ANIMATED_ALPHA_FIXTURE =
+            "libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif";
+
+    /// An animated 8bpc AVIS image sequence fixture with a depth auxiliary track.
+    private static final String LIBAVIF_ANIMATED_DEPTH_FIXTURE =
+            "libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif";
+
     /// A gain-map fixture copied from libavif's test data.
     private static final String LIBAVIF_GAINMAP_FIXTURE = "libavif-test-data/seine_sdr_gainmap_srgb.avif";
+
+    /// A gain-map grid fixture copied from libavif's test data.
+    private static final String LIBAVIF_GAINMAP_GRID_FIXTURE =
+            "libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif";
 
     /// A gain-map fixture without the `tmap` compatible brand.
     private static final String LIBAVIF_GAINMAP_NO_TMAP_BRAND_FIXTURE =
@@ -350,6 +364,55 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that a standalone AV1 gain-map item can be decoded as raw planes.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawGainMapPlanesDecodesStandaloneGainMapFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_FIXTURE))) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+
+            AvifPlanes gainMapPlanes = reader.readRawGainMapPlanes(0);
+            assertNotNull(gainMapPlanes);
+            assertEquals(gainMapInfo.gainMapBitDepth(), gainMapPlanes.bitDepth());
+            assertEquals(gainMapInfo.gainMapPixelFormat(), gainMapPlanes.pixelFormat());
+            assertEquals(gainMapInfo.gainMapWidth(), gainMapPlanes.codedWidth());
+            assertEquals(gainMapInfo.gainMapHeight(), gainMapPlanes.codedHeight());
+            assertTrue(gainMapPlanes.lumaPlane().sampleBuffer().isReadOnly());
+        }
+    }
+
+    /// Verifies that a gain-map grid can be decoded and composed as raw planes.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawGainMapPlanesComposesGainMapGridFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_GRID_FIXTURE))) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+            assertEquals("grid", gainMapInfo.gainMapItemType());
+
+            AvifPlanes gainMapPlanes = reader.readRawGainMapPlanes(0);
+            assertNotNull(gainMapPlanes);
+            assertEquals(gainMapInfo.gainMapBitDepth(), gainMapPlanes.bitDepth());
+            assertEquals(gainMapInfo.gainMapPixelFormat(), gainMapPlanes.pixelFormat());
+            assertEquals(gainMapInfo.gainMapWidth(), gainMapPlanes.codedWidth());
+            assertEquals(gainMapInfo.gainMapHeight(), gainMapPlanes.codedHeight());
+            assertTrue(gainMapPlanes.lumaPlane().sampleBuffer().isReadOnly());
+        }
+    }
+
+    /// Verifies that images without `tmap` metadata report no raw gain-map planes.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawGainMapPlanesReturnsNullWithoutGainMap() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE))) {
+            assertNull(reader.readRawGainMapPlanes(0));
+        }
+    }
+
     /// Verifies that a `tmap` item is ignored when the `tmap` compatible brand is absent.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
@@ -429,6 +492,36 @@ final class AvifImageReaderTest {
                 assertEquals(150, f.height());
                 assertEquals(i, f.frameIndex());
             }
+        }
+    }
+
+    /// Verifies that AVIS alpha auxiliary tracks are exposed through sequence metadata.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openParsesAnimatedAlphaAuxiliaryTrackInfo() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_ALPHA_FIXTURE))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.animated());
+            assertTrue(info.alphaPresent());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
+            assertThrows(AvifDecodeException.class, () -> reader.readRawAlphaPlanes(0));
+        }
+    }
+
+    /// Verifies that AVIS depth auxiliary tracks are exposed through sequence metadata.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openParsesAnimatedDepthAuxiliaryTrackInfo() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_DEPTH_FIXTURE))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.animated());
+            assertFalse(info.alphaPresent());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_DEPTH_TYPE));
+            assertNull(reader.readRawAlphaPlanes(0));
         }
     }
 

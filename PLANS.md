@@ -13,14 +13,15 @@ extended coefficient token magnitudes, and has focused coverage for larger
 `I420` and `I444` chroma-transform fixtures.
 AVIS sequence support now includes random indexed frame reads that do not disturb
 sequential playback state, and public metadata exposes sequence timescale,
-duration, per-frame durations, primary-image transform properties, and auxiliary
-image type strings. Auxiliary image metadata is also exposed through structured
-descriptors that include item id, auxiliary type, item type, dimensions, bit
-depth, and pixel format when available. The public reader can also expose raw
-decoded color planes for still images, grid-derived still images, and AVIS
-frames, plus raw luma planes for single alpha auxiliary items and alpha grids.
-Image metadata now includes `tmap` gain-map descriptors when the `tmap` brand
-and preferred `altr` relationship are present.
+duration, per-frame durations, primary-image transform properties, and `auxi`
+track type strings for alpha and depth tracks. Auxiliary image metadata is also
+exposed through structured descriptors that include item id, auxiliary type, item
+type, dimensions, bit depth, and pixel format when available. The public reader
+can expose raw decoded color planes for still images, grid-derived still images,
+and AVIS frames, raw luma planes for single alpha auxiliary items and alpha
+grids, and raw gain-map planes for standalone or grid-derived gain-map images.
+Image metadata includes `tmap` gain-map descriptors when the `tmap` brand and
+preferred `altr` relationship are present.
 
 All AVIF files copied from libavif `tests/data` have explicit corpus
 expectations. The remaining work is to improve correctness, broaden AVIF
@@ -50,11 +51,11 @@ behavior where the feature is in scope.
 - Implement full color management: apply ICC profiles, transfer functions,
   nclx primaries/transfer/matrix handling, range conversion, and display-ready
   RGB adaptation across 8/10/12-bit inputs.
-- Decode gain-map and depth-image planes through public APIs. Gain-map container
-  descriptors are exposed, but gain-map pixel decoding, tone mapping, and depth
-  image descriptors are still pending.
+- Implement gain-map tone mapping and decode depth-image planes through public
+  APIs. Gain-map container descriptors and raw gain-map plane decoding are now
+  exposed, but tone mapping and depth pixel decoding are still pending.
 - Improve AVIS support beyond random access: timing accuracy validation, alpha
-  sequences, and multi-sample edge cases.
+  sequence plane decoding, and multi-sample edge cases.
 - Add incremental/streaming input behavior instead of requiring the full source
   to be buffered before parsing.
 - Define and test behavior for layered/scalable AVIF and operating-point
@@ -62,8 +63,8 @@ behavior where the feature is in scope.
 
 ### Public API And Metadata
 
-- Expose remaining image metadata, especially depth descriptors and decoded
-  gain-map planes where they belong in the public API.
+- Expose remaining image metadata, especially structured depth descriptors and
+  decoded depth planes where they belong in the public API.
 - Complete explicit output choices for sequence alpha planes, display-converted
   RGB, and high-bit-depth buffers without unnecessary copies.
 - Review alpha semantics, premultiplication metadata, and buffer immutability

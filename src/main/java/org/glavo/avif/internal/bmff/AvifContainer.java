@@ -57,6 +57,18 @@ public final class AvifContainer {
     private final int gridAlphaOutputWidth;
     /// Alpha grid output height.
     private final int gridAlphaOutputHeight;
+    /// The gain-map AV1 OBU payload, or `null` when absent or grid-derived.
+    private final @Nullable @Unmodifiable ByteBuffer gainMapItemPayload;
+    /// Gain-map grid cell AV1 OBU payloads in row-major order, or `null`.
+    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] gainMapGridCellPayloads;
+    /// Gain-map grid row count.
+    private final int gainMapGridRows;
+    /// Gain-map grid column count.
+    private final int gainMapGridColumns;
+    /// Gain-map grid output width.
+    private final int gainMapGridOutputWidth;
+    /// Gain-map grid output height.
+    private final int gainMapGridOutputHeight;
 
     /// The clean-aperture crop x offset, or -1.
     private final int clapCropX;
@@ -120,11 +132,52 @@ public final class AvifContainer {
             int clapCropWidth, int clapCropHeight,
             int rotationCode, int mirrorAxis
     ) {
+        this(info, primaryItemPayload, alphaItemPayload, null, null, 0, 0, 0, 0,
+                clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis);
+    }
+
+    /// Creates parsed AVIF container data with optional alpha, gain-map payloads, and transforms.
+    ///
+    /// @param info the parsed image metadata
+    /// @param primaryItemPayload the primary image AV1 OBU payload
+    /// @param alphaItemPayload the alpha auxiliary image AV1 OBU payload, or `null`
+    /// @param gainMapItemPayload the gain-map AV1 OBU payload, or `null`
+    /// @param gainMapGridCellPayloads the gain-map grid cell AV1 OBU payloads, or `null`
+    /// @param gainMapGridRows the gain-map grid row count
+    /// @param gainMapGridColumns the gain-map grid column count
+    /// @param gainMapGridOutputWidth the gain-map grid output width
+    /// @param gainMapGridOutputHeight the gain-map grid output height
+    /// @param clapCropX the clean-aperture x offset, or -1
+    /// @param clapCropY the clean-aperture y offset, or -1
+    /// @param clapCropWidth the clean-aperture width, or -1
+    /// @param clapCropHeight the clean-aperture height, or -1
+    /// @param rotationCode the rotation code, or -1
+    /// @param mirrorAxis the mirror axis, or -1
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifContainer(
+            AvifImageInfo info,
+            byte[] primaryItemPayload,
+            byte @Nullable [] alphaItemPayload,
+            byte @Nullable [] gainMapItemPayload,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] gainMapGridCellPayloads,
+            int gainMapGridRows, int gainMapGridColumns,
+            int gainMapGridOutputWidth, int gainMapGridOutputHeight,
+            int clapCropX, int clapCropY,
+            int clapCropWidth, int clapCropHeight,
+            int rotationCode, int mirrorAxis
+    ) {
         this.info = Objects.requireNonNull(info, "info");
         this.primaryItemPayload = immutablePayload(Objects.requireNonNull(primaryItemPayload, "primaryItemPayload"));
         this.alphaItemPayload = alphaItemPayload != null
                 ? immutablePayload(alphaItemPayload)
                 : null;
+        if (gainMapItemPayload != null && gainMapGridCellPayloads != null) {
+            throw new IllegalArgumentException("gainMapItemPayload and gainMapGridCellPayloads are mutually exclusive");
+        }
+        if (gainMapGridCellPayloads != null) {
+            if (gainMapGridRows <= 0) throw new IllegalArgumentException("gainMapGridRows <= 0: " + gainMapGridRows);
+            if (gainMapGridColumns <= 0) throw new IllegalArgumentException("gainMapGridColumns <= 0: " + gainMapGridColumns);
+        }
         this.isGrid = false;
         this.gridCellPayloads = null;
         this.gridAlphaCellPayloads = null;
@@ -136,6 +189,16 @@ public final class AvifContainer {
         this.gridAlphaColumns = 0;
         this.gridAlphaOutputWidth = 0;
         this.gridAlphaOutputHeight = 0;
+        this.gainMapItemPayload = gainMapItemPayload != null
+                ? immutablePayload(gainMapItemPayload)
+                : null;
+        this.gainMapGridCellPayloads = gainMapGridCellPayloads != null
+                ? immutablePayloads(gainMapGridCellPayloads)
+                : null;
+        this.gainMapGridRows = gainMapGridRows;
+        this.gainMapGridColumns = gainMapGridColumns;
+        this.gainMapGridOutputWidth = gainMapGridOutputWidth;
+        this.gainMapGridOutputHeight = gainMapGridOutputHeight;
         this.clapCropX = clapCropX;
         this.clapCropY = clapCropY;
         this.clapCropWidth = clapCropWidth;
@@ -181,6 +244,29 @@ public final class AvifContainer {
             int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
             int rotationCode, int mirrorAxis
     ) {
+        this(info, gridCellPayloads, alphaItemPayload, gridAlphaCellPayloads,
+                null, null, 0, 0, 0, 0,
+                gridRows, gridColumns, gridOutputWidth, gridOutputHeight,
+                gridAlphaRows, gridAlphaColumns, gridAlphaOutputWidth, gridAlphaOutputHeight,
+                clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis);
+    }
+
+    /// Creates parsed AVIF container data for a grid derived image with optional alpha and gain-map payloads.
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifContainer(
+            AvifImageInfo info,
+            byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
+            byte @Nullable [] alphaItemPayload,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] gridAlphaCellPayloads,
+            byte @Nullable [] gainMapItemPayload,
+            byte @Unmodifiable [] @Nullable @Unmodifiable [] gainMapGridCellPayloads,
+            int gainMapGridRows, int gainMapGridColumns,
+            int gainMapGridOutputWidth, int gainMapGridOutputHeight,
+            int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight,
+            int gridAlphaRows, int gridAlphaColumns, int gridAlphaOutputWidth, int gridAlphaOutputHeight,
+            int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
+            int rotationCode, int mirrorAxis
+    ) {
         this.info = Objects.requireNonNull(info, "info");
         Objects.requireNonNull(gridCellPayloads, "gridCellPayloads");
         if (gridRows <= 0) throw new IllegalArgumentException("gridRows <= 0: " + gridRows);
@@ -188,6 +274,13 @@ public final class AvifContainer {
         if (gridAlphaCellPayloads != null) {
             if (gridAlphaRows <= 0) throw new IllegalArgumentException("gridAlphaRows <= 0: " + gridAlphaRows);
             if (gridAlphaColumns <= 0) throw new IllegalArgumentException("gridAlphaColumns <= 0: " + gridAlphaColumns);
+        }
+        if (gainMapItemPayload != null && gainMapGridCellPayloads != null) {
+            throw new IllegalArgumentException("gainMapItemPayload and gainMapGridCellPayloads are mutually exclusive");
+        }
+        if (gainMapGridCellPayloads != null) {
+            if (gainMapGridRows <= 0) throw new IllegalArgumentException("gainMapGridRows <= 0: " + gainMapGridRows);
+            if (gainMapGridColumns <= 0) throw new IllegalArgumentException("gainMapGridColumns <= 0: " + gainMapGridColumns);
         }
         this.primaryItemPayload = null;
         this.alphaItemPayload = alphaItemPayload != null
@@ -206,6 +299,16 @@ public final class AvifContainer {
         this.gridAlphaColumns = gridAlphaColumns;
         this.gridAlphaOutputWidth = gridAlphaOutputWidth;
         this.gridAlphaOutputHeight = gridAlphaOutputHeight;
+        this.gainMapItemPayload = gainMapItemPayload != null
+                ? immutablePayload(gainMapItemPayload)
+                : null;
+        this.gainMapGridCellPayloads = gainMapGridCellPayloads != null
+                ? immutablePayloads(gainMapGridCellPayloads)
+                : null;
+        this.gainMapGridRows = gainMapGridRows;
+        this.gainMapGridColumns = gainMapGridColumns;
+        this.gainMapGridOutputWidth = gainMapGridOutputWidth;
+        this.gainMapGridOutputHeight = gainMapGridOutputHeight;
         this.clapCropX = clapCropX;
         this.clapCropY = clapCropY;
         this.clapCropWidth = clapCropWidth;
@@ -239,6 +342,12 @@ public final class AvifContainer {
         this.gridAlphaColumns = 0;
         this.gridAlphaOutputWidth = 0;
         this.gridAlphaOutputHeight = 0;
+        this.gainMapItemPayload = null;
+        this.gainMapGridCellPayloads = null;
+        this.gainMapGridRows = 0;
+        this.gainMapGridColumns = 0;
+        this.gainMapGridOutputWidth = 0;
+        this.gainMapGridOutputHeight = 0;
         this.clapCropX = -1;
         this.clapCropY = -1;
         this.clapCropWidth = -1;
@@ -361,6 +470,54 @@ public final class AvifContainer {
     /// @return the alpha grid output height
     public int gridAlphaOutputHeight() {
         return gridAlphaOutputHeight;
+    }
+
+    /// Returns the gain-map AV1 OBU payload.
+    ///
+    /// @return the gain-map AV1 OBU payload, or `null`
+    public @Nullable @UnmodifiableView ByteBuffer gainMapItemPayload() {
+        if (gainMapItemPayload == null) {
+            return null;
+        }
+        return payloadView(gainMapItemPayload);
+    }
+
+    /// Returns the gain-map grid cell AV1 OBU payloads in row-major order.
+    ///
+    /// @return the gain-map grid cell AV1 OBU payloads, or `null`
+    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] gainMapGridCellPayloads() {
+        if (gainMapGridCellPayloads == null) {
+            return null;
+        }
+        return payloadViews(gainMapGridCellPayloads);
+    }
+
+    /// Returns the gain-map grid row count.
+    ///
+    /// @return the gain-map grid row count
+    public int gainMapGridRows() {
+        return gainMapGridRows;
+    }
+
+    /// Returns the gain-map grid column count.
+    ///
+    /// @return the gain-map grid column count
+    public int gainMapGridColumns() {
+        return gainMapGridColumns;
+    }
+
+    /// Returns the gain-map grid output width.
+    ///
+    /// @return the gain-map grid output width
+    public int gainMapGridOutputWidth() {
+        return gainMapGridOutputWidth;
+    }
+
+    /// Returns the gain-map grid output height.
+    ///
+    /// @return the gain-map grid output height
+    public int gainMapGridOutputHeight() {
+        return gainMapGridOutputHeight;
     }
 
     /// Returns whether a clean-aperture crop is present.

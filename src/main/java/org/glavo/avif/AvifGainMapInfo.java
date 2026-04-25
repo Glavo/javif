@@ -22,8 +22,9 @@ import java.util.Objects;
 
 /// Immutable metadata for one AVIF tone-mapped gain map association.
 ///
-/// The descriptor exposes container-level `tmap` and gain-map image item metadata. It does not
-/// imply that gain-map pixels have been decoded or applied to the base image.
+/// The descriptor exposes container-level `tmap` and gain-map image item metadata. Gain-map
+/// pixels can be decoded separately through `AvifImageReader`; this descriptor does not imply that
+/// those pixels have been tone-mapped or applied to the base image.
 @NotNullByDefault
 public final class AvifGainMapInfo {
     /// The `tmap` derived image item id.

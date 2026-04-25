@@ -262,7 +262,7 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// The returned planes expose the decoded AV1 color image before AVIF auxiliary alpha
     /// composition and before AVIF item transforms such as `clap`, `irot`, and `imir`.
-    /// Grid-derived raw plane composition is not implemented.
+    /// Grid-derived still images are returned as composed raw planes.
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded color planes
@@ -276,7 +276,7 @@ public final class AvifImageReader implements AutoCloseable {
             return readSequenceRawColorPlanes(frameIndex);
         }
         if (container.isGrid()) {
-            return readGridRawColorPlanes(frameIndex);
+            return readGridRawColorPlanes();
         }
         if (frameIndex != 0) {
             throw new AvifDecodeException(
@@ -295,8 +295,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// Reads raw decoded alpha auxiliary planes for the frame at the supplied index.
     ///
     /// The returned planes expose an alpha auxiliary AV1 image before AVIF item transforms are
-    /// applied. A `null` return value means the frame has no alpha auxiliary image. Alpha grids
-    /// and alpha AVIS sequences are not implemented.
+    /// applied. A `null` return value means the frame has no alpha auxiliary image. Alpha AVIS
+    /// sequences are not implemented.
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded alpha auxiliary planes, or `null` when no alpha auxiliary image is present
@@ -328,6 +328,51 @@ public final class AvifImageReader implements AutoCloseable {
             return readGridRawAlphaPlanes(alphaCellPayloads);
         }
         return null;
+    }
+
+    /// Reads raw decoded gain-map planes for the frame at the supplied index.
+    ///
+    /// The returned planes expose the AV1 image referenced by the AVIF `tmap` gain-map
+    /// association. A `null` return value means the frame has no gain-map image. The returned
+    /// planes are not tone-mapped or applied to the base image.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return raw decoded gain-map planes, or `null` when no gain-map image is present
+    /// @throws IOException if the gain-map image cannot be decoded
+    public @Nullable AvifPlanes readRawGainMapPlanes(int frameIndex) throws IOException {
+        ensureOpen();
+        if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        AvifGainMapInfo gainMapInfo = container.info().gainMapInfo();
+        if (gainMapInfo == null) {
+            return null;
+        }
+        if (container.isSequence()) {
+            throw unsupported("Raw gain-map planes for AVIS sequences are not implemented", null);
+        }
+        if (frameIndex != 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.UNSUPPORTED_FEATURE,
+                    "Indexed AVIF gain-map plane decoding beyond the primary still image is not implemented in this slice",
+                    null
+            );
+        }
+        ByteBuffer gainMapPayload = container.gainMapItemPayload();
+        if (gainMapPayload != null) {
+            return decodeRawColorPlanes(gainMapPayload, "Gain-map AV1 item");
+        }
+        @Unmodifiable ByteBuffer @Nullable [] gainMapCellPayloads = container.gainMapGridCellPayloads();
+        if (gainMapCellPayloads != null) {
+            return composeGridRawColorPlanes(
+                    decodeGridRawColorPlanes(gainMapCellPayloads),
+                    container.gainMapGridRows(),
+                    container.gainMapGridColumns(),
+                    container.gainMapGridOutputWidth(),
+                    container.gainMapGridOutputHeight()
+            );
+        }
+        throw unsupported("Gain-map item type is not decodable as AV1 planes: " + gainMapInfo.gainMapItemType(), null);
     }
 
     /// Decodes the next frame from an image sequence using the persistent sequential AV1 reader.
@@ -407,10 +452,9 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Decodes raw color planes for one grid-derived still image.
     ///
-    /// @param frameIndex the zero-based frame index
     /// @return raw decoded color planes composed from grid cells
     /// @throws IOException if decoding fails
-    private AvifPlanes readGridRawColorPlanes(int frameIndex) throws IOException {
+    private AvifPlanes readGridRawColorPlanes() throws IOException {
         @Unmodifiable ByteBuffer @Nullable [] cellPayloads = container.gridCellPayloads();
         if (cellPayloads == null || cellPayloads.length == 0) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cell payloads", null);

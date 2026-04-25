@@ -25,6 +25,8 @@ import java.util.Objects;
 public final class AvifAuxiliaryImageInfo {
     /// The AVIF auxiliary image type string used for alpha images.
     public static final String ALPHA_TYPE = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha";
+    /// The AVIF auxiliary image type string used for depth images.
+    public static final String DEPTH_TYPE = "urn:mpeg:mpegB:cicp:systems:auxiliary:depth";
 
     /// The BMFF item id for the auxiliary image.
     private final int itemId;
@@ -140,6 +142,13 @@ public final class AvifAuxiliaryImageInfo {
     /// @return whether this auxiliary image is an alpha image
     public boolean isAlpha() {
         return ALPHA_TYPE.equals(auxiliaryType);
+    }
+
+    /// Returns whether this auxiliary image is a depth image.
+    ///
+    /// @return whether this auxiliary image is a depth image
+    public boolean isDepth() {
+        return DEPTH_TYPE.equals(auxiliaryType);
     }
 
     /// Returns whether the supplied dimensions represent a known image size.
