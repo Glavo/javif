@@ -79,6 +79,10 @@ final class AvifImageReaderTest {
     private static final Path LIBAVIF_PROGRESSIVE_FIXTURE =
             Path.of("external", "libavif", "tests", "data", "draw_points_idat_progressive.avif");
 
+    /// An animated 8bpc AVIS image sequence fixture.
+    private static final Path LIBAVIF_ANIMATED_FIXTURE =
+            Path.of("external", "libavif", "tests", "data", "colors-animated-8bpc.avif");
+
     /// Verifies that the primary AV1 item payload is decoded through the migrated AV1 decoder.
     ///
     /// @throws IOException if the reader cannot decode the test stream
@@ -216,6 +220,17 @@ final class AvifImageReaderTest {
             assertNotNull(frame);
             assertNull(reader.readFrame());
         }
+    }
+
+    /// Verifies that an animated AVIS sequence parses and decodes the first frame.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void animatedSequenceIsRejectedWithClearDiagnostic() {
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class,
+                () -> AvifImageReader.open(LIBAVIF_ANIMATED_FIXTURE));
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, ex.code());
+        assertTrue(ex.getMessage().contains("AVIS"), "message should mention AVIS");
     }
 
     /// Verifies that an irot rotation transform is applied to the decoded frame.

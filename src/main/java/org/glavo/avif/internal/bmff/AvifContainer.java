@@ -58,6 +58,19 @@ public final class AvifContainer {
     /// The mirror axis (0 or 1), or -1.
     private final int mirrorAxis;
 
+    /// Whether this is an AVIS image sequence.
+    private final boolean isSequence;
+    /// The AV1 OBU payloads for each sample in order.
+    private final byte @Nullable @Unmodifiable [] @Nullable @Unmodifiable [] samplePayloads;
+    /// The frame duration deltas in media timescale units.
+    private final int @Unmodifiable [] frameDeltas;
+    /// The number of samples.
+    private final int sampleCount;
+    /// The media timescale.
+    private final int mediaTimescale;
+    /// The total media duration in timescale units.
+    private final long mediaDuration;
+
     /// Creates parsed AVIF container data without an alpha image or grid.
     ///
     /// @param info the parsed image metadata
@@ -114,61 +127,31 @@ public final class AvifContainer {
         this.clapCropHeight = clapCropHeight;
         this.rotationCode = rotationCode;
         this.mirrorAxis = mirrorAxis;
+        this.isSequence = false;
+        this.samplePayloads = null;
+        this.frameDeltas = new int[0];
+        this.sampleCount = 0;
+        this.mediaTimescale = 0;
+        this.mediaDuration = 0;
     }
 
     /// Creates parsed AVIF container data for a grid derived image.
-    ///
-    /// @param info the parsed image metadata
-    /// @param gridCellPayloads the grid cell AV1 OBU payloads in row-major order
-    /// @param gridRows the grid row count
-    /// @param gridColumns the grid column count
-    /// @param gridOutputWidth the grid output width, or -1
-    /// @param gridOutputHeight the grid output height, or -1
-    public AvifContainer(
-            AvifImageInfo info,
-            byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
-            int gridRows,
-            int gridColumns,
-            int gridOutputWidth,
-            int gridOutputHeight
-    ) {
+    public AvifContainer(AvifImageInfo info, byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
+            int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight) {
         this(info, gridCellPayloads, gridRows, gridColumns, gridOutputWidth, gridOutputHeight,
                 -1, -1, -1, -1, -1, -1);
     }
 
     /// Creates parsed AVIF container data for a grid derived image with transforms.
-    ///
-    /// @param info the parsed image metadata
-    /// @param gridCellPayloads the grid cell AV1 OBU payloads in row-major order
-    /// @param gridRows the grid row count
-    /// @param gridColumns the grid column count
-    /// @param gridOutputWidth the grid output width, or -1
-    /// @param gridOutputHeight the grid output height, or -1
-    /// @param clapCropX the clean-aperture x offset, or -1
-    /// @param clapCropY the clean-aperture y offset, or -1
-    /// @param clapCropWidth the clean-aperture width, or -1
-    /// @param clapCropHeight the clean-aperture height, or -1
-    /// @param rotationCode the rotation code, or -1
-    /// @param mirrorAxis the mirror axis, or -1
-    public AvifContainer(
-            AvifImageInfo info,
-            byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
-            int gridRows,
-            int gridColumns,
-            int gridOutputWidth,
-            int gridOutputHeight,
-            int clapCropX, int clapCropY,
-            int clapCropWidth, int clapCropHeight,
-            int rotationCode, int mirrorAxis
-    ) {
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifContainer(AvifImageInfo info, byte @Unmodifiable [] @Unmodifiable [] gridCellPayloads,
+            int gridRows, int gridColumns, int gridOutputWidth, int gridOutputHeight,
+            int clapCropX, int clapCropY, int clapCropWidth, int clapCropHeight,
+            int rotationCode, int mirrorAxis) {
         this.info = Objects.requireNonNull(info, "info");
         Objects.requireNonNull(gridCellPayloads, "gridCellPayloads");
-        if (gridRows <= 0) {
-            throw new IllegalArgumentException("gridRows <= 0: " + gridRows);
-        }
-        if (gridColumns <= 0) {
-            throw new IllegalArgumentException("gridColumns <= 0: " + gridColumns);
-        }
+        if (gridRows <= 0) throw new IllegalArgumentException("gridRows <= 0: " + gridRows);
+        if (gridColumns <= 0) throw new IllegalArgumentException("gridColumns <= 0: " + gridColumns);
         this.primaryItemPayload = null;
         this.alphaItemPayload = null;
         this.isGrid = true;
@@ -183,6 +166,40 @@ public final class AvifContainer {
         this.clapCropHeight = clapCropHeight;
         this.rotationCode = rotationCode;
         this.mirrorAxis = mirrorAxis;
+        this.isSequence = false;
+        this.samplePayloads = null;
+        this.frameDeltas = new int[0];
+        this.sampleCount = 0;
+        this.mediaTimescale = 0;
+        this.mediaDuration = 0;
+    }
+
+    /// Creates parsed AVIF container data for an image sequence.
+    public AvifContainer(AvifImageInfo info, byte @Unmodifiable [] @Unmodifiable [] samplePayloads,
+            int @Unmodifiable [] frameDeltas, int sampleCount, int mediaTimescale, long mediaDuration) {
+        this.info = Objects.requireNonNull(info, "info");
+        Objects.requireNonNull(samplePayloads, "samplePayloads");
+        Objects.requireNonNull(frameDeltas, "frameDeltas");
+        this.primaryItemPayload = null;
+        this.alphaItemPayload = null;
+        this.isGrid = false;
+        this.gridCellPayloads = null;
+        this.gridRows = 0;
+        this.gridColumns = 0;
+        this.gridOutputWidth = 0;
+        this.gridOutputHeight = 0;
+        this.clapCropX = -1;
+        this.clapCropY = -1;
+        this.clapCropWidth = -1;
+        this.clapCropHeight = -1;
+        this.rotationCode = -1;
+        this.mirrorAxis = -1;
+        this.isSequence = true;
+        this.samplePayloads = samplePayloads.clone();
+        this.frameDeltas = frameDeltas.clone();
+        this.sampleCount = sampleCount;
+        this.mediaTimescale = mediaTimescale;
+        this.mediaDuration = mediaDuration;
     }
 
     /// Returns the parsed image metadata.
@@ -304,5 +321,36 @@ public final class AvifContainer {
     /// @return the mirror axis (0 or 1), or -1
     public int mirrorAxis() {
         return mirrorAxis;
+    }
+
+    /// Returns whether this is an AVIS image sequence.
+    ///
+    /// @return whether this is an AVIS image sequence
+    public boolean isSequence() {
+        return isSequence;
+    }
+
+    /// Returns the AV1 OBU payloads for each sample in order.
+    ///
+    /// @return the AV1 OBU payloads, or `null`
+    public byte @Nullable @Unmodifiable [] @Nullable [] samplePayloads() {
+        if (samplePayloads == null) {
+            return null;
+        }
+        return samplePayloads.clone();
+    }
+
+    /// Returns the number of samples.
+    ///
+    /// @return the number of samples
+    public int sampleCount() {
+        return sampleCount;
+    }
+
+    /// Returns the frame duration deltas in media timescale units.
+    ///
+    /// @return the frame duration deltas
+    public int @Unmodifiable [] frameDeltas() {
+        return frameDeltas.clone();
     }
 }

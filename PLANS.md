@@ -25,7 +25,10 @@ references, missing required properties, and essential unknown property rejectio
 `paris_icc_exif_xmp.avif`, `abc_color_irot_alpha_NOirot.avif`, `sofa_grid1x5_420.avif`,
 `draw_points_idat_progressive.avif`, plus synthetic still-image, alpha, grid, and irot tests.
 
-**Known gap:** AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
+**Known gaps:**
+- AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
+- AVIS image sequences (avis brand + `moov` box) are detected and rejected with a clear
+  diagnostic. Full `moov`/track/sample-table parsing is deferred.
 
 ## Remaining Work
 

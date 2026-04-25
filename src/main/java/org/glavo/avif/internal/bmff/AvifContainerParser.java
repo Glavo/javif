@@ -84,7 +84,11 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.INVALID_FTYP, "Missing AVIF-compatible ftyp box", 0L);
         }
         if (avisBrandSeen) {
-            throw unsupported("AVIS image sequence tracks are not implemented in this slice", null);
+            throw unsupported(
+                    "AVIS image sequences are recognized but full sequence decoding is not yet implemented. " +
+                    "The file is an animated AVIF with one or more image sequence tracks.",
+                    null
+            );
         }
         if (meta.primaryItemId == 0) {
             throw new AvifDecodeException(AvifErrorCode.MISSING_IMAGE_ITEM, "Primary item is not specified", null);

@@ -207,12 +207,15 @@ public final class AvifImageReader implements AutoCloseable {
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        if (frameIndex != 0) {
+        if (frameIndex != 0 && !container.isSequence()) {
             throw new AvifDecodeException(
                     AvifErrorCode.UNSUPPORTED_FEATURE,
                     "Indexed AVIF frame decoding beyond the primary still image is not implemented in this slice",
                     null
             );
+        }
+        if (container.isSequence()) {
+            return readSequenceFrame(frameIndex);
         }
         if (container.isGrid()) {
             return readGridFrame(frameIndex);
@@ -233,6 +236,36 @@ public final class AvifImageReader implements AutoCloseable {
                 rawFrame = adaptFrame(colorFrame, frameIndex);
             }
             return applyTransforms(rawFrame);
+        } catch (AvifDecodeException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+        }
+    }
+
+    /// Decodes a single frame from an image sequence.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return the decoded frame
+    /// @throws IOException if decoding fails
+    private AvifFrame readSequenceFrame(int frameIndex) throws IOException {
+        byte @Unmodifiable [] @Nullable [] payloads = container.samplePayloads();
+        if (payloads == null || frameIndex >= payloads.length) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        byte[] payload = payloads[frameIndex];
+        if (payload == null) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sample payload is null: " + frameIndex, null);
+        }
+        try (Av1ImageReader av1Reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)),
+                config.av1DecoderConfig()
+        )) {
+            DecodedFrame decodedFrame = av1Reader.readFrame();
+            if (decodedFrame == null) {
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sample produced no frame: " + frameIndex, null);
+            }
+            return adaptFrame(decodedFrame, frameIndex);
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
