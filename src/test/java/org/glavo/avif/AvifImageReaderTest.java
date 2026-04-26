@@ -111,6 +111,9 @@ final class AvifImageReaderTest {
     /// A gain-map fixture copied from libavif's test data.
     private static final String LIBAVIF_GAINMAP_FIXTURE = "libavif-test-data/seine_sdr_gainmap_srgb.avif";
 
+    /// A gain-map fixture copied from libavif's test data with ICC color profiles.
+    private static final String LIBAVIF_GAINMAP_ICC_FIXTURE = "libavif-test-data/seine_sdr_gainmap_srgb_icc.avif";
+
     /// A gain-map grid fixture copied from libavif's test data.
     private static final String LIBAVIF_GAINMAP_GRID_FIXTURE =
             "libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif";
@@ -612,6 +615,15 @@ final class AvifImageReaderTest {
             assertTrue(gainMapInfo.gainMapHeight() > 0);
             assertNotNull(gainMapInfo.gainMapBitDepth());
             assertNotNull(gainMapInfo.gainMapPixelFormat());
+            AvifColorInfo toneMappedColorInfo = gainMapInfo.toneMappedColorInfo();
+            assertNotNull(toneMappedColorInfo);
+            assertEquals(1, toneMappedColorInfo.colorPrimaries());
+            assertEquals(16, toneMappedColorInfo.transferCharacteristics());
+            assertEquals(6, toneMappedColorInfo.matrixCoefficients());
+            assertNull(gainMapInfo.toneMappedIccProfile());
+            AvifColorInfo gainMapColorInfo = gainMapInfo.gainMapColorInfo();
+            assertNotNull(gainMapColorInfo);
+            assertEquals(6, gainMapColorInfo.matrixCoefficients());
             assertEquals(0, gainMapInfo.metadataVersion());
             assertEquals(0, gainMapInfo.metadataMinimumVersion());
             assertEquals(0, gainMapInfo.metadataWriterVersion());
@@ -628,6 +640,23 @@ final class AvifImageReaderTest {
                 assertTrue(gamma.numerator() > 0);
                 assertTrue(gamma.denominator() > 0);
             }
+        }
+    }
+
+    /// Verifies that a gain-map fixture exposes alternate ICC metadata without applying it.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openParsesGainMapIccFixtureInfo() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_ICC_FIXTURE))) {
+            assertNotNull(reader.info().iccProfile());
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+
+            ByteBuffer toneMappedIccProfile = gainMapInfo.toneMappedIccProfile();
+            assertNotNull(toneMappedIccProfile);
+            assertTrue(toneMappedIccProfile.isReadOnly());
+            assertTrue(toneMappedIccProfile.remaining() > 0);
         }
     }
 

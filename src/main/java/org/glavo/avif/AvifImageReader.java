@@ -527,7 +527,15 @@ public final class AvifImageReader implements AutoCloseable {
         if (gainMapPlanes == null) {
             return null;
         }
-        return AvifGainMapToneMapper.apply(readFrame(frameIndex), gainMapPlanes, metadata, hdrHeadroom);
+        return AvifGainMapToneMapper.apply(
+                readFrame(frameIndex),
+                gainMapPlanes,
+                metadata,
+                container.info().colorInfo(),
+                gainMapInfo.toneMappedColorInfo(),
+                gainMapInfo.gainMapColorInfo(),
+                hdrHeadroom
+        );
     }
 
     /// Reads raw decoded depth auxiliary planes for the frame at the supplied index.

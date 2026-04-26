@@ -19,11 +19,12 @@ tools, native ABI compatibility, fuzzers, and apps are out of scope.
 - Finish postfilter parity with dav1d through cross-stage verification of loop filter, CDEF,
   Wiener restoration, self-guided restoration, super-resolution, and film grain in the correct
   pipeline order.
-- Improve display semantics while preserving raw-plane APIs: clarify ICC/CICP behavior, implement
-  pure-Java CICP transfer and primaries conversion where feasible under the `java.base` runtime
-  boundary, and keep ICC application metadata-only unless the dependency policy changes.
+- Improve display semantics while preserving raw-plane APIs: validate the pure-Java CICP transfer
+  and RGB-primary conversion paths against reference pixels, define selectable output color-space
+  behavior where needed, and keep ICC application metadata-only unless the dependency policy
+  changes.
 - Complete AVIF-level feature handling covered by libavif data: reference-grade gain-map tone
-  mapping with CICP/ICC color-management parity, AVIS gain-map/depth/alpha sequencing gaps,
+  mapping pixel parity, ICC-profile gain-map policy, AVIS gain-map/depth/alpha sequencing gaps,
   non-default operating-point policy, auxiliary grid/layout edge cases, and stricter
   `clap`/`irot`/`imir` validation against libavif behavior.
 - Keep public APIs conservative. Add configuration only where behavior must be selectable, such as

@@ -17,7 +17,10 @@ package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 /// Immutable metadata for one AVIF tone-mapped gain map association.
@@ -49,6 +52,12 @@ public final class AvifGainMapInfo {
     private final @Nullable AvifBitDepth gainMapBitDepth;
     /// The gain-map AV1 chroma sampling layout, or `null` when unknown.
     private final @Nullable AvifPixelFormat gainMapPixelFormat;
+    /// The tone-mapped item CICP color information, or `null` when absent.
+    private final @Nullable AvifColorInfo toneMappedColorInfo;
+    /// The tone-mapped item ICC profile payload, or `null` when absent.
+    private final @Nullable @Unmodifiable ByteBuffer toneMappedIccProfile;
+    /// The gain-map image item CICP color information, or `null` when absent.
+    private final @Nullable AvifColorInfo gainMapColorInfo;
     /// The gain-map metadata version field from the `tmap` payload.
     private final int metadataVersion;
     /// The minimum metadata version required by the `tmap` payload.
@@ -73,6 +82,9 @@ public final class AvifGainMapInfo {
     /// @param gainMapHeight the gain-map image height in pixels, or -1 when unknown
     /// @param gainMapBitDepth the gain-map AV1 bit depth, or `null` when unknown
     /// @param gainMapPixelFormat the gain-map AV1 chroma sampling layout, or `null` when unknown
+    /// @param toneMappedColorInfo the tone-mapped item CICP color information, or `null` when absent
+    /// @param toneMappedIccProfile the tone-mapped item ICC profile payload, or `null` when absent
+    /// @param gainMapColorInfo the gain-map image item CICP color information, or `null` when absent
     /// @param metadataVersion the gain-map metadata version field from the `tmap` payload
     /// @param metadataMinimumVersion the minimum metadata version required by the `tmap` payload
     /// @param metadataWriterVersion the writer metadata version from the `tmap` payload
@@ -90,6 +102,9 @@ public final class AvifGainMapInfo {
             int gainMapHeight,
             @Nullable AvifBitDepth gainMapBitDepth,
             @Nullable AvifPixelFormat gainMapPixelFormat,
+            @Nullable AvifColorInfo toneMappedColorInfo,
+            byte @Nullable [] toneMappedIccProfile,
+            @Nullable AvifColorInfo gainMapColorInfo,
             int metadataVersion,
             int metadataMinimumVersion,
             int metadataWriterVersion,
@@ -132,6 +147,9 @@ public final class AvifGainMapInfo {
         this.gainMapHeight = gainMapHeight;
         this.gainMapBitDepth = gainMapBitDepth;
         this.gainMapPixelFormat = gainMapPixelFormat;
+        this.toneMappedColorInfo = toneMappedColorInfo;
+        this.toneMappedIccProfile = immutableBytes(toneMappedIccProfile);
+        this.gainMapColorInfo = gainMapColorInfo;
         this.metadataVersion = metadataVersion;
         this.metadataMinimumVersion = metadataMinimumVersion;
         this.metadataWriterVersion = metadataWriterVersion;
@@ -216,6 +234,36 @@ public final class AvifGainMapInfo {
         return gainMapPixelFormat;
     }
 
+    /// Returns the tone-mapped item CICP color information.
+    ///
+    /// This describes the alternate image represented by the `tmap` derived item. It is distinct
+    /// from the base image color information exposed by `AvifImageInfo.colorInfo()`.
+    ///
+    /// @return the tone-mapped item CICP color information, or `null` when absent
+    public @Nullable AvifColorInfo toneMappedColorInfo() {
+        return toneMappedColorInfo;
+    }
+
+    /// Returns the tone-mapped item ICC profile payload.
+    ///
+    /// ICC profiles are exposed as metadata only; the pure-Java decoder does not apply ICC color
+    /// transforms at runtime.
+    ///
+    /// @return the tone-mapped item ICC profile payload, or `null` when absent
+    public @Nullable @UnmodifiableView ByteBuffer toneMappedIccProfile() {
+        return byteView(toneMappedIccProfile);
+    }
+
+    /// Returns the gain-map image item CICP color information.
+    ///
+    /// The gain-map image uses this CICP information when its YUV planes are converted into RGB
+    /// gain-map samples.
+    ///
+    /// @return the gain-map image item CICP color information, or `null` when absent
+    public @Nullable AvifColorInfo gainMapColorInfo() {
+        return gainMapColorInfo;
+    }
+
     /// Returns the gain-map metadata version field from the `tmap` payload.
     ///
     /// @return the gain-map metadata version field
@@ -267,5 +315,27 @@ public final class AvifGainMapInfo {
     /// @return whether both dimensions are -1
     private static boolean isUnknownSize(int width, int height) {
         return width == -1 && height == -1;
+    }
+
+    /// Creates immutable byte storage.
+    ///
+    /// @param bytes the source bytes, or `null`
+    /// @return immutable byte storage, or `null`
+    private static @Nullable @Unmodifiable ByteBuffer immutableBytes(byte @Nullable [] bytes) {
+        if (bytes == null) {
+            return null;
+        }
+        return ByteBuffer.wrap(bytes.clone()).asReadOnlyBuffer();
+    }
+
+    /// Creates a read-only byte-buffer view.
+    ///
+    /// @param bytes the immutable byte storage, or `null`
+    /// @return a read-only view, or `null`
+    private static @Nullable @UnmodifiableView ByteBuffer byteView(@Nullable @Unmodifiable ByteBuffer bytes) {
+        if (bytes == null) {
+            return null;
+        }
+        return bytes.asReadOnlyBuffer();
     }
 }

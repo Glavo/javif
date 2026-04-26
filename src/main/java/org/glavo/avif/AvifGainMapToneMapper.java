@@ -26,20 +26,12 @@ import java.util.Objects;
 
 /// Applies parsed AVIF gain-map metadata to decoded RGB frame output.
 ///
-/// This implementation follows the ISO gain-map equation over normalized RGB samples and uses
-/// sRGB transfer functions for the current pure-Java output path. ICC transforms and cross-primary
-/// conversion remain outside this helper because production code is restricted to `java.base`.
+/// This implementation follows the ISO gain-map equation over normalized RGB samples, uses CICP
+/// transfer functions where available, converts between supported RGB primary sets in linear
+/// light, and leaves ICC transforms metadata-only under the repository's `java.base` runtime
+/// boundary.
 @NotNullByDefault
 final class AvifGainMapToneMapper {
-    /// The maximum normalized channel value.
-    private static final double CHANNEL_MAX = 1.0;
-
-    /// The sRGB linear-to-gamma threshold.
-    private static final double SRGB_LINEAR_THRESHOLD = 0.0031308;
-
-    /// The sRGB gamma-to-linear threshold.
-    private static final double SRGB_GAMMA_THRESHOLD = 0.04045;
-
     /// Prevents instantiation of this utility class.
     private AvifGainMapToneMapper() {
     }
@@ -49,24 +41,36 @@ final class AvifGainMapToneMapper {
     /// @param baseFrame the decoded base frame
     /// @param gainMapPlanes the decoded gain-map planes
     /// @param metadata the parsed gain-map metadata
+    /// @param baseColorInfo the base image CICP color information, or `null`
+    /// @param toneMappedColorInfo the tone-mapped item CICP color information, or `null`
+    /// @param gainMapColorInfo the gain-map image item CICP color information, or `null`
     /// @param hdrHeadroom the requested display HDR headroom in log2 space
     /// @return the tone-mapped frame, or the original frame when the gain-map weight is zero
     static AvifFrame apply(
             AvifFrame baseFrame,
             AvifPlanes gainMapPlanes,
             AvifGainMapMetadata metadata,
+            @Nullable AvifColorInfo baseColorInfo,
+            @Nullable AvifColorInfo toneMappedColorInfo,
+            @Nullable AvifColorInfo gainMapColorInfo,
             double hdrHeadroom
     ) {
         AvifFrame checkedBaseFrame = Objects.requireNonNull(baseFrame, "baseFrame");
         AvifPlanes checkedGainMapPlanes = Objects.requireNonNull(gainMapPlanes, "gainMapPlanes");
-        GainMapMath math = new GainMapMath(Objects.requireNonNull(metadata, "metadata"), hdrHeadroom);
+        GainMapMath math = new GainMapMath(
+                Objects.requireNonNull(metadata, "metadata"),
+                baseColorInfo,
+                toneMappedColorInfo,
+                hdrHeadroom
+        );
         if (math.weight() == 0.0) {
             return checkedBaseFrame;
         }
         GainMapSampler sampler = new GainMapSampler(
                 checkedGainMapPlanes,
                 checkedBaseFrame.width(),
-                checkedBaseFrame.height()
+                checkedBaseFrame.height(),
+                gainMapColorInfo
         );
         if (checkedBaseFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
             return applyToIntFrame(checkedBaseFrame, sampler, math);
@@ -88,14 +92,24 @@ final class AvifGainMapToneMapper {
         int width = baseFrame.width();
         int height = baseFrame.height();
         int[] toneMapped = new int[width * height];
+        double[] mappedRgb = new double[3];
         for (int y = 0; y < height; y++) {
             int row = y * width;
             for (int x = 0; x < width; x++) {
                 int pixel = basePixels.get(row + x);
                 int alpha = pixel & 0xFF00_0000;
-                int red = toneMapByteChannel((pixel >>> 16) & 0xFF, sampler.channel(x, y, 0), 0, math);
-                int green = toneMapByteChannel((pixel >>> 8) & 0xFF, sampler.channel(x, y, 1), 1, math);
-                int blue = toneMapByteChannel(pixel & 0xFF, sampler.channel(x, y, 2), 2, math);
+                math.apply(
+                        ((pixel >>> 16) & 0xFF) / 255.0,
+                        ((pixel >>> 8) & 0xFF) / 255.0,
+                        (pixel & 0xFF) / 255.0,
+                        sampler.channel(x, y, 0),
+                        sampler.channel(x, y, 1),
+                        sampler.channel(x, y, 2),
+                        mappedRgb
+                );
+                int red = unitToByte(mappedRgb[0]);
+                int green = unitToByte(mappedRgb[1]);
+                int blue = unitToByte(mappedRgb[2]);
                 toneMapped[row + x] = alpha | (red << 16) | (green << 8) | blue;
             }
         }
@@ -120,14 +134,24 @@ final class AvifGainMapToneMapper {
         int width = baseFrame.width();
         int height = baseFrame.height();
         long[] toneMapped = new long[width * height];
+        double[] mappedRgb = new double[3];
         for (int y = 0; y < height; y++) {
             int row = y * width;
             for (int x = 0; x < width; x++) {
                 long pixel = basePixels.get(row + x);
                 long alpha = pixel & 0xFFFF_0000_0000_0000L;
-                long red = toneMapWordChannel((int) ((pixel >>> 32) & 0xFFFFL), sampler.channel(x, y, 0), 0, math);
-                long green = toneMapWordChannel((int) ((pixel >>> 16) & 0xFFFFL), sampler.channel(x, y, 1), 1, math);
-                long blue = toneMapWordChannel((int) (pixel & 0xFFFFL), sampler.channel(x, y, 2), 2, math);
+                math.apply(
+                        ((pixel >>> 32) & 0xFFFFL) / 65_535.0,
+                        ((pixel >>> 16) & 0xFFFFL) / 65_535.0,
+                        (pixel & 0xFFFFL) / 65_535.0,
+                        sampler.channel(x, y, 0),
+                        sampler.channel(x, y, 1),
+                        sampler.channel(x, y, 2),
+                        mappedRgb
+                );
+                long red = unitToWord(mappedRgb[0]);
+                long green = unitToWord(mappedRgb[1]);
+                long blue = unitToWord(mappedRgb[2]);
                 toneMapped[row + x] = alpha | (red << 32) | (green << 16) | blue;
             }
         }
@@ -141,84 +165,20 @@ final class AvifGainMapToneMapper {
         );
     }
 
-    /// Applies gain-map math to one 8-bit channel.
+    /// Converts a normalized value to an unsigned 8-bit channel.
     ///
-    /// @param sample the base gamma-encoded sample
-    /// @param gainMapSample the normalized gain-map sample
-    /// @param channel the RGB channel index
-    /// @param math the gain-map math state
-    /// @return the tone-mapped gamma-encoded 8-bit sample
-    private static int toneMapByteChannel(int sample, double gainMapSample, int channel, GainMapMath math) {
-        double baseLinear = srgbToLinear(sample / 255.0);
-        double mappedLinear = math.apply(channel, baseLinear, gainMapSample);
-        return linearToByte(mappedLinear);
+    /// @param value the normalized value
+    /// @return the unsigned 8-bit channel
+    private static int unitToByte(double value) {
+        return (int) Math.round(AvifCicpColorTransforms.clampUnit(value) * 255.0);
     }
 
-    /// Applies gain-map math to one 16-bit channel.
+    /// Converts a normalized value to an unsigned 16-bit channel.
     ///
-    /// @param sample the base gamma-encoded sample
-    /// @param gainMapSample the normalized gain-map sample
-    /// @param channel the RGB channel index
-    /// @param math the gain-map math state
-    /// @return the tone-mapped gamma-encoded 16-bit sample
-    private static long toneMapWordChannel(int sample, double gainMapSample, int channel, GainMapMath math) {
-        double baseLinear = srgbToLinear(sample / 65_535.0);
-        double mappedLinear = math.apply(channel, baseLinear, gainMapSample);
-        return linearToWord(mappedLinear);
-    }
-
-    /// Converts one sRGB gamma-encoded sample to linear light.
-    ///
-    /// @param value the normalized gamma-encoded sample
-    /// @return the normalized linear-light sample
-    private static double srgbToLinear(double value) {
-        double clamped = clampUnit(value);
-        if (clamped <= SRGB_GAMMA_THRESHOLD) {
-            return clamped / 12.92;
-        }
-        return Math.pow((clamped + 0.055) / 1.055, 2.4);
-    }
-
-    /// Converts one linear-light sample to an 8-bit sRGB sample.
-    ///
-    /// @param value the normalized linear-light sample
-    /// @return the gamma-encoded 8-bit sample
-    private static int linearToByte(double value) {
-        return (int) Math.round(linearToSrgb(value) * 255.0);
-    }
-
-    /// Converts one linear-light sample to a 16-bit sRGB sample.
-    ///
-    /// @param value the normalized linear-light sample
-    /// @return the gamma-encoded 16-bit sample
-    private static long linearToWord(double value) {
-        return Math.round(linearToSrgb(value) * 65_535.0);
-    }
-
-    /// Converts one linear-light sample to normalized sRGB.
-    ///
-    /// @param value the normalized linear-light sample
-    /// @return the normalized gamma-encoded sample
-    private static double linearToSrgb(double value) {
-        double clamped = clampUnit(value);
-        if (clamped <= SRGB_LINEAR_THRESHOLD) {
-            return clamped * 12.92;
-        }
-        return 1.055 * Math.pow(clamped, 1.0 / 2.4) - 0.055;
-    }
-
-    /// Clamps a normalized sample to the closed unit interval.
-    ///
-    /// @param value the sample value
-    /// @return the clamped value
-    private static double clampUnit(double value) {
-        if (value <= 0.0) {
-            return 0.0;
-        }
-        if (value >= CHANNEL_MAX) {
-            return CHANNEL_MAX;
-        }
-        return value;
+    /// @param value the normalized value
+    /// @return the unsigned 16-bit channel
+    private static long unitToWord(double value) {
+        return Math.round(AvifCicpColorTransforms.clampUnit(value) * 65_535.0);
     }
 
     /// Precomputed gain-map equation state.
@@ -236,21 +196,42 @@ final class AvifGainMapToneMapper {
         private final double @Unmodifiable [] baseOffset;
         /// Per-channel alternate image offsets.
         private final double @Unmodifiable [] alternateOffset;
+        /// Base gamma-to-linear transfer color information.
+        private final @Nullable AvifColorInfo baseColorInfo;
+        /// Output linear-to-gamma transfer color information.
+        private final @Nullable AvifColorInfo outputColorInfo;
+        /// Base-to-gain-map-math linear RGB primary conversion.
+        private final AvifCicpColorTransforms.RgbMatrix inputConversion;
+        /// Gain-map-math-to-output linear RGB primary conversion.
+        private final AvifCicpColorTransforms.RgbMatrix outputConversion;
 
         /// Creates precomputed gain-map equation state.
         ///
         /// @param metadata the parsed gain-map metadata
+        /// @param baseColorInfo the base image CICP color information, or `null`
+        /// @param toneMappedColorInfo the tone-mapped item CICP color information, or `null`
         /// @param hdrHeadroom the requested display HDR headroom in log2 space
-        private GainMapMath(AvifGainMapMetadata metadata, double hdrHeadroom) {
+        private GainMapMath(
+                AvifGainMapMetadata metadata,
+                @Nullable AvifColorInfo baseColorInfo,
+                @Nullable AvifColorInfo toneMappedColorInfo,
+                double hdrHeadroom
+        ) {
             if (!Double.isFinite(hdrHeadroom) || hdrHeadroom < 0.0) {
                 throw new IllegalArgumentException("hdrHeadroom must be a finite non-negative value");
             }
+            @Nullable AvifColorInfo gainMapMathColorInfo =
+                    metadata.useBaseColorSpace() || toneMappedColorInfo == null ? baseColorInfo : toneMappedColorInfo;
             this.weight = computeWeight(hdrHeadroom, metadata.baseHdrHeadroom(), metadata.alternateHdrHeadroom());
             this.gainMapMin = signedFractionsToDoubles(metadata.gainMapMin());
             this.gainMapMax = signedFractionsToDoubles(metadata.gainMapMax());
             this.gammaInverse = inverseUnsignedFractions(metadata.gainMapGamma());
             this.baseOffset = signedFractionsToDoubles(metadata.baseOffset());
             this.alternateOffset = signedFractionsToDoubles(metadata.alternateOffset());
+            this.baseColorInfo = baseColorInfo;
+            this.outputColorInfo = baseColorInfo;
+            this.inputConversion = AvifCicpColorTransforms.conversionMatrix(baseColorInfo, gainMapMathColorInfo);
+            this.outputConversion = AvifCicpColorTransforms.conversionMatrix(gainMapMathColorInfo, outputColorInfo);
         }
 
         /// Returns the gain-map application weight.
@@ -260,13 +241,44 @@ final class AvifGainMapToneMapper {
             return weight;
         }
 
+        /// Applies gain-map math to one normalized gamma-encoded RGB triplet.
+        ///
+        /// @param baseRed the normalized base red channel
+        /// @param baseGreen the normalized base green channel
+        /// @param baseBlue the normalized base blue channel
+        /// @param gainMapRed the normalized gain-map red channel
+        /// @param gainMapGreen the normalized gain-map green channel
+        /// @param gainMapBlue the normalized gain-map blue channel
+        /// @param outputRgb the mutable normalized gamma-encoded output RGB triplet
+        private void apply(
+                double baseRed,
+                double baseGreen,
+                double baseBlue,
+                double gainMapRed,
+                double gainMapGreen,
+                double gainMapBlue,
+                double[] outputRgb
+        ) {
+            outputRgb[0] = AvifCicpColorTransforms.gammaToLinear(baseRed, baseColorInfo);
+            outputRgb[1] = AvifCicpColorTransforms.gammaToLinear(baseGreen, baseColorInfo);
+            outputRgb[2] = AvifCicpColorTransforms.gammaToLinear(baseBlue, baseColorInfo);
+            inputConversion.apply(outputRgb);
+            outputRgb[0] = applyChannel(0, outputRgb[0], gainMapRed);
+            outputRgb[1] = applyChannel(1, outputRgb[1], gainMapGreen);
+            outputRgb[2] = applyChannel(2, outputRgb[2], gainMapBlue);
+            outputConversion.apply(outputRgb);
+            outputRgb[0] = AvifCicpColorTransforms.linearToGamma(outputRgb[0], outputColorInfo);
+            outputRgb[1] = AvifCicpColorTransforms.linearToGamma(outputRgb[1], outputColorInfo);
+            outputRgb[2] = AvifCicpColorTransforms.linearToGamma(outputRgb[2], outputColorInfo);
+        }
+
         /// Applies gain-map math to one linear-light channel.
         ///
         /// @param channel the RGB channel index
         /// @param baseLinear the normalized linear-light base value
         /// @param gainMapSample the normalized gain-map sample
         /// @return the normalized linear-light tone-mapped value
-        private double apply(int channel, double baseLinear, double gainMapSample) {
+        private double applyChannel(int channel, double baseLinear, double gainMapSample) {
             double gainMapEncoded = clampUnit(gainMapSample);
             double gainMapLog2 = lerp(
                     gainMapMin[channel],
@@ -305,6 +317,14 @@ final class AvifGainMapToneMapper {
         /// @return the interpolated value
         private static double lerp(double a, double b, double weight) {
             return (1.0 - weight) * a + weight * b;
+        }
+
+        /// Clamps a normalized sample to the closed unit interval.
+        ///
+        /// @param value the sample value
+        /// @return the clamped value
+        private static double clampUnit(double value) {
+            return AvifCicpColorTransforms.clampUnit(value);
         }
 
         /// Converts signed fractions to `double` values.
@@ -347,6 +367,8 @@ final class AvifGainMapToneMapper {
         private final int baseHeight;
         /// The maximum gain-map sample value.
         private final int maxSample;
+        /// The gain-map YUV-to-RGB transform.
+        private final YuvToRgbTransform yuvToRgbTransform;
         /// The cached RGB pixel for the last sampled gain-map coordinate.
         private int cachedRgb;
         /// The last sampled gain-map x coordinate, or -1 before the first sample.
@@ -359,7 +381,13 @@ final class AvifGainMapToneMapper {
         /// @param planes the decoded gain-map planes
         /// @param baseWidth the base frame width in pixels
         /// @param baseHeight the base frame height in pixels
-        private GainMapSampler(AvifPlanes planes, int baseWidth, int baseHeight) {
+        /// @param gainMapColorInfo the gain-map image item CICP color information, or `null`
+        private GainMapSampler(
+                AvifPlanes planes,
+                int baseWidth,
+                int baseHeight,
+                @Nullable AvifColorInfo gainMapColorInfo
+        ) {
             if (baseWidth <= 0 || baseHeight <= 0) {
                 throw new IllegalArgumentException("base frame dimensions must be positive");
             }
@@ -367,6 +395,9 @@ final class AvifGainMapToneMapper {
             this.baseWidth = baseWidth;
             this.baseHeight = baseHeight;
             this.maxSample = planes.bitDepth().maxSampleValue();
+            this.yuvToRgbTransform = gainMapColorInfo != null
+                    ? YuvToRgbTransform.fromColorInfo(gainMapColorInfo, planes.pixelFormat() == AvifPixelFormat.I400)
+                    : YuvToRgbTransform.BT601_FULL_RANGE;
         }
 
         /// Returns a normalized gain-map RGB channel for one base pixel coordinate.
@@ -406,7 +437,7 @@ final class AvifGainMapToneMapper {
             }
             int chromaX = chromaX(x);
             int chromaY = chromaY(y);
-            cachedRgb = YuvToRgbTransform.BT601_FULL_RANGE.toOpaqueArgb(
+            cachedRgb = yuvToRgbTransform.toOpaqueArgb(
                     planes.lumaPlane().sample(x, y),
                     chromaUPlane.sample(chromaX, chromaY),
                     chromaVPlane.sample(chromaX, chromaY),
@@ -436,7 +467,7 @@ final class AvifGainMapToneMapper {
         /// @param sample the decoded sample
         /// @return the normalized sample
         private double sampleToUnit(int sample) {
-            return clampUnit((double) sample / (double) maxSample);
+            return AvifCicpColorTransforms.clampUnit((double) sample / (double) maxSample);
         }
 
         /// Returns the chroma x coordinate for one luma x coordinate.

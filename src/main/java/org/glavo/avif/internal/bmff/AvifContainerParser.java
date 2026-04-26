@@ -2385,12 +2385,24 @@ public final class AvifContainerParser {
                 gainMapDimensions.height,
                 gainMapBitDepth,
                 gainMapPixelFormat,
+                toneMappedItem.firstProperty(AvifColorInfo.class),
+                iccProfile(toneMappedItem),
+                gainMapItem.firstProperty(AvifColorInfo.class),
                 metadata.version,
                 metadata.minimumVersion,
                 metadata.writerVersion,
                 true,
                 metadata.metadata
         );
+    }
+
+    /// Returns the ICC profile property payload for one item.
+    ///
+    /// @param item the item whose properties are searched
+    /// @return the ICC profile payload, or `null` when absent
+    private static byte @Nullable [] iccProfile(Item item) {
+        IccColorProfile iccProfile = item.firstProperty(IccColorProfile.class);
+        return iccProfile != null ? iccProfile.profile() : null;
     }
 
     /// Parses the tone-map metadata payload from one `tmap` item.
