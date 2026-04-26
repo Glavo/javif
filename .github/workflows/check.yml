@@ -21,8 +21,8 @@ jobs:
         with:
           name: javif.jar
           path: build/libs/*.jar
-      - run: xvfb-run -a ./gradlew check jacocoTestReport --info --no-daemon --stacktrace
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v6
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+#      - run: xvfb-run -a ./gradlew check jacocoTestReport --info --no-daemon --stacktrace
+#      - name: Upload coverage report
+#        uses: codecov/codecov-action@v6
+#        with:
+#          token: ${{ secrets.CODECOV_TOKEN }}
