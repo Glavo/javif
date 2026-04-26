@@ -494,6 +494,42 @@ public final class AvifImageReader implements AutoCloseable {
         throw unsupported("Gain-map item type is not decodable as AV1 planes: " + gainMapInfo.gainMapItemType(), null);
     }
 
+    /// Reads the decoded frame at the supplied index with its AVIF gain map applied.
+    ///
+    /// The returned frame preserves the regular `readFrame(int)` alpha composition, item
+    /// transforms, frame index, and RGB storage mode. A `null` return value means the frame has no
+    /// supported gain-map association. AVIS sequence gain maps are not implemented yet.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @param hdrHeadroom the requested display HDR headroom in log2 space
+    /// @return the tone-mapped frame, or `null` when no supported gain map is present
+    /// @throws IOException if the base frame or gain-map image cannot be decoded
+    public @Nullable AvifFrame readToneMappedFrame(int frameIndex, double hdrHeadroom) throws IOException {
+        ensureOpen();
+        if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
+            throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
+        }
+        if (!Double.isFinite(hdrHeadroom) || hdrHeadroom < 0.0) {
+            throw new IllegalArgumentException("hdrHeadroom must be a finite non-negative value");
+        }
+        AvifGainMapInfo gainMapInfo = container.info().gainMapInfo();
+        if (gainMapInfo == null) {
+            return null;
+        }
+        if (container.isSequence()) {
+            throw unsupported("Tone mapping AVIS gain-map sequences is not implemented", null);
+        }
+        AvifGainMapMetadata metadata = gainMapInfo.metadata();
+        if (metadata == null) {
+            return null;
+        }
+        AvifPlanes gainMapPlanes = readRawGainMapPlanes(frameIndex);
+        if (gainMapPlanes == null) {
+            return null;
+        }
+        return AvifGainMapToneMapper.apply(readFrame(frameIndex), gainMapPlanes, metadata, hdrHeadroom);
+    }
+
     /// Reads raw decoded depth auxiliary planes for the frame at the supplied index.
     ///
     /// The returned planes expose a depth auxiliary AV1 image before AVIF item transforms are

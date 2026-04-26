@@ -168,6 +168,25 @@ final class AvifImageReaderTest {
         return bytes;
     }
 
+    /// Returns whether two ARGB buffers contain at least one RGB difference while preserving alpha.
+    ///
+    /// @param basePixels the base frame pixels
+    /// @param toneMappedPixels the tone-mapped frame pixels
+    /// @return whether at least one RGB channel differs and every alpha channel matches
+    private static boolean hasRgbDifferenceWithSameAlpha(IntBuffer basePixels, IntBuffer toneMappedPixels) {
+        assertEquals(basePixels.remaining(), toneMappedPixels.remaining());
+        boolean hasRgbDifference = false;
+        while (basePixels.hasRemaining()) {
+            int basePixel = basePixels.get();
+            int toneMappedPixel = toneMappedPixels.get();
+            assertEquals(basePixel & 0xFF00_0000, toneMappedPixel & 0xFF00_0000);
+            if ((basePixel & 0x00FF_FFFF) != (toneMappedPixel & 0x00FF_FFFF)) {
+                hasRgbDifference = true;
+            }
+        }
+        return hasRgbDifference;
+    }
+
     /// Creates a depth auxiliary fixture by replacing the alpha auxiliary type with the equal-length depth type.
     ///
     /// @return an AVIF fixture with a depth auxiliary item
@@ -661,6 +680,98 @@ final class AvifImageReaderTest {
     void readRawGainMapPlanesReturnsNullWithoutGainMap() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE))) {
             assertNull(reader.readRawGainMapPlanes(0));
+        }
+    }
+
+    /// Verifies that tone-mapped output is absent when no gain map is present.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readToneMappedFrameReturnsNullWithoutGainMap() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE))) {
+            assertNull(reader.readToneMappedFrame(0, 1.0));
+        }
+    }
+
+    /// Verifies that invalid tone-mapping headroom values are rejected before decoding.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void readToneMappedFrameRejectsInvalidHeadroom() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_FIXTURE))) {
+            assertThrows(IllegalArgumentException.class, () -> reader.readToneMappedFrame(0, -1.0));
+            assertThrows(IllegalArgumentException.class, () -> reader.readToneMappedFrame(0, Double.NaN));
+            assertThrows(IllegalArgumentException.class, () -> reader.readToneMappedFrame(0, Double.POSITIVE_INFINITY));
+        }
+    }
+
+    /// Verifies that applying a gain map at the base image headroom is a no-op.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readToneMappedFrameAtBaseHeadroomReturnsBasePixels() throws IOException {
+        byte[] bytes = testResourceBytes(LIBAVIF_GAINMAP_FIXTURE);
+        int[] basePixels;
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifFrame baseFrame = reader.readFrame(0);
+            basePixels = baseFrame.intPixels();
+        }
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+            AvifGainMapMetadata metadata = gainMapInfo.metadata();
+            assertNotNull(metadata);
+
+            AvifFrame toneMappedFrame = reader.readToneMappedFrame(0, metadata.baseHdrHeadroom().toDouble());
+            assertNotNull(toneMappedFrame);
+            assertArrayEquals(basePixels, toneMappedFrame.intPixels());
+        }
+    }
+
+    /// Verifies that applying a gain map at the alternate image headroom changes RGB while preserving alpha.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readToneMappedFrameAtAlternateHeadroomAppliesGainMap() throws IOException {
+        byte[] bytes = testResourceBytes(LIBAVIF_GAINMAP_FIXTURE);
+        AvifFrame baseFrame;
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            baseFrame = reader.readFrame(0);
+        }
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+            AvifGainMapMetadata metadata = gainMapInfo.metadata();
+            assertNotNull(metadata);
+
+            AvifFrame toneMappedFrame = reader.readToneMappedFrame(0, metadata.alternateHdrHeadroom().toDouble());
+            assertNotNull(toneMappedFrame);
+            assertEquals(baseFrame.width(), toneMappedFrame.width());
+            assertEquals(baseFrame.height(), toneMappedFrame.height());
+            assertEquals(baseFrame.bitDepth(), toneMappedFrame.bitDepth());
+            assertEquals(baseFrame.pixelFormat(), toneMappedFrame.pixelFormat());
+            assertEquals(baseFrame.rgbOutputMode(), toneMappedFrame.rgbOutputMode());
+            assertTrue(hasRgbDifferenceWithSameAlpha(baseFrame.intPixelBuffer(), toneMappedFrame.intPixelBuffer()));
+        }
+    }
+
+    /// Verifies that gain-map grid fixtures can be tone-mapped into frame output.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readToneMappedFrameComposesGainMapGridFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_GRID_FIXTURE))) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+            AvifGainMapMetadata metadata = gainMapInfo.metadata();
+            assertNotNull(metadata);
+
+            AvifFrame toneMappedFrame = reader.readToneMappedFrame(0, metadata.alternateHdrHeadroom().toDouble());
+            assertNotNull(toneMappedFrame);
+            assertEquals(reader.info().width(), toneMappedFrame.width());
+            assertEquals(reader.info().height(), toneMappedFrame.height());
+            assertEquals(AvifRgbOutputMode.ARGB_16161616, toneMappedFrame.rgbOutputMode());
+            assertTrue(toneMappedFrame.longPixelBuffer().isReadOnly());
         }
     }
 

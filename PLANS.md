@@ -22,10 +22,10 @@ tools, native ABI compatibility, fuzzers, and apps are out of scope.
 - Improve display semantics while preserving raw-plane APIs: clarify ICC/CICP behavior, implement
   pure-Java CICP transfer and primaries conversion where feasible under the `java.base` runtime
   boundary, and keep ICC application metadata-only unless the dependency policy changes.
-- Complete AVIF-level feature handling covered by libavif data: gain-map tone mapping on top of the
-  parsed and validated `tmap` metadata, AVIS gain-map/depth/alpha sequencing gaps, non-default
-  operating-point policy, auxiliary grid/layout edge cases, and stricter `clap`/`irot`/`imir`
-  validation against libavif behavior.
+- Complete AVIF-level feature handling covered by libavif data: reference-grade gain-map tone
+  mapping with CICP/ICC color-management parity, AVIS gain-map/depth/alpha sequencing gaps,
+  non-default operating-point policy, auxiliary grid/layout edge cases, and stricter
+  `clap`/`irot`/`imir` validation against libavif behavior.
 - Keep public APIs conservative. Add configuration only where behavior must be selectable, such as
   color-management mode, film-grain enablement, operating-point selection, and gain-map application
   mode.
