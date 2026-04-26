@@ -21,8 +21,11 @@ import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
 import org.glavo.avif.AvifGainMapInfo;
+import org.glavo.avif.AvifGainMapMetadata;
 import org.glavo.avif.AvifImageInfo;
 import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.AvifSignedFraction;
+import org.glavo.avif.AvifUnsignedFraction;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -2300,7 +2303,10 @@ public final class AvifContainerParser {
             }
             validateOperatingPointStructure(gainMapItem, "Gain-map image");
 
-            ToneMapMetadataVersions versions = toneMapMetadataVersions(item);
+            @Nullable ToneMapMetadata toneMapMetadata = toneMapMetadata(item);
+            if (toneMapMetadata == null) {
+                return GainMapPayloads.empty();
+            }
             ItemDimensions toneMappedDimensions = itemDimensions(item);
 
             if ("grid".equals(gainMapItem.type)) {
@@ -2313,7 +2319,7 @@ public final class AvifContainerParser {
                         new ItemDimensions(grid.outputWidth, grid.outputHeight),
                         AvifBitDepth.fromBits(grid.representativeAv1C.bitDepth()),
                         grid.representativeAv1C.pixelFormat(),
-                        versions
+                        toneMapMetadata
                 );
                 return GainMapPayloads.grid(info, grid);
             }
@@ -2336,7 +2342,7 @@ public final class AvifContainerParser {
                     gainMapDimensions,
                     gainMapBitDepth,
                     gainMapPixelFormat,
-                    versions
+                    toneMapMetadata
             );
             if ("av01".equals(gainMapItem.type)) {
                 return GainMapPayloads.item(info, mergeItemExtents(gainMapItem));
@@ -2355,7 +2361,7 @@ public final class AvifContainerParser {
     /// @param gainMapDimensions the gain-map item dimensions
     /// @param gainMapBitDepth the gain-map AV1 bit depth, or `null`
     /// @param gainMapPixelFormat the gain-map AV1 pixel format, or `null`
-    /// @param versions the parsed tone-map metadata version fields
+    /// @param metadata the parsed tone-map metadata
     /// @return a gain-map descriptor
     private static AvifGainMapInfo gainMapInfo(
             Item toneMappedItem,
@@ -2365,7 +2371,7 @@ public final class AvifContainerParser {
             ItemDimensions gainMapDimensions,
             @Nullable AvifBitDepth gainMapBitDepth,
             @Nullable AvifPixelFormat gainMapPixelFormat,
-            ToneMapMetadataVersions versions
+            ToneMapMetadata metadata
     ) {
         return new AvifGainMapInfo(
                 toneMappedItem.id,
@@ -2379,21 +2385,22 @@ public final class AvifContainerParser {
                 gainMapDimensions.height,
                 gainMapBitDepth,
                 gainMapPixelFormat,
-                versions.version,
-                versions.minimumVersion,
-                versions.writerVersion,
-                versions.supported()
+                metadata.version,
+                metadata.minimumVersion,
+                metadata.writerVersion,
+                true,
+                metadata.metadata
         );
     }
 
-    /// Parses only the version fields from one `tmap` metadata payload.
+    /// Parses the tone-map metadata payload from one `tmap` item.
     ///
     /// @param item the `tmap` item
-    /// @return parsed `tmap` metadata version fields
+    /// @return parsed tone-map metadata, or `null` when the metadata version is unsupported
     /// @throws AvifDecodeException if the payload is malformed
-    private ToneMapMetadataVersions toneMapMetadataVersions(Item item) throws AvifDecodeException {
+    private @Nullable ToneMapMetadata toneMapMetadata(Item item) throws AvifDecodeException {
         byte[] payload = mergeItemExtents(item);
-        if (payload.length < 5) {
+        if (payload.length < 1) {
             throw new AvifDecodeException(
                     AvifErrorCode.BMFF_PARSE_FAILED,
                     "tmap item payload is too short: " + item.id,
@@ -2402,9 +2409,134 @@ public final class AvifContainerParser {
         }
         BoxInput input = new BoxInput(payload);
         int version = input.readU8();
+        if (version != 0) {
+            return null;
+        }
+        if (input.remaining() < 4) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "tmap item payload is too short: " + item.id,
+                    null
+            );
+        }
         int minimumVersion = input.readU16();
+        if (minimumVersion > SUPPORTED_GAIN_MAP_METADATA_VERSION) {
+            return null;
+        }
         int writerVersion = input.readU16();
-        return new ToneMapMetadataVersions(version, minimumVersion, writerVersion);
+        if (writerVersion < minimumVersion) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "tmap writer_version is less than minimum_version: " + writerVersion + " < " + minimumVersion,
+                    null
+            );
+        }
+
+        AvifGainMapMetadata metadata = parseGainMapMetadata(input);
+        if (writerVersion <= SUPPORTED_GAIN_MAP_METADATA_VERSION && input.hasRemaining()) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "tmap item has unexpected trailing metadata bytes: " + input.remaining(),
+                    null
+            );
+        }
+        return new ToneMapMetadata(version, minimumVersion, writerVersion, metadata);
+    }
+
+    /// Parses ISO 21496-1 gain-map metadata from a `tmap` payload body.
+    ///
+    /// @param input the input positioned after the version fields
+    /// @return parsed gain-map metadata
+    /// @throws AvifDecodeException if the metadata is malformed
+    private static AvifGainMapMetadata parseGainMapMetadata(BoxInput input) throws AvifDecodeException {
+        int packedFlags = input.readU8();
+        boolean multichannel = (packedFlags & 0x80) != 0;
+        boolean useBaseColorSpace = (packedFlags & 0x40) != 0;
+        int channelCount = multichannel ? 3 : 1;
+
+        AvifUnsignedFraction baseHdrHeadroom = readUnsignedFraction(input);
+        AvifUnsignedFraction alternateHdrHeadroom = readUnsignedFraction(input);
+        AvifSignedFraction[] gainMapMin = new AvifSignedFraction[3];
+        AvifSignedFraction[] gainMapMax = new AvifSignedFraction[3];
+        AvifUnsignedFraction[] gainMapGamma = new AvifUnsignedFraction[3];
+        AvifSignedFraction[] baseOffset = new AvifSignedFraction[3];
+        AvifSignedFraction[] alternateOffset = new AvifSignedFraction[3];
+
+        for (int c = 0; c < channelCount; c++) {
+            gainMapMin[c] = readSignedFraction(input);
+            gainMapMax[c] = readSignedFraction(input);
+            gainMapGamma[c] = readUnsignedFraction(input);
+            baseOffset[c] = readSignedFraction(input);
+            alternateOffset[c] = readSignedFraction(input);
+        }
+        for (int c = channelCount; c < 3; c++) {
+            gainMapMin[c] = gainMapMin[0];
+            gainMapMax[c] = gainMapMax[0];
+            gainMapGamma[c] = gainMapGamma[0];
+            baseOffset[c] = baseOffset[0];
+            alternateOffset[c] = alternateOffset[0];
+        }
+
+        try {
+            return new AvifGainMapMetadata(
+                    multichannel,
+                    useBaseColorSpace,
+                    baseHdrHeadroom,
+                    alternateHdrHeadroom,
+                    gainMapMin,
+                    gainMapMax,
+                    gainMapGamma,
+                    baseOffset,
+                    alternateOffset
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Invalid gain-map metadata: " + exception.getMessage(),
+                    null,
+                    exception
+            );
+        }
+    }
+
+    /// Reads one unsigned gain-map metadata fraction.
+    ///
+    /// @param input the source input
+    /// @return one unsigned fraction
+    /// @throws AvifDecodeException if the input is truncated or invalid
+    private static AvifUnsignedFraction readUnsignedFraction(BoxInput input) throws AvifDecodeException {
+        long numerator = input.readU32();
+        long denominator = input.readU32();
+        try {
+            return new AvifUnsignedFraction(numerator, denominator);
+        } catch (IllegalArgumentException exception) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Invalid unsigned gain-map fraction: " + exception.getMessage(),
+                    null,
+                    exception
+            );
+        }
+    }
+
+    /// Reads one signed gain-map metadata fraction.
+    ///
+    /// @param input the source input
+    /// @return one signed fraction
+    /// @throws AvifDecodeException if the input is truncated or invalid
+    private static AvifSignedFraction readSignedFraction(BoxInput input) throws AvifDecodeException {
+        int numerator = (int) input.readU32();
+        long denominator = input.readU32();
+        try {
+            return new AvifSignedFraction(numerator, denominator);
+        } catch (IllegalArgumentException exception) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Invalid signed gain-map fraction: " + exception.getMessage(),
+                    null,
+                    exception
+            );
+        }
     }
 
     /// Returns image dimensions from an item's `ispe` property.
@@ -2693,34 +2825,34 @@ public final class AvifContainerParser {
         }
     }
 
-    /// Parsed `tmap` metadata version fields.
+    /// Parsed `tmap` metadata.
     @NotNullByDefault
-    private static final class ToneMapMetadataVersions {
+    private static final class ToneMapMetadata {
         /// The metadata version field.
         private final int version;
         /// The minimum supported metadata version field.
         private final int minimumVersion;
         /// The writer metadata version field.
         private final int writerVersion;
+        /// The parsed gain-map metadata.
+        private final AvifGainMapMetadata metadata;
 
-        /// Creates parsed `tmap` metadata version fields.
+        /// Creates parsed `tmap` metadata.
         ///
         /// @param version the metadata version field
         /// @param minimumVersion the minimum supported metadata version field
         /// @param writerVersion the writer metadata version field
-        private ToneMapMetadataVersions(int version, int minimumVersion, int writerVersion) {
+        /// @param metadata the parsed gain-map metadata
+        private ToneMapMetadata(
+                int version,
+                int minimumVersion,
+                int writerVersion,
+                AvifGainMapMetadata metadata
+        ) {
             this.version = version;
             this.minimumVersion = minimumVersion;
             this.writerVersion = writerVersion;
-        }
-
-        /// Returns whether this implementation supports these metadata version fields.
-        ///
-        /// @return whether this implementation supports these metadata version fields
-        private boolean supported() {
-            return version == 0
-                    && minimumVersion <= SUPPORTED_GAIN_MAP_METADATA_VERSION
-                    && writerVersion >= minimumVersion;
+            this.metadata = Objects.requireNonNull(metadata, "metadata");
         }
     }
 

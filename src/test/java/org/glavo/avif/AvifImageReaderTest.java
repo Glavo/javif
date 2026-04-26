@@ -127,6 +127,22 @@ final class AvifImageReaderTest {
     private static final String LIBAVIF_UNSUPPORTED_GAINMAP_VERSION_FIXTURE =
             "libavif-test-data/unsupported_gainmap_version.avif";
 
+    /// A gain-map fixture with an unsupported `tmap` minimum metadata version.
+    private static final String LIBAVIF_UNSUPPORTED_GAINMAP_MINIMUM_VERSION_FIXTURE =
+            "libavif-test-data/unsupported_gainmap_minimum_version.avif";
+
+    /// A gain-map fixture with an unsupported writer version and extra trailing metadata bytes.
+    private static final String LIBAVIF_UNSUPPORTED_GAINMAP_WRITER_EXTRA_BYTES_FIXTURE =
+            "libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif";
+
+    /// A gain-map fixture with a supported writer version and invalid extra trailing metadata bytes.
+    private static final String LIBAVIF_SUPPORTED_GAINMAP_WRITER_EXTRA_BYTES_FIXTURE =
+            "libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif";
+
+    /// A gain-map fixture with invalid zero gamma metadata.
+    private static final String LIBAVIF_GAINMAP_ZERO_GAMMA_FIXTURE =
+            "libavif-test-data/seine_sdr_gainmap_gammazero.avif";
+
     /// Loads a test resource into a byte array.
     ///
     /// @param resourceName the classpath resource name
@@ -581,6 +597,18 @@ final class AvifImageReaderTest {
             assertEquals(0, gainMapInfo.metadataMinimumVersion());
             assertEquals(0, gainMapInfo.metadataWriterVersion());
             assertTrue(gainMapInfo.metadataSupported());
+            AvifGainMapMetadata metadata = gainMapInfo.metadata();
+            assertNotNull(metadata);
+            assertTrue(metadata.useBaseColorSpace());
+            assertEquals(3, metadata.gainMapMin().length);
+            assertEquals(3, metadata.gainMapMax().length);
+            assertEquals(3, metadata.gainMapGamma().length);
+            assertEquals(3, metadata.baseOffset().length);
+            assertEquals(3, metadata.alternateOffset().length);
+            for (AvifUnsignedFraction gamma : metadata.gainMapGamma()) {
+                assertTrue(gamma.numerator() > 0);
+                assertTrue(gamma.denominator() > 0);
+            }
         }
     }
 
@@ -620,6 +648,9 @@ final class AvifImageReaderTest {
             assertEquals(gainMapInfo.gainMapWidth(), gainMapPlanes.codedWidth());
             assertEquals(gainMapInfo.gainMapHeight(), gainMapPlanes.codedHeight());
             assertTrue(gainMapPlanes.lumaPlane().sampleBuffer().isReadOnly());
+            AvifGainMapMetadata metadata = gainMapInfo.metadata();
+            assertNotNull(metadata);
+            assertEquals(new AvifUnsignedFraction(6, 2), metadata.baseHdrHeadroom());
         }
     }
 
@@ -681,18 +712,60 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that unsupported gain-map metadata versions are exposed as unsupported descriptors.
+    /// Verifies that unsupported gain-map metadata versions are ignored.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
     @Test
-    void openExposesUnsupportedGainMapMetadataVersion() throws IOException {
+    void openIgnoresUnsupportedGainMapMetadataVersions() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_UNSUPPORTED_GAINMAP_VERSION_FIXTURE))) {
-            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
-
-            assertNotNull(gainMapInfo);
-            assertEquals(99, gainMapInfo.metadataVersion());
-            assertFalse(gainMapInfo.metadataSupported());
+            assertNull(reader.info().gainMapInfo());
+            assertNull(reader.readRawGainMapPlanes(0));
         }
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_UNSUPPORTED_GAINMAP_MINIMUM_VERSION_FIXTURE)
+        )) {
+            assertNull(reader.info().gainMapInfo());
+            assertNull(reader.readRawGainMapPlanes(0));
+        }
+    }
+
+    /// Verifies that newer writer metadata may append unknown bytes when the minimum version is supported.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openAcceptsUnsupportedGainMapWriterVersionWithExtraBytes() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_UNSUPPORTED_GAINMAP_WRITER_EXTRA_BYTES_FIXTURE)
+        )) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+            assertEquals(0, gainMapInfo.metadataVersion());
+            assertEquals(0, gainMapInfo.metadataMinimumVersion());
+            assertEquals(99, gainMapInfo.metadataWriterVersion());
+            assertTrue(gainMapInfo.metadataSupported());
+            assertNotNull(gainMapInfo.metadata());
+            assertNotNull(reader.readRawGainMapPlanes(0));
+        }
+    }
+
+    /// Verifies that supported writer metadata rejects unexpected trailing bytes.
+    @Test
+    void openRejectsSupportedGainMapWriterVersionWithExtraBytes() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(testResourceBytes(LIBAVIF_SUPPORTED_GAINMAP_WRITER_EXTRA_BYTES_FIXTURE))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that invalid gain-map gamma metadata is rejected.
+    @Test
+    void openRejectsGainMapZeroGamma() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_ZERO_GAMMA_FIXTURE))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
     /// Verifies that a progressive idat fixture parses and decodes through the reader.

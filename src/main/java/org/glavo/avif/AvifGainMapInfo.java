@@ -57,6 +57,8 @@ public final class AvifGainMapInfo {
     private final int metadataWriterVersion;
     /// Whether this implementation can parse the advertised gain-map metadata version.
     private final boolean metadataSupported;
+    /// The parsed gain-map metadata, or `null` when the metadata version is unsupported.
+    private final @Nullable AvifGainMapMetadata metadata;
 
     /// Creates gain-map metadata.
     ///
@@ -75,6 +77,7 @@ public final class AvifGainMapInfo {
     /// @param metadataMinimumVersion the minimum metadata version required by the `tmap` payload
     /// @param metadataWriterVersion the writer metadata version from the `tmap` payload
     /// @param metadataSupported whether this implementation can parse the advertised metadata version
+    /// @param metadata the parsed gain-map metadata, or `null` when unsupported
     public AvifGainMapInfo(
             int toneMappedImageItemId,
             int baseImageItemId,
@@ -90,7 +93,8 @@ public final class AvifGainMapInfo {
             int metadataVersion,
             int metadataMinimumVersion,
             int metadataWriterVersion,
-            boolean metadataSupported
+            boolean metadataSupported,
+            @Nullable AvifGainMapMetadata metadata
     ) {
         if (toneMappedImageItemId <= 0) {
             throw new IllegalArgumentException("toneMappedImageItemId <= 0: " + toneMappedImageItemId);
@@ -113,6 +117,9 @@ public final class AvifGainMapInfo {
         if (metadataVersion < 0 || metadataMinimumVersion < 0 || metadataWriterVersion < 0) {
             throw new IllegalArgumentException("metadata version fields must be non-negative");
         }
+        if (metadataSupported != (metadata != null)) {
+            throw new IllegalArgumentException("metadataSupported must match metadata presence");
+        }
 
         this.toneMappedImageItemId = toneMappedImageItemId;
         this.baseImageItemId = baseImageItemId;
@@ -129,6 +136,7 @@ public final class AvifGainMapInfo {
         this.metadataMinimumVersion = metadataMinimumVersion;
         this.metadataWriterVersion = metadataWriterVersion;
         this.metadataSupported = metadataSupported;
+        this.metadata = metadata;
     }
 
     /// Returns the `tmap` derived image item id.
@@ -234,6 +242,13 @@ public final class AvifGainMapInfo {
     /// @return whether the gain-map metadata version is supported
     public boolean metadataSupported() {
         return metadataSupported;
+    }
+
+    /// Returns the parsed gain-map metadata.
+    ///
+    /// @return the parsed gain-map metadata, or `null` when unsupported
+    public @Nullable AvifGainMapMetadata metadata() {
+        return metadata;
     }
 
     /// Returns whether the supplied dimensions represent a known image size.
