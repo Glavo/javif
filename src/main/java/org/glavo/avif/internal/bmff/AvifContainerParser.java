@@ -407,6 +407,9 @@ public final class AvifContainerParser {
         }
         validateOperatingPointStructure(auxiliaryItem, label + " auxiliary image");
         validateAuxiliaryItemDimensions(auxiliaryItem, label, expectedWidth, expectedHeight);
+        if (isAlphaAuxiliaryType(auxiliaryType)) {
+            validateAuxiliaryTransformProperties(imageItem, auxiliaryItem, label);
+        }
         return AuxiliaryPayloads.item(mergeItemExtents(auxiliaryItem));
     }
 
@@ -432,6 +435,9 @@ public final class AvifContainerParser {
                         label + " auxiliary item is not usable: " + auxiliaryItem.id,
                         null
                 );
+            }
+            if (isAlphaAuxiliaryType(auxiliaryType)) {
+                validateAuxiliaryTransformProperties(gridItem, auxiliaryItem, label);
             }
             if ("grid".equals(auxiliaryItem.type)) {
                 GridPayloads auxiliaryGrid = parseGridPayloads(auxiliaryItem);
@@ -495,6 +501,9 @@ public final class AvifContainerParser {
             ImageSpatialExtents colorIspe = colorCellItem.firstProperty(ImageSpatialExtents.class);
             assert colorIspe != null;
             validateAuxiliaryItemDimensions(auxiliaryCellItem, label, colorIspe.width, colorIspe.height);
+            if (isAlphaAuxiliaryType(auxiliaryType)) {
+                validateAuxiliaryTransformProperties(colorCellItem, auxiliaryCellItem, "Per-cell " + label);
+            }
             auxiliaryCellPayloads[i] = mergeItemExtents(auxiliaryCellItem);
         }
         return AuxiliaryPayloads.grid(new GridPayloads(
@@ -560,6 +569,100 @@ public final class AvifContainerParser {
                     null
             );
         }
+    }
+
+    /// Returns whether an auxiliary type is the AVIF alpha auxiliary type.
+    ///
+    /// @param auxiliaryType the auxiliary image type string
+    /// @return whether the type describes an alpha auxiliary image
+    private static boolean isAlphaAuxiliaryType(String auxiliaryType) {
+        return AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(auxiliaryType);
+    }
+
+    /// Validates alpha auxiliary transform properties against the master image item.
+    ///
+    /// libavif accepts old alpha items that have no transform properties. Once any alpha transform
+    /// property is present, `clap`, `irot`, and `imir` must all match the color item exactly.
+    ///
+    /// @param imageItem the color image item
+    /// @param auxiliaryItem the alpha auxiliary item
+    /// @param label the diagnostic auxiliary label
+    /// @throws AvifDecodeException if alpha transform properties differ from the master image
+    private static void validateAuxiliaryTransformProperties(
+            Item imageItem,
+            Item auxiliaryItem,
+            String label
+    ) throws AvifDecodeException {
+        if (!hasTransformProperties(auxiliaryItem)) {
+            return;
+        }
+        if (!sameCleanApertureProperty(imageItem, auxiliaryItem)
+                || !sameImageRotationProperty(imageItem, auxiliaryItem)
+                || !sameImageMirrorProperty(imageItem, auxiliaryItem)) {
+            throw unsupported(label + " auxiliary transform properties differ from the master image", null);
+        }
+    }
+
+    /// Returns whether one item has any AVIF transformative property.
+    ///
+    /// @param item the item to inspect
+    /// @return whether the item has a `clap`, `irot`, or `imir` property
+    private static boolean hasTransformProperties(Item item) {
+        return item.firstProperty(CleanAperture.class) != null
+                || item.firstProperty(ImageRotation.class) != null
+                || item.firstProperty(ImageMirror.class) != null;
+    }
+
+    /// Returns whether two items have equal `clap` properties.
+    ///
+    /// @param firstItem the first item
+    /// @param secondItem the second item
+    /// @return whether the `clap` properties are both absent or equal
+    private static boolean sameCleanApertureProperty(Item firstItem, Item secondItem) {
+        @Nullable CleanAperture first = firstItem.firstProperty(CleanAperture.class);
+        @Nullable CleanAperture second = secondItem.firstProperty(CleanAperture.class);
+        if (first == second) {
+            return true;
+        }
+        if (first == null || second == null) {
+            return false;
+        }
+        return first.cleanApertureWidthN == second.cleanApertureWidthN
+                && first.cleanApertureWidthD == second.cleanApertureWidthD
+                && first.cleanApertureHeightN == second.cleanApertureHeightN
+                && first.cleanApertureHeightD == second.cleanApertureHeightD
+                && first.horizOffN == second.horizOffN
+                && first.horizOffD == second.horizOffD
+                && first.vertOffN == second.vertOffN
+                && first.vertOffD == second.vertOffD;
+    }
+
+    /// Returns whether two items have equal `irot` properties.
+    ///
+    /// @param firstItem the first item
+    /// @param secondItem the second item
+    /// @return whether the `irot` properties are both absent or equal
+    private static boolean sameImageRotationProperty(Item firstItem, Item secondItem) {
+        @Nullable ImageRotation first = firstItem.firstProperty(ImageRotation.class);
+        @Nullable ImageRotation second = secondItem.firstProperty(ImageRotation.class);
+        if (first == second) {
+            return true;
+        }
+        return first != null && second != null && first.rotation == second.rotation;
+    }
+
+    /// Returns whether two items have equal `imir` properties.
+    ///
+    /// @param firstItem the first item
+    /// @param secondItem the second item
+    /// @return whether the `imir` properties are both absent or equal
+    private static boolean sameImageMirrorProperty(Item firstItem, Item secondItem) {
+        @Nullable ImageMirror first = firstItem.firstProperty(ImageMirror.class);
+        @Nullable ImageMirror second = secondItem.firstProperty(ImageMirror.class);
+        if (first == second) {
+            return true;
+        }
+        return first != null && second != null && first.axis == second.axis;
     }
 
     /// Collects metadata payloads associated with one rendered image item.

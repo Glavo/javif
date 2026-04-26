@@ -37,6 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests that use Java ImageIO to read libavif PNG/JPEG reference resources.
 @NotNullByDefault
 final class LibavifImageIoReferenceTest {
+    /// Maximum per-channel delta accepted for the lossy `abc` AVIF fixture.
+    private static final int ABC_IROT_MAX_CHANNEL_DELTA = 16;
+
     /// Image resources copied from libavif's test data and their expected dimensions.
     private static final ImageResource @Unmodifiable [] IMAGE_RESOURCES = new ImageResource[]{
             new ImageResource("libavif-test-data/abc.png", 512, 256, true),
@@ -187,6 +190,25 @@ final class LibavifImageIoReferenceTest {
         assertRotatedFrameSize(source, "libavif-test-data/abc_color_irot_alpha_NOirot.avif");
     }
 
+    /// Verifies that the color-and-alpha `irot` fixture matches the source image after a 90-degree
+    /// counter-clockwise AVIF rotation.
+    ///
+    /// @throws IOException if a resource cannot be read or decoded
+    @Test
+    void abcColorAndAlphaIrotFixtureMatchesCounterClockwiseReferencePixels() throws IOException {
+        BufferedImage source = readImage("libavif-test-data/abc.png");
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes("libavif-test-data/abc_color_irot_alpha_irot.avif")
+        )) {
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
+            assertEquals(AvifPixelFormat.I444, frame.pixelFormat());
+            assertCounterClockwiseReferenceMatches(source, frame.intPixelBuffer(), frame.width(), frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Verifies that high-bit-depth rotation transforms are applied to decoded frame dimensions.
     ///
     /// @throws IOException if the AVIF resource cannot be decoded
@@ -284,6 +306,43 @@ final class LibavifImageIoReferenceTest {
 
         assertNull(firstMismatch, firstMismatch);
         assertTrue(largestDelta <= reference.maxChannelDelta);
+    }
+
+    /// Asserts that an AVIF output matches a 90-degree counter-clockwise rotation of a source image.
+    ///
+    /// @param expectedSource the unrotated source image
+    /// @param actualPixels the actual decoded AVIF pixels
+    /// @param actualWidth the actual decoded frame width
+    /// @param actualHeight the actual decoded frame height
+    private static void assertCounterClockwiseReferenceMatches(
+            BufferedImage expectedSource,
+            IntBuffer actualPixels,
+            int actualWidth,
+            int actualHeight
+    ) {
+        assertEquals(expectedSource.getHeight(), actualWidth);
+        assertEquals(expectedSource.getWidth(), actualHeight);
+        assertEquals(actualWidth * actualHeight, actualPixels.remaining());
+
+        int largestDelta = 0;
+        String firstMismatch = null;
+        for (int y = 0; y < actualHeight; y++) {
+            for (int x = 0; x < actualWidth; x++) {
+                int expectedArgb = expectedSource.getRGB(expectedSource.getWidth() - 1 - y, x);
+                int actualArgb = actualPixels.get(y * actualWidth + x);
+                int delta = displayRelevantChannelDelta(expectedArgb, actualArgb);
+                largestDelta = Math.max(largestDelta, delta);
+                if (delta > ABC_IROT_MAX_CHANNEL_DELTA && firstMismatch == null) {
+                    firstMismatch = "Pixel mismatch in abc_color_irot_alpha_irot.avif at (" + x + ", " + y
+                            + "): expected " + argbText(expectedArgb)
+                            + ", actual " + argbText(actualArgb)
+                            + ", max channel delta " + delta;
+                }
+            }
+        }
+
+        assertNull(firstMismatch, firstMismatch);
+        assertTrue(largestDelta <= ABC_IROT_MAX_CHANNEL_DELTA);
     }
 
     /// Returns the largest display-relevant unsigned 8-bit channel delta between two packed ARGB pixels.

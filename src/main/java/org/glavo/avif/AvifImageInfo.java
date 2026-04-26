@@ -66,9 +66,9 @@ public final class AvifImageInfo {
     private final int cleanApertureCropWidth;
     /// The clean-aperture crop height, or -1 when absent.
     private final int cleanApertureCropHeight;
-    /// The clockwise rotation code from the `irot` property, or -1 when absent.
+    /// The AVIF `irot` rotation code, or -1 when absent.
     private final int rotationCode;
-    /// The mirror axis from the `imir` property, or -1 when absent.
+    /// The AVIF `imir` mirror axis, or -1 when absent.
     private final int mirrorAxis;
     /// The typed image-transform descriptor, or `null` when no image transform is present.
     private final @Nullable AvifImageTransformInfo transformInfo;
@@ -231,8 +231,8 @@ public final class AvifImageInfo {
     /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
     /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
     /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
-    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
     /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
     public AvifImageInfo(
             int width,
@@ -303,8 +303,8 @@ public final class AvifImageInfo {
     /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
     /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
     /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
-    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
     /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
     /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
     @SuppressWarnings("checkstyle:ParameterNumber")
@@ -379,8 +379,8 @@ public final class AvifImageInfo {
     /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
     /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
     /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
-    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
     /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
     /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
     /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
@@ -459,8 +459,8 @@ public final class AvifImageInfo {
     /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
     /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
     /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
-    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
     /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
     /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
     /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
@@ -543,8 +543,8 @@ public final class AvifImageInfo {
     /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
     /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
     /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
-    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
     /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
     /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
     /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
@@ -814,9 +814,9 @@ public final class AvifImageInfo {
         return cleanApertureCropHeight;
     }
 
-    /// Returns the clockwise rotation code from the `irot` property.
+    /// Returns the AVIF `irot` rotation code.
     ///
-    /// Values 0 through 3 represent 0, 90, 180, and 270 degrees clockwise.
+    /// Values 0 through 3 represent 0, 90, 180, and 270 degrees counter-clockwise.
     /// A value of -1 means the property is absent.
     ///
     /// @return the rotation code, or -1 when absent
@@ -824,9 +824,9 @@ public final class AvifImageInfo {
         return rotationCode;
     }
 
-    /// Returns the mirror axis from the `imir` property.
+    /// Returns the AVIF `imir` mirror axis.
     ///
-    /// A value of 0 mirrors over the vertical axis, 1 mirrors over the horizontal axis,
+    /// A value of 0 mirrors over the horizontal axis, 1 mirrors over the vertical axis,
     /// and -1 means the property is absent.
     ///
     /// @return the mirror axis, or -1 when absent
@@ -1016,8 +1016,8 @@ public final class AvifImageInfo {
     /// @param cleanApertureCropY the clean-aperture crop y coordinate
     /// @param cleanApertureCropWidth the clean-aperture crop width
     /// @param cleanApertureCropHeight the clean-aperture crop height
-    /// @param rotationCode the clockwise rotation code
-    /// @param mirrorAxis the mirror axis
+    /// @param rotationCode the AVIF `irot` rotation code
+    /// @param mirrorAxis the AVIF `imir` mirror axis
     /// @return typed image-transform metadata, or `null`
     private static @Nullable AvifImageTransformInfo imageTransformInfo(
             int cleanApertureCropX,

@@ -1542,7 +1542,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param pixels the source pixel array
     /// @param width the source width
     /// @param height the source height
-    /// @param rotation the rotation code (1=90° CW, 2=180°, 3=270° CW)
+    /// @param rotation the AVIF `irot` rotation code (1=90° CCW, 2=180°, 3=90° CW)
     /// @return the rotated pixel array
     private static int[] applyRotationInt(int[] pixels, int width, int height, int rotation) {
         return switch (rotation) {
@@ -1552,7 +1552,7 @@ public final class AvifImageReader implements AutoCloseable {
                 int[] result = new int[newWidth * newHeight];
                 for (int y = 0; y < newHeight; y++) {
                     for (int x = 0; x < newWidth; x++) {
-                        result[y * newWidth + x] = pixels[(height - 1 - x) * width + y];
+                        result[y * newWidth + x] = pixels[x * width + (width - 1 - y)];
                     }
                 }
                 yield result;
@@ -1572,7 +1572,7 @@ public final class AvifImageReader implements AutoCloseable {
                 int[] result = new int[newWidth * newHeight];
                 for (int y = 0; y < newHeight; y++) {
                     for (int x = 0; x < newWidth; x++) {
-                        result[y * newWidth + x] = pixels[x * width + (width - 1 - y)];
+                        result[y * newWidth + x] = pixels[(height - 1 - x) * width + y];
                     }
                 }
                 yield result;
@@ -1586,7 +1586,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param pixels the source pixel array
     /// @param width the source width
     /// @param height the source height
-    /// @param rotation the rotation code (1=90° CW, 2=180°, 3=270° CW)
+    /// @param rotation the AVIF `irot` rotation code (1=90° CCW, 2=180°, 3=90° CW)
     /// @return the rotated pixel array
     private static long[] applyRotationLong(long[] pixels, int width, int height, int rotation) {
         return switch (rotation) {
@@ -1596,7 +1596,7 @@ public final class AvifImageReader implements AutoCloseable {
                 long[] result = new long[newWidth * newHeight];
                 for (int y = 0; y < newHeight; y++) {
                     for (int x = 0; x < newWidth; x++) {
-                        result[y * newWidth + x] = pixels[(height - 1 - x) * width + y];
+                        result[y * newWidth + x] = pixels[x * width + (width - 1 - y)];
                     }
                 }
                 yield result;
@@ -1616,7 +1616,7 @@ public final class AvifImageReader implements AutoCloseable {
                 long[] result = new long[newWidth * newHeight];
                 for (int y = 0; y < newHeight; y++) {
                     for (int x = 0; x < newWidth; x++) {
-                        result[y * newWidth + x] = pixels[x * width + (width - 1 - y)];
+                        result[y * newWidth + x] = pixels[(height - 1 - x) * width + y];
                     }
                 }
                 yield result;
@@ -1630,7 +1630,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param pixels the source pixel array
     /// @param width the source width
     /// @param height the source height
-    /// @param axis the mirror axis (0=vertical, 1=horizontal)
+    /// @param axis the AVIF `imir` mirror axis (0=horizontal axis, 1=vertical axis)
     /// @return the mirrored pixel array
     private static int[] applyMirrorInt(int[] pixels, int width, int height, int axis) {
         int[] result = new int[width * height];
@@ -1656,7 +1656,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param pixels the source pixel array
     /// @param width the source width
     /// @param height the source height
-    /// @param axis the mirror axis (0=vertical, 1=horizontal)
+    /// @param axis the AVIF `imir` mirror axis (0=horizontal axis, 1=vertical axis)
     /// @return the mirrored pixel array
     private static long[] applyMirrorLong(long[] pixels, int width, int height, int axis) {
         long[] result = new long[width * height];

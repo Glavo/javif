@@ -28,9 +28,9 @@ public final class AvifImageTransformInfo {
     private final int cleanApertureCropWidth;
     /// The clean-aperture crop height, or -1 when absent.
     private final int cleanApertureCropHeight;
-    /// The clockwise rotation code from `irot`, or -1 when absent.
+    /// The AVIF `irot` rotation code, or -1 when absent.
     private final int rotationCode;
-    /// The mirror axis from `imir`, or -1 when absent.
+    /// The AVIF `imir` mirror axis, or -1 when absent.
     private final int mirrorAxis;
 
     /// Creates immutable image transform metadata.
@@ -39,8 +39,8 @@ public final class AvifImageTransformInfo {
     /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
     /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
     /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the clockwise rotation code from `irot`, or -1 when absent
-    /// @param mirrorAxis the mirror axis from `imir`, or -1 when absent
+    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
     public AvifImageTransformInfo(
             int cleanApertureCropX,
             int cleanApertureCropY,
@@ -123,9 +123,9 @@ public final class AvifImageTransformInfo {
         return rotationCode >= 0;
     }
 
-    /// Returns the clockwise rotation code from `irot`.
+    /// Returns the AVIF `irot` rotation code.
     ///
-    /// Values 0 through 3 represent 0, 90, 180, and 270 degrees clockwise.
+    /// Values 0 through 3 represent 0, 90, 180, and 270 degrees counter-clockwise.
     /// A value of -1 means the property is absent.
     ///
     /// @return the rotation code, or -1 when absent
@@ -133,12 +133,21 @@ public final class AvifImageTransformInfo {
         return rotationCode;
     }
 
-    /// Returns the clockwise rotation in degrees.
+    /// Returns the clockwise-equivalent rotation in degrees.
     ///
     /// A value of -1 means the `irot` property is absent.
     ///
-    /// @return the clockwise rotation in degrees, or -1 when absent
+    /// @return the clockwise-equivalent rotation in degrees, or -1 when absent
     public int rotationDegreesClockwise() {
+        return rotationCode < 0 ? -1 : ((4 - rotationCode) & 3) * 90;
+    }
+
+    /// Returns the counter-clockwise rotation in degrees encoded by `irot`.
+    ///
+    /// A value of -1 means the `irot` property is absent.
+    ///
+    /// @return the counter-clockwise rotation in degrees, or -1 when absent
+    public int rotationDegreesCounterClockwise() {
         return rotationCode < 0 ? -1 : rotationCode * 90;
     }
 
@@ -149,9 +158,9 @@ public final class AvifImageTransformInfo {
         return mirrorAxis >= 0;
     }
 
-    /// Returns the mirror axis from `imir`.
+    /// Returns the AVIF `imir` mirror axis.
     ///
-    /// A value of 0 mirrors over the vertical axis, 1 mirrors over the horizontal axis,
+    /// A value of 0 mirrors over the horizontal axis, 1 mirrors over the vertical axis,
     /// and -1 means the property is absent.
     ///
     /// @return the mirror axis, or -1 when absent

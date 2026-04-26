@@ -1428,7 +1428,8 @@ final class AvifImageReaderTest {
             assertFalse(transformInfo.hasCleanApertureCrop());
             assertTrue(transformInfo.hasRotation());
             assertEquals(1, transformInfo.rotationCode());
-            assertEquals(90, transformInfo.rotationDegreesClockwise());
+            assertEquals(270, transformInfo.rotationDegreesClockwise());
+            assertEquals(90, transformInfo.rotationDegreesCounterClockwise());
             assertFalse(transformInfo.hasMirror());
             assertEquals(-1, transformInfo.mirrorAxis());
 
@@ -1457,6 +1458,7 @@ final class AvifImageReaderTest {
             assertFalse(transformInfo.hasCleanApertureCrop());
             assertFalse(transformInfo.hasRotation());
             assertEquals(-1, transformInfo.rotationDegreesClockwise());
+            assertEquals(-1, transformInfo.rotationDegreesCounterClockwise());
             assertTrue(transformInfo.hasMirror());
             assertEquals(1, transformInfo.mirrorAxis());
 
