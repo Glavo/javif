@@ -40,7 +40,7 @@ public final class BlockNeighborContext {
     private static final int PROVISIONAL_CANDIDATE_CAPACITY = 12;
 
     /// The AV1 coefficient-context byte that marks one transform block as all-zero.
-    private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
+    private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0;
 
     /// The switchable interpolation-filter symbol used for regular 8-tap filtering.
     private static final byte INTERPOLATION_FILTER_REGULAR = 0;
@@ -1828,9 +1828,9 @@ public final class BlockNeighborContext {
 
     /// Sums the stored DC-sign classes across one visible coefficient-context edge span.
     ///
-    /// Stored coefficient-context bytes encode negative values as class `0`, all-zero as class `1`,
-    /// and positive values as class `2`. This helper converts the stored bytes back into the
-    /// signed balance used by `dav1d`'s `get_dc_sign_ctx()`.
+    /// Stored coefficient-context bytes encode all-zero or zero-DC blocks as class `0`, negative
+    /// values as class `1`, and positive values as class `2`. This helper converts the stored
+    /// bytes back into the signed balance used by `dav1d`'s `get_dc_sign_ctx()`.
     ///
     /// @param contexts the stored coefficient-context edge bytes
     /// @param start the inclusive start coordinate in 4x4 units
@@ -1840,7 +1840,12 @@ public final class BlockNeighborContext {
         int end = Math.min(contexts.length, start + span);
         int sum = 0;
         for (int index = start; index < end; index++) {
-            sum += ((contexts[index] & 0xFF) >>> 6) - 1;
+            int signClass = (contexts[index] & 0xFF) >>> 6;
+            if (signClass == 1) {
+                sum--;
+            } else if (signClass == 2) {
+                sum++;
+            }
         }
         return sum;
     }

@@ -119,7 +119,7 @@ final class BlockNeighborContextTest {
         );
         context.updateLumaCoefficientContext(
                 new TransformUnit(new BlockPosition(0, 1), TransformSize.TX_4X4),
-                0x03
+                0x43
         );
 
         assertEquals(

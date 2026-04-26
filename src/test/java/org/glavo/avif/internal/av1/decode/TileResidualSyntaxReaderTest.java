@@ -113,7 +113,7 @@ final class TileResidualSyntaxReaderTest {
         assertTrue(residualUnit.allZero());
         assertEquals(-1, residualUnit.endOfBlockIndex());
         assertArrayEquals(new int[16], residualUnit.coefficients());
-        assertEquals(0x40, residualUnit.coefficientContextByte());
+        assertEquals(0, residualUnit.coefficientContextByte());
     }
 
     /// Verifies that a supported non-zero transform block decodes a real DC coefficient.
@@ -594,7 +594,7 @@ final class TileResidualSyntaxReaderTest {
         assertTrue(residualUnits[0].endOfBlockIndex() >= 0);
         assertEquals(expectedCoefficientContextByte(residualUnits[0].coefficients()), residualUnits[0].coefficientContextByte());
         assertTrue(residualUnits[1].allZero());
-        assertEquals(0x40, residualUnits[1].coefficientContextByte());
+        assertEquals(0, residualUnits[1].coefficientContextByte());
 
         BlockNeighborContext oracleNeighborContext = BlockNeighborContext.create(tileContext);
         TileBlockHeaderReader.BlockHeader oracleHeader =
@@ -910,7 +910,11 @@ final class TileResidualSyntaxReaderTest {
     /// @param signedDcCoefficient the decoded signed DC coefficient
     /// @return the stored coefficient-context byte expected for one non-zero DC coefficient
     private static int expectedNonZeroCoefficientContextByte(int signedDcCoefficient) {
-        return Math.min(Math.abs(signedDcCoefficient), 63) | (signedDcCoefficient > 0 ? 0x80 : 0);
+        int magnitude = Math.min(Math.abs(signedDcCoefficient), 63);
+        if (signedDcCoefficient < 0) {
+            return magnitude | 0x40;
+        }
+        return magnitude | 0x80;
     }
 
     /// Returns the expected stored coefficient-context byte for one dense residual coefficient array.
@@ -924,10 +928,13 @@ final class TileResidualSyntaxReaderTest {
         }
         int magnitude = Math.min(cumulativeLevel, 63);
         int dcCoefficient = coefficients[0];
-        if (dcCoefficient == 0) {
+        if (dcCoefficient < 0) {
             return magnitude | 0x40;
         }
-        return magnitude | (dcCoefficient > 0 ? 0x80 : 0);
+        if (dcCoefficient > 0) {
+            return magnitude | 0x80;
+        }
+        return magnitude;
     }
 
     /// Returns the expected natural-raster index of the first scanned AC coefficient.
@@ -1817,7 +1824,7 @@ final class TileResidualSyntaxReaderTest {
                 new int[transformSize.widthPixels() * transformSize.heightPixels()],
                 visibleWidthPixels,
                 visibleHeightPixels,
-                0x40
+                0
         );
     }
 

@@ -41,7 +41,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
-    private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
+    private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0;
 
     /// The chroma-U plane index used by chroma coefficient-context helpers.
     private static final int CHROMA_PLANE_U = 0;
@@ -1236,10 +1236,13 @@ public final class TileResidualSyntaxReader {
     /// @return the stored coefficient-context byte for one non-zero transform unit
     private static int createNonZeroCoefficientContextByte(int cumulativeLevel, int signedDcLevel) {
         int magnitude = Math.min(cumulativeLevel, 63);
-        if (signedDcLevel == 0) {
+        if (signedDcLevel < 0) {
             return magnitude | 0x40;
         }
-        return magnitude | (signedDcLevel > 0 ? 0x80 : 0);
+        if (signedDcLevel > 0) {
+            return magnitude | 0x80;
+        }
+        return magnitude;
     }
 
     /// Returns the entropy-coded coefficient width for the supplied transform size.

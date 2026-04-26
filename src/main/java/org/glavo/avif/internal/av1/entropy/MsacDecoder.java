@@ -185,9 +185,13 @@ public final class MsacDecoder {
         do {
             symbol++;
             lowerBound = upperBound;
-            upperBound = scaledRange * (cdf[symbol] >>> PROBABILITY_SHIFT);
-            upperBound >>>= 7 - PROBABILITY_SHIFT;
-            upperBound += MINIMUM_PROBABILITY * (symbolLimit - symbol);
+            if (symbol == symbolLimit) {
+                upperBound = 0;
+            } else {
+                upperBound = scaledRange * (cdf[symbol] >>> PROBABILITY_SHIFT);
+                upperBound >>>= 7 - PROBABILITY_SHIFT;
+                upperBound += MINIMUM_PROBABILITY * (symbolLimit - symbol);
+            }
         } while (differenceHigh < upperBound);
 
         normalize(difference - (((long) upperBound) << (WINDOW_SIZE - 16)), lowerBound - upperBound);
