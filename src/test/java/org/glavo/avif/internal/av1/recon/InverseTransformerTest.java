@@ -25,7 +25,6 @@ import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /// Tests for minimal inverse-transform reconstruction.
 @NotNullByDefault
@@ -47,9 +46,6 @@ final class InverseTransformerTest {
 
     /// The sample count of one `TX_64X64` block.
     private static final int TX_64X64_AREA = TX_64X64_SIDE * TX_64X64_SIDE;
-
-    /// The stable unsupported-size failure used before `TX_16X16` support lands.
-    private static final String UNSUPPORTED_TX_16X16_MESSAGE = "Unsupported inverse transform size: TX_16X16";
 
     /// Verifies that `TX_4X4` DC-only `DCT_DCT` reconstruction yields one constant residual block.
     @Test
@@ -332,26 +328,19 @@ final class InverseTransformerTest {
         assertEquals(100, plane.sample(3, 3));
     }
 
-    /// Verifies that `TX_16X16` either still reports the current unsupported boundary or, once
-    /// wired, reconstructs one zero residual block for zeroed `DCT_DCT` input.
+    /// Verifies that every declared transform size accepts zeroed `DCT_DCT` input.
     @Test
-    void keepsTx16x16SupportBoundaryStable() {
-        int[] coefficients = new int[TX_16X16_AREA];
-
-        try {
-            int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
-            assertArrayEquals(new int[TX_16X16_AREA], residual);
-        } catch (IllegalStateException exception) {
-            assertEquals(UNSUPPORTED_TX_16X16_MESSAGE, exception.getMessage());
+    void reconstructsZeroResidualBlockForEveryTransformSize() {
+        for (TransformSize transformSize : TransformSize.values()) {
+            int area = transformSize.widthPixels() * transformSize.heightPixels();
+            int[] residual = InverseTransformer.reconstructResidualBlock(new int[area], transformSize);
+            assertArrayEquals(new int[area], residual, transformSize.name());
         }
     }
 
-    /// Verifies that `TX_16X16` DC-only `DCT_DCT` reconstruction yields one constant residual
-    /// block once support is available.
+    /// Verifies that `TX_16X16` DC-only `DCT_DCT` reconstruction yields one constant residual block.
     @Test
-    void reconstructsSixteenBySixteenDcOnlyResidualBlockWhenSupported() {
-        assumeTx16x16SupportAvailable();
-
+    void reconstructsSixteenBySixteenDcOnlyResidualBlock() {
         int[] coefficients = new int[TX_16X16_AREA];
         coefficients[0] = 512;
 
@@ -361,11 +350,9 @@ final class InverseTransformerTest {
     }
 
     /// Verifies that the first horizontal `TX_16X16` `DCT_DCT` AC basis stays row-constant and
-    /// left-right antisymmetric once support is available.
+    /// left-right antisymmetric.
     @Test
-    void reconstructsSixteenBySixteenHorizontalAcResidualPatternWhenSupported() {
-        assumeTx16x16SupportAvailable();
-
+    void reconstructsSixteenBySixteenHorizontalAcResidualPattern() {
         int[] coefficients = new int[TX_16X16_AREA];
         coefficients[1] = 4096;
 
@@ -441,29 +428,6 @@ final class InverseTransformerTest {
         assertHorizontalAntisymmetry(residual, 64, 16);
         assertTrue(residual[0] > 0, "First horizontal basis sample should stay positive");
         assertTrue(residual[63] < 0, "Mirrored horizontal basis sample should stay negative");
-    }
-
-    /// Skips the calling test until `TX_16X16` inverse-transform support is wired in.
-    private static void assumeTx16x16SupportAvailable() {
-        assumeTrue(
-                supportsTx16x16InverseTransform(),
-                "TX_16X16 DCT_DCT inverse-transform support is not wired into InverseTransformer yet"
-        );
-    }
-
-    /// Returns whether `InverseTransformer` already accepts one zeroed `TX_16X16` block.
-    ///
-    /// @return whether `TX_16X16` reconstruction is available
-    private static boolean supportsTx16x16InverseTransform() {
-        try {
-            InverseTransformer.reconstructResidualBlock(new int[TX_16X16_AREA], TransformSize.TX_16X16);
-            return true;
-        } catch (IllegalStateException exception) {
-            if (UNSUPPORTED_TX_16X16_MESSAGE.equals(exception.getMessage())) {
-                return false;
-            }
-            throw exception;
-        }
     }
 
     /// Creates one filled residual block with one repeated sample value.

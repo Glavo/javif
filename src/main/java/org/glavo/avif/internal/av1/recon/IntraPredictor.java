@@ -553,7 +553,7 @@ final class IntraPredictor {
             case SMOOTH_VERTICAL -> PredictionMode.SMOOTH_VERTICAL;
             case SMOOTH_HORIZONTAL -> PredictionMode.SMOOTH_HORIZONTAL;
             case PAETH -> PredictionMode.PAETH;
-            case CFL -> throw new IllegalStateException("CFL chroma prediction is not implemented yet");
+            case CFL -> throw new IllegalArgumentException("CFL requires predictChromaCfl with reconstructed luma");
         };
     }
 

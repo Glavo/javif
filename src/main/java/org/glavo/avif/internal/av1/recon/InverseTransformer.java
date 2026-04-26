@@ -224,7 +224,6 @@ final class InverseTransformer {
             case RTX_32X8 -> reconstructGenericLargeDctDct(coefficients, 32, 8, 2);
             case RTX_16X64 -> reconstructGenericLargeDctDct(coefficients, 16, 64, 2);
             case RTX_64X16 -> reconstructGenericLargeDctDct(coefficients, 64, 16, 2);
-            default -> throw unsupportedTransformSize(transformSize);
         };
     }
 
@@ -1332,13 +1331,5 @@ final class InverseTransformer {
     /// @return the transform area in samples
     private static int checkedTransformArea(TransformSize transformSize) {
         return transformSize.widthPixels() * transformSize.heightPixels();
-    }
-
-    /// Creates one stable unsupported-transform failure.
-    ///
-    /// @param transformSize the unsupported transform size
-    /// @return one stable unsupported-transform failure
-    private static IllegalStateException unsupportedTransformSize(TransformSize transformSize) {
-        return new IllegalStateException("Unsupported inverse transform size: " + transformSize);
     }
 }

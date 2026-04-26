@@ -1239,30 +1239,6 @@ public final class FrameReconstructor {
                 );
             }
         }
-        for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
-            if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
-                throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current modeled luma transform sizes: "
-                                + residualUnit.size()
-                );
-            }
-        }
-        for (TransformResidualUnit residualUnit : residualLayout.chromaUUnits()) {
-            if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
-                throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current modeled chroma transform sizes: "
-                                + residualUnit.size()
-                );
-            }
-        }
-        for (TransformResidualUnit residualUnit : residualLayout.chromaVUnits()) {
-            if (!residualUnit.allZero() && !isSupportedNonZeroResidualSize(residualUnit.size())) {
-                throw new IllegalStateException(
-                        "Non-zero residual reconstruction currently supports only the current modeled chroma transform sizes: "
-                                + residualUnit.size()
-                );
-            }
-        }
     }
 
     /// Reconstructs the currently supported inter prediction subset.
@@ -3821,36 +3797,7 @@ public final class FrameReconstructor {
         return Math.max(1, chromaEnd - chromaStart);
     }
 
-    /// Returns whether one transform size currently supports non-zero residual reconstruction.
-    ///
-    /// @param transformSize the transform size to inspect
-    /// @return whether one transform size currently supports non-zero residual reconstruction
-    private static boolean isSupportedNonZeroResidualSize(TransformSize transformSize) {
-        return switch (transformSize) {
-            case TX_4X4,
-                    TX_8X8,
-                    TX_16X16,
-                    TX_32X32,
-                    TX_64X64,
-                    RTX_4X8,
-                    RTX_8X4,
-                    RTX_4X16,
-                    RTX_16X4,
-                    RTX_8X16,
-                    RTX_16X8,
-                    RTX_16X32,
-                    RTX_32X16,
-                    RTX_32X64,
-                    RTX_64X32,
-                    RTX_8X32,
-                    RTX_32X8,
-                    RTX_16X64,
-                    RTX_64X16 -> true;
-            default -> false;
-        };
-    }
-
-    /// Reconstructs the currently supported luma residual subset into the destination plane.
+    /// Reconstructs decoded luma residuals into the destination plane.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param residualLayout the decoded luma residual layout
@@ -3893,7 +3840,7 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Reconstructs the currently supported chroma residual subset into the destination planes.
+    /// Reconstructs decoded chroma residuals into the destination planes.
     ///
     /// @param chromaUPlane the mutable chroma U destination plane
     /// @param chromaVPlane the mutable chroma V destination plane

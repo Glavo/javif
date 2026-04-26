@@ -32,6 +32,8 @@ Implemented container/API coverage:
 - default AVIF operating-point semantics: `a1op` value `0` is accepted, non-default
   still/progressive/grid/auxiliary/gain-map operating points are rejected explicitly,
   and raw AV1 OBU streams honor `Av1DecoderConfig.operatingPoint()` layer filtering
+- frame reconstruction covers CFL chroma prediction for `I420`, `I422`, and `I444`,
+  plus non-zero residual reconstruction for every declared AV1 transform size
 
 ## Remaining Work
 
@@ -40,8 +42,8 @@ Implemented container/API coverage:
 - Close the remaining `I444` pixel-accuracy gap with broader reference-image
   assertions.
 - Finish or explicitly reject AV1 reconstruction paths that can still fail as
-  `NOT_IMPLEMENTED`, especially CFL chroma prediction, inter palette blocks,
-  unsupported inter-intra block sizes, and remaining inverse-transform sizes.
+  `NOT_IMPLEMENTED`, especially defensive inter-palette states and remaining
+  inter/compound/warped prediction edge cases.
 - Audit inter prediction, compound prediction, warped motion, restoration,
   super-resolution, CDEF, loop filter, and film grain against dav1d behavior.
 - Add regression fixtures for real-world AVIF files that parse but still decode
