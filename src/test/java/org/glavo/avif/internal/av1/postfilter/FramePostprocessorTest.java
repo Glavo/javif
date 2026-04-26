@@ -198,6 +198,111 @@ final class FramePostprocessorTest {
         assertEquals(64, decodedPlanes.lumaPlane().sample(3, 3));
     }
 
+    /// Verifies that CDEF preserves units that contain no non-skipped blocks.
+    @Test
+    void postprocessSkipsFullySkippedCdefUnit() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                new int[][]{
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 64, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32},
+                        {32, 32, 32, 32, 32, 32, 32, 32}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(6, 0, new int[]{60}, new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult =
+                PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0, true);
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertSame(decodedPlanes, postprocessed);
+        assertEquals(64, postprocessed.lumaPlane().sample(3, 3));
+    }
+
+    /// Verifies that CDEF strength and output range honor high-bit-depth planes.
+    @Test
+    void postprocessAppliesCdefToHighBitDepthSamples() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                10,
+                AvifPixelFormat.I400,
+                new int[][]{
+                        {512, 512, 512, 512, 512, 512, 512, 512},
+                        {512, 512, 512, 512, 512, 512, 512, 512},
+                        {512, 512, 512, 512, 512, 512, 512, 512},
+                        {512, 512, 512, 768, 512, 512, 512, 512},
+                        {512, 512, 512, 512, 512, 512, 512, 512},
+                        {512, 512, 512, 512, 512, 512, 512, 512},
+                        {512, 512, 512, 512, 512, 512, 512, 512},
+                        {512, 512, 512, 512, 512, 512, 512, 512}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(6, 0, new int[]{63}, new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        int filteredCenter = postprocessed.lumaPlane().sample(3, 3);
+        assertNotSame(decodedPlanes, postprocessed);
+        assertTrue(filteredCenter < 768);
+        assertTrue(filteredCenter > 255);
+        assertEquals(768, decodedPlanes.lumaPlane().sample(3, 3));
+    }
+
     /// Verifies that active CDEF fails explicitly when decoded block indices are unavailable.
     @Test
     void postprocessRejectsActiveCdefWithoutDecodedBlockIndex() {

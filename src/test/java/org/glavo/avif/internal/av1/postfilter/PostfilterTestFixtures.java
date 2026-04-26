@@ -59,10 +59,28 @@ final class PostfilterTestFixtures {
             @Nullable int[][] chromaUSamples,
             @Nullable int[][] chromaVSamples
     ) {
+        return createDecodedPlanes(8, pixelFormat, lumaSamples, chromaUSamples, chromaVSamples);
+    }
+
+    /// Creates one decoded-plane snapshot from row-major sample matrices.
+    ///
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the decoded pixel format
+    /// @param lumaSamples the luma sample raster
+    /// @param chromaUSamples the chroma-U sample raster, or `null`
+    /// @param chromaVSamples the chroma-V sample raster, or `null`
+    /// @return one immutable decoded-plane snapshot
+    static DecodedPlanes createDecodedPlanes(
+            int bitDepth,
+            AvifPixelFormat pixelFormat,
+            int[][] lumaSamples,
+            @Nullable int[][] chromaUSamples,
+            @Nullable int[][] chromaVSamples
+    ) {
         int width = lumaSamples[0].length;
         int height = lumaSamples.length;
         return new DecodedPlanes(
-                8,
+                bitDepth,
                 pixelFormat,
                 width,
                 height,
@@ -188,13 +206,23 @@ final class PostfilterTestFixtures {
     /// @param cdefIndex the decoded CDEF index to expose from the leaf
     /// @return one single-leaf syntax result with the supplied decoded CDEF index
     static FrameSyntaxDecodeResult createSingleLeafSyntaxResult(FrameHeader frameHeader, int cdefIndex) {
+        return createSingleLeafSyntaxResult(frameHeader, cdefIndex, false);
+    }
+
+    /// Creates one single-leaf syntax result with the supplied decoded CDEF index and skip flag.
+    ///
+    /// @param frameHeader the frame header that owns the syntax result
+    /// @param cdefIndex the decoded CDEF index to expose from the leaf
+    /// @param skip the decoded skip flag to expose from the leaf
+    /// @return one single-leaf syntax result with the supplied decoded CDEF index and skip flag
+    static FrameSyntaxDecodeResult createSingleLeafSyntaxResult(FrameHeader frameHeader, int cdefIndex, boolean skip) {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_8X8;
         TileBlockHeaderReader.BlockHeader blockHeader = new TileBlockHeaderReader.BlockHeader(
                 position,
                 blockSize,
                 false,
-                false,
+                skip,
                 false,
                 true,
                 false,

@@ -20,8 +20,8 @@ import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
+import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -29,37 +29,36 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Applies the current CDEF stage of the postfilter pipeline.
+/// Applies the AV1 CDEF stage of the postfilter pipeline.
 ///
-/// This implementation applies a deterministic CDEF subset from decoded frame-level strengths and
-/// block-level `cdefIndex` syntax. It keeps inactive CDEF as an identity transform, uses the AV1
-/// default CDEF index for skipped blocks that omit the side syntax, and rejects active CDEF when
-/// block syntax is unavailable instead of silently preserving filtered frames.
+/// The implementation mirrors the dav1d CDEF scalar path at decoded-plane granularity: strength
+/// values are scaled by bit depth, dominant directions are detected from luma 8x8 units, chroma
+/// primary filtering reuses the luma direction, and fully skipped CDEF units are preserved.
 @NotNullByDefault
 public final class CdefApplier {
     /// The luma CDEF unit size in samples.
     private static final int CDEF_UNIT_SIZE = 8;
 
-    /// Direction vectors used for primary CDEF filtering.
-    private static final int @Unmodifiable [] @Unmodifiable [] DIRECTIONS = {
-            {1, 0},
-            {1, -1},
-            {0, -1},
-            {-1, -1},
-            {-1, 0},
-            {-1, 1},
-            {0, 1},
-            {1, 1}
+    /// Sentinel used for samples beyond visible frame edges.
+    private static final int MISSING_SAMPLE = Integer.MIN_VALUE;
+
+    /// Direction-search divisors copied from the AV1 CDEF direction estimator.
+    private static final int @Unmodifiable [] DIRECTION_DIVISORS = {840, 420, 280, 210, 168, 140, 120};
+
+    /// Direction vectors for the two primary or secondary CDEF tap distances.
+    private static final int @Unmodifiable [] @Unmodifiable [] @Unmodifiable [] FILTER_DIRECTIONS = {
+            {{1, -1}, {2, -2}},
+            {{1, 0}, {2, -1}},
+            {{1, 0}, {2, 0}},
+            {{1, 0}, {2, 1}},
+            {{1, 1}, {2, 2}},
+            {{0, 1}, {1, 2}},
+            {{0, 1}, {0, 2}},
+            {{0, 1}, {-1, 2}}
     };
 
-    /// Primary CDEF taps selected by primary-strength parity.
-    private static final int @Unmodifiable [] @Unmodifiable [] PRIMARY_TAPS = {
-            {4, 2},
-            {3, 3}
-    };
-
-    /// Secondary CDEF taps.
-    private static final int @Unmodifiable [] SECONDARY_TAPS = {2, 1};
+    /// Chroma direction remapping used by AV1 for `I422`.
+    private static final int @Unmodifiable [] I422_UV_DIRECTIONS = {7, 0, 2, 4, 5, 6, 6, 6};
 
     /// Applies CDEF to one decoded frame.
     ///
@@ -92,45 +91,66 @@ public final class CdefApplier {
 
         int unitColumns = cdefUnitCount(decodedPlanes.codedWidth());
         int unitRows = cdefUnitCount(decodedPlanes.codedHeight());
-        int[] cdefIndices = buildCdefIndexMap(syntaxDecodeResult, checkedCdef, unitColumns, unitRows);
+        CdefUnitMap cdefUnitMap = buildCdefUnitMap(syntaxDecodeResult, unitColumns, unitRows);
+        int bitDepthShift = decodedPlanes.bitDepth() - 8;
+        int damping = checkedCdef.damping() + bitDepthShift;
+        CdefDirectionMap directionMap = buildDirectionMap(
+                decodedPlanes.lumaPlane(),
+                decodedPlanes.bitDepth(),
+                checkedCdef,
+                cdefUnitMap,
+                unitColumns,
+                unitRows,
+                decodedPlanes.hasChroma()
+        );
 
         DecodedPlane lumaPlane = applyPlane(
                 decodedPlanes.lumaPlane(),
-                decodedPlanes.bitDepth(),
-                checkedCdef.damping(),
+                bitDepthShift,
+                damping,
                 checkedCdef.yStrengths(),
-                cdefIndices,
+                cdefUnitMap,
+                directionMap,
                 unitColumns,
                 unitRows,
                 CDEF_UNIT_SIZE,
-                CDEF_UNIT_SIZE
+                CDEF_UNIT_SIZE,
+                true,
+                false
         );
         @Nullable DecodedPlane chromaUPlane = decodedPlanes.chromaUPlane();
         @Nullable DecodedPlane chromaVPlane = decodedPlanes.chromaVPlane();
         if (decodedPlanes.hasChroma()) {
             int chromaUnitWidth = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingX(decodedPlanes.pixelFormat()));
             int chromaUnitHeight = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingY(decodedPlanes.pixelFormat()));
+            boolean i422Chroma = decodedPlanes.pixelFormat() == AvifPixelFormat.I422;
             chromaUPlane = applyPlane(
                     Objects.requireNonNull(chromaUPlane, "chromaUPlane"),
-                    decodedPlanes.bitDepth(),
-                    checkedCdef.damping(),
+                    bitDepthShift,
+                    damping - 1,
                     checkedCdef.uvStrengths(),
-                    cdefIndices,
+                    cdefUnitMap,
+                    directionMap,
                     unitColumns,
                     unitRows,
                     chromaUnitWidth,
-                    chromaUnitHeight
+                    chromaUnitHeight,
+                    false,
+                    i422Chroma
             );
             chromaVPlane = applyPlane(
                     Objects.requireNonNull(chromaVPlane, "chromaVPlane"),
-                    decodedPlanes.bitDepth(),
-                    checkedCdef.damping(),
+                    bitDepthShift,
+                    damping - 1,
                     checkedCdef.uvStrengths(),
-                    cdefIndices,
+                    cdefUnitMap,
+                    directionMap,
                     unitColumns,
                     unitRows,
                     chromaUnitWidth,
-                    chromaUnitHeight
+                    chromaUnitHeight,
+                    false,
+                    i422Chroma
             );
         }
 
@@ -174,22 +194,19 @@ public final class CdefApplier {
         return false;
     }
 
-    /// Builds the luma CDEF-unit index map from decoded partition-tree leaves.
+    /// Builds the luma CDEF-unit map from decoded partition-tree leaves.
     ///
     /// @param syntaxDecodeResult the decoded block syntax that carries CDEF indices
-    /// @param cdef the normalized frame-level CDEF state
     /// @param unitColumns the luma CDEF-unit column count
     /// @param unitRows the luma CDEF-unit row count
-    /// @return a row-major luma CDEF-unit index map
-    private static int[] buildCdefIndexMap(
+    /// @return the row-major CDEF-unit map
+    private static CdefUnitMap buildCdefUnitMap(
             FrameSyntaxDecodeResult syntaxDecodeResult,
-            FrameHeader.CdefInfo cdef,
             int unitColumns,
             int unitRows
     ) {
-        int defaultIndex = 0;
         int[] cdefIndices = new int[unitColumns * unitRows];
-        Arrays.fill(cdefIndices, defaultIndex);
+        boolean[] nonSkipUnits = new boolean[unitColumns * unitRows];
         for (int tileIndex = 0; tileIndex < syntaxDecodeResult.tileCount(); tileIndex++) {
             TilePartitionTreeReader.Node[] frameLocalRoots = FrameLocalPartitionTrees.create(
                     syntaxDecodeResult.assembly(),
@@ -197,33 +214,30 @@ public final class CdefApplier {
                     syntaxDecodeResult.tileRoots(tileIndex)
             );
             for (TilePartitionTreeReader.Node root : frameLocalRoots) {
-                fillCdefIndexMap(root, cdefIndices, defaultIndex, unitColumns, unitRows);
+                fillCdefUnitMap(root, cdefIndices, nonSkipUnits, unitColumns, unitRows);
             }
         }
-        return cdefIndices;
+        return new CdefUnitMap(cdefIndices, nonSkipUnits);
     }
 
-    /// Fills CDEF-unit indices covered by one partition-tree node.
+    /// Fills CDEF-unit syntax state covered by one partition-tree node.
     ///
     /// @param node the partition-tree node to visit
     /// @param cdefIndices the mutable row-major CDEF index map
-    /// @param defaultIndex the default CDEF index when block syntax omitted it
+    /// @param nonSkipUnits the mutable row-major non-skip map
     /// @param unitColumns the luma CDEF-unit column count
     /// @param unitRows the luma CDEF-unit row count
-    private static void fillCdefIndexMap(
+    private static void fillCdefUnitMap(
             TilePartitionTreeReader.Node node,
             int[] cdefIndices,
-            int defaultIndex,
+            boolean[] nonSkipUnits,
             int unitColumns,
             int unitRows
     ) {
         if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
             int blockCdefIndex = leafNode.header().cdefIndex();
             if (blockCdefIndex < 0) {
-                blockCdefIndex = defaultIndex;
-            }
-            if (blockCdefIndex < 0) {
-                return;
+                blockCdefIndex = 0;
             }
             int startX = leafNode.header().position().x4() << 2;
             int startY = leafNode.header().position().y4() << 2;
@@ -233,9 +247,16 @@ public final class CdefApplier {
             int startUnitY = clamp(startY / CDEF_UNIT_SIZE, 0, unitRows - 1);
             int endUnitX = clamp((endX + CDEF_UNIT_SIZE - 1) / CDEF_UNIT_SIZE, 0, unitColumns);
             int endUnitY = clamp((endY + CDEF_UNIT_SIZE - 1) / CDEF_UNIT_SIZE, 0, unitRows);
+            boolean skip = leafNode.header().skip();
             for (int unitY = startUnitY; unitY < endUnitY; unitY++) {
                 for (int unitX = startUnitX; unitX < endUnitX; unitX++) {
-                    cdefIndices[unitY * unitColumns + unitX] = blockCdefIndex;
+                    int unitIndex = unitY * unitColumns + unitX;
+                    if (!skip) {
+                        cdefIndices[unitIndex] = blockCdefIndex;
+                        nonSkipUnits[unitIndex] = true;
+                    } else if (!nonSkipUnits[unitIndex]) {
+                        cdefIndices[unitIndex] = blockCdefIndex;
+                    }
                 }
             }
             return;
@@ -243,39 +264,125 @@ public final class CdefApplier {
 
         TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
         for (TilePartitionTreeReader.Node child : partitionNode.children()) {
-            fillCdefIndexMap(child, cdefIndices, defaultIndex, unitColumns, unitRows);
+            fillCdefUnitMap(child, cdefIndices, nonSkipUnits, unitColumns, unitRows);
         }
+    }
+
+    /// Builds luma-derived direction and variance state for each CDEF unit.
+    ///
+    /// @param lumaPlane the decoded luma plane
+    /// @param bitDepth the decoded bit depth
+    /// @param cdef the normalized frame-level CDEF state
+    /// @param cdefUnitMap the row-major CDEF-unit syntax map
+    /// @param unitColumns the luma CDEF-unit column count
+    /// @param unitRows the luma CDEF-unit row count
+    /// @param hasChroma whether the frame has chroma planes
+    /// @return the row-major luma-derived CDEF direction map
+    private static CdefDirectionMap buildDirectionMap(
+            DecodedPlane lumaPlane,
+            int bitDepth,
+            FrameHeader.CdefInfo cdef,
+            CdefUnitMap cdefUnitMap,
+            int unitColumns,
+            int unitRows,
+            boolean hasChroma
+    ) {
+        int[] directions = new int[unitColumns * unitRows];
+        int[] variances = new int[unitColumns * unitRows];
+        short[] sourceSamples = lumaPlane.samples();
+        int bitDepthShift = bitDepth - 8;
+        for (int unitY = 0; unitY < unitRows; unitY++) {
+            int startY = unitY * CDEF_UNIT_SIZE;
+            if (startY >= lumaPlane.height()) {
+                continue;
+            }
+            for (int unitX = 0; unitX < unitColumns; unitX++) {
+                int startX = unitX * CDEF_UNIT_SIZE;
+                if (startX >= lumaPlane.width()) {
+                    continue;
+                }
+                int unitIndex = unitY * unitColumns + unitX;
+                if (!cdefUnitMap.nonSkip(unitIndex)) {
+                    continue;
+                }
+                if (!requiresDirection(cdef, cdefUnitMap.cdefIndex(unitIndex), bitDepthShift, hasChroma)) {
+                    continue;
+                }
+                CdefDirection direction = detectDirection(lumaPlane, sourceSamples, startX, startY, bitDepthShift);
+                directions[unitIndex] = direction.direction();
+                variances[unitIndex] = direction.variance();
+            }
+        }
+        return new CdefDirectionMap(directions, variances);
+    }
+
+    /// Returns whether the selected CDEF strengths require luma direction detection.
+    ///
+    /// @param cdef the normalized frame-level CDEF state
+    /// @param cdefIndex the selected CDEF index
+    /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
+    /// @param hasChroma whether the frame has chroma planes
+    /// @return whether the selected strengths contain an active primary filter
+    private static boolean requiresDirection(
+            FrameHeader.CdefInfo cdef,
+            int cdefIndex,
+            int bitDepthShift,
+            boolean hasChroma
+    ) {
+        if (hasSelectedPrimary(cdef.yStrengths(), cdefIndex, bitDepthShift)) {
+            return true;
+        }
+        return hasChroma && hasSelectedPrimary(cdef.uvStrengths(), cdefIndex, bitDepthShift);
+    }
+
+    /// Returns whether one selected encoded strength has an active primary component.
+    ///
+    /// @param strengths the encoded CDEF strength table
+    /// @param cdefIndex the selected CDEF index
+    /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
+    /// @return whether the selected encoded strength has an active primary component
+    private static boolean hasSelectedPrimary(int[] strengths, int cdefIndex, int bitDepthShift) {
+        if (strengths.length == 0) {
+            return false;
+        }
+        return decodeStrength(strengthForIndex(strengths, cdefIndex), bitDepthShift).primary() != 0;
     }
 
     /// Applies CDEF to one plane.
     ///
     /// @param plane the source plane to filter
-    /// @param bitDepth the decoded bit depth
-    /// @param damping the frame-level CDEF damping value
+    /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
+    /// @param damping the bit-depth-adjusted CDEF damping value
     /// @param strengths the encoded strength table for the plane
-    /// @param cdefIndices the row-major luma CDEF-unit index map
+    /// @param cdefUnitMap the row-major luma CDEF-unit syntax map
+    /// @param directionMap the row-major luma-derived CDEF direction map
     /// @param unitColumns the luma CDEF-unit column count
     /// @param unitRows the luma CDEF-unit row count
     /// @param unitWidth the plane-local CDEF-unit width
     /// @param unitHeight the plane-local CDEF-unit height
-    /// @return the filtered plane, or the original plane when all selected strengths are inactive
+    /// @param luma whether this invocation filters the luma plane
+    /// @param i422Chroma whether this invocation filters an `I422` chroma plane
+    /// @return the filtered plane, or the original plane when all selected units are inactive
     private static DecodedPlane applyPlane(
             DecodedPlane plane,
-            int bitDepth,
+            int bitDepthShift,
             int damping,
             int[] strengths,
-            int[] cdefIndices,
+            CdefUnitMap cdefUnitMap,
+            CdefDirectionMap directionMap,
             int unitColumns,
             int unitRows,
             int unitWidth,
-            int unitHeight
+            int unitHeight,
+            boolean luma,
+            boolean i422Chroma
     ) {
         if (!hasActiveStrength(strengths)) {
             return plane;
         }
         short[] sourceSamples = plane.samples();
         short[] outputSamples = Arrays.copyOf(sourceSamples, sourceSamples.length);
-        int maximumSample = (1 << bitDepth) - 1;
+        int maximumSample = (1 << (bitDepthShift + 8)) - 1;
         boolean changed = false;
         for (int unitY = 0; unitY < unitRows; unitY++) {
             int planeStartY = unitY * unitHeight;
@@ -288,8 +395,28 @@ public final class CdefApplier {
                 if (planeStartX >= plane.width()) {
                     continue;
                 }
-                int strength = strengthForIndex(strengths, cdefIndices[unitY * unitColumns + unitX]);
-                CdefStrength decodedStrength = decodeStrength(strength);
+                int unitIndex = unitY * unitColumns + unitX;
+                if (!cdefUnitMap.nonSkip(unitIndex)) {
+                    continue;
+                }
+                CdefStrength decodedStrength = decodeStrength(
+                        strengthForIndex(strengths, cdefUnitMap.cdefIndex(unitIndex)),
+                        bitDepthShift
+                );
+                if (!decodedStrength.active()) {
+                    continue;
+                }
+                int direction = 0;
+                if (decodedStrength.primary() != 0) {
+                    direction = directionMap.direction(unitIndex);
+                    if (luma) {
+                        decodedStrength = decodedStrength.withPrimary(
+                                adjustStrength(decodedStrength.primary(), directionMap.variance(unitIndex))
+                        );
+                    } else if (i422Chroma) {
+                        direction = I422_UV_DIRECTIONS[direction];
+                    }
+                }
                 if (!decodedStrength.active()) {
                     continue;
                 }
@@ -301,8 +428,10 @@ public final class CdefApplier {
                         planeStartY,
                         Math.min(plane.width(), planeStartX + unitWidth),
                         planeEndY,
-                        damping,
+                        Math.max(0, damping),
                         decodedStrength,
+                        direction,
+                        bitDepthShift,
                         maximumSample
                 );
                 changed = true;
@@ -326,17 +455,18 @@ public final class CdefApplier {
         return strengths[cdefIndex];
     }
 
-    /// Decodes one packed CDEF strength into primary and secondary components.
+    /// Decodes one packed CDEF strength into bit-depth-scaled primary and secondary components.
     ///
     /// @param strength the packed AV1 CDEF strength
+    /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
     /// @return the decoded primary and secondary CDEF strengths
-    private static CdefStrength decodeStrength(int strength) {
-        int primary = strength >> 2;
+    private static CdefStrength decodeStrength(int strength, int bitDepthShift) {
+        int primary = (strength >> 2) << bitDepthShift;
         int secondary = strength & 3;
         if (secondary == 3) {
             secondary++;
         }
-        return new CdefStrength(primary, secondary);
+        return new CdefStrength(primary, secondary << bitDepthShift);
     }
 
     /// Applies CDEF to one rectangular unit.
@@ -348,8 +478,10 @@ public final class CdefApplier {
     /// @param startY the inclusive unit start Y coordinate
     /// @param endX the exclusive unit end X coordinate
     /// @param endY the exclusive unit end Y coordinate
-    /// @param damping the frame-level CDEF damping value
+    /// @param damping the strength-adjusted CDEF damping value
     /// @param strength the decoded primary and secondary CDEF strengths
+    /// @param direction the luma-derived dominant CDEF direction
+    /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
     /// @param maximumSample the maximum legal output sample value
     private static void filterUnit(
             DecodedPlane plane,
@@ -361,143 +493,178 @@ public final class CdefApplier {
             int endY,
             int damping,
             CdefStrength strength,
+            int direction,
+            int bitDepthShift,
             int maximumSample
     ) {
-        int direction = detectDirection(plane, sourceSamples, startX, startY, endX, endY);
-        int[] primaryDirection = DIRECTIONS[direction];
-        int[] secondaryDirection0 = DIRECTIONS[(direction + 2) & 7];
-        int[] secondaryDirection1 = DIRECTIONS[(direction + 6) & 7];
-        int[] primaryTaps = PRIMARY_TAPS[strength.primary() & 1];
-        int primaryDamping = Math.max(0, damping - floorLog2(Math.max(1, strength.primary())));
-        int secondaryDamping = Math.max(0, damping - floorLog2(Math.max(1, strength.secondary())));
+        int primaryTap = 4 - ((strength.primary() >> bitDepthShift) & 1);
+        int primaryDamping = strength.primary() > 0
+                ? Math.max(0, damping - floorLog2(strength.primary()))
+                : 0;
+        int secondaryDamping = strength.secondary() > 0
+                ? Math.max(0, damping - floorLog2(strength.secondary()))
+                : 0;
+        boolean clipToNeighborRange = strength.primary() > 0 && strength.secondary() > 0;
 
         for (int y = startY; y < endY; y++) {
             int rowOffset = y * plane.stride();
             for (int x = startX; x < endX; x++) {
                 int center = sourceSamples[rowOffset + x] & 0xFFFF;
                 int sum = 0;
+                int minimum = center;
+                int maximum = center;
                 if (strength.primary() > 0) {
-                    sum += directionalContribution(
-                            plane,
-                            sourceSamples,
-                            x,
-                            y,
-                            center,
-                            primaryDirection,
-                            primaryTaps,
-                            strength.primary(),
-                            primaryDamping
-                    );
+                    int tap = primaryTap;
+                    for (int distanceIndex = 0; distanceIndex < 2; distanceIndex++) {
+                        int[] step = FILTER_DIRECTIONS[direction][distanceIndex];
+                        int positive = sampleOrMissing(plane, sourceSamples, x + step[0], y + step[1]);
+                        int negative = sampleOrMissing(plane, sourceSamples, x - step[0], y - step[1]);
+                        sum += tap * constrainSample(positive, center, strength.primary(), primaryDamping);
+                        sum += tap * constrainSample(negative, center, strength.primary(), primaryDamping);
+                        if (clipToNeighborRange) {
+                            minimum = includeMinimum(minimum, positive);
+                            minimum = includeMinimum(minimum, negative);
+                            maximum = includeMaximum(maximum, positive);
+                            maximum = includeMaximum(maximum, negative);
+                        }
+                        tap = (tap & 3) | 2;
+                    }
                 }
                 if (strength.secondary() > 0) {
-                    sum += directionalContribution(
-                            plane,
-                            sourceSamples,
-                            x,
-                            y,
-                            center,
-                            secondaryDirection0,
-                            SECONDARY_TAPS,
-                            strength.secondary(),
-                            secondaryDamping
-                    );
-                    sum += directionalContribution(
-                            plane,
-                            sourceSamples,
-                            x,
-                            y,
-                            center,
-                            secondaryDirection1,
-                            SECONDARY_TAPS,
-                            strength.secondary(),
-                            secondaryDamping
-                    );
+                    int secondaryDirection0 = (direction + 2) & 7;
+                    int secondaryDirection1 = (direction + 6) & 7;
+                    for (int distanceIndex = 0; distanceIndex < 2; distanceIndex++) {
+                        int tap = 2 - distanceIndex;
+                        int[] step0 = FILTER_DIRECTIONS[secondaryDirection0][distanceIndex];
+                        int[] step1 = FILTER_DIRECTIONS[secondaryDirection1][distanceIndex];
+                        int positive0 = sampleOrMissing(plane, sourceSamples, x + step0[0], y + step0[1]);
+                        int negative0 = sampleOrMissing(plane, sourceSamples, x - step0[0], y - step0[1]);
+                        int positive1 = sampleOrMissing(plane, sourceSamples, x + step1[0], y + step1[1]);
+                        int negative1 = sampleOrMissing(plane, sourceSamples, x - step1[0], y - step1[1]);
+                        sum += tap * constrainSample(positive0, center, strength.secondary(), secondaryDamping);
+                        sum += tap * constrainSample(negative0, center, strength.secondary(), secondaryDamping);
+                        sum += tap * constrainSample(positive1, center, strength.secondary(), secondaryDamping);
+                        sum += tap * constrainSample(negative1, center, strength.secondary(), secondaryDamping);
+                        if (clipToNeighborRange) {
+                            minimum = includeMinimum(includeMinimum(minimum, positive0), negative0);
+                            minimum = includeMinimum(includeMinimum(minimum, positive1), negative1);
+                            maximum = includeMaximum(includeMaximum(maximum, positive0), negative0);
+                            maximum = includeMaximum(includeMaximum(maximum, positive1), negative1);
+                        }
+                    }
                 }
                 int filtered = center + ((sum - (sum < 0 ? 1 : 0) + 8) >> 4);
+                if (clipToNeighborRange) {
+                    filtered = clamp(filtered, minimum, maximum);
+                }
                 outputSamples[rowOffset + x] = (short) clamp(filtered, 0, maximumSample);
             }
         }
     }
 
-    /// Returns one directional CDEF contribution for a pair of symmetric taps.
-    ///
-    /// @param plane the source plane metadata
-    /// @param sourceSamples the immutable source samples for this CDEF pass
-    /// @param x the current sample X coordinate
-    /// @param y the current sample Y coordinate
-    /// @param center the current center sample
-    /// @param direction the unit step direction
-    /// @param taps the distance-one and distance-two taps
-    /// @param strength the active CDEF strength
-    /// @param damping the strength-adjusted damping value
-    /// @return one directional CDEF contribution
-    private static int directionalContribution(
-            DecodedPlane plane,
-            short[] sourceSamples,
-            int x,
-            int y,
-            int center,
-            int[] direction,
-            int[] taps,
-            int strength,
-            int damping
-    ) {
-        int contribution = 0;
-        for (int distance = 1; distance <= taps.length; distance++) {
-            int tap = taps[distance - 1];
-            int positive = sampleClamped(
-                    plane,
-                    sourceSamples,
-                    x + direction[0] * distance,
-                    y + direction[1] * distance
-            );
-            int negative = sampleClamped(
-                    plane,
-                    sourceSamples,
-                    x - direction[0] * distance,
-                    y - direction[1] * distance
-            );
-            contribution += tap * constrain(positive - center, strength, damping);
-            contribution += tap * constrain(negative - center, strength, damping);
-        }
-        return contribution;
-    }
-
-    /// Detects a stable dominant direction for one CDEF unit.
+    /// Detects the dominant AV1 CDEF direction and variance for one luma 8x8 unit.
     ///
     /// @param plane the source plane metadata
     /// @param sourceSamples the immutable source samples for this CDEF pass
     /// @param startX the inclusive unit start X coordinate
     /// @param startY the inclusive unit start Y coordinate
-    /// @param endX the exclusive unit end X coordinate
-    /// @param endY the exclusive unit end Y coordinate
-    /// @return the selected direction index in `0..7`
-    private static int detectDirection(
+    /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
+    /// @return the dominant direction and its directional variance
+    private static CdefDirection detectDirection(
             DecodedPlane plane,
             short[] sourceSamples,
             int startX,
             int startY,
-            int endX,
-            int endY
+            int bitDepthShift
     ) {
-        int bestDirection = 0;
-        long bestScore = Long.MAX_VALUE;
-        for (int directionIndex = 0; directionIndex < DIRECTIONS.length; directionIndex++) {
-            int[] direction = DIRECTIONS[directionIndex];
-            long score = 0;
-            for (int y = startY; y < endY; y++) {
-                for (int x = startX; x < endX; x++) {
-                    int center = sourceSamples[y * plane.stride() + x] & 0xFFFF;
-                    score += Math.abs(center - sampleClamped(plane, sourceSamples, x + direction[0], y + direction[1]));
-                    score += Math.abs(center - sampleClamped(plane, sourceSamples, x - direction[0], y - direction[1]));
-                }
-            }
-            if (score < bestScore) {
-                bestScore = score;
-                bestDirection = directionIndex;
+        int[][] partialSumHv = new int[2][8];
+        int[][] partialSumDiag = new int[2][15];
+        int[][] partialSumAlt = new int[4][11];
+
+        for (int y = 0; y < CDEF_UNIT_SIZE; y++) {
+            for (int x = 0; x < CDEF_UNIT_SIZE; x++) {
+                int sample = sampleClamped(plane, sourceSamples, startX + x, startY + y);
+                int px = (sample >> bitDepthShift) - 128;
+                partialSumDiag[0][y + x] += px;
+                partialSumAlt[0][y + (x >> 1)] += px;
+                partialSumHv[0][y] += px;
+                partialSumAlt[1][3 + y - (x >> 1)] += px;
+                partialSumDiag[1][7 + y - x] += px;
+                partialSumAlt[2][3 - (y >> 1) + x] += px;
+                partialSumHv[1][x] += px;
+                partialSumAlt[3][(y >> 1) + x] += px;
             }
         }
-        return bestDirection;
+
+        long[] cost = new long[8];
+        for (int n = 0; n < 8; n++) {
+            cost[2] += (long) partialSumHv[0][n] * partialSumHv[0][n];
+            cost[6] += (long) partialSumHv[1][n] * partialSumHv[1][n];
+        }
+        cost[2] *= 105;
+        cost[6] *= 105;
+
+        for (int n = 0; n < 7; n++) {
+            int divisor = DIRECTION_DIVISORS[n];
+            cost[0] += ((long) partialSumDiag[0][n] * partialSumDiag[0][n]
+                    + (long) partialSumDiag[0][14 - n] * partialSumDiag[0][14 - n]) * divisor;
+            cost[4] += ((long) partialSumDiag[1][n] * partialSumDiag[1][n]
+                    + (long) partialSumDiag[1][14 - n] * partialSumDiag[1][14 - n]) * divisor;
+        }
+        cost[0] += (long) partialSumDiag[0][7] * partialSumDiag[0][7] * 105;
+        cost[4] += (long) partialSumDiag[1][7] * partialSumDiag[1][7] * 105;
+
+        for (int n = 0; n < 4; n++) {
+            int costIndex = n * 2 + 1;
+            for (int m = 0; m < 5; m++) {
+                cost[costIndex] += (long) partialSumAlt[n][3 + m] * partialSumAlt[n][3 + m];
+            }
+            cost[costIndex] *= 105;
+            for (int m = 0; m < 3; m++) {
+                int divisor = DIRECTION_DIVISORS[2 * m + 1];
+                cost[costIndex] += ((long) partialSumAlt[n][m] * partialSumAlt[n][m]
+                        + (long) partialSumAlt[n][10 - m] * partialSumAlt[n][10 - m]) * divisor;
+            }
+        }
+
+        int bestDirection = 0;
+        long bestCost = cost[0];
+        for (int direction = 1; direction < cost.length; direction++) {
+            if (cost[direction] > bestCost) {
+                bestCost = cost[direction];
+                bestDirection = direction;
+            }
+        }
+        long variance = (bestCost - cost[bestDirection ^ 4]) >> 10;
+        return new CdefDirection(bestDirection, (int) Math.min(Integer.MAX_VALUE, variance));
+    }
+
+    /// Applies the luma primary-strength variance adjustment.
+    ///
+    /// @param strength the bit-depth-scaled primary strength
+    /// @param variance the CDEF direction estimator variance
+    /// @return the adjusted primary strength
+    private static int adjustStrength(int strength, int variance) {
+        if (variance == 0) {
+            return 0;
+        }
+        int scaledVariance = variance >> 6;
+        int shift = scaledVariance != 0 ? Math.min(floorLog2(scaledVariance), 12) : 0;
+        return (strength * (4 + shift) + 8) >> 4;
+    }
+
+    /// Applies the AV1 CDEF constraint function to one sample.
+    ///
+    /// @param sample the neighbor sample, or `MISSING_SAMPLE`
+    /// @param center the current center sample
+    /// @param threshold the active CDEF threshold
+    /// @param damping the strength-adjusted CDEF damping value
+    /// @return the constrained signed delta
+    private static int constrainSample(int sample, int center, int threshold, int damping) {
+        if (sample == MISSING_SAMPLE) {
+            return 0;
+        }
+        return constrain(sample - center, threshold, damping);
     }
 
     /// Applies the AV1 CDEF constraint function to one neighbor delta.
@@ -515,7 +682,39 @@ public final class CdefApplier {
         return difference < 0 ? -constrainedMagnitude : constrainedMagnitude;
     }
 
-    /// Returns one source sample with edge extension.
+    /// Returns the minimum after optionally including one non-missing neighbor sample.
+    ///
+    /// @param current the current minimum
+    /// @param sample the candidate neighbor sample, or `MISSING_SAMPLE`
+    /// @return the updated minimum
+    private static int includeMinimum(int current, int sample) {
+        return sample == MISSING_SAMPLE ? current : Math.min(current, sample);
+    }
+
+    /// Returns the maximum after optionally including one non-missing neighbor sample.
+    ///
+    /// @param current the current maximum
+    /// @param sample the candidate neighbor sample, or `MISSING_SAMPLE`
+    /// @return the updated maximum
+    private static int includeMaximum(int current, int sample) {
+        return sample == MISSING_SAMPLE ? current : Math.max(current, sample);
+    }
+
+    /// Returns one source sample or the AV1 missing-edge sentinel.
+    ///
+    /// @param plane the source plane metadata
+    /// @param sourceSamples the immutable source samples for this CDEF pass
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return one source sample or `MISSING_SAMPLE`
+    private static int sampleOrMissing(DecodedPlane plane, short[] sourceSamples, int x, int y) {
+        if (x < 0 || x >= plane.width() || y < 0 || y >= plane.height()) {
+            return MISSING_SAMPLE;
+        }
+        return sourceSamples[y * plane.stride() + x] & 0xFFFF;
+    }
+
+    /// Returns one source sample with edge extension for CDEF direction estimation.
     ///
     /// @param plane the source plane metadata
     /// @param sourceSamples the immutable source samples for this CDEF pass
@@ -608,11 +807,122 @@ public final class CdefApplier {
             return secondary;
         }
 
+        /// Returns a copy with a replacement primary strength.
+        ///
+        /// @param adjustedPrimary the replacement primary strength
+        /// @return a copy with a replacement primary strength
+        private CdefStrength withPrimary(int adjustedPrimary) {
+            return new CdefStrength(adjustedPrimary, secondary);
+        }
+
         /// Returns whether either strength component can change a sample.
         ///
         /// @return whether either strength component can change a sample
         private boolean active() {
             return primary != 0 || secondary != 0;
+        }
+    }
+
+    /// Luma-derived CDEF direction-estimator result.
+    @NotNullByDefault
+    private static final class CdefDirection {
+        /// The dominant direction index in `0..7`.
+        private final int direction;
+
+        /// The directional variance used for luma primary strength adjustment.
+        private final int variance;
+
+        /// Creates one CDEF direction-estimator result.
+        ///
+        /// @param direction the dominant direction index in `0..7`
+        /// @param variance the directional variance used for luma primary strength adjustment
+        private CdefDirection(int direction, int variance) {
+            this.direction = direction;
+            this.variance = variance;
+        }
+
+        /// Returns the dominant direction index in `0..7`.
+        ///
+        /// @return the dominant direction index in `0..7`
+        private int direction() {
+            return direction;
+        }
+
+        /// Returns the directional variance used for luma primary strength adjustment.
+        ///
+        /// @return the directional variance used for luma primary strength adjustment
+        private int variance() {
+            return variance;
+        }
+    }
+
+    /// Row-major decoded CDEF syntax state for luma CDEF units.
+    @NotNullByDefault
+    private static final class CdefUnitMap {
+        /// The decoded CDEF index for each luma CDEF unit.
+        private final int @Unmodifiable [] cdefIndices;
+
+        /// Whether each luma CDEF unit contains at least one non-skipped block.
+        private final boolean @Unmodifiable [] nonSkipUnits;
+
+        /// Creates one row-major decoded CDEF syntax map.
+        ///
+        /// @param cdefIndices the decoded CDEF index for each luma CDEF unit
+        /// @param nonSkipUnits whether each luma CDEF unit contains at least one non-skipped block
+        private CdefUnitMap(int[] cdefIndices, boolean[] nonSkipUnits) {
+            this.cdefIndices = Arrays.copyOf(Objects.requireNonNull(cdefIndices, "cdefIndices"), cdefIndices.length);
+            this.nonSkipUnits = Arrays.copyOf(Objects.requireNonNull(nonSkipUnits, "nonSkipUnits"), nonSkipUnits.length);
+        }
+
+        /// Returns the decoded CDEF index for one luma CDEF unit.
+        ///
+        /// @param unitIndex the row-major CDEF unit index
+        /// @return the decoded CDEF index for one luma CDEF unit
+        private int cdefIndex(int unitIndex) {
+            return cdefIndices[unitIndex];
+        }
+
+        /// Returns whether one luma CDEF unit contains at least one non-skipped block.
+        ///
+        /// @param unitIndex the row-major CDEF unit index
+        /// @return whether one luma CDEF unit contains at least one non-skipped block
+        private boolean nonSkip(int unitIndex) {
+            return nonSkipUnits[unitIndex];
+        }
+    }
+
+    /// Row-major luma-derived CDEF direction state.
+    @NotNullByDefault
+    private static final class CdefDirectionMap {
+        /// The dominant direction for each luma CDEF unit.
+        private final int @Unmodifiable [] directions;
+
+        /// The directional variance for each luma CDEF unit.
+        private final int @Unmodifiable [] variances;
+
+        /// Creates one row-major luma-derived CDEF direction map.
+        ///
+        /// @param directions the dominant direction for each luma CDEF unit
+        /// @param variances the directional variance for each luma CDEF unit
+        private CdefDirectionMap(int[] directions, int[] variances) {
+            this.directions = Arrays.copyOf(Objects.requireNonNull(directions, "directions"), directions.length);
+            this.variances = Arrays.copyOf(Objects.requireNonNull(variances, "variances"), variances.length);
+        }
+
+        /// Returns the dominant direction for one luma CDEF unit.
+        ///
+        /// @param unitIndex the row-major CDEF unit index
+        /// @return the dominant direction for one luma CDEF unit
+        private int direction(int unitIndex) {
+            return directions[unitIndex];
+        }
+
+        /// Returns the directional variance for one luma CDEF unit.
+        ///
+        /// @param unitIndex the row-major CDEF unit index
+        /// @return the directional variance for one luma CDEF unit
+        private int variance(int unitIndex) {
+            return variances[unitIndex];
         }
     }
 }

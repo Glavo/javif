@@ -37,6 +37,10 @@ Implemented container/API coverage:
 - AV1 loop filtering skips non-edge 4x4 grid lines, selects luma/chroma filter
   widths by edge direction and transform size, and uses exact narrow, 6-tap,
   8-tap, and 16-tap sample filters with regression coverage
+- AV1 CDEF uses dav1d-aligned luma direction detection, bit-depth-scaled
+  strengths, luma-driven chroma directions, non-skip unit masking, and
+  missing-edge sentinel handling, with skipped-unit and high-bit-depth regression
+  coverage
 - libavif ImageIO reference validation covers copied PNG/JPEG source resources,
   documented source-to-AVIF dimensions, rotated output dimensions, and stable
   `I444` draw-points regions across normal, metadata-size-zero, and IDAT
@@ -51,9 +55,9 @@ Implemented container/API coverage:
 - Finish or explicitly reject AV1 reconstruction paths that can still fail as
   `NOT_IMPLEMENTED`, especially defensive inter-palette states and remaining
   inter/compound/warped prediction edge cases.
-- Audit inter prediction, compound prediction, warped motion, CDEF, restoration,
-  super-resolution, film grain, and any remaining loop-filter interactions
-  found by whole-image reference tests against dav1d behavior.
+- Audit inter prediction, compound prediction, warped motion, restoration,
+  super-resolution, film grain, and any remaining cross-stage postfilter
+  interactions found by whole-image reference tests against dav1d behavior.
 - Add regression fixtures for real-world AVIF files that parse but still decode
   with visible corruption.
 
