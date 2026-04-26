@@ -83,8 +83,8 @@ final class TilePartitionTreeReaderTest {
         assertEquals(BlockSize.SIZE_64X32, leafNode.header().size());
         assertEquals(TransformSize.RTX_64X32, leafNode.transformLayout().uniformLumaTransformSize());
         assertEquals(10, leafNode.transformLayout().visibleWidth4());
-        assertEquals(7, leafNode.transformLayout().visibleHeight4());
-        assertFalse(hasInvalidLeafOrigin(roots[0], 10, 7));
+        assertEquals(8, leafNode.transformLayout().visibleHeight4());
+        assertFalse(hasInvalidLeafOrigin(roots[0], 10, 8));
     }
 
     /// Counts the number of leaf nodes in one partition tree.

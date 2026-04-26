@@ -455,13 +455,13 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(2, transformLayout.visibleWidth4());
         assertEquals(2, transformLayout.visibleHeight4());
         assertEquals(4, exactVisibleChromaWidthPixels(tileContext, position, BlockSize.SIZE_8X8));
-        assertEquals(3, exactVisibleChromaHeightPixels(tileContext, position, BlockSize.SIZE_8X8));
+        assertEquals(4, exactVisibleChromaHeightPixels(tileContext, position, BlockSize.SIZE_8X8));
         assertTrue(expectedResidualLayout.hasChromaUnits());
         assertTrue(residualLayout.hasChromaUnits());
         assertEquals(4, residualLayout.chromaUUnits()[0].visibleWidthPixels());
-        assertEquals(3, residualLayout.chromaUUnits()[0].visibleHeightPixels());
+        assertEquals(4, residualLayout.chromaUUnits()[0].visibleHeightPixels());
         assertEquals(4, residualLayout.chromaVUnits()[0].visibleWidthPixels());
-        assertEquals(3, residualLayout.chromaVUnits()[0].visibleHeightPixels());
+        assertEquals(4, residualLayout.chromaVUnits()[0].visibleHeightPixels());
         assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
     }
 
@@ -487,14 +487,14 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(2, transformLayout.visibleWidth4());
         assertEquals(2, transformLayout.visibleHeight4());
         assertEquals(4, exactVisibleChromaWidthPixels(tileContext, position, BlockSize.SIZE_8X8));
-        assertEquals(5, exactVisibleChromaHeightPixels(tileContext, position, BlockSize.SIZE_8X8));
+        assertEquals(8, exactVisibleChromaHeightPixels(tileContext, position, BlockSize.SIZE_8X8));
         assertEquals(TransformSize.RTX_4X8, transformLayout.chromaTransformSize());
         assertTrue(expectedResidualLayout.hasChromaUnits());
         assertTrue(residualLayout.hasChromaUnits());
         assertEquals(4, residualLayout.chromaUUnits()[0].visibleWidthPixels());
-        assertEquals(5, residualLayout.chromaUUnits()[0].visibleHeightPixels());
+        assertEquals(8, residualLayout.chromaUUnits()[0].visibleHeightPixels());
         assertEquals(4, residualLayout.chromaVUnits()[0].visibleWidthPixels());
-        assertEquals(5, residualLayout.chromaVUnits()[0].visibleHeightPixels());
+        assertEquals(8, residualLayout.chromaVUnits()[0].visibleHeightPixels());
         assertResidualLayoutEquals(expectedResidualLayout, residualLayout);
     }
 
@@ -1444,7 +1444,7 @@ final class TileResidualSyntaxReaderTest {
             BlockPosition position,
             BlockSize blockSize
     ) {
-        return Math.max(0, Math.min(blockSize.widthPixels(), tileContext.width() - (position.x4() << 2)));
+        return Math.max(0, Math.min(blockSize.widthPixels(), (tileContext.codedWidth4() - position.x4()) << 2));
     }
 
     /// Returns the exact visible luma height in pixels for one block clipped against the synthetic frame.
@@ -1458,7 +1458,7 @@ final class TileResidualSyntaxReaderTest {
             BlockPosition position,
             BlockSize blockSize
     ) {
-        return Math.max(0, Math.min(blockSize.heightPixels(), tileContext.height() - (position.y4() << 2)));
+        return Math.max(0, Math.min(blockSize.heightPixels(), (tileContext.codedHeight4() - position.y4()) << 2));
     }
 
     /// Returns the exact visible chroma span that covers one visible luma span under subsampling.

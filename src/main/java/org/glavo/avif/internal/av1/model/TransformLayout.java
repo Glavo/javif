@@ -64,8 +64,8 @@ public final class TransformLayout {
     /// @param blockSize the coded block size that owns this transform layout
     /// @param visibleWidth4 the visible block width in 4x4 units after clipping against tile bounds
     /// @param visibleHeight4 the visible block height in 4x4 units after clipping against tile bounds
-    /// @param visibleWidthPixels the exact visible block width in pixels after clipping against tile bounds
-    /// @param visibleHeightPixels the exact visible block height in pixels after clipping against tile bounds
+    /// @param visibleWidthPixels the exact coded-grid block width in pixels after clipping against tile bounds
+    /// @param visibleHeightPixels the exact coded-grid block height in pixels after clipping against tile bounds
     /// @param maxLumaTransformSize the largest luma transform size allowed by the current block and frame layout
     /// @param chromaTransformSize the largest chroma transform size allowed by the current block and frame layout, or `null`
     /// @param variableLumaTransformTree whether this layout came from a variable luma transform tree
@@ -135,8 +135,8 @@ public final class TransformLayout {
     /// @param blockSize the coded block size that owns this transform layout
     /// @param visibleWidth4 the visible block width in 4x4 units after clipping against tile bounds
     /// @param visibleHeight4 the visible block height in 4x4 units after clipping against tile bounds
-    /// @param visibleWidthPixels the exact visible block width in pixels after clipping against tile bounds
-    /// @param visibleHeightPixels the exact visible block height in pixels after clipping against tile bounds
+    /// @param visibleWidthPixels the exact coded-grid block width in pixels after clipping against tile bounds
+    /// @param visibleHeightPixels the exact coded-grid block height in pixels after clipping against tile bounds
     /// @param maxLumaTransformSize the largest luma transform size allowed by the current block and frame layout
     /// @param chromaTransformSize the largest chroma transform size allowed by the current block and frame layout, or `null`
     /// @param variableLumaTransformTree whether this layout came from a variable luma transform tree

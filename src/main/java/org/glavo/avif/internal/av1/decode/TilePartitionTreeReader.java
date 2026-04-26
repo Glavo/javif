@@ -77,12 +77,6 @@ public final class TilePartitionTreeReader {
     /// The tile height in AV1 4x4 coding units after 8x8 frame-grid rounding.
     private final int tileHeight4;
 
-    /// The tile width in visible 4x4 units clipped to the decoded frame size.
-    private final int visibleTileWidth4;
-
-    /// The tile height in visible 4x4 units clipped to the decoded frame size.
-    private final int visibleTileHeight4;
-
     /// Creates one recursive tile partition tree reader.
     ///
     /// @param tileContext the tile-local decode state that owns the active tile bitstream
@@ -97,8 +91,6 @@ public final class TilePartitionTreeReader {
         this.loopRestorationReader = new TileLoopRestorationReader(nonNullTileContext, syntaxReader);
         this.tileWidth4 = nonNullTileContext.codedWidth4();
         this.tileHeight4 = nonNullTileContext.codedHeight4();
-        this.visibleTileWidth4 = (nonNullTileContext.width() + 3) >> 2;
-        this.visibleTileHeight4 = (nonNullTileContext.height() + 3) >> 2;
     }
 
     /// Returns the tile-local decode state that owns this tree reader.
@@ -235,7 +227,7 @@ public final class TilePartitionTreeReader {
         return node;
     }
 
-    /// Reads the mandatory 8x8 split into visible 4x4 leaf nodes.
+    /// Reads the mandatory 8x8 split into 4x4 leaf nodes.
     ///
     /// @param position the current 8x8 block origin
     /// @param level the current 8x8 square block level
@@ -248,13 +240,13 @@ public final class TilePartitionTreeReader {
                 leaf(position.offset(1, 1), BlockSize.SIZE_4X4));
     }
 
-    /// Reads one visible leaf block.
+    /// Reads one coded leaf block.
     ///
     /// @param position the local tile-relative block origin
     /// @param size the block size to read
-    /// @return the leaf node for the supplied block, or `null` when fully outside the tile
+    /// @return the leaf node for the supplied block, or `null` when fully outside the coded tile grid
     private @Nullable LeafNode leaf(BlockPosition position, BlockSize size) {
-        if (position.x4() >= visibleTileWidth4 || position.y4() >= visibleTileHeight4) {
+        if (position.x4() >= tileWidth4 || position.y4() >= tileHeight4) {
             return null;
         }
         TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, size, neighborContext, false);

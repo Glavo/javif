@@ -221,6 +221,14 @@ final class LibavifImageIoReferenceTest {
             ),
     };
 
+    /// Alpha-plane references for AVIF fixtures whose source images contain ImageIO-readable alpha.
+    private static final AlphaPlaneReference @Unmodifiable [] ALPHA_PLANE_REFERENCES = new AlphaPlaneReference[]{
+            new AlphaPlaneReference("libavif-test-data/draw_points.png", "libavif-test-data/draw_points_idat.avif"),
+            new AlphaPlaneReference("libavif-test-data/draw_points.png", "libavif-test-data/draw_points_idat_metasize0.avif"),
+            new AlphaPlaneReference("libavif-test-data/draw_points.png", "libavif-test-data/draw_points_idat_progressive.avif"),
+            new AlphaPlaneReference("libavif-test-data/draw_points.png", "libavif-test-data/draw_points_idat_progressive_metasize0.avif"),
+    };
+
     /// Verifies that ImageIO can read every copied libavif PNG/JPEG reference resource.
     ///
     /// @return the dynamic image resource tests
@@ -260,6 +268,18 @@ final class LibavifImageIoReferenceTest {
                 .map(reference -> DynamicTest.dynamicTest(
                         reference.avifResource() + " region " + reference.region(),
                         () -> assertPixelRegionReference(reference)
+                ));
+    }
+
+    /// Verifies decoded AVIF alpha planes against ImageIO-readable source-image alpha channels.
+    ///
+    /// @return the dynamic alpha-plane reference tests
+    @TestFactory
+    Stream<DynamicTest> decodedAvifAlphaPlanesMatchImageIoReferences() {
+        return Arrays.stream(ALPHA_PLANE_REFERENCES)
+                .map(reference -> DynamicTest.dynamicTest(
+                        reference.avifResource(),
+                        () -> assertAlphaPlaneReference(reference)
                 ));
     }
 
@@ -327,6 +347,19 @@ final class LibavifImageIoReferenceTest {
             AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertEquals(source.getRGB(22, 0) >>> 24, alphaPlanes.lumaPlane().sample(22, 0));
+        }
+    }
+
+    /// Verifies that the `circle_custom_properties` alpha plane consumes coded padding blocks before the next superblock.
+    ///
+    /// @throws IOException if the resources cannot be read or decoded
+    @Test
+    void circleCustomPropertiesFixtureDecodesReferenceAlphaPlane() throws IOException {
+        BufferedImage source = TestResources.readImage("libavif-test-data/circle-trns-after-plte.png");
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/circle_custom_properties.avif"))) {
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertAlphaPlaneMatchesReference("libavif-test-data/circle_custom_properties.avif", source, alphaPlanes.lumaPlane());
         }
     }
 
@@ -505,6 +538,38 @@ final class LibavifImageIoReferenceTest {
         }
     }
 
+    /// Asserts one decoded alpha plane against an ImageIO-readable source-image alpha channel.
+    ///
+    /// @param reference the expected alpha-plane reference
+    /// @throws IOException if a resource cannot be read or decoded
+    private static void assertAlphaPlaneReference(AlphaPlaneReference reference) throws IOException {
+        BufferedImage expected = TestResources.readImage(reference.sourceResource());
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.avifResource()))) {
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertAlphaPlaneMatchesReference(reference.avifResource(), expected, alphaPlanes.lumaPlane());
+        }
+    }
+
+    /// Asserts that one decoded alpha plane matches the alpha channel from an ImageIO reference.
+    ///
+    /// @param label the diagnostic label
+    /// @param expected the expected ImageIO-decoded image
+    /// @param actual the decoded alpha plane
+    private static void assertAlphaPlaneMatchesReference(String label, BufferedImage expected, AvifPlane actual) {
+        assertEquals(expected.getWidth(), actual.width());
+        assertEquals(expected.getHeight(), actual.height());
+        for (int y = 0; y < expected.getHeight(); y++) {
+            for (int x = 0; x < expected.getWidth(); x++) {
+                assertEquals(
+                        expected.getRGB(x, y) >>> 24,
+                        actual.sample(x, y),
+                        label + " alpha mismatch at (" + x + "," + y + ")"
+                );
+            }
+        }
+    }
+
     /// Asserts that one AVIF frame matches an ImageIO reference image.
     ///
     /// @param label the diagnostic label
@@ -669,6 +734,17 @@ final class LibavifImageIoReferenceTest {
             PixelRegion region,
             PixelTransform transform,
             PixelTolerance tolerance
+    ) {
+    }
+
+    /// One raw alpha-plane reference between an ImageIO-readable source and an AVIF fixture.
+    ///
+    /// @param sourceResource the source image classpath resource name
+    /// @param avifResource the encoded AVIF classpath resource name
+    @NotNullByDefault
+    private record AlphaPlaneReference(
+            String sourceResource,
+            String avifResource
     ) {
     }
 }

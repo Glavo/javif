@@ -147,8 +147,8 @@ final class TileTransformLayoutReaderTest {
 
         assertEquals(2, layout.visibleWidth4());
         assertEquals(2, layout.visibleHeight4());
-        assertEquals(7, layout.visibleWidthPixels());
-        assertEquals(5, layout.visibleHeightPixels());
+        assertEquals(8, layout.visibleWidthPixels());
+        assertEquals(8, layout.visibleHeightPixels());
         assertEquals(TransformSize.RTX_4X8, layout.chromaTransformSize());
         assertEquals(1, chromaUnits.length);
         assertEquals(0, chromaUnits[0].position().x4());

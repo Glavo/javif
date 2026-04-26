@@ -315,19 +315,31 @@ public final class FrameReconstructor {
 
         requireSupportedSequence(sequenceHeader, frameHeader, checkedSyntaxDecodeResult);
 
+        int alignedLumaWidth = alignedLumaDimension(frameSize.codedWidth());
+        int alignedLumaHeight = alignedLumaDimension(frameSize.height());
         MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(
-                frameSize.codedWidth(),
-                frameSize.height(),
+                alignedLumaWidth,
+                alignedLumaHeight,
                 sequenceHeader.colorConfig().bitDepth()
         );
-        @Nullable MutablePlaneBuffer chromaUPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
-        @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(pixelFormat, frameSize, sequenceHeader.colorConfig().bitDepth());
+        @Nullable MutablePlaneBuffer chromaUPlane = createChromaPlane(
+                pixelFormat,
+                alignedLumaWidth,
+                alignedLumaHeight,
+                sequenceHeader.colorConfig().bitDepth()
+        );
+        @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(
+                pixelFormat,
+                alignedLumaWidth,
+                alignedLumaHeight,
+                sequenceHeader.colorConfig().bitDepth()
+        );
 
         TilePartitionTreeReader.Node[][] tileRootsByTile = FrameLocalPartitionTrees.create(
                 assembly,
                 checkedSyntaxDecodeResult.tileRoots()
         );
-        DecodedBlockMap decodedBlockMap = DecodedBlockMap.create(tileRootsByTile, frameSize.codedWidth(), frameSize.height());
+        DecodedBlockMap decodedBlockMap = DecodedBlockMap.create(tileRootsByTile, alignedLumaWidth, alignedLumaHeight);
         for (TilePartitionTreeReader.Node[] tileRoots : tileRootsByTile) {
             for (TilePartitionTreeReader.Node root : tileRoots) {
                 reconstructNode(
@@ -345,9 +357,13 @@ public final class FrameReconstructor {
             }
         }
 
-        DecodedPlane decodedLumaPlane = lumaPlane.toDecodedPlane();
-        @Nullable DecodedPlane decodedChromaUPlane = chromaUPlane != null ? chromaUPlane.toDecodedPlane() : null;
-        @Nullable DecodedPlane decodedChromaVPlane = chromaVPlane != null ? chromaVPlane.toDecodedPlane() : null;
+        DecodedPlane decodedLumaPlane = lumaPlane.toDecodedPlane(frameSize.codedWidth(), frameSize.height());
+        @Nullable DecodedPlane decodedChromaUPlane = chromaUPlane != null
+                ? chromaUPlane.toDecodedPlane(chromaWidth(pixelFormat, frameSize.codedWidth()), chromaHeight(pixelFormat, frameSize.height()))
+                : null;
+        @Nullable DecodedPlane decodedChromaVPlane = chromaVPlane != null
+                ? chromaVPlane.toDecodedPlane(chromaWidth(pixelFormat, frameSize.codedWidth()), chromaHeight(pixelFormat, frameSize.height()))
+                : null;
 
         if (frameHeader.superResolution().enabled()) {
             return applySuperResolution(
@@ -419,26 +435,61 @@ public final class FrameReconstructor {
     /// @return one mutable chroma plane for the current supported pixel format, or `null`
     private static @Nullable MutablePlaneBuffer createChromaPlane(
             AvifPixelFormat pixelFormat,
-            FrameHeader.FrameSize frameSize,
+            int alignedLumaWidth,
+            int alignedLumaHeight,
             int bitDepth
     ) {
         return switch (pixelFormat) {
             case I400 -> null;
             case I420 -> new MutablePlaneBuffer(
-                    (frameSize.codedWidth() + 1) >> 1,
-                    (frameSize.height() + 1) >> 1,
+                    alignedLumaWidth >> 1,
+                    alignedLumaHeight >> 1,
                     bitDepth
             );
             case I422 -> new MutablePlaneBuffer(
-                    (frameSize.codedWidth() + 1) >> 1,
-                    frameSize.height(),
+                    alignedLumaWidth >> 1,
+                    alignedLumaHeight,
                     bitDepth
             );
             case I444 -> new MutablePlaneBuffer(
-                    frameSize.codedWidth(),
-                    frameSize.height(),
+                    alignedLumaWidth,
+                    alignedLumaHeight,
                     bitDepth
             );
+        };
+    }
+
+    /// Returns an AV1 luma dimension rounded up to the decoder's 8-pixel frame buffer grid.
+    ///
+    /// @param dimension the uncropped luma dimension in samples
+    /// @return the dimension rounded up to a multiple of 8 samples
+    private static int alignedLumaDimension(int dimension) {
+        return (dimension + 7) & ~7;
+    }
+
+    /// Returns the chroma-plane width for one output luma width.
+    ///
+    /// @param pixelFormat the active decoded pixel format
+    /// @param lumaWidth the output luma width in samples
+    /// @return the chroma-plane width for the supplied luma width
+    private static int chromaWidth(AvifPixelFormat pixelFormat, int lumaWidth) {
+        return switch (pixelFormat) {
+            case I400 -> 0;
+            case I420, I422 -> (lumaWidth + 1) >> 1;
+            case I444 -> lumaWidth;
+        };
+    }
+
+    /// Returns the chroma-plane height for one output luma height.
+    ///
+    /// @param pixelFormat the active decoded pixel format
+    /// @param lumaHeight the output luma height in samples
+    /// @return the chroma-plane height for the supplied luma height
+    private static int chromaHeight(AvifPixelFormat pixelFormat, int lumaHeight) {
+        return switch (pixelFormat) {
+            case I400 -> 0;
+            case I420 -> (lumaHeight + 1) >> 1;
+            case I422, I444 -> lumaHeight;
         };
     }
 
@@ -1281,6 +1332,8 @@ public final class FrameReconstructor {
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
+        int frameLumaWidth = frameHeader.frameSize().codedWidth();
+        int frameLumaHeight = frameHeader.frameSize().height();
         if (header.compoundReference()) {
             reconstructCompoundInterPrediction(
                     lumaPlane,
@@ -1290,6 +1343,8 @@ public final class FrameReconstructor {
                     transformLayout,
                     pixelFormat,
                     frameHeader,
+                    frameLumaWidth,
+                    frameLumaHeight,
                     orderHintBits,
                     referenceSurfaceSnapshots
             );
@@ -1303,6 +1358,8 @@ public final class FrameReconstructor {
                         transformLayout,
                         pixelFormat,
                         frameHeader,
+                        frameLumaWidth,
+                        frameLumaHeight,
                         referenceSurfaceSnapshots,
                         decodedBlockMap
                 );
@@ -1315,6 +1372,8 @@ public final class FrameReconstructor {
                         transformLayout,
                         pixelFormat,
                         frameHeader,
+                        frameLumaWidth,
+                        frameLumaHeight,
                         referenceSurfaceSnapshots
                 );
             }
@@ -1330,6 +1389,8 @@ public final class FrameReconstructor {
                         transformLayout,
                         pixelFormat,
                         frameHeader,
+                        frameLumaWidth,
+                        frameLumaHeight,
                         referenceSurfaceSnapshots,
                         decodedBlockMap
                 );
@@ -1356,6 +1417,8 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int frameLumaWidth,
+            int frameLumaHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1375,6 +1438,8 @@ public final class FrameReconstructor {
                 0,
                 frameHeader,
                 pixelFormat,
+                frameLumaWidth,
+                frameLumaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1390,6 +1455,8 @@ public final class FrameReconstructor {
                 0,
                 frameHeader,
                 pixelFormat,
+                frameLumaWidth,
+                frameLumaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1404,6 +1471,8 @@ public final class FrameReconstructor {
         int chromaY = lumaY >> chromaSubsamplingY;
         int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
         int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
+        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         applyObmcAboveNeighbors(
                 chromaUPlane,
                 ChromaPlane.U,
@@ -1416,6 +1485,8 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
+                frameChromaWidth,
+                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1431,6 +1502,8 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
+                frameChromaWidth,
+                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1446,6 +1519,8 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
+                frameChromaWidth,
+                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1461,6 +1536,8 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
+                frameChromaWidth,
+                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1493,6 +1570,8 @@ public final class FrameReconstructor {
             int subsamplingY,
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
+            int framePlaneWidth,
+            int framePlaneHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1534,6 +1613,8 @@ public final class FrameReconstructor {
                             true,
                             frameHeader,
                             pixelFormat,
+                            framePlaneWidth,
+                            framePlaneHeight,
                             referenceSurfaceSnapshots
                     );
                     processed++;
@@ -1570,6 +1651,8 @@ public final class FrameReconstructor {
             int subsamplingY,
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
+            int framePlaneWidth,
+            int framePlaneHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1611,6 +1694,8 @@ public final class FrameReconstructor {
                             false,
                             frameHeader,
                             pixelFormat,
+                            framePlaneWidth,
+                            framePlaneHeight,
                             referenceSurfaceSnapshots
                     );
                     processed++;
@@ -1646,6 +1731,8 @@ public final class FrameReconstructor {
             boolean above,
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
+            int framePlaneWidth,
+            int framePlaneHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
@@ -1680,8 +1767,8 @@ public final class FrameReconstructor {
                         referencePlane,
                         destinationX + x,
                         destinationY + y,
-                        destinationPlane.width(),
-                        destinationPlane.height(),
+                        framePlaneWidth,
+                        framePlaneHeight,
                         motionVector.columnQuarterPel(),
                         motionVector.rowQuarterPel(),
                         denominatorX,
@@ -1775,6 +1862,8 @@ public final class FrameReconstructor {
         reconstructInterPlanePrediction(
                 lumaPlane,
                 lumaSnapshot,
+                lumaSnapshot.width(),
+                lumaSnapshot.height(),
                 lumaX,
                 lumaY,
                 visibleLumaWidth,
@@ -1806,6 +1895,8 @@ public final class FrameReconstructor {
         reconstructInterPlanePrediction(
                 chromaUPlane,
                 chromaUSnapshot,
+                chromaUSnapshot.width(),
+                chromaUSnapshot.height(),
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -1822,6 +1913,8 @@ public final class FrameReconstructor {
         reconstructInterPlanePrediction(
                 chromaVPlane,
                 chromaVSnapshot,
+                chromaVSnapshot.width(),
+                chromaVSnapshot.height(),
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -1855,6 +1948,8 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int frameLumaWidth,
+            int frameLumaHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
@@ -1876,6 +1971,8 @@ public final class FrameReconstructor {
         reconstructInterPlanePrediction(
                 lumaPlane,
                 referencePlanes.lumaPlane(),
+                frameLumaWidth,
+                frameLumaHeight,
                 lumaX,
                 lumaY,
                 visibleLumaWidth,
@@ -1900,12 +1997,16 @@ public final class FrameReconstructor {
         int chromaY = lumaY >> chromaSubsamplingY;
         int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
         int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
+        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         int chromaDenominatorX = 4 << chromaSubsamplingX;
         int chromaDenominatorY = 4 << chromaSubsamplingY;
 
         reconstructInterPlanePrediction(
                 chromaUPlane,
                 Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -1922,6 +2023,8 @@ public final class FrameReconstructor {
         reconstructInterPlanePrediction(
                 chromaVPlane,
                 Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -1956,6 +2059,8 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int frameLumaWidth,
+            int frameLumaHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1978,6 +2083,8 @@ public final class FrameReconstructor {
         reconstructLocalWarpedPlanePrediction(
                 lumaPlane,
                 referencePlanes.lumaPlane(),
+                frameLumaWidth,
+                frameLumaHeight,
                 lumaX,
                 lumaY,
                 visibleLumaWidth,
@@ -2003,12 +2110,16 @@ public final class FrameReconstructor {
         int chromaY = lumaY >> chromaSubsamplingY;
         int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
         int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
+        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         int chromaDenominatorX = 4 << chromaSubsamplingX;
         int chromaDenominatorY = 4 << chromaSubsamplingY;
 
         reconstructLocalWarpedPlanePrediction(
                 chromaUPlane,
                 Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -2026,6 +2137,8 @@ public final class FrameReconstructor {
         reconstructLocalWarpedPlanePrediction(
                 chromaVPlane,
                 Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -2062,6 +2175,8 @@ public final class FrameReconstructor {
     private static void reconstructLocalWarpedPlanePrediction(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
+            int framePlaneWidth,
+            int framePlaneHeight,
             int destinationX,
             int destinationY,
             int width,
@@ -2082,15 +2197,17 @@ public final class FrameReconstructor {
             for (int x = 0; x < width; x++) {
                 int planeX = destinationX + x;
                 int lumaX = planeX << subsamplingX;
+                int mappedPlaneX = Math.min(planeX, framePlaneWidth - 1);
+                int mappedPlaneY = Math.min(planeY, framePlaneHeight - 1);
                 int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
-                        planeX,
-                        destinationPlane.width(),
+                        mappedPlaneX,
+                        framePlaneWidth,
                         referencePlane.width(),
                         denominatorX
                 ) + model.columnOffsetQuarterPel(lumaX, lumaY);
                 int sourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
-                        planeY,
-                        destinationPlane.height(),
+                        mappedPlaneY,
+                        framePlaneHeight,
                         referencePlane.height(),
                         denominatorY
                 ) + model.rowOffsetQuarterPel(lumaX, lumaY);
@@ -2510,6 +2627,8 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
+            int frameLumaWidth,
+            int frameLumaHeight,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
@@ -2557,6 +2676,8 @@ public final class FrameReconstructor {
                 lumaPlane,
                 referencePlanes0.lumaPlane(),
                 referencePlanes1.lumaPlane(),
+                frameLumaWidth,
+                frameLumaHeight,
                 lumaX,
                 lumaY,
                 visibleLumaWidth,
@@ -2594,6 +2715,8 @@ public final class FrameReconstructor {
         int chromaY = lumaY >> chromaSubsamplingY;
         int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
         int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
+        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         int chromaDenominatorX = 4 << chromaSubsamplingX;
         int chromaDenominatorY = 4 << chromaSubsamplingY;
 
@@ -2601,6 +2724,8 @@ public final class FrameReconstructor {
                 chromaUPlane,
                 Objects.requireNonNull(referencePlanes0.chromaUPlane(), "referencePlanes0.chromaUPlane()"),
                 Objects.requireNonNull(referencePlanes1.chromaUPlane(), "referencePlanes1.chromaUPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -2631,6 +2756,8 @@ public final class FrameReconstructor {
                 chromaVPlane,
                 Objects.requireNonNull(referencePlanes0.chromaVPlane(), "referencePlanes0.chromaVPlane()"),
                 Objects.requireNonNull(referencePlanes1.chromaVPlane(), "referencePlanes1.chromaVPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -2684,6 +2811,8 @@ public final class FrameReconstructor {
     private static void reconstructInterPlanePrediction(
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
+            int framePlaneWidth,
+            int framePlaneHeight,
             int destinationX,
             int destinationY,
             int width,
@@ -2697,8 +2826,8 @@ public final class FrameReconstructor {
             FrameHeader.InterpolationFilter horizontalFilterMode,
             FrameHeader.InterpolationFilter verticalFilterMode
     ) {
-        if (destinationPlane.width() == referencePlane.width()
-                && destinationPlane.height() == referencePlane.height()
+        if (framePlaneWidth == referencePlane.width()
+                && framePlaneHeight == referencePlane.height()
                 && Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
                 && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
             copyReferencePlaneBlock(
@@ -2723,8 +2852,8 @@ public final class FrameReconstructor {
                                 referencePlane,
                                 destinationX + x,
                                 destinationY + y,
-                                destinationPlane.width(),
-                                destinationPlane.height(),
+                                framePlaneWidth,
+                                framePlaneHeight,
                                 sourceOffsetQuarterPelX,
                                 sourceOffsetQuarterPelY,
                                 denominatorX,
@@ -2775,6 +2904,8 @@ public final class FrameReconstructor {
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane0,
             DecodedPlane referencePlane1,
+            int framePlaneWidth,
+            int framePlaneHeight,
             int destinationX,
             int destinationY,
             int width,
@@ -2809,8 +2940,8 @@ public final class FrameReconstructor {
                         referencePlane0,
                         destinationX + x,
                         destinationY + y,
-                        destinationPlane.width(),
-                        destinationPlane.height(),
+                        framePlaneWidth,
+                        framePlaneHeight,
                         sourceOffsetQuarterPelX0,
                         sourceOffsetQuarterPelY0,
                         denominatorX,
@@ -2825,8 +2956,8 @@ public final class FrameReconstructor {
                         referencePlane1,
                         destinationX + x,
                         destinationY + y,
-                        destinationPlane.width(),
-                        destinationPlane.height(),
+                        framePlaneWidth,
+                        framePlaneHeight,
                         sourceOffsetQuarterPelX1,
                         sourceOffsetQuarterPelY1,
                         denominatorX,
@@ -2906,14 +3037,16 @@ public final class FrameReconstructor {
             FrameHeader.InterpolationFilter verticalFilterMode,
             int maximumSampleValue
     ) {
+        int mappedDestinationX = Math.min(destinationX, destinationPlaneWidth - 1);
+        int mappedDestinationY = Math.min(destinationY, destinationPlaneHeight - 1);
         int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
-                destinationX,
+                mappedDestinationX,
                 destinationPlaneWidth,
                 referencePlane.width(),
                 denominatorX
         ) + sourceOffsetQuarterPelX;
         int sourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
-                destinationY,
+                mappedDestinationY,
                 destinationPlaneHeight,
                 referencePlane.height(),
                 denominatorY

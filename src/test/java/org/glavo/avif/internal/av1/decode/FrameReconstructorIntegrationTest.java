@@ -2103,7 +2103,7 @@ final class FrameReconstructorIntegrationTest {
 
         assertFalse(decodedLeaf.header().skip());
         assertTrue(decodedLeaf.header().hasChroma());
-        assertEquals(1, decodedLeaf.transformLayout().visibleWidth4());
+        assertEquals(2, decodedLeaf.transformLayout().visibleWidth4());
         assertEquals(2, decodedLeaf.transformLayout().visibleHeight4());
         assertEquals(TransformSize.TX_4X4, decodedLeaf.transformLayout().chromaTransformSize());
         assertBitstreamDerivedChromaResidualReconstructsOnlyWithinVisibleFootprint(
