@@ -635,6 +635,37 @@ final class IntraPredictorTest {
         assertBlockEquals(plane, x, y, expected);
     }
 
+    /// Verifies that zone-2 directional prediction samples the top-left/above edge when the
+    /// projected top-edge base reaches `-1`.
+    @Test
+    void directionalChromaPredictionUsesTopLeftAtZoneTwoBoundary() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 12, 8);
+        int x = 3;
+        int y = 3;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                80,
+                new int[]{10, 50, 90, 130, 170, 210, 230, 240},
+                new int[]{200, 180, 160, 140, 120, 100, 80, 60}
+        );
+
+        IntraPredictor.predictChroma(plane, x, y, 4, 4, UvIntraPredictionMode.VERTICAL_RIGHT, 0);
+
+        assertBlockEquals(
+                plane,
+                x,
+                y,
+                new int[][]{
+                        {41, 33, 73, 113},
+                        {69, 16, 56, 96},
+                        {155, 30, 39, 79},
+                        {188, 58, 23, 63}
+                }
+        );
+    }
+
     /// Verifies that directional chroma prediction interpolates from the left edge in the steep-angle zone.
     @Test
     void directionalChromaPredictionInterpolatesFromLeftEdge() {

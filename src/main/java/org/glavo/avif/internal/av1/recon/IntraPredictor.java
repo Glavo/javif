@@ -902,6 +902,7 @@ final class IntraPredictor {
         boolean upsampleLeft = intraEdgeFilterEnabled
                 && useDirectionalEdgeUpsample(referenceSpan, 180 - angle, smoothEdgeReferences);
         int[] topEdge;
+        int topBaseOffset;
         if (upsampleTop) {
             topEdge = upsampleDirectionalEdge(
                     topReferences,
@@ -913,6 +914,7 @@ final class IntraPredictor {
                     true
             );
             dx <<= 1;
+            topBaseOffset = 2;
         } else {
             int filterStrength = intraEdgeFilterEnabled
                     ? directionalEdgeFilterStrength(referenceSpan, angle - 90, smoothEdgeReferences)
@@ -920,8 +922,10 @@ final class IntraPredictor {
             topEdge = edgeWithTopLeft(filterStrength != 0
                     ? filterDirectionalEdge(topReferences, topLeft, width, 0, width, -1, width, filterStrength)
                     : topReferences, topLeft);
+            topBaseOffset = 1;
         }
         int[] leftEdge;
+        int leftBaseOffset;
         if (upsampleLeft) {
             leftEdge = upsampleDirectionalEdge(
                     leftReferences,
@@ -933,6 +937,7 @@ final class IntraPredictor {
                     true
             );
             dy <<= 1;
+            leftBaseOffset = 2;
         } else {
             int filterStrength = intraEdgeFilterEnabled
                     ? directionalEdgeFilterStrength(referenceSpan, 180 - angle, smoothEdgeReferences)
@@ -940,31 +945,38 @@ final class IntraPredictor {
             leftEdge = edgeWithTopLeft(filterStrength != 0
                     ? filterDirectionalEdge(leftReferences, topLeft, height, 0, height, -1, height, filterStrength)
                     : leftReferences, topLeft);
+            leftBaseOffset = 1;
         }
-        int baseIncrementX = 1 + (upsampleTop ? 1 : 0);
-        int leftBaseOffset = 1 + (upsampleLeft ? 1 : 0);
-        for (int row = 0, xpos = (baseIncrementX << 6) - dx; row < height; row++, xpos -= dx) {
-            int baseX = xpos >> 6;
-            int fracX = xpos & 0x3E;
-            for (int column = 0, ypos = (row << (6 + (upsampleLeft ? 1 : 0))) - dy;
-                 column < width;
-                 column++, baseX += baseIncrementX, ypos -= dy) {
-                if (baseX >= 0) {
+        int minBaseX = -(1 + (upsampleTop ? 1 : 0));
+        for (int row = 0; row < height; row++) {
+            for (int column = 0; column < width; column++) {
+                int projectedX = (column << 6) - (row + 1) * dx;
+                int baseX = projectedX >> (6 - (upsampleTop ? 1 : 0));
+                if (baseX >= minBaseX) {
+                    int index = topBaseOffset + baseX;
                     setSampleIfInside(
                             plane,
                             x + column,
                             y + row,
-                            interpolate(edgeSample(topEdge, baseX), edgeSample(topEdge, baseX + 1), fracX)
+                            interpolate(
+                                    edgeSample(topEdge, index),
+                                    edgeSample(topEdge, index + 1),
+                                    directionalFraction(projectedX, upsampleTop)
+                            )
                     );
                 } else {
-                    int baseY = ypos >> 6;
-                    int fracY = ypos & 0x3E;
+                    int projectedY = (row << 6) - (column + 1) * dy;
+                    int baseY = projectedY >> (6 - (upsampleLeft ? 1 : 0));
                     int leftIndex = leftBaseOffset + baseY;
                     setSampleIfInside(
                             plane,
                             x + column,
                             y + row,
-                            interpolate(edgeSample(leftEdge, leftIndex), edgeSample(leftEdge, leftIndex + 1), fracY)
+                            interpolate(
+                                    edgeSample(leftEdge, leftIndex),
+                                    edgeSample(leftEdge, leftIndex + 1),
+                                    directionalFraction(projectedY, upsampleLeft)
+                            )
                     );
                 }
             }
@@ -1748,6 +1760,15 @@ final class IntraPredictor {
     /// @return one directional interpolation result between two edge samples
     private static int interpolate(int sample0, int sample1, int fraction) {
         return (sample0 * (64 - fraction) + sample1 * fraction + 32) >> 6;
+    }
+
+    /// Returns the AV1 directional interpolation fraction for one projected coordinate.
+    ///
+    /// @param projectedCoordinate the signed projected coordinate in 1/64 sample units
+    /// @param upsampled whether the sampled edge has been upsampled by two
+    /// @return the interpolation fraction in `[0, 62]`
+    private static int directionalFraction(int projectedCoordinate, boolean upsampled) {
+        return (projectedCoordinate << (upsampled ? 1 : 0)) & 0x3E;
     }
 
     /// Fills one rectangular block with one constant sample value.
