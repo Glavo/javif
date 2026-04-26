@@ -44,6 +44,9 @@ import java.util.Objects;
 /// High-level reader for AVIF images.
 @NotNullByDefault
 public final class AvifImageReader implements AutoCloseable {
+    /// The chunk size used when accumulating stream and channel inputs.
+    private static final int INPUT_READ_BUFFER_SIZE = 8192;
+
     /// The immutable decoder configuration.
     private final AvifDecoderConfig config;
     /// The parsed container data.
@@ -87,7 +90,10 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return a new AVIF image reader
     /// @throws AvifDecodeException if the source is not a supported AVIF container
     public static AvifImageReader open(byte[] source, AvifDecoderConfig config) throws AvifDecodeException {
-        return new AvifImageReader(Objects.requireNonNull(source, "source").clone(), config);
+        byte[] checkedSource = Objects.requireNonNull(source, "source");
+        AvifDecoderConfig checkedConfig = Objects.requireNonNull(config, "config");
+        validateInputSize(checkedSource.length, checkedConfig.inputSizeLimit());
+        return new AvifImageReader(checkedSource.clone(), checkedConfig);
     }
 
     /// Opens an AVIF image reader over a byte buffer.
@@ -106,10 +112,12 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return a new AVIF image reader
     /// @throws AvifDecodeException if the source is not a supported AVIF container
     public static AvifImageReader open(ByteBuffer source, AvifDecoderConfig config) throws AvifDecodeException {
+        AvifDecoderConfig checkedConfig = Objects.requireNonNull(config, "config");
         ByteBuffer copy = Objects.requireNonNull(source, "source").slice();
+        validateInputSize(copy.remaining(), checkedConfig.inputSizeLimit());
         byte[] bytes = new byte[copy.remaining()];
         copy.get(bytes);
-        return open(bytes, config);
+        return new AvifImageReader(bytes, checkedConfig);
     }
 
     /// Opens an AVIF image reader over an input stream.
@@ -128,7 +136,12 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return a new AVIF image reader
     /// @throws IOException if the source cannot be read or decoded
     public static AvifImageReader open(InputStream source, AvifDecoderConfig config) throws IOException {
-        return open(Objects.requireNonNull(source, "source").readAllBytes(), config);
+        AvifDecoderConfig checkedConfig = Objects.requireNonNull(config, "config");
+        byte[] bytes = readInputStream(
+                Objects.requireNonNull(source, "source"),
+                checkedConfig.inputSizeLimit()
+        );
+        return new AvifImageReader(bytes, checkedConfig);
     }
 
     /// Opens an AVIF image reader over a readable byte channel.
@@ -147,22 +160,12 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return a new AVIF image reader
     /// @throws IOException if the source cannot be read or decoded
     public static AvifImageReader open(ReadableByteChannel source, AvifDecoderConfig config) throws IOException {
-        ReadableByteChannel checkedSource = Objects.requireNonNull(source, "source");
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ByteBuffer buffer = ByteBuffer.allocate(8192);
-        while (true) {
-            int read = checkedSource.read(buffer);
-            if (read < 0) {
-                break;
-            }
-            if (read == 0) {
-                throw new IOException("ReadableByteChannel made no progress while reading AVIF input");
-            }
-            buffer.flip();
-            output.writeBytes(bufferToArray(buffer));
-            buffer.clear();
-        }
-        return open(output.toByteArray(), config);
+        AvifDecoderConfig checkedConfig = Objects.requireNonNull(config, "config");
+        byte[] bytes = readByteChannel(
+                Objects.requireNonNull(source, "source"),
+                checkedConfig.inputSizeLimit()
+        );
+        return new AvifImageReader(bytes, checkedConfig);
     }
 
     /// Opens an AVIF image reader over a file path.
@@ -181,7 +184,106 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return a new AVIF image reader
     /// @throws IOException if the source cannot be read or decoded
     public static AvifImageReader open(Path source, AvifDecoderConfig config) throws IOException {
-        return open(Files.readAllBytes(Objects.requireNonNull(source, "source")), config);
+        Path checkedSource = Objects.requireNonNull(source, "source");
+        AvifDecoderConfig checkedConfig = Objects.requireNonNull(config, "config");
+        long inputSizeLimit = checkedConfig.inputSizeLimit();
+        if (inputSizeLimit > 0) {
+            validateInputSize(Files.size(checkedSource), inputSizeLimit);
+        }
+        try (InputStream input = Files.newInputStream(checkedSource)) {
+            return new AvifImageReader(readInputStream(input, inputSizeLimit), checkedConfig);
+        }
+    }
+
+    /// Reads an input stream into bounded memory.
+    ///
+    /// @param source the source input stream
+    /// @param inputSizeLimit the maximum accepted input size in bytes, or `0` for no limit
+    /// @return the complete source bytes
+    /// @throws IOException if the source cannot be read or exceeds the configured limit
+    private static byte[] readInputStream(InputStream source, long inputSizeLimit) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[INPUT_READ_BUFFER_SIZE];
+        long totalBytes = 0;
+        while (true) {
+            int read = source.read(buffer);
+            if (read < 0) {
+                break;
+            }
+            if (read == 0) {
+                throw new IOException("InputStream made no progress while reading AVIF input");
+            }
+            validateAdditionalInputSize(totalBytes, read, inputSizeLimit);
+            output.write(buffer, 0, read);
+            totalBytes += read;
+        }
+        return output.toByteArray();
+    }
+
+    /// Reads a byte channel into bounded memory.
+    ///
+    /// @param source the source byte channel
+    /// @param inputSizeLimit the maximum accepted input size in bytes, or `0` for no limit
+    /// @return the complete source bytes
+    /// @throws IOException if the source cannot be read or exceeds the configured limit
+    private static byte[] readByteChannel(ReadableByteChannel source, long inputSizeLimit) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteBuffer buffer = ByteBuffer.allocate(INPUT_READ_BUFFER_SIZE);
+        byte[] bytes = buffer.array();
+        long totalBytes = 0;
+        while (true) {
+            int read = source.read(buffer);
+            if (read < 0) {
+                break;
+            }
+            if (read == 0) {
+                throw new IOException("ReadableByteChannel made no progress while reading AVIF input");
+            }
+            validateAdditionalInputSize(totalBytes, read, inputSizeLimit);
+            output.write(bytes, 0, read);
+            totalBytes += read;
+            buffer.clear();
+        }
+        return output.toByteArray();
+    }
+
+    /// Validates a complete input size against the configured limit.
+    ///
+    /// @param inputSize the complete input size in bytes
+    /// @param inputSizeLimit the maximum accepted input size in bytes, or `0` for no limit
+    /// @throws AvifDecodeException if the size exceeds the configured limit
+    private static void validateInputSize(long inputSize, long inputSizeLimit) throws AvifDecodeException {
+        if (inputSizeLimit > 0 && inputSize > inputSizeLimit) {
+            throw inputTooLarge(inputSizeLimit);
+        }
+    }
+
+    /// Validates an incremental input-size increase against the configured limit.
+    ///
+    /// @param currentSize the number of bytes already accepted
+    /// @param additionalSize the number of additional bytes about to be accepted
+    /// @param inputSizeLimit the maximum accepted input size in bytes, or `0` for no limit
+    /// @throws AvifDecodeException if the new size would exceed the configured limit
+    private static void validateAdditionalInputSize(
+            long currentSize,
+            long additionalSize,
+            long inputSizeLimit
+    ) throws AvifDecodeException {
+        if (inputSizeLimit > 0 && additionalSize > inputSizeLimit - currentSize) {
+            throw inputTooLarge(inputSizeLimit);
+        }
+    }
+
+    /// Creates an input-too-large exception.
+    ///
+    /// @param inputSizeLimit the configured input size limit in bytes
+    /// @return an input-too-large exception
+    private static AvifDecodeException inputTooLarge(long inputSizeLimit) {
+        return new AvifDecodeException(
+                AvifErrorCode.INPUT_TOO_LARGE,
+                "AVIF input exceeds configured inputSizeLimit: " + inputSizeLimit + " bytes",
+                null
+        );
     }
 
     /// Returns immutable image metadata parsed from the container.
@@ -2127,13 +2229,4 @@ public final class AvifImageReader implements AutoCloseable {
         return result;
     }
 
-    /// Copies remaining bytes from a buffer into a byte array.
-    ///
-    /// @param buffer the source buffer
-    /// @return a byte array containing the buffer's remaining bytes
-    private static byte[] bufferToArray(ByteBuffer buffer) {
-        byte[] bytes = new byte[buffer.remaining()];
-        buffer.get(bytes);
-        return bytes;
-    }
 }

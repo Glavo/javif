@@ -33,5 +33,7 @@ public enum AvifErrorCode {
     /// The embedded AV1 payload could not be decoded.
     AV1_DECODE_FAILED,
     /// The reader was used after being closed.
-    CLOSED
+    CLOSED,
+    /// The input exceeds the configured maximum input size.
+    INPUT_TOO_LARGE
 }

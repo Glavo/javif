@@ -30,6 +30,8 @@ public final class AvifDecoderConfig {
     private final Av1DecoderConfig av1DecoderConfig;
     /// The requested packed RGB output storage mode.
     private final AvifRgbOutputMode rgbOutputMode;
+    /// The maximum accepted encoded AVIF input size in bytes, or `0` for no limit.
+    private final long inputSizeLimit;
 
     /// Creates a configuration from a validated builder.
     ///
@@ -37,6 +39,7 @@ public final class AvifDecoderConfig {
     private AvifDecoderConfig(Builder builder) {
         this.av1DecoderConfig = builder.av1DecoderConfig;
         this.rgbOutputMode = builder.rgbOutputMode;
+        this.inputSizeLimit = builder.inputSizeLimit;
     }
 
     /// Creates a mutable configuration builder.
@@ -60,6 +63,15 @@ public final class AvifDecoderConfig {
         return rgbOutputMode;
     }
 
+    /// Returns the maximum accepted encoded AVIF input size.
+    ///
+    /// A value of `0` means that the reader does not apply a configured input-size limit.
+    ///
+    /// @return the maximum accepted encoded AVIF input size in bytes, or `0` for no limit
+    public long inputSizeLimit() {
+        return inputSizeLimit;
+    }
+
     /// Mutable builder for `AvifDecoderConfig`.
     @NotNullByDefault
     public static final class Builder {
@@ -67,6 +79,8 @@ public final class AvifDecoderConfig {
         private Av1DecoderConfig av1DecoderConfig = Av1DecoderConfig.DEFAULT;
         /// The requested packed RGB output storage mode.
         private AvifRgbOutputMode rgbOutputMode = AvifRgbOutputMode.AUTOMATIC;
+        /// The maximum accepted encoded AVIF input size in bytes, or `0` for no limit.
+        private long inputSizeLimit;
 
         /// Creates a builder with default values.
         public Builder() {
@@ -90,6 +104,21 @@ public final class AvifDecoderConfig {
         /// @return this builder
         public Builder rgbOutputMode(AvifRgbOutputMode value) {
             this.rgbOutputMode = Objects.requireNonNull(value, "value");
+            return this;
+        }
+
+        /// Sets the maximum accepted encoded AVIF input size.
+        ///
+        /// A value of `0` disables the configured limit. Positive values are applied before
+        /// copying array and buffer inputs and while accumulating stream, channel, and path inputs.
+        ///
+        /// @param value the maximum accepted encoded AVIF input size in bytes, or `0` for no limit
+        /// @return this builder
+        public Builder inputSizeLimit(long value) {
+            if (value < 0) {
+                throw new IllegalArgumentException("inputSizeLimit must be non-negative");
+            }
+            this.inputSizeLimit = value;
             return this;
         }
 

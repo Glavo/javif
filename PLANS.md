@@ -25,6 +25,8 @@ Implemented container/API coverage:
 - explicit RGB output-mode controls for automatic, ARGB_8888, and
   ARGB_16161616 frame buffers across still, sequence, grid, alpha, and
   high-bit-depth paths
+- bounded buffered input ingestion for byte arrays, `ByteBuffer`, `InputStream`,
+  `ReadableByteChannel`, and `Path`, controlled by `AvifDecoderConfig.inputSizeLimit()`
 
 ## Remaining Work
 
@@ -50,9 +52,8 @@ Implemented container/API coverage:
 
 ### Container And API
 
-- Add incremental or streaming input behavior instead of requiring a complete
-  buffered source.
-- Audit alpha edge cases and public buffer immutability annotations.
+- Finish the alpha edge-case audit around unusual auxiliary image dimensions,
+  bit depths, premultiplication flags, and sequence/grid combinations.
 
 ### Validation
 

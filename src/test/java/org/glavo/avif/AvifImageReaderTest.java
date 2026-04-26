@@ -20,6 +20,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,7 +28,10 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.nio.ShortBuffer;
+import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -183,6 +187,94 @@ final class AvifImageReaderTest {
         assertTrue(offset >= 0);
         System.arraycopy(replacementBytes, 0, bytes, offset, replacementBytes.length);
         return bytes;
+    }
+
+    /// Verifies that negative configured input-size limits are rejected.
+    @Test
+    void decoderConfigRejectsNegativeInputSizeLimit() {
+        assertThrows(IllegalArgumentException.class, () -> AvifDecoderConfig.builder().inputSizeLimit(-1));
+    }
+
+    /// Verifies that every public input type rejects encoded data above the configured limit.
+    ///
+    /// @throws IOException if the temporary fixture cannot be written
+    @Test
+    void openRejectsInputsAboveConfiguredInputSizeLimit() throws IOException {
+        byte[] bytes = minimalAvifStillImage();
+        AvifDecoderConfig config = AvifDecoderConfig.builder()
+                .inputSizeLimit(bytes.length - 1L)
+                .build();
+
+        assertInputTooLarge(() -> AvifImageReader.open(bytes, config));
+        assertInputTooLarge(() -> AvifImageReader.open(ByteBuffer.wrap(bytes), config));
+        assertInputTooLarge(() -> AvifImageReader.open(new ByteArrayInputStream(bytes), config));
+        assertInputTooLarge(() -> AvifImageReader.open(Channels.newChannel(new ByteArrayInputStream(bytes)), config));
+
+        Path path = writeWorkspaceTempFile("oversized", bytes);
+        assertInputTooLarge(() -> AvifImageReader.open(path, config));
+    }
+
+    /// Verifies that the configured input-size limit is inclusive.
+    ///
+    /// @throws IOException if the reader cannot parse the test input
+    @Test
+    void openAcceptsInputsAtConfiguredInputSizeLimit() throws IOException {
+        byte[] bytes = minimalAvifStillImage();
+        AvifDecoderConfig config = AvifDecoderConfig.builder()
+                .inputSizeLimit(bytes.length)
+                .build();
+
+        try (AvifImageReader reader = AvifImageReader.open(bytes, config)) {
+            assertEquals(64, reader.info().width());
+        }
+        try (AvifImageReader reader = AvifImageReader.open(ByteBuffer.wrap(bytes), config)) {
+            assertEquals(64, reader.info().width());
+        }
+        try (AvifImageReader reader = AvifImageReader.open(new ByteArrayInputStream(bytes), config)) {
+            assertEquals(64, reader.info().width());
+        }
+        try (AvifImageReader reader = AvifImageReader.open(
+                Channels.newChannel(new ByteArrayInputStream(bytes)),
+                config
+        )) {
+            assertEquals(64, reader.info().width());
+        }
+
+        Path path = writeWorkspaceTempFile("exact-limit", bytes);
+        try (AvifImageReader reader = AvifImageReader.open(path, config)) {
+            assertEquals(64, reader.info().width());
+        }
+    }
+
+    /// Writes bytes to a temporary path under the workspace-local build directory.
+    ///
+    /// @param name the logical fixture name
+    /// @param bytes the file contents
+    /// @return the written path
+    /// @throws IOException if the fixture cannot be written
+    private static Path writeWorkspaceTempFile(String name, byte[] bytes) throws IOException {
+        Path directory = Path.of("build", "tmp", "test", "AvifImageReaderTest");
+        Files.createDirectories(directory);
+        Path path = directory.resolve(name + "-" + System.nanoTime() + ".avif");
+        Files.write(path, bytes);
+        return path;
+    }
+
+    /// Asserts that an input-open operation fails with `INPUT_TOO_LARGE`.
+    ///
+    /// @param operation the operation expected to fail
+    private static void assertInputTooLarge(ThrowingOpen operation) {
+        AvifDecodeException exception = assertThrows(AvifDecodeException.class, operation::open);
+        assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
+    }
+
+    /// Open operation that may fail with `IOException`.
+    @FunctionalInterface
+    private interface ThrowingOpen {
+        /// Runs the open operation.
+        ///
+        /// @throws IOException if opening fails
+        void open() throws IOException;
     }
 
     /// Verifies that the primary AV1 item payload is decoded through the migrated AV1 decoder.
