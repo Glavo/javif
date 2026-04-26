@@ -201,8 +201,7 @@ public final class LoopFilterApplier {
 
         boolean blockEdge = current.header() != previous.header();
         boolean transformEdge = current.transformCell(planeIndex).unit() != previous.transformCell(planeIndex).unit();
-        if (!blockEdge && !transformEdge && current.header().skip() && previous.header().skip()
-                && !current.header().intra() && !previous.header().intra()) {
+        if (!blockEdge && !transformEdge) {
             return;
         }
 
@@ -220,7 +219,12 @@ public final class LoopFilterApplier {
 
         int dx = pass == 0 ? 1 : 0;
         int dy = pass == 0 ? 0 : 1;
-        int filterSize = filterSize(current.transformCell(planeIndex).size(), previous.transformCell(planeIndex).size(), planeIndex);
+        int filterSize = filterSize(
+                current.transformCell(planeIndex).size(),
+                previous.transformCell(planeIndex).size(),
+                planeIndex,
+                pass
+        );
         int level = filterLevel(frameHeader, current.header(), planeIndex, pass);
         FilterStrength strength = filterStrength(level, frameHeader.loopFilter().sharpness());
         if (strength.level() == 0) {
@@ -266,10 +270,12 @@ public final class LoopFilterApplier {
         }
         if (boundedFilterSize == 4 || !mask.flat()) {
             narrowFilter(plane, x, y, dx, dy, mask.highEdgeVariance());
+        } else if (boundedFilterSize == 6) {
+            wideFilterSix(plane, x, y, dx, dy);
         } else if (boundedFilterSize == 8 || !mask.flat2()) {
-            wideFilter(plane, x, y, dx, dy, 3);
+            wideFilterEight(plane, x, y, dx, dy);
         } else {
-            wideFilter(plane, x, y, dx, dy, 4);
+            wideFilterSixteen(plane, x, y, dx, dy);
         }
     }
 
@@ -285,11 +291,20 @@ public final class LoopFilterApplier {
     private static int boundedFilterSize(PlaneBuffer plane, int x, int y, int dx, int dy, int requestedFilterSize) {
         int size = requestedFilterSize;
         while (size >= 4) {
-            int required = size == 16 ? 7 : 4;
+            int required = switch (size) {
+                case 16 -> 7;
+                case 8 -> 4;
+                case 6 -> 3;
+                default -> 2;
+            };
             if (hasSamplesAroundEdge(plane, x, y, dx, dy, required)) {
                 return size;
             }
-            size >>= 1;
+            size = switch (size) {
+                case 16 -> 8;
+                case 8, 6 -> 4;
+                default -> 0;
+            };
         }
         return 0;
     }
@@ -341,30 +356,35 @@ public final class LoopFilterApplier {
         int threshBd = strength.threshold() << bitDepthShift;
         int p0 = sampleRelative(plane, x, y, dx, dy, -1);
         int p1 = sampleRelative(plane, x, y, dx, dy, -2);
-        int p2 = sampleRelative(plane, x, y, dx, dy, -3);
-        int p3 = sampleRelative(plane, x, y, dx, dy, -4);
         int q0 = sampleRelative(plane, x, y, dx, dy, 0);
         int q1 = sampleRelative(plane, x, y, dx, dy, 1);
-        int q2 = sampleRelative(plane, x, y, dx, dy, 2);
-        int q3 = sampleRelative(plane, x, y, dx, dy, 3);
 
         boolean highEdgeVariance = Math.abs(p1 - p0) > threshBd || Math.abs(q1 - q0) > threshBd;
-        boolean filtered = Math.abs(p3 - p2) <= limitBd
-                && Math.abs(p2 - p1) <= limitBd
-                && Math.abs(p1 - p0) <= limitBd
+        boolean filtered = Math.abs(p1 - p0) <= limitBd
                 && Math.abs(q1 - q0) <= limitBd
-                && Math.abs(q2 - q1) <= limitBd
-                && Math.abs(q3 - q2) <= limitBd
-                && Math.abs(p0 - q0) * 2 + Math.abs(p1 - q1) / 2 <= blimitBd;
+                && Math.abs(p0 - q0) * 2 + (Math.abs(p1 - q1) >> 1) <= blimitBd;
         boolean flat = false;
         boolean flat2 = false;
-        if (filterSize >= 8) {
-            flat = Math.abs(p1 - p0) <= thresholdBd
+        if (filterSize > 4) {
+            int p2 = sampleRelative(plane, x, y, dx, dy, -3);
+            int q2 = sampleRelative(plane, x, y, dx, dy, 2);
+            filtered = filtered
+                    && Math.abs(p2 - p1) <= limitBd
+                    && Math.abs(q2 - q1) <= limitBd;
+            flat = Math.abs(p2 - p0) <= thresholdBd
+                    && Math.abs(p1 - p0) <= thresholdBd
                     && Math.abs(q1 - q0) <= thresholdBd
-                    && Math.abs(p2 - p0) <= thresholdBd
-                    && Math.abs(q2 - q0) <= thresholdBd
-                    && Math.abs(p3 - p0) <= thresholdBd
-                    && Math.abs(q3 - q0) <= thresholdBd;
+                    && Math.abs(q2 - q0) <= thresholdBd;
+            if (filterSize > 6) {
+                int p3 = sampleRelative(plane, x, y, dx, dy, -4);
+                int q3 = sampleRelative(plane, x, y, dx, dy, 3);
+                filtered = filtered
+                        && Math.abs(p3 - p2) <= limitBd
+                        && Math.abs(q3 - q2) <= limitBd;
+                flat = flat
+                        && Math.abs(p3 - p0) <= thresholdBd
+                        && Math.abs(q3 - q0) <= thresholdBd;
+            }
         }
         if (filterSize >= 16 && flat) {
             flat2 = Math.abs(sampleRelative(plane, x, y, dx, dy, -7) - p0) <= thresholdBd
@@ -411,30 +431,96 @@ public final class LoopFilterApplier {
         }
     }
 
-    /// Applies the AV1 wide loop filter to one boundary sample.
+    /// Applies the AV1 6-tap wide loop filter to one boundary sample.
     ///
     /// @param plane the mutable plane buffer
     /// @param x the first sample on the right or lower side of the boundary
     /// @param y the first sample on the right or lower side of the boundary
     /// @param dx the horizontal offset across the boundary
     /// @param dy the vertical offset across the boundary
-    /// @param log2Size the base-2 logarithm of the filter tap normalization size
-    private static void wideFilter(PlaneBuffer plane, int x, int y, int dx, int dy, int log2Size) {
-        int n = log2Size == 4 ? 6 : 3;
-        int n2 = log2Size == 3 ? 0 : 1;
-        int[] filtered = new int[n * 2];
-        for (int i = -n; i < n; i++) {
-            int sum = 0;
-            for (int j = -n; j <= n; j++) {
-                int relative = clamp(i + j, -(n + 1), n);
-                int tap = Math.abs(j) <= n2 ? 2 : 1;
-                sum += sampleRelative(plane, x, y, dx, dy, relative) * tap;
-            }
-            filtered[i + n] = round2(sum, log2Size);
-        }
-        for (int i = -n; i < n; i++) {
-            setSampleRelative(plane, x, y, dx, dy, i, filtered[i + n]);
-        }
+    private static void wideFilterSix(PlaneBuffer plane, int x, int y, int dx, int dy) {
+        int p2 = sampleRelative(plane, x, y, dx, dy, -3);
+        int p1 = sampleRelative(plane, x, y, dx, dy, -2);
+        int p0 = sampleRelative(plane, x, y, dx, dy, -1);
+        int q0 = sampleRelative(plane, x, y, dx, dy, 0);
+        int q1 = sampleRelative(plane, x, y, dx, dy, 1);
+        int q2 = sampleRelative(plane, x, y, dx, dy, 2);
+        setSampleRelative(plane, x, y, dx, dy, -2, (p2 + 2 * p2 + 2 * p1 + 2 * p0 + q0 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, -1, (p2 + 2 * p1 + 2 * p0 + 2 * q0 + q1 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, 0, (p1 + 2 * p0 + 2 * q0 + 2 * q1 + q2 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, 1, (p0 + 2 * q0 + 2 * q1 + 2 * q2 + q2 + 4) >> 3);
+    }
+
+    /// Applies the AV1 8-tap wide loop filter to one boundary sample.
+    ///
+    /// @param plane the mutable plane buffer
+    /// @param x the first sample on the right or lower side of the boundary
+    /// @param y the first sample on the right or lower side of the boundary
+    /// @param dx the horizontal offset across the boundary
+    /// @param dy the vertical offset across the boundary
+    private static void wideFilterEight(PlaneBuffer plane, int x, int y, int dx, int dy) {
+        int p3 = sampleRelative(plane, x, y, dx, dy, -4);
+        int p2 = sampleRelative(plane, x, y, dx, dy, -3);
+        int p1 = sampleRelative(plane, x, y, dx, dy, -2);
+        int p0 = sampleRelative(plane, x, y, dx, dy, -1);
+        int q0 = sampleRelative(plane, x, y, dx, dy, 0);
+        int q1 = sampleRelative(plane, x, y, dx, dy, 1);
+        int q2 = sampleRelative(plane, x, y, dx, dy, 2);
+        int q3 = sampleRelative(plane, x, y, dx, dy, 3);
+        setSampleRelative(plane, x, y, dx, dy, -3, (p3 + p3 + p3 + 2 * p2 + p1 + p0 + q0 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, -2, (p3 + p3 + p2 + 2 * p1 + p0 + q0 + q1 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, -1, (p3 + p2 + p1 + 2 * p0 + q0 + q1 + q2 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, 0, (p2 + p1 + p0 + 2 * q0 + q1 + q2 + q3 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, 1, (p1 + p0 + q0 + 2 * q1 + q2 + q3 + q3 + 4) >> 3);
+        setSampleRelative(plane, x, y, dx, dy, 2, (p0 + q0 + q1 + 2 * q2 + q3 + q3 + q3 + 4) >> 3);
+    }
+
+    /// Applies the AV1 16-tap wide loop filter to one boundary sample.
+    ///
+    /// @param plane the mutable plane buffer
+    /// @param x the first sample on the right or lower side of the boundary
+    /// @param y the first sample on the right or lower side of the boundary
+    /// @param dx the horizontal offset across the boundary
+    /// @param dy the vertical offset across the boundary
+    private static void wideFilterSixteen(PlaneBuffer plane, int x, int y, int dx, int dy) {
+        int p6 = sampleRelative(plane, x, y, dx, dy, -7);
+        int p5 = sampleRelative(plane, x, y, dx, dy, -6);
+        int p4 = sampleRelative(plane, x, y, dx, dy, -5);
+        int p3 = sampleRelative(plane, x, y, dx, dy, -4);
+        int p2 = sampleRelative(plane, x, y, dx, dy, -3);
+        int p1 = sampleRelative(plane, x, y, dx, dy, -2);
+        int p0 = sampleRelative(plane, x, y, dx, dy, -1);
+        int q0 = sampleRelative(plane, x, y, dx, dy, 0);
+        int q1 = sampleRelative(plane, x, y, dx, dy, 1);
+        int q2 = sampleRelative(plane, x, y, dx, dy, 2);
+        int q3 = sampleRelative(plane, x, y, dx, dy, 3);
+        int q4 = sampleRelative(plane, x, y, dx, dy, 4);
+        int q5 = sampleRelative(plane, x, y, dx, dy, 5);
+        int q6 = sampleRelative(plane, x, y, dx, dy, 6);
+        setSampleRelative(plane, x, y, dx, dy, -6,
+                (p6 + p6 + p6 + p6 + p6 + p6 * 2 + p5 * 2 + p4 * 2 + p3 + p2 + p1 + p0 + q0 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, -5,
+                (p6 + p6 + p6 + p6 + p6 + p5 * 2 + p4 * 2 + p3 * 2 + p2 + p1 + p0 + q0 + q1 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, -4,
+                (p6 + p6 + p6 + p6 + p5 + p4 * 2 + p3 * 2 + p2 * 2 + p1 + p0 + q0 + q1 + q2 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, -3,
+                (p6 + p6 + p6 + p5 + p4 + p3 * 2 + p2 * 2 + p1 * 2 + p0 + q0 + q1 + q2 + q3 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, -2,
+                (p6 + p6 + p5 + p4 + p3 + p2 * 2 + p1 * 2 + p0 * 2 + q0 + q1 + q2 + q3 + q4 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, -1,
+                (p6 + p5 + p4 + p3 + p2 + p1 * 2 + p0 * 2 + q0 * 2 + q1 + q2 + q3 + q4 + q5 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, 0,
+                (p5 + p4 + p3 + p2 + p1 + p0 * 2 + q0 * 2 + q1 * 2 + q2 + q3 + q4 + q5 + q6 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, 1,
+                (p4 + p3 + p2 + p1 + p0 + q0 * 2 + q1 * 2 + q2 * 2 + q3 + q4 + q5 + q6 + q6 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, 2,
+                (p3 + p2 + p1 + p0 + q0 + q1 * 2 + q2 * 2 + q3 * 2 + q4 + q5 + q6 + q6 + q6 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, 3,
+                (p2 + p1 + p0 + q0 + q1 + q2 * 2 + q3 * 2 + q4 * 2 + q5 + q6 + q6 + q6 + q6 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, 4,
+                (p1 + p0 + q0 + q1 + q2 + q3 * 2 + q4 * 2 + q5 * 2 + q6 + q6 + q6 + q6 + q6 + 8) >> 4);
+        setSampleRelative(plane, x, y, dx, dy, 5,
+                (p0 + q0 + q1 + q2 + q3 + q4 * 2 + q5 * 2 + q6 * 2 + q6 + q6 + q6 + q6 + q6 + 8) >> 4);
     }
 
     /// Returns the loop-filter level for one block, plane, and pass.
@@ -553,13 +639,22 @@ public final class LoopFilterApplier {
     /// @param txSize the current transform size
     /// @param previousTxSize the transform size on the other side of the edge
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+    /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
     /// @return the maximum filter size allowed by the transform sizes across one edge
-    private static int filterSize(TransformSize txSize, TransformSize previousTxSize, int planeIndex) {
-        int baseSize = Math.min(
-                Math.min(txSize.widthPixels(), txSize.heightPixels()),
-                Math.min(previousTxSize.widthPixels(), previousTxSize.heightPixels())
-        );
-        return Math.min(planeIndex == 0 ? 16 : 8, baseSize);
+    private static int filterSize(TransformSize txSize, TransformSize previousTxSize, int planeIndex, int pass) {
+        int baseSize = pass == 0
+                ? Math.min(txSize.widthPixels(), previousTxSize.widthPixels())
+                : Math.min(txSize.heightPixels(), previousTxSize.heightPixels());
+        if (planeIndex != 0) {
+            return baseSize >= 8 ? 6 : 4;
+        }
+        if (baseSize >= 16) {
+            return 16;
+        }
+        if (baseSize >= 8) {
+            return 8;
+        }
+        return 4;
     }
 
     /// Returns whether any loop-filter level can affect the decoded frame.

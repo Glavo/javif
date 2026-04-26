@@ -320,6 +320,43 @@ final class PostfilterTestFixtures {
         );
     }
 
+    /// Creates a two-leaf syntax result split on the vertical edge between equal-sized blocks.
+    ///
+    /// @param frameHeader the frame header that owns the syntax result
+    /// @param blockSize the block size for each side of the split
+    /// @param lumaTransformSize the luma transform size for each side of the split
+    /// @param chromaTransformSize the chroma transform size for each side of the split, or `null`
+    /// @return a two-leaf syntax result split on the vertical edge between equal-sized blocks
+    static FrameSyntaxDecodeResult createVerticalSplitLeafSyntaxResult(
+            FrameHeader frameHeader,
+            BlockSize blockSize,
+            TransformSize lumaTransformSize,
+            @Nullable TransformSize chromaTransformSize
+    ) {
+        TilePartitionTreeReader.LeafNode leftLeaf = createLeaf(
+                new BlockPosition(0, 0),
+                blockSize,
+                0,
+                lumaTransformSize,
+                chromaTransformSize,
+                new TransformUnit[]{new TransformUnit(new BlockPosition(0, 0), lumaTransformSize)}
+        );
+        TilePartitionTreeReader.LeafNode rightLeaf = createLeaf(
+                new BlockPosition(blockSize.width4(), 0),
+                blockSize,
+                0,
+                lumaTransformSize,
+                chromaTransformSize,
+                new TransformUnit[]{new TransformUnit(new BlockPosition(blockSize.width4(), 0), lumaTransformSize)}
+        );
+        FrameAssembly assembly = new FrameAssembly(createSequenceHeader(), frameHeader, 0, 0);
+        return new FrameSyntaxDecodeResult(
+                assembly,
+                new TilePartitionTreeReader.Node[][]{{leftLeaf, rightLeaf}},
+                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)}
+        );
+    }
+
     /// Creates one intra leaf with caller-supplied transform coverage.
     ///
     /// @param position the leaf position in luma 4x4 units
@@ -335,6 +372,26 @@ final class PostfilterTestFixtures {
             TransformSize maxLumaTransformSize,
             TransformUnit[] lumaUnits
     ) {
+        return createLeaf(position, blockSize, cdefIndex, maxLumaTransformSize, null, lumaUnits);
+    }
+
+    /// Creates one intra leaf with caller-supplied luma and chroma transform coverage.
+    ///
+    /// @param position the leaf position in luma 4x4 units
+    /// @param blockSize the decoded block size
+    /// @param cdefIndex the decoded CDEF index
+    /// @param maxLumaTransformSize the maximum luma transform size for the leaf
+    /// @param chromaTransformSize the chroma transform size for the leaf, or `null`
+    /// @param lumaUnits the luma transform units that cover the leaf
+    /// @return one intra leaf with caller-supplied transform coverage
+    private static TilePartitionTreeReader.LeafNode createLeaf(
+            BlockPosition position,
+            BlockSize blockSize,
+            int cdefIndex,
+            TransformSize maxLumaTransformSize,
+            @Nullable TransformSize chromaTransformSize,
+            TransformUnit[] lumaUnits
+    ) {
         TileBlockHeaderReader.BlockHeader blockHeader = createIntraBlockHeader(position, blockSize, cdefIndex);
         TransformLayout transformLayout = new TransformLayout(
                 position,
@@ -344,7 +401,7 @@ final class PostfilterTestFixtures {
                 blockSize.widthPixels(),
                 blockSize.heightPixels(),
                 maxLumaTransformSize,
-                null,
+                chromaTransformSize,
                 lumaUnits.length > 1,
                 lumaUnits
         );

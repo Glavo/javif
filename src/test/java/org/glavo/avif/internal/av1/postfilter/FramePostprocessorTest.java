@@ -18,7 +18,9 @@ package org.glavo.avif.internal.av1.postfilter;
 import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
+import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -292,6 +294,225 @@ final class FramePostprocessorTest {
         assertEquals(44, decodedPlanes.lumaPlane().sample(4, 3));
     }
 
+    /// Verifies that active loop filtering ignores 4x4-grid lines that are neither block nor transform edges.
+    @Test
+    void postprocessDoesNotApplyLoopFilterAwayFromDecodedEdges() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                new int[][]{
+                        {40, 40, 40, 40, 40, 40, 40, 40},
+                        {40, 40, 40, 40, 40, 40, 40, 40},
+                        {40, 40, 40, 40, 40, 40, 40, 40},
+                        {40, 40, 40, 40, 40, 40, 40, 40},
+                        {48, 48, 48, 48, 48, 48, 48, 48},
+                        {48, 48, 48, 48, 48, 48, 48, 48},
+                        {48, 48, 48, 48, 48, 48, 48, 48},
+                        {48, 48, 48, 48, 48, 48, 48, 48}
+                },
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{16, 16},
+                        0,
+                        0,
+                        0,
+                        false,
+                        false,
+                        new int[]{0, 0, 0, 0, 0, 0, 0, 0},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult =
+                PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
+            for (int x = 0; x < decodedPlanes.codedWidth(); x++) {
+                assertEquals(decodedPlanes.lumaPlane().sample(x, y), postprocessed.lumaPlane().sample(x, y));
+            }
+        }
+    }
+
+    /// Verifies the exact AV1 8-tap luma loop filter on flat 8x8 transform edges.
+    @Test
+    void postprocessAppliesEightTapLumaLoopFilterOnFlatEdges() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                repeatedRows(new int[]{40, 40, 40, 40, 40, 40, 40, 40, 48, 48, 48, 48, 48, 48, 48, 48}, 8),
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{16, 0},
+                        0,
+                        0,
+                        0,
+                        false,
+                        false,
+                        new int[]{0, 0, 0, 0, 0, 0, 0, 0},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(
+                frameHeader,
+                BlockSize.SIZE_8X8,
+                TransformSize.TX_8X8,
+                null
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        int[] expectedRow = new int[]{40, 40, 40, 40, 40, 41, 42, 43, 45, 46, 47, 48, 48, 48, 48, 48};
+        for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
+            for (int x = 0; x < decodedPlanes.codedWidth(); x++) {
+                assertEquals(expectedRow[x], postprocessed.lumaPlane().sample(x, y));
+            }
+        }
+    }
+
+    /// Verifies the exact AV1 16-tap luma loop filter on flat 16x16 transform edges.
+    @Test
+    void postprocessAppliesSixteenTapLumaLoopFilterOnFlatEdges() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                repeatedRows(
+                        new int[]{
+                                40, 40, 40, 40, 40, 40, 40, 40,
+                                40, 40, 40, 40, 40, 40, 40, 40,
+                                48, 48, 48, 48, 48, 48, 48, 48,
+                                48, 48, 48, 48, 48, 48, 48, 48
+                        },
+                        16
+                ),
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{16, 0},
+                        0,
+                        0,
+                        0,
+                        false,
+                        false,
+                        new int[]{0, 0, 0, 0, 0, 0, 0, 0},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(
+                frameHeader,
+                BlockSize.SIZE_16X16,
+                TransformSize.TX_16X16,
+                null
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        int[] expectedRow = new int[]{
+                40, 40, 40, 40, 40, 40, 40, 40,
+                40, 40, 41, 41, 42, 42, 43, 44,
+                45, 46, 46, 47, 47, 48, 48, 48,
+                48, 48, 48, 48, 48, 48, 48, 48
+        };
+        for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
+            for (int x = 0; x < decodedPlanes.codedWidth(); x++) {
+                assertEquals(expectedRow[x], postprocessed.lumaPlane().sample(x, y));
+            }
+        }
+    }
+
+    /// Verifies the exact AV1 6-tap chroma loop filter on flat 8x8 transform edges.
+    @Test
+    void postprocessAppliesSixTapChromaLoopFilterOnFlatEdges() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I444,
+                repeatedRows(new int[]{100, 100, 100, 100, 100, 100, 100, 100,
+                        100, 100, 100, 100, 100, 100, 100, 100}, 8),
+                repeatedRows(new int[]{60, 60, 60, 60, 60, 60, 60, 60, 68, 68, 68, 68, 68, 68, 68, 68}, 8),
+                repeatedRows(new int[]{90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90}, 8)
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I444,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        16,
+                        0,
+                        0,
+                        false,
+                        false,
+                        new int[]{0, 0, 0, 0, 0, 0, 0, 0},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(
+                frameHeader,
+                BlockSize.SIZE_8X8,
+                TransformSize.TX_8X8,
+                TransformSize.TX_8X8
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        int[] expectedChromaRow = new int[]{60, 60, 60, 60, 60, 60, 61, 63, 65, 67, 68, 68, 68, 68, 68, 68};
+        for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
+            for (int x = 0; x < decodedPlanes.codedWidth(); x++) {
+                assertEquals(expectedChromaRow[x], postprocessed.chromaUPlane().sample(x, y));
+                assertEquals(decodedPlanes.chromaVPlane().sample(x, y), postprocessed.chromaVPlane().sample(x, y));
+            }
+        }
+    }
+
     /// Verifies that active loop filtering fails explicitly when decoded block edges are unavailable.
     @Test
     void postprocessRejectsActiveLoopFilter() {
@@ -463,5 +684,18 @@ final class FramePostprocessorTest {
         );
 
         assertTrue(exception.getMessage().contains("loop restoration"));
+    }
+
+    /// Creates a matrix by copying one row multiple times.
+    ///
+    /// @param row the source row
+    /// @param height the target matrix height
+    /// @return the repeated-row matrix
+    private static int[][] repeatedRows(int[] row, int height) {
+        int[][] result = new int[height][row.length];
+        for (int y = 0; y < height; y++) {
+            System.arraycopy(row, 0, result[y], 0, row.length);
+        }
+        return result;
     }
 }
