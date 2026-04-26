@@ -30,11 +30,19 @@ import java.util.Objects;
 /// Applies the loop-restoration stage of the postfilter pipeline.
 ///
 /// Inactive restoration preserves samples exactly. Active restoration consumes decoded
-/// restoration-unit syntax and applies per-unit Wiener or self-guided filtering.
+/// restoration-unit syntax and applies per-unit Wiener or self-guided filtering. Wiener filtering
+/// uses the AV1 two-stage horizontal/vertical rounding model, while self-guided filtering currently
+/// uses the local projection model implemented below.
 @NotNullByDefault
 public final class RestorationApplier {
     /// The AV1 Wiener coefficient precision.
     private static final int FILTER_BITS = 7;
+
+    /// The AV1 Wiener filter tap count.
+    private static final int WIENER_TAP_COUNT = 7;
+
+    /// The signed source-sample offset of the first Wiener tap.
+    private static final int WIENER_TAP_OFFSET = 3;
 
     /// The self-guided projection coefficient precision.
     private static final int SELF_GUIDED_PROJECTION_BITS = 7;
@@ -228,23 +236,65 @@ public final class RestorationApplier {
             int endY
     ) {
         int[][] coefficients = unit.wienerCoefficients();
-        int[] horizontalKernel = wienerKernel(coefficients[0]);
-        int[] verticalKernel = wienerKernel(coefficients[1]);
+        int @Unmodifiable [] horizontalKernel = wienerKernel(coefficients[0]);
+        int @Unmodifiable [] verticalKernel = wienerKernel(coefficients[1]);
         for (int y = startY; y < endY; y++) {
             for (int x = startX; x < endX; x++) {
-                int sum = 0;
-                for (int ky = -3; ky <= 3; ky++) {
-                    int horizontal = 0;
-                    int sourceY = clamp(y + ky, 0, source.height() - 1);
-                    for (int kx = -3; kx <= 3; kx++) {
-                        horizontal += horizontalKernel[kx + 3]
-                                * source.sample(clamp(x + kx, 0, source.width() - 1), sourceY);
-                    }
-                    sum += verticalKernel[ky + 3] * round2(horizontal, FILTER_BITS);
-                }
-                destination.setSample(x, y, round2(sum, FILTER_BITS));
+                destination.setSample(x, y, wienerSample(source, horizontalKernel, verticalKernel, x, y));
             }
         }
+    }
+
+    /// Returns one AV1 Wiener-restored sample using separable two-stage rounding.
+    ///
+    /// @param source the immutable source plane view
+    /// @param horizontalKernel the seven-tap horizontal Wiener kernel
+    /// @param verticalKernel the seven-tap vertical Wiener kernel
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return one restored sample before final bit-depth clipping
+    private static int wienerSample(
+            PlaneBuffer source,
+            int @Unmodifiable [] horizontalKernel,
+            int @Unmodifiable [] verticalKernel,
+            int x,
+            int y
+    ) {
+        int bitDepth = source.bitDepth();
+        int roundBitsV = 11 - (bitDepth == 12 ? 2 : 0);
+        int roundingOffsetV = 1 << (roundBitsV - 1);
+        int roundOffset = 1 << (bitDepth + roundBitsV - 1);
+        int sum = -roundOffset;
+        for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
+            int sourceY = clamp(y + tap - WIENER_TAP_OFFSET, 0, source.height() - 1);
+            sum += verticalKernel[tap] * wienerHorizontalSample(source, horizontalKernel, x, sourceY);
+        }
+        return (sum + roundingOffsetV) >> roundBitsV;
+    }
+
+    /// Returns one horizontally filtered AV1 Wiener intermediate sample.
+    ///
+    /// @param source the immutable source plane view
+    /// @param horizontalKernel the seven-tap horizontal Wiener kernel
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return one clipped horizontal Wiener intermediate sample
+    private static int wienerHorizontalSample(
+            PlaneBuffer source,
+            int @Unmodifiable [] horizontalKernel,
+            int x,
+            int y
+    ) {
+        int bitDepth = source.bitDepth();
+        int roundBitsH = 3 + (bitDepth == 12 ? 2 : 0);
+        int roundingOffsetH = 1 << (roundBitsH - 1);
+        int clipLimit = 1 << (bitDepth + 1 + FILTER_BITS - roundBitsH);
+        int sum = 1 << (bitDepth + 6);
+        for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
+            int sourceX = clamp(x + tap - WIENER_TAP_OFFSET, 0, source.width() - 1);
+            sum += horizontalKernel[tap] * source.sample(sourceX, y);
+        }
+        return clamp((sum + roundingOffsetH) >> roundBitsH, 0, clipLimit - 1);
     }
 
     /// Applies one self-guided restoration unit.
@@ -290,7 +340,7 @@ public final class RestorationApplier {
     ///
     /// @param coefficients the three coded Wiener coefficients
     /// @return one symmetric seven-tap Wiener filter kernel
-    private static int[] wienerKernel(int[] coefficients) {
+    private static int @Unmodifiable [] wienerKernel(int @Unmodifiable [] coefficients) {
         int c0 = coefficients[0];
         int c1 = coefficients[1];
         int c2 = coefficients[2];
@@ -356,6 +406,12 @@ public final class RestorationApplier {
         /// The plane height in samples.
         private final int height;
 
+        /// The sample stride of one plane row.
+        private final int stride;
+
+        /// The decoded bit depth.
+        private final int bitDepth;
+
         /// The maximum legal sample value.
         private final int maxSampleValue;
 
@@ -366,11 +422,14 @@ public final class RestorationApplier {
         ///
         /// @param width the plane width in samples
         /// @param height the plane height in samples
+        /// @param stride the sample stride of one plane row
         /// @param bitDepth the decoded bit depth
         /// @param samples the mutable sample storage
-        private PlaneBuffer(int width, int height, int bitDepth, short[] samples) {
+        private PlaneBuffer(int width, int height, int stride, int bitDepth, short[] samples) {
             this.width = width;
             this.height = height;
+            this.stride = stride;
+            this.bitDepth = bitDepth;
             this.maxSampleValue = (1 << bitDepth) - 1;
             this.samples = Objects.requireNonNull(samples, "samples");
         }
@@ -382,7 +441,13 @@ public final class RestorationApplier {
         /// @return a mutable copy of one decoded plane
         public static PlaneBuffer create(DecodedPlane plane, int bitDepth) {
             DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
-            return new PlaneBuffer(checkedPlane.width(), checkedPlane.height(), bitDepth, checkedPlane.samples());
+            return new PlaneBuffer(
+                    checkedPlane.width(),
+                    checkedPlane.height(),
+                    checkedPlane.stride(),
+                    bitDepth,
+                    checkedPlane.samples()
+            );
         }
 
         /// Returns the plane width in samples.
@@ -399,13 +464,20 @@ public final class RestorationApplier {
             return height;
         }
 
+        /// Returns the decoded bit depth.
+        ///
+        /// @return the decoded bit depth
+        public int bitDepth() {
+            return bitDepth;
+        }
+
         /// Returns one sample.
         ///
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return one sample
         public int sample(int x, int y) {
-            return samples[y * width + x] & 0xFFFF;
+            return samples[y * stride + x] & 0xFFFF;
         }
 
         /// Stores one clipped sample.
@@ -414,14 +486,14 @@ public final class RestorationApplier {
         /// @param y the sample Y coordinate
         /// @param value the replacement value
         public void setSample(int x, int y, int value) {
-            samples[y * width + x] = (short) clamp(value, 0, maxSampleValue);
+            samples[y * stride + x] = (short) clamp(value, 0, maxSampleValue);
         }
 
         /// Returns one immutable decoded plane from the current samples.
         ///
         /// @return one immutable decoded plane from the current samples
         public DecodedPlane toDecodedPlane() {
-            return new DecodedPlane(width, height, width, samples);
+            return new DecodedPlane(width, height, stride, samples);
         }
     }
 }

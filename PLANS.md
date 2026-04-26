@@ -41,6 +41,9 @@ Implemented container/API coverage:
   strengths, luma-driven chroma directions, non-skip unit masking, and
   missing-edge sentinel handling, with skipped-unit and high-bit-depth regression
   coverage
+- AV1 loop restoration now keeps non-tight plane strides intact and applies
+  Wiener restoration with AV1 two-stage horizontal/vertical rounding semantics,
+  with exact stride-aware regression coverage
 - libavif ImageIO reference validation covers copied PNG/JPEG source resources,
   documented source-to-AVIF dimensions, rotated output dimensions, and stable
   `I444` draw-points regions across normal, metadata-size-zero, and IDAT
@@ -55,9 +58,10 @@ Implemented container/API coverage:
 - Finish or explicitly reject AV1 reconstruction paths that can still fail as
   `NOT_IMPLEMENTED`, especially defensive inter-palette states and remaining
   inter/compound/warped prediction edge cases.
-- Audit inter prediction, compound prediction, warped motion, restoration,
-  super-resolution, film grain, and any remaining cross-stage postfilter
-  interactions found by whole-image reference tests against dav1d behavior.
+- Audit inter prediction, compound prediction, warped motion, self-guided
+  restoration, super-resolution, film grain, and any remaining cross-stage
+  postfilter interactions found by whole-image reference tests against dav1d
+  behavior.
 - Add regression fixtures for real-world AVIF files that parse but still decode
   with visible corruption.
 
