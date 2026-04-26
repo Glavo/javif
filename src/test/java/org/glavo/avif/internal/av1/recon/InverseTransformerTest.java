@@ -191,6 +191,29 @@ final class InverseTransformerTest {
         );
     }
 
+    /// Verifies that non-DC `WHT_WHT` coefficients are interpreted in natural row-major order.
+    @Test
+    void reconstructsFourByFourWalshHadamardNonDcRows() {
+        int[] coefficients = new int[16];
+        coefficients[1] = 4;
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.WHT_WHT
+        );
+
+        assertArrayEquals(
+                new int[]{
+                        1, 0, 0, 0,
+                        0, 0, -1, -1,
+                        0, 0, -1, -1,
+                        0, 0, -1, -1
+                },
+                residual
+        );
+    }
+
     /// Verifies that horizontal one-dimensional DCT transforms only the coefficient row selected
     /// by the vertical identity axis.
     @Test

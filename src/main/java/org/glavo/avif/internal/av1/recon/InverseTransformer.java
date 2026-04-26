@@ -575,9 +575,9 @@ final class InverseTransformer {
 
     /// Reconstructs one AV1 lossless `WHT_WHT` residual block.
     ///
-    /// AV1 lossless blocks always use a coded `TX_4X4` transform. The coefficient transpose and
-    /// initial `>> 2` match the scalar `dav1d` path before running the horizontal and vertical
-    /// inverse Walsh-Hadamard passes.
+    /// AV1 lossless blocks always use a coded `TX_4X4` transform. The initial `>> 2` matches the
+    /// scalar `dav1d` path; the input is already converted into this decoder's natural row-major
+    /// coefficient order before reaching the inverse transform.
     ///
     /// @param coefficients the dequantized lossless coefficients in natural raster order
     /// @param transformSize the active transform size
@@ -591,8 +591,9 @@ final class InverseTransformer {
         int[] output = new int[16];
         int[] scratch = new int[4];
         for (int y = 0; y < 4; y++) {
+            int rowOffset = y << 2;
             for (int x = 0; x < 4; x++) {
-                scratch[x] = coefficients[(x << 2) + y] >> 2;
+                scratch[x] = coefficients[rowOffset + x] >> 2;
             }
             inverseWalshHadamard4(scratch);
             for (int x = 0; x < 4; x++) {

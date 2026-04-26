@@ -135,13 +135,12 @@ final class LibavifImageIoReferenceTest {
                     DRAW_POINTS_TOLERANCE,
                     "Pending progressive full-image AV1 reconstruction accuracy; the bottom-row region test remains enabled."
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/abc.png",
                     "libavif-test-data/abc_color_irot_alpha_irot.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.ROTATE_90_COUNTER_CLOCKWISE,
-                    ABC_TOLERANCE,
-                    "Pending AV1 reconstruction fix: the raw color luma plane currently leaves large regions at neutral 128."
+                    ABC_TOLERANCE
             ),
             disabledPixelImage(
                     "libavif-test-data/abc.png",
@@ -321,7 +320,6 @@ final class LibavifImageIoReferenceTest {
     ///
     /// @throws IOException if a resource cannot be read or decoded
     @Test
-    @Disabled("Pending AV1 reconstruction fix: raw color luma currently leaves large white regions at neutral 128.")
     void abcColorAndAlphaIrotFixtureMatchesCounterClockwiseReferencePixels() throws IOException {
         assertPixelImageReference(PIXEL_IMAGE_REFERENCES[4]);
     }
