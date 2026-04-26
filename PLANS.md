@@ -27,6 +27,8 @@ Implemented container/API coverage:
   high-bit-depth paths
 - bounded buffered input ingestion for byte arrays, `ByteBuffer`, `InputStream`,
   `ReadableByteChannel`, and `Path`, controlled by `AvifDecoderConfig.inputSizeLimit()`
+- alpha edge-case validation for still images, grids, AVIS auxiliary tracks,
+  premultiplied-alpha references, decoded alpha luma planes, and alpha-grid layout
 
 ## Remaining Work
 
@@ -49,11 +51,6 @@ Implemented container/API coverage:
   adaptation for 8/10/12-bit inputs.
 - Implement gain-map tone mapping and display adaptation.
 - Define and test layered/scalable AVIF and operating-point selection.
-
-### Container And API
-
-- Finish the alpha edge-case audit around unusual auxiliary image dimensions,
-  bit depths, premultiplication flags, and sequence/grid combinations.
 
 ### Validation
 

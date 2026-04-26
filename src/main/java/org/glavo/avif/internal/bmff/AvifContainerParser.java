@@ -142,6 +142,7 @@ public final class AvifContainerParser {
                 ispe.width,
                 ispe.height
         );
+        validateItemPremultipliedAlpha(primaryItem, alphaPayloads, "Primary image");
         boolean alphaPremultiplied = itemAlphaPremultiplied(primaryItem, AvifAuxiliaryImageInfo.ALPHA_TYPE);
         AuxiliaryPayloads depthPayloads = parseAuxiliaryPayloads(
                 primaryItem,
@@ -207,6 +208,7 @@ public final class AvifContainerParser {
                 AvifAuxiliaryImageInfo.ALPHA_TYPE,
                 "Alpha"
         );
+        validateItemPremultipliedAlpha(gridItem, alphaPayloads, "Primary grid");
         boolean alphaPremultiplied = itemAlphaPremultiplied(gridItem, AvifAuxiliaryImageInfo.ALPHA_TYPE);
         AuxiliaryPayloads depthPayloads = parseGridAuxiliaryPayloads(
                 gridItem,
@@ -1214,6 +1216,7 @@ public final class AvifContainerParser {
     /// Creates an AVIF container from parsed sequence data.
     private AvifContainer parseSequenceImage() throws AvifDecodeException {
         MoovState s = meta.moovState;
+        validateSequencePremultipliedAlphaReferences();
         SequencePayloads colorPayloads = sequencePayloads(s, "Color sequence");
         byte @Nullable [][] alphaPayloads = sequenceAuxiliaryPayloads(
                 meta.moovAlphaState,
@@ -1534,6 +1537,7 @@ public final class AvifContainerParser {
                 continue;
             }
             ensureSupportedMoovTrackReferences(candidate);
+            validateMoovAuxiliaryTrackGeometry(candidate, meta.moovState);
             if (!meta.moovAuxiliaryTypes.contains(candidate.auxiliaryType)) {
                 meta.moovAuxiliaryTypes.add(candidate.auxiliaryType);
             }
@@ -1567,6 +1571,71 @@ public final class AvifContainerParser {
                     null
             );
         }
+    }
+
+    /// Validates that one matched AVIS auxiliary track has compatible geometry.
+    ///
+    /// @param auxiliaryTrack the matched auxiliary track
+    /// @param colorTrack the selected color track
+    /// @throws AvifDecodeException if the auxiliary track geometry is unsupported
+    private static void validateMoovAuxiliaryTrackGeometry(
+            MoovState auxiliaryTrack,
+            MoovState colorTrack
+    ) throws AvifDecodeException {
+        if (auxiliaryTrack.width > 0
+                && colorTrack.width > 0
+                && auxiliaryTrack.width != colorTrack.width) {
+            throw unsupported(
+                    moovAuxiliaryLabel(auxiliaryTrack) + " sequence track width does not match color sequence: "
+                            + auxiliaryTrack.width + " != " + colorTrack.width,
+                    null
+            );
+        }
+        if (auxiliaryTrack.height > 0
+                && colorTrack.height > 0
+                && auxiliaryTrack.height != colorTrack.height) {
+            throw unsupported(
+                    moovAuxiliaryLabel(auxiliaryTrack) + " sequence track height does not match color sequence: "
+                            + auxiliaryTrack.height + " != " + colorTrack.height,
+                    null
+            );
+        }
+    }
+
+    /// Validates `prem` references from the selected AVIS color track.
+    ///
+    /// @throws AvifDecodeException if the color track declares unsupported premultiplied-alpha semantics
+    private void validateSequencePremultipliedAlphaReferences() throws AvifDecodeException {
+        List<Integer> premultipliedByTrackIds = meta.moovState.premultipliedByTrackIds;
+        if (premultipliedByTrackIds.isEmpty()) {
+            return;
+        }
+        if (premultipliedByTrackIds.size() != 1) {
+            throw unsupported("Multiple AVIS prem track references are not supported", null);
+        }
+        MoovState alphaTrack = meta.moovAlphaState;
+        int premultipliedByTrackId = premultipliedByTrackIds.get(0);
+        if (alphaTrack == null || alphaTrack.trackId != premultipliedByTrackId) {
+            throw unsupported(
+                    "AVIS prem track reference does not target the selected alpha auxiliary track: "
+                            + premultipliedByTrackId,
+                    null
+            );
+        }
+    }
+
+    /// Returns a diagnostic label for one AVIS auxiliary track.
+    ///
+    /// @param auxiliaryTrack the auxiliary track
+    /// @return the diagnostic label
+    private static String moovAuxiliaryLabel(MoovState auxiliaryTrack) {
+        if (AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(auxiliaryTrack.auxiliaryType)) {
+            return "Alpha";
+        }
+        if (AvifAuxiliaryImageInfo.DEPTH_TYPE.equals(auxiliaryTrack.auxiliaryType)) {
+            return "Depth";
+        }
+        return "Auxiliary";
     }
 
     /// Parses a `trak` box and extracts video track metadata.
@@ -2125,6 +2194,35 @@ public final class AvifContainerParser {
     private boolean itemAlphaPremultiplied(Item imageItem, String auxiliaryType) {
         Item auxiliaryItem = findAuxiliaryItem(imageItem.id, auxiliaryType);
         return auxiliaryItem != null && imageItem.premultipliedById == auxiliaryItem.id;
+    }
+
+    /// Validates `prem` references from a still-image or grid item.
+    ///
+    /// @param imageItem the color image or grid item
+    /// @param alphaPayloads the resolved alpha payloads
+    /// @param label the diagnostic image label
+    /// @throws AvifDecodeException if the item declares unsupported premultiplied-alpha semantics
+    private void validateItemPremultipliedAlpha(
+            Item imageItem,
+            AuxiliaryPayloads alphaPayloads,
+            String label
+    ) throws AvifDecodeException {
+        if (imageItem.premultipliedById == 0) {
+            return;
+        }
+        Item referencedItem = meta.item(imageItem.premultipliedById);
+        AuxiliaryType auxiliaryType = referencedItem != null
+                ? referencedItem.firstProperty(AuxiliaryType.class)
+                : null;
+        if (!alphaPayloads.present()
+                || auxiliaryType == null
+                || !AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(auxiliaryType.type)) {
+            throw unsupported(
+                    label + " prem reference does not target a usable alpha auxiliary image: "
+                            + imageItem.premultipliedById,
+                    null
+            );
+        }
     }
 
     /// Returns auxiliary image descriptors associated with one master image item.

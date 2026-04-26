@@ -1469,6 +1469,54 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that a still-image `prem` item reference must target the resolved alpha item.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsStillPremultipliedReferenceToNonAlphaItem() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(syntheticAlphaAvifWithPremTarget(99))
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
+    /// Verifies that still-image alpha item dimensions are validated before decoding.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsStillAlphaDimensionMismatch() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(syntheticAlphaAvifWithAlphaDimensions(32, 64))
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
+    /// Verifies that an AVIS `prem` track reference must target the selected alpha track.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsAvisPremultipliedReferenceWithoutMatchingAlphaTrack() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithPremReferenceToMissingAlphaTrack())
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
+    /// Verifies that AVIS alpha auxiliary track dimensions are validated during container parsing.
+    ///
+    /// @throws IOException if an unexpected error occurs
+    @Test
+    void rejectsAvisAlphaTrackDimensionMismatch() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithMismatchedAlphaDimensions())
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
     /// Verifies that a libavif fixture with an alpha auxiliary item missing ispe is rejected.
     ///
     /// @throws IOException if the fixture cannot be read
@@ -1712,15 +1760,63 @@ final class AvifImageReaderTest {
     /// @param premultiplied whether to add a `prem` item reference from color to alpha
     /// @return the complete AVIF test file bytes
     private static byte[] syntheticAlphaAvif(boolean premultiplied) {
+        return syntheticAlphaAvif(premultiplied, premultiplied ? 2 : 0, 64, 64);
+    }
+
+    /// Creates a synthetic AVIF still image with a `prem` reference to a custom target item.
+    ///
+    /// @param premTargetId the item ID referenced by the `prem` reference
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvifWithPremTarget(int premTargetId) {
+        return syntheticAlphaAvif(true, premTargetId, 64, 64);
+    }
+
+    /// Creates a synthetic AVIF still image with custom alpha item dimensions.
+    ///
+    /// @param alphaWidth the alpha item width
+    /// @param alphaHeight the alpha item height
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvifWithAlphaDimensions(int alphaWidth, int alphaHeight) {
+        return syntheticAlphaAvif(false, 0, alphaWidth, alphaHeight);
+    }
+
+    /// Creates a synthetic AVIF still image with configurable alpha metadata.
+    ///
+    /// @param premultiplied whether to add a `prem` item reference from color to alpha
+    /// @param premTargetId the item ID referenced by the `prem` reference, or `0`
+    /// @param alphaWidth the alpha item width
+    /// @param alphaHeight the alpha item height
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvif(
+            boolean premultiplied,
+            int premTargetId,
+            int alphaWidth,
+            int alphaHeight
+    ) {
         byte[] colorPayload = av1StillPicturePayload();
         byte[] alphaPayload = av1StillPicturePayload();
         byte[] ftyp = fileTypeBox();
-        byte[] firstMeta = buildDualItemMeta(colorPayload.length + alphaPayload.length, premultiplied);
+        byte[] firstMeta = buildDualItemMeta(
+                colorPayload.length + alphaPayload.length,
+                premultiplied,
+                premTargetId,
+                alphaWidth,
+                alphaHeight
+        );
         int metaSize = firstMeta.length;
         int mdatHeaderSize = 8;
         int colorOffset = ftyp.length + metaSize + mdatHeaderSize;
         int alphaOffset = colorOffset + colorPayload.length;
-        byte[] meta = buildDualItemMeta(colorOffset, colorPayload.length, alphaOffset, alphaPayload.length, premultiplied);
+        byte[] meta = buildDualItemMeta(
+                colorOffset,
+                colorPayload.length,
+                alphaOffset,
+                alphaPayload.length,
+                premultiplied,
+                premTargetId,
+                alphaWidth,
+                alphaHeight
+        );
         return concat(ftyp, meta, box("mdat", concat(colorPayload, alphaPayload)));
     }
 
@@ -1731,6 +1827,24 @@ final class AvifImageReaderTest {
     /// @return the dual-item meta box bytes
     private static byte[] buildDualItemMeta(int totalPayloadLength, boolean premultiplied) {
         return buildDualItemMeta(0, 0, 0, totalPayloadLength, premultiplied);
+    }
+
+    /// Creates a dual-item meta box with placeholder sizes and custom alpha metadata.
+    ///
+    /// @param totalPayloadLength the total mdat payload length
+    /// @param premultiplied whether to add a `prem` item reference from color to alpha
+    /// @param premTargetId the item ID referenced by the `prem` reference, or `0`
+    /// @param alphaWidth the alpha item width
+    /// @param alphaHeight the alpha item height
+    /// @return the dual-item meta box bytes
+    private static byte[] buildDualItemMeta(
+            int totalPayloadLength,
+            boolean premultiplied,
+            int premTargetId,
+            int alphaWidth,
+            int alphaHeight
+    ) {
+        return buildDualItemMeta(0, 0, 0, totalPayloadLength, premultiplied, premTargetId, alphaWidth, alphaHeight);
     }
 
     /// Creates a dual-item meta box with actual payload offsets and lengths.
@@ -1747,6 +1861,31 @@ final class AvifImageReaderTest {
             int alphaOffset,
             int alphaLength,
             boolean premultiplied
+    ) {
+        return buildDualItemMeta(colorOffset, colorLength, alphaOffset, alphaLength,
+                premultiplied, premultiplied ? 2 : 0, 64, 64);
+    }
+
+    /// Creates a dual-item meta box with actual payload offsets, lengths, and custom alpha metadata.
+    ///
+    /// @param colorOffset the absolute color item payload offset
+    /// @param colorLength the color item payload length
+    /// @param alphaOffset the absolute alpha item payload offset
+    /// @param alphaLength the alpha item payload length
+    /// @param premultiplied whether to add a `prem` item reference from color to alpha
+    /// @param premTargetId the item ID referenced by the `prem` reference, or `0`
+    /// @param alphaWidth the alpha item width
+    /// @param alphaHeight the alpha item height
+    /// @return the dual-item meta box bytes
+    private static byte[] buildDualItemMeta(
+            int colorOffset,
+            int colorLength,
+            int alphaOffset,
+            int alphaLength,
+            boolean premultiplied,
+            int premTargetId,
+            int alphaWidth,
+            int alphaHeight
     ) {
         byte[] iloc = fullBox("iloc", 0, 0,
                 new byte[]{0x44, 0x40},
@@ -1776,7 +1915,7 @@ final class AvifImageReaderTest {
                         imageSpatialExtentsProperty(),
                         av1ConfigProperty(),
                         colorProperty(),
-                        imageSpatialExtentsProperty(),
+                        imageSpatialExtentsProperty(alphaWidth, alphaHeight),
                         monochromeAv1ConfigProperty(),
                         auxCAlphaProperty()
                 ),
@@ -1789,7 +1928,7 @@ final class AvifImageReaderTest {
                 )
         );
 
-        byte[] iref = refBox(1, 2, premultiplied);
+        byte[] iref = refBox(1, 2, premultiplied ? premTargetId : 0);
 
         return fullBox("meta", 0, 0,
                 handlerBox(), primaryItemBox(), iloc, iinf, iprp, iref);
@@ -1802,9 +1941,19 @@ final class AvifImageReaderTest {
     /// @param premultiplied whether to include a `prem` reference
     /// @return the iref box bytes
     private static byte[] refBox(int fromId, int toId, boolean premultiplied) {
+        return refBox(fromId, toId, premultiplied ? toId : 0);
+    }
+
+    /// Creates an `iref` box with an `auxl` reference and an optional custom `prem` target.
+    ///
+    /// @param fromId the from item id
+    /// @param toId the auxiliary target item id
+    /// @param premTargetId the premultiplied-alpha target item id, or `0`
+    /// @return the iref box bytes
+    private static byte[] refBox(int fromId, int toId, int premTargetId) {
         return fullBox("iref", 0, 0,
                 box("auxl", u16(fromId), u16(1), u16(toId)),
-                premultiplied ? box("prem", u16(fromId), u16(1), u16(toId)) : new byte[0]
+                premTargetId > 0 ? box("prem", u16(fromId), u16(1), u16(premTargetId)) : new byte[0]
         );
     }
 
@@ -2043,6 +2192,92 @@ final class AvifImageReaderTest {
                 sample2.length
         );
         return concat(ftyp, moov, box("mdat", concat(colorMdatPayload, alphaMdatPayload)));
+    }
+
+    /// Creates a minimal AVIS sequence whose color track has an unresolved `prem` reference.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithPremReferenceToMissingAlphaTrack() {
+        byte[] sample = av1StillPicturePayload();
+        byte[] colorTrack = avisTrackBox(
+                1,
+                "pict",
+                trackReferenceBox("prem", 3),
+                null,
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                sample.length,
+                sample.length,
+                sample.length
+        );
+        byte[] mismatchedAlphaTrack = avisTrackBox(
+                2,
+                "auxv",
+                trackReferenceBox("auxl", 99),
+                AUXILIARY_ALPHA_TYPE,
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                sample.length,
+                sample.length,
+                sample.length
+        );
+        return concat(sequenceFileTypeBox(), box("moov", colorTrack, mismatchedAlphaTrack));
+    }
+
+    /// Creates a minimal AVIS sequence with a matched alpha track that advertises different dimensions.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithMismatchedAlphaDimensions() {
+        byte[] sample = av1StillPicturePayload();
+        byte[] colorTrack = avisTrackBox(
+                1,
+                "pict",
+                null,
+                null,
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                sample.length,
+                sample.length,
+                sample.length
+        );
+        byte[] alphaTrack = avisTrackBoxWithTrackDimensions(
+                3,
+                "auxv",
+                trackReferenceBox("auxl", 1),
+                AUXILIARY_ALPHA_TYPE,
+                new int[]{0, 0},
+                false,
+                3,
+                1,
+                3,
+                1,
+                3,
+                null,
+                32,
+                64,
+                sample.length,
+                sample.length,
+                sample.length
+        );
+        return concat(sequenceFileTypeBox(), box("moov", colorTrack, alphaTrack));
     }
 
     /// Creates a minimal AVIS sequence with duplicate `mdia` handler boxes.
@@ -2426,6 +2661,60 @@ final class AvifImageReaderTest {
         );
     }
 
+    /// Creates a minimal AVIS track box with custom `tkhd` dimensions.
+    ///
+    /// @param trackId the track ID written to `tkhd`
+    /// @param handlerType the optional media handler type
+    /// @param trackReference the optional `tref` box
+    /// @param auxiliaryType the optional `auxi` auxiliary type
+    /// @param chunkOffsets the absolute chunk offsets
+    /// @param useCo64 whether to encode chunk offsets with `co64`
+    /// @param timingSampleCount the sample count covered by `stts`
+    /// @param firstStscChunk the first chunk signaled by the first `stsc` entry
+    /// @param mediaDuration the duration written to `mdhd`
+    /// @param sampleDelta the constant sample delta written to `stts`
+    /// @param trackDuration the duration written to `tkhd`
+    /// @param editList the optional `edts` box
+    /// @param trackWidth the track width written to `tkhd`
+    /// @param trackHeight the track height written to `tkhd`
+    /// @param sampleSizes the sample sizes
+    /// @return the `trak` box bytes
+    private static byte[] avisTrackBoxWithTrackDimensions(
+            int trackId,
+            @Nullable String handlerType,
+            byte @Nullable [] trackReference,
+            @Nullable String auxiliaryType,
+            int[] chunkOffsets,
+            boolean useCo64,
+            int timingSampleCount,
+            int firstStscChunk,
+            int mediaDuration,
+            int sampleDelta,
+            int trackDuration,
+            byte @Nullable [] editList,
+            int trackWidth,
+            int trackHeight,
+            int... sampleSizes
+    ) {
+        return box(
+                "trak",
+                trackHeaderBox(trackId, trackDuration, trackWidth, trackHeight),
+                trackReference == null ? new byte[0] : trackReference,
+                editList == null ? new byte[0] : editList,
+                mediaBox(
+                        handlerType,
+                        auxiliaryType,
+                        chunkOffsets,
+                        useCo64,
+                        timingSampleCount,
+                        firstStscChunk,
+                        mediaDuration,
+                        sampleDelta,
+                        sampleSizes
+                )
+        );
+    }
+
     /// Creates a minimal AVIS track header.
     ///
     /// @param trackDuration the duration written to `tkhd`
@@ -2440,6 +2729,17 @@ final class AvifImageReaderTest {
     /// @param trackDuration the duration written to `tkhd`
     /// @return the `tkhd` box bytes
     private static byte[] trackHeaderBox(int trackId, int trackDuration) {
+        return trackHeaderBox(trackId, trackDuration, 64, 64);
+    }
+
+    /// Creates a minimal AVIS track header with custom dimensions.
+    ///
+    /// @param trackId the track ID written to `tkhd`
+    /// @param trackDuration the duration written to `tkhd`
+    /// @param width the track width
+    /// @param height the track height
+    /// @return the `tkhd` box bytes
+    private static byte[] trackHeaderBox(int trackId, int trackDuration, int width, int height) {
         return fullBox(
                 "tkhd",
                 0,
@@ -2449,8 +2749,8 @@ final class AvifImageReaderTest {
                 u32(0),
                 u32(trackDuration),
                 new byte[52],
-                u32(64 << 16),
-                u32(64 << 16)
+                u32(width << 16),
+                u32(height << 16)
         );
     }
 
@@ -2883,7 +3183,16 @@ final class AvifImageReaderTest {
     ///
     /// @return the image spatial extents property bytes
     private static byte[] imageSpatialExtentsProperty() {
-        return fullBox("ispe", 0, 0, u32(64), u32(64));
+        return imageSpatialExtentsProperty(64, 64);
+    }
+
+    /// Creates an `ispe` property with custom dimensions.
+    ///
+    /// @param width the image width
+    /// @param height the image height
+    /// @return the image spatial extents property bytes
+    private static byte[] imageSpatialExtentsProperty(int width, int height) {
+        return fullBox("ispe", 0, 0, u32(width), u32(height));
     }
 
     /// Creates an `av1C` property for the reduced `8-bit I420` AV1 fixture.

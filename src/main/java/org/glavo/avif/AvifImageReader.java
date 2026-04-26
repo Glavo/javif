@@ -700,9 +700,23 @@ public final class AvifImageReader implements AutoCloseable {
     /// @throws IOException if one alpha grid cell cannot be decoded
     private AvifPlanes readGridRawAlphaPlanes(@Unmodifiable ByteBuffer @Unmodifiable [] alphaCellPayloads)
             throws IOException {
+        validateAlphaGridParameters(
+                alphaCellPayloads.length,
+                container.gridAlphaRows(),
+                container.gridAlphaColumns(),
+                container.gridAlphaOutputWidth(),
+                container.gridAlphaOutputHeight()
+        );
         AvifPlanes[] cellPlanes = decodeGridRawColorPlanes(alphaCellPayloads);
         AvifBitDepth bitDepth = cellPlanes[0].bitDepth();
-        validateGridRawAlphaPlaneCells(cellPlanes, bitDepth);
+        validateGridRawAlphaPlaneCells(
+                cellPlanes,
+                bitDepth,
+                container.gridAlphaRows(),
+                container.gridAlphaColumns(),
+                container.gridAlphaOutputWidth(),
+                container.gridAlphaOutputHeight()
+        );
         AvifPlane lumaPlane = composeGridPlane(
                 lumaPlanes(cellPlanes),
                 container.gridAlphaRows(),
@@ -849,16 +863,44 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Validates that all alpha grid cells share the same bit depth.
+    /// Validates that all alpha grid cells share the same bit depth and rectangular layout.
     ///
     /// @param cellPlanes the decoded alpha cell planes
     /// @param bitDepth the expected bit depth
-    private static void validateGridRawAlphaPlaneCells(AvifPlanes[] cellPlanes, AvifBitDepth bitDepth) {
-        for (AvifPlanes cellPlane : cellPlanes) {
+    /// @param rows the alpha grid row count
+    /// @param columns the alpha grid column count
+    /// @param outputWidth the alpha grid output width
+    /// @param outputHeight the alpha grid output height
+    /// @throws AvifDecodeException if the alpha grid cannot be represented as one raw alpha plane
+    private static void validateGridRawAlphaPlaneCells(
+            AvifPlanes[] cellPlanes,
+            AvifBitDepth bitDepth,
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight
+    ) throws AvifDecodeException {
+        int[] columnWidths = new int[columns];
+        int[] rowHeights = new int[rows];
+        for (int i = 0; i < cellPlanes.length; i++) {
+            AvifPlanes cellPlane = cellPlanes[i];
             if (cellPlane.bitDepth() != bitDepth) {
-                throw new IllegalArgumentException("alpha grid cell bit depth mismatch");
+                throw unsupported("Alpha grid cell bit depth mismatch", null);
             }
+            AvifPlane lumaPlane = cellPlane.lumaPlane();
+            int row = i / columns;
+            int col = i % columns;
+            validateAlphaGridCellGeometry(
+                    lumaPlane.width(),
+                    lumaPlane.height(),
+                    columnWidths,
+                    rowHeights,
+                    row,
+                    col,
+                    "Alpha grid"
+            );
         }
+        validateAlphaGridCoverage(columnWidths, rowHeights, "Alpha grid");
     }
 
     /// Returns luma planes for all grid cells.
@@ -1782,12 +1824,13 @@ public final class AvifImageReader implements AutoCloseable {
             int frameIndex,
             boolean alphaPremultiplied
     ) throws AvifDecodeException {
-        if (alphaFrame.width() != colorFrame.width() || alphaFrame.height() != colorFrame.height()) {
-            throw unsupported("Alpha with different decoded dimensions than master image", null);
-        }
-        if (alphaPlanes == null) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha planes not available", null);
-        }
+        validateDecodedAlphaFrame(
+                colorFrame.width(),
+                colorFrame.height(),
+                alphaFrame,
+                alphaPlanes,
+                "Alpha"
+        );
         return combineFrameWithAlphaPlane(
                 colorFrame,
                 alphaPlanes,
@@ -1821,7 +1864,9 @@ public final class AvifImageReader implements AutoCloseable {
         if (outputWidth != colorFrame.width() || outputHeight != colorFrame.height()) {
             throw unsupported("Alpha grid with different decoded dimensions than master image", null);
         }
+        validateAlphaGridParameters(alphaCellPayloads.length, rows, columns, outputWidth, outputHeight);
         DecodedAlphaCell[] alphaCells = decodeAlphaGridCells(alphaCellPayloads);
+        validateDecodedAlphaGrid(alphaCells, rows, columns, outputWidth, outputHeight);
         if (colorFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
             return combineIntGridAlpha(
                     colorFrame,
@@ -1884,6 +1929,187 @@ public final class AvifImageReader implements AutoCloseable {
             }
         }
         return alphaCells;
+    }
+
+    /// Validates one decoded alpha frame before composition.
+    ///
+    /// @param expectedWidth the expected alpha width
+    /// @param expectedHeight the expected alpha height
+    /// @param alphaFrame the decoded alpha frame metadata
+    /// @param alphaPlanes the decoded alpha planes, or `null`
+    /// @param label the diagnostic alpha source label
+    /// @throws AvifDecodeException if the alpha frame is incompatible with the color frame
+    private static void validateDecodedAlphaFrame(
+            int expectedWidth,
+            int expectedHeight,
+            DecodedFrame alphaFrame,
+            @Nullable DecodedPlanes alphaPlanes,
+            String label
+    ) throws AvifDecodeException {
+        if (alphaFrame.width() != expectedWidth || alphaFrame.height() != expectedHeight) {
+            throw unsupported(label + " with different decoded dimensions than master image", null);
+        }
+        if (alphaPlanes == null) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " planes not available", null);
+        }
+        validateAlphaLumaPlane(alphaPlanes.lumaPlane(), alphaFrame.width(), alphaFrame.height(), label);
+    }
+
+    /// Validates alpha grid metadata before decoding cells.
+    ///
+    /// @param cellCount the number of alpha cell payloads
+    /// @param rows the alpha grid row count
+    /// @param columns the alpha grid column count
+    /// @param outputWidth the alpha grid output width
+    /// @param outputHeight the alpha grid output height
+    /// @throws AvifDecodeException if the alpha grid metadata is malformed
+    private static void validateAlphaGridParameters(
+            int cellCount,
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight
+    ) throws AvifDecodeException {
+        if (rows <= 0 || columns <= 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Alpha grid dimensions must be positive",
+                    null
+            );
+        }
+        if (outputWidth <= 0 || outputHeight <= 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Alpha grid output dimensions must be positive",
+                    null
+            );
+        }
+        long expectedCellCount = (long) rows * columns;
+        if (expectedCellCount > Integer.MAX_VALUE || cellCount != (int) expectedCellCount) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Alpha grid cell count does not match rows * columns",
+                    null
+            );
+        }
+    }
+
+    /// Validates decoded alpha grid cells before composition.
+    ///
+    /// @param alphaCells the decoded alpha cells
+    /// @param rows the alpha grid row count
+    /// @param columns the alpha grid column count
+    /// @param outputWidth the alpha grid output width
+    /// @param outputHeight the alpha grid output height
+    /// @throws AvifDecodeException if the decoded cells cannot cover the declared alpha grid
+    private static void validateDecodedAlphaGrid(
+            DecodedAlphaCell[] alphaCells,
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight
+    ) throws AvifDecodeException {
+        int[] columnWidths = new int[columns];
+        int[] rowHeights = new int[rows];
+        for (int i = 0; i < alphaCells.length; i++) {
+            DecodedAlphaCell alphaCell = alphaCells[i];
+            DecodedFrame frame = alphaCell.frame;
+            DecodedPlane lumaPlane = alphaCell.planes.lumaPlane();
+            validateAlphaLumaPlane(lumaPlane, frame.width(), frame.height(), "Alpha grid cell " + i);
+            int row = i / columns;
+            int col = i % columns;
+            validateAlphaGridCellGeometry(
+                    frame.width(),
+                    frame.height(),
+                    columnWidths,
+                    rowHeights,
+                    row,
+                    col,
+                    "Alpha grid"
+            );
+        }
+        validateAlphaGridCoverage(columnWidths, rowHeights, "Alpha grid");
+    }
+
+    /// Validates one alpha luma plane against the expected decoded dimensions.
+    ///
+    /// @param lumaPlane the decoded luma plane used as alpha
+    /// @param expectedWidth the expected luma width
+    /// @param expectedHeight the expected luma height
+    /// @param label the diagnostic alpha source label
+    /// @throws AvifDecodeException if the luma plane cannot cover the expected alpha image
+    private static void validateAlphaLumaPlane(
+            DecodedPlane lumaPlane,
+            int expectedWidth,
+            int expectedHeight,
+            String label
+    ) throws AvifDecodeException {
+        if (lumaPlane.width() < expectedWidth || lumaPlane.height() < expectedHeight) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    label + " luma plane is smaller than the decoded alpha frame",
+                    null
+            );
+        }
+    }
+
+    /// Validates one alpha grid cell against the shared rectangular grid layout.
+    ///
+    /// @param cellWidth the decoded cell width
+    /// @param cellHeight the decoded cell height
+    /// @param columnWidths the expected width for each column, updated in place
+    /// @param rowHeights the expected height for each row, updated in place
+    /// @param row the cell row index
+    /// @param col the cell column index
+    /// @param label the diagnostic grid label
+    /// @throws AvifDecodeException if the cell layout is unsupported
+    private static void validateAlphaGridCellGeometry(
+            int cellWidth,
+            int cellHeight,
+            int[] columnWidths,
+            int[] rowHeights,
+            int row,
+            int col,
+            String label
+    ) throws AvifDecodeException {
+        if (columnWidths[col] == 0) {
+            columnWidths[col] = cellWidth;
+        } else if (columnWidths[col] != cellWidth) {
+            throw unsupported(label + " cell width mismatch in column " + col, null);
+        }
+        if (rowHeights[row] == 0) {
+            rowHeights[row] = cellHeight;
+        } else if (rowHeights[row] != cellHeight) {
+            throw unsupported(label + " cell height mismatch in row " + row, null);
+        }
+    }
+
+    /// Validates that decoded alpha grid cells expose a non-empty source layout.
+    ///
+    /// @param columnWidths the decoded width of each column
+    /// @param rowHeights the decoded height of each row
+    /// @param label the diagnostic grid label
+    /// @throws AvifDecodeException if the decoded cells cannot produce a source rectangle
+    private static void validateAlphaGridCoverage(
+            int[] columnWidths,
+            int[] rowHeights,
+            String label
+    ) throws AvifDecodeException {
+        int totalWidth = 0;
+        for (int width : columnWidths) {
+            totalWidth += width;
+        }
+        int totalHeight = 0;
+        for (int height : rowHeights) {
+            totalHeight += height;
+        }
+        if (totalWidth <= 0 || totalHeight <= 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    label + " decoded cell coverage is empty",
+                    null
+            );
+        }
     }
 
     /// Combines alpha from one raw luma plane into a color frame.
