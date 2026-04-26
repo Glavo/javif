@@ -505,6 +505,45 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the tone-mapped frame, or `null` when no supported gain map is present
     /// @throws IOException if the base frame or gain-map image cannot be decoded
     public @Nullable AvifFrame readToneMappedFrame(int frameIndex, double hdrHeadroom) throws IOException {
+        return readToneMappedFrameInternal(frameIndex, hdrHeadroom, null);
+    }
+
+    /// Reads the decoded frame at the supplied index with its AVIF gain map applied.
+    ///
+    /// The returned frame preserves the regular `readFrame(int)` alpha composition, item
+    /// transforms, frame index, and RGB storage mode. RGB channels are converted into the requested
+    /// CICP output color space after gain-map application. ICC profile application remains
+    /// metadata-only.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @param hdrHeadroom the requested display HDR headroom in log2 space
+    /// @param outputColorInfo the requested output CICP color information
+    /// @return the tone-mapped frame, or `null` when no supported gain map is present
+    /// @throws IOException if the base frame or gain-map image cannot be decoded
+    public @Nullable AvifFrame readToneMappedFrame(
+            int frameIndex,
+            double hdrHeadroom,
+            AvifColorInfo outputColorInfo
+    ) throws IOException {
+        return readToneMappedFrameInternal(
+                frameIndex,
+                hdrHeadroom,
+                Objects.requireNonNull(outputColorInfo, "outputColorInfo")
+        );
+    }
+
+    /// Reads the decoded frame at the supplied index with optional output color conversion.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @param hdrHeadroom the requested display HDR headroom in log2 space
+    /// @param outputColorInfo the requested output CICP color information, or `null` for base color space
+    /// @return the tone-mapped frame, or `null` when no supported gain map is present
+    /// @throws IOException if the base frame or gain-map image cannot be decoded
+    private @Nullable AvifFrame readToneMappedFrameInternal(
+            int frameIndex,
+            double hdrHeadroom,
+            @Nullable AvifColorInfo outputColorInfo
+    ) throws IOException {
         ensureOpen();
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
@@ -523,9 +562,12 @@ public final class AvifImageReader implements AutoCloseable {
         if (metadata == null) {
             return null;
         }
-        AvifPlanes gainMapPlanes = readRawGainMapPlanes(frameIndex);
-        if (gainMapPlanes == null) {
-            return null;
+        @Nullable AvifPlanes gainMapPlanes = null;
+        if (AvifGainMapToneMapper.requiresGainMap(metadata, hdrHeadroom)) {
+            gainMapPlanes = readRawGainMapPlanes(frameIndex);
+            if (gainMapPlanes == null) {
+                return null;
+            }
         }
         return AvifGainMapToneMapper.apply(
                 readFrame(frameIndex),
@@ -534,6 +576,7 @@ public final class AvifImageReader implements AutoCloseable {
                 container.info().colorInfo(),
                 gainMapInfo.toneMappedColorInfo(),
                 gainMapInfo.gainMapColorInfo(),
+                outputColorInfo,
                 hdrHeadroom
         );
     }

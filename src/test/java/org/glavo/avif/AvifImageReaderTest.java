@@ -731,6 +731,7 @@ final class AvifImageReaderTest {
             assertThrows(IllegalArgumentException.class, () -> reader.readToneMappedFrame(0, -1.0));
             assertThrows(IllegalArgumentException.class, () -> reader.readToneMappedFrame(0, Double.NaN));
             assertThrows(IllegalArgumentException.class, () -> reader.readToneMappedFrame(0, Double.POSITIVE_INFINITY));
+            assertThrows(NullPointerException.class, () -> reader.readToneMappedFrame(0, 1.0, null));
         }
     }
 
@@ -754,6 +755,36 @@ final class AvifImageReaderTest {
             AvifFrame toneMappedFrame = reader.readToneMappedFrame(0, metadata.baseHdrHeadroom().toDouble());
             assertNotNull(toneMappedFrame);
             assertArrayEquals(basePixels, toneMappedFrame.intPixels());
+        }
+    }
+
+    /// Verifies that base-headroom output can still be converted into a requested CICP color space.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readToneMappedFrameAtBaseHeadroomConvertsOutputColorSpace() throws IOException {
+        byte[] bytes = testResourceBytes(LIBAVIF_GAINMAP_FIXTURE);
+        AvifFrame baseFrame;
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            baseFrame = reader.readFrame(0);
+        }
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifGainMapInfo gainMapInfo = reader.info().gainMapInfo();
+            assertNotNull(gainMapInfo);
+            AvifGainMapMetadata metadata = gainMapInfo.metadata();
+            assertNotNull(metadata);
+            AvifColorInfo pqSrgbOutput = new AvifColorInfo(1, 16, 6, true);
+
+            AvifFrame toneMappedFrame = reader.readToneMappedFrame(
+                    0,
+                    metadata.baseHdrHeadroom().toDouble(),
+                    pqSrgbOutput
+            );
+            assertNotNull(toneMappedFrame);
+            assertEquals(baseFrame.width(), toneMappedFrame.width());
+            assertEquals(baseFrame.height(), toneMappedFrame.height());
+            assertEquals(baseFrame.rgbOutputMode(), toneMappedFrame.rgbOutputMode());
+            assertTrue(hasRgbDifferenceWithSameAlpha(baseFrame.intPixelBuffer(), toneMappedFrame.intPixelBuffer()));
         }
     }
 

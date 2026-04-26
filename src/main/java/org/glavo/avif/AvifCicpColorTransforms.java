@@ -147,6 +147,19 @@ final class AvifCicpColorTransforms {
         return xyzToTarget != null ? xyzToTarget.multiply(sourceToXyz) : IDENTITY;
     }
 
+    /// Returns whether two CICP descriptors have the same effective RGB color space.
+    ///
+    /// RGB frame output is affected by color primaries and transfer characteristics. Matrix
+    /// coefficients and sample range describe YUV storage and are intentionally ignored here.
+    ///
+    /// @param first the first color information, or `null`
+    /// @param second the second color information, or `null`
+    /// @return whether both descriptors resolve to the same effective RGB color space
+    static boolean sameEffectiveRgbColorSpace(@Nullable AvifColorInfo first, @Nullable AvifColorInfo second) {
+        return colorPrimaries(first) == colorPrimaries(second)
+                && transferCharacteristics(first) == transferCharacteristics(second);
+    }
+
     /// Clamps a sample to the closed unit interval.
     ///
     /// @param value the sample value
