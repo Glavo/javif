@@ -15,6 +15,8 @@ Implemented container/API coverage:
   edit-list repetition metadata
 - AVIS media handler filtering for image, auxiliary-image, and unrelated tracks
 - AVIS `tref/auxl` matching for alpha/depth auxiliary tracks
+- AVIS/still/grid premultiplied-alpha metadata and straight-alpha frame output
+- sequence alpha frame composition for `readFrame()`
 - raw plane access for color, alpha, depth, and gain-map images
 
 ## Remaining Work
@@ -41,16 +43,15 @@ Implemented container/API coverage:
 
 ### Container And API
 
-- Finish AVIS multi-track edge cases beyond handler and `auxl` matching:
-  multiple compatible color tracks, premultiplied-alpha `prem` references, and
-  unsupported non-auxiliary track-reference policies.
+- Finish AVIS multi-track edge cases beyond handler, `auxl`, and `prem`
+  handling: multiple compatible color tracks and unsupported non-auxiliary
+  track-reference policies.
 - Add incremental or streaming input behavior instead of requiring a complete
   buffered source.
 - Expose remaining useful metadata through typed public descriptors.
 - Complete explicit output controls for display-converted RGB and high-bit-depth
   buffers without unnecessary copies.
-- Audit alpha semantics, premultiplication metadata, and public buffer
-  immutability annotations.
+- Audit alpha edge cases and public buffer immutability annotations.
 
 ### Validation
 

@@ -142,6 +142,7 @@ public final class AvifContainerParser {
                 ispe.width,
                 ispe.height
         );
+        boolean alphaPremultiplied = itemAlphaPremultiplied(primaryItem, AvifAuxiliaryImageInfo.ALPHA_TYPE);
         AuxiliaryPayloads depthPayloads = parseAuxiliaryPayloads(
                 primaryItem,
                 AvifAuxiliaryImageInfo.DEPTH_TYPE,
@@ -177,7 +178,9 @@ public final class AvifContainerParser {
                 transformParams[5],
                 null,
                 auxiliaryImages(primaryItem.id),
-                gainMapPayloads.info
+                gainMapPayloads.info,
+                AvifImageInfo.REPETITION_COUNT_UNKNOWN,
+                alphaPremultiplied
         );
 
         return new AvifContainer(info, payload,
@@ -204,6 +207,7 @@ public final class AvifContainerParser {
                 AvifAuxiliaryImageInfo.ALPHA_TYPE,
                 "Alpha"
         );
+        boolean alphaPremultiplied = itemAlphaPremultiplied(gridItem, AvifAuxiliaryImageInfo.ALPHA_TYPE);
         AuxiliaryPayloads depthPayloads = parseGridAuxiliaryPayloads(
                 gridItem,
                 colorGrid,
@@ -237,7 +241,9 @@ public final class AvifContainerParser {
                 transforms[5],
                 null,
                 auxiliaryImages(gridItem.id),
-                gainMapPayloads.info
+                gainMapPayloads.info,
+                AvifImageInfo.REPETITION_COUNT_UNKNOWN,
+                alphaPremultiplied
         );
 
         return new AvifContainer(info, colorGrid.cellPayloads,
@@ -1246,7 +1252,8 @@ public final class AvifContainerParser {
                 meta.moovAuxiliaryTypes.toArray(String[]::new),
                 null,
                 null,
-                repetitionCount);
+                repetitionCount,
+                sequenceAlphaPremultiplied());
         return new AvifContainer(info,
                 colorPayloads.payloads,
                 alphaPayloads,
@@ -1283,6 +1290,16 @@ public final class AvifContainerParser {
             );
         }
         return track.mediaDuration;
+    }
+
+    /// Returns whether the selected AVIS color track is premultiplied by the selected alpha track.
+    ///
+    /// @return whether the selected AVIS sequence uses premultiplied alpha
+    private boolean sequenceAlphaPremultiplied() {
+        MoovState alphaTrack = meta.moovAlphaState;
+        return alphaTrack != null
+                && alphaTrack.trackId != 0
+                && meta.moovState.premultipliedByTrackIds.contains(alphaTrack.trackId);
     }
 
     /// Resolves the animated-sequence repetition count from a parsed edit list.
@@ -1598,6 +1615,7 @@ public final class AvifContainerParser {
             BoxInput payload = input.slice(child.payloadOffset(), child.payloadSize());
             switch (child.type()) {
                 case "auxl" -> parseMoovTrackReference(payload, meta.moovState.auxiliaryForTrackIds, "auxl");
+                case "prem" -> parseMoovTrackReference(payload, meta.moovState.premultipliedByTrackIds, "prem");
                 default -> {}
             }
             input.skipBoxPayload(child);
@@ -2022,6 +2040,9 @@ public final class AvifContainerParser {
                 if ("auxl".equals(reference.type())) {
                     fromItem.auxForId = toItem.id;
                 }
+                if ("prem".equals(reference.type())) {
+                    fromItem.premultipliedById = toItem.id;
+                }
                 if ("dimg".equals(reference.type())) {
                     if (toItem.dimgForId != 0 && toItem.dimgForId != fromItem.id) {
                         toItem.sharedDerivedImageReference = true;
@@ -2076,6 +2097,16 @@ public final class AvifContainerParser {
             }
         }
         return null;
+    }
+
+    /// Returns whether one item declares premultiplied alpha semantics.
+    ///
+    /// @param imageItem the color image item
+    /// @param auxiliaryType the alpha auxiliary type string
+    /// @return whether the color item is premultiplied by that auxiliary item
+    private boolean itemAlphaPremultiplied(Item imageItem, String auxiliaryType) {
+        Item auxiliaryItem = findAuxiliaryItem(imageItem.id, auxiliaryType);
+        return auxiliaryItem != null && imageItem.premultipliedById == auxiliaryItem.id;
     }
 
     /// Returns auxiliary image descriptors associated with one master image item.
@@ -2664,6 +2695,8 @@ public final class AvifContainerParser {
         private @Nullable String auxiliaryType;
         /// The `tref/auxl` color track IDs referenced by this auxiliary track.
         private final List<Integer> auxiliaryForTrackIds = new ArrayList<>();
+        /// The `tref/prem` alpha track IDs referenced by this color track.
+        private final List<Integer> premultipliedByTrackIds = new ArrayList<>();
         /// The parsed sample timing deltas.
         private final List<Integer> sampleDeltas = new ArrayList<>();
         /// The parsed chunk offsets.
@@ -2706,6 +2739,8 @@ public final class AvifContainerParser {
             auxiliaryType = other.auxiliaryType;
             auxiliaryForTrackIds.clear();
             auxiliaryForTrackIds.addAll(other.auxiliaryForTrackIds);
+            premultipliedByTrackIds.clear();
+            premultipliedByTrackIds.addAll(other.premultipliedByTrackIds);
             sampleDeltas.clear();
             sampleDeltas.addAll(other.sampleDeltas);
             chunkOffsets.clear();
@@ -2973,6 +3008,8 @@ public final class AvifContainerParser {
         private boolean hasUnsupportedEssentialProperty;
         /// The master image item id for auxiliary items.
         private int auxForId;
+        /// The auxiliary item id that premultiplies this color item, or 0.
+        private int premultipliedById;
         /// The image item id described by this metadata item, or 0.
         private int descForId;
         /// The grid item id for dimg cell items, or 0.

@@ -619,8 +619,24 @@ final class AvifImageReaderTest {
 
             assertTrue(info.animated());
             assertTrue(info.alphaPresent());
+            assertFalse(info.alphaPremultiplied());
             assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
             assertNotNull(reader.readRawAlphaPlanes(0));
+            assertEquals(0x80, reader.readFrame().intPixelBuffer().get(0) >>> 24);
+        }
+    }
+
+    /// Verifies that AVIS `tref/prem` references expose premultiplied alpha metadata.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceUsesPremultipliedAlphaReference() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithReferencedAlphaTrack(true, true))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.animated());
+            assertTrue(info.alphaPresent());
+            assertTrue(info.alphaPremultiplied());
         }
     }
 
@@ -1166,6 +1182,7 @@ final class AvifImageReaderTest {
             assertEquals(64, info.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, info.bitDepth());
             assertTrue(info.alphaPresent());
+            assertFalse(info.alphaPremultiplied());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
             assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
@@ -1201,6 +1218,19 @@ final class AvifImageReaderTest {
             assertEquals(64 * 64, pixels.length);
             assertTrue((pixels[0] >>> 24) != 0xFF, "synthetic alpha should produce non-opaque pixels");
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that a still-image `prem` item reference exposes premultiplied alpha metadata.
+    ///
+    /// @throws IOException if the fixture cannot be read
+    @Test
+    void openParsesStillPremultipliedAlphaReference() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(syntheticAlphaAvif(true))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.alphaPresent());
+            assertTrue(info.alphaPremultiplied());
         }
     }
 
@@ -1439,24 +1469,33 @@ final class AvifImageReaderTest {
     ///
     /// @return the complete AVIF test file bytes
     private static byte[] syntheticAlphaAvif() {
+        return syntheticAlphaAvif(false);
+    }
+
+    /// Creates a synthetic AVIF still image with a primary color item and an alpha auxiliary item.
+    ///
+    /// @param premultiplied whether to add a `prem` item reference from color to alpha
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvif(boolean premultiplied) {
         byte[] colorPayload = av1StillPicturePayload();
         byte[] alphaPayload = av1StillPicturePayload();
         byte[] ftyp = fileTypeBox();
-        byte[] firstMeta = buildDualItemMeta(colorPayload.length + alphaPayload.length);
+        byte[] firstMeta = buildDualItemMeta(colorPayload.length + alphaPayload.length, premultiplied);
         int metaSize = firstMeta.length;
         int mdatHeaderSize = 8;
         int colorOffset = ftyp.length + metaSize + mdatHeaderSize;
         int alphaOffset = colorOffset + colorPayload.length;
-        byte[] meta = buildDualItemMeta(colorOffset, colorPayload.length, alphaOffset, alphaPayload.length);
+        byte[] meta = buildDualItemMeta(colorOffset, colorPayload.length, alphaOffset, alphaPayload.length, premultiplied);
         return concat(ftyp, meta, box("mdat", concat(colorPayload, alphaPayload)));
     }
 
     /// Creates a dual-item meta box with placeholder sizes.
     ///
     /// @param totalPayloadLength the total mdat payload length
+    /// @param premultiplied whether to add a `prem` item reference from color to alpha
     /// @return the dual-item meta box bytes
-    private static byte[] buildDualItemMeta(int totalPayloadLength) {
-        return buildDualItemMeta(0, 0, 0, totalPayloadLength);
+    private static byte[] buildDualItemMeta(int totalPayloadLength, boolean premultiplied) {
+        return buildDualItemMeta(0, 0, 0, totalPayloadLength, premultiplied);
     }
 
     /// Creates a dual-item meta box with actual payload offsets and lengths.
@@ -1465,8 +1504,15 @@ final class AvifImageReaderTest {
     /// @param colorLength the color item payload length
     /// @param alphaOffset the absolute alpha item payload offset
     /// @param alphaLength the alpha item payload length
+    /// @param premultiplied whether to add a `prem` item reference from color to alpha
     /// @return the dual-item meta box bytes
-    private static byte[] buildDualItemMeta(int colorOffset, int colorLength, int alphaOffset, int alphaLength) {
+    private static byte[] buildDualItemMeta(
+            int colorOffset,
+            int colorLength,
+            int alphaOffset,
+            int alphaLength,
+            boolean premultiplied
+    ) {
         byte[] iloc = fullBox("iloc", 0, 0,
                 new byte[]{0x44, 0x40},
                 u16(2),
@@ -1508,7 +1554,7 @@ final class AvifImageReaderTest {
                 )
         );
 
-        byte[] iref = refBox(1, 2);
+        byte[] iref = refBox(1, 2, premultiplied);
 
         return fullBox("meta", 0, 0,
                 handlerBox(), primaryItemBox(), iloc, iinf, iprp, iref);
@@ -1518,10 +1564,12 @@ final class AvifImageReaderTest {
     ///
     /// @param fromId the from item id
     /// @param toId the to item id
+    /// @param premultiplied whether to include a `prem` reference
     /// @return the iref box bytes
-    private static byte[] refBox(int fromId, int toId) {
+    private static byte[] refBox(int fromId, int toId, boolean premultiplied) {
         return fullBox("iref", 0, 0,
-                box("auxl", u16(fromId), u16(1), u16(toId))
+                box("auxl", u16(fromId), u16(1), u16(toId)),
+                premultiplied ? box("prem", u16(fromId), u16(1), u16(toId)) : new byte[0]
         );
     }
 
@@ -1715,6 +1763,18 @@ final class AvifImageReaderTest {
     /// @param includeMatchingAlpha whether to include a correctly referenced alpha track after a mismatched one
     /// @return the complete AVIS test file bytes
     private static byte[] minimalAvisSequenceWithReferencedAlphaTrack(boolean includeMatchingAlpha) {
+        return minimalAvisSequenceWithReferencedAlphaTrack(includeMatchingAlpha, false);
+    }
+
+    /// Creates a minimal AVIS sequence with an optionally matching alpha track reference.
+    ///
+    /// @param includeMatchingAlpha whether to include a correctly referenced alpha track after a mismatched one
+    /// @param premultiplied whether to add a `prem` track reference from color to the matching alpha track
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithReferencedAlphaTrack(
+            boolean includeMatchingAlpha,
+            boolean premultiplied
+    ) {
         byte[] sample0 = av1StillPicturePayload();
         byte[] sample1 = av1StillPicturePayload();
         byte[] sample2 = av1StillPicturePayload();
@@ -1729,6 +1789,7 @@ final class AvifImageReaderTest {
                 new int[]{0, 0},
                 new int[]{0, 0},
                 includeMatchingAlpha,
+                premultiplied,
                 sample0.length,
                 sample1.length,
                 sample2.length
@@ -1741,6 +1802,7 @@ final class AvifImageReaderTest {
                 new int[]{colorChunk0Offset, colorChunk1Offset},
                 new int[]{alphaChunk0Offset, alphaChunk1Offset},
                 includeMatchingAlpha,
+                premultiplied,
                 sample0.length,
                 sample1.length,
                 sample2.length
@@ -1836,18 +1898,20 @@ final class AvifImageReaderTest {
     /// @param colorChunkOffsets the absolute color track chunk offsets
     /// @param alphaChunkOffsets the absolute alpha track chunk offsets
     /// @param includeMatchingAlpha whether to include a matching alpha track
+    /// @param premultiplied whether to add a `prem` track reference from color to the matching alpha track
     /// @param sampleSizes the color and matching alpha sample sizes
     /// @return the `moov` box bytes
     private static byte[] minimalAvisMoovBoxWithReferencedAlphaTrack(
             int[] colorChunkOffsets,
             int[] alphaChunkOffsets,
             boolean includeMatchingAlpha,
+            boolean premultiplied,
             int... sampleSizes
     ) {
         byte[] colorTrack = avisTrackBox(
                 1,
                 "pict",
-                null,
+                includeMatchingAlpha && premultiplied ? trackReferenceBox("prem", 3) : null,
                 null,
                 colorChunkOffsets,
                 false,

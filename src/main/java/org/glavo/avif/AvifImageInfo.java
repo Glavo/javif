@@ -42,6 +42,8 @@ public final class AvifImageInfo {
     private final AvifPixelFormat pixelFormat;
     /// Whether an alpha auxiliary image is present.
     private final boolean alphaPresent;
+    /// Whether color samples are premultiplied by the alpha auxiliary image.
+    private final boolean alphaPremultiplied;
     /// Whether the input is an animated image sequence.
     private final boolean animated;
     /// The number of frames advertised by the container.
@@ -487,6 +489,92 @@ public final class AvifImageInfo {
             @Nullable AvifGainMapInfo gainMapInfo,
             int repetitionCount
     ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                pixelFormat,
+                alphaPresent,
+                animated,
+                frameCount,
+                colorInfo,
+                iccProfile,
+                exif,
+                xmp,
+                mediaTimescale,
+                mediaDuration,
+                frameDurations,
+                cleanApertureCropX,
+                cleanApertureCropY,
+                cleanApertureCropWidth,
+                cleanApertureCropHeight,
+                rotationCode,
+                mirrorAxis,
+                auxiliaryImageTypes,
+                auxiliaryImages,
+                gainMapInfo,
+                repetitionCount,
+                false
+        );
+    }
+
+    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, gain-map metadata,
+    /// sequence repetition metadata, and alpha premultiplication metadata.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
+    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
+    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
+    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
+    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
+    /// @param rotationCode the clockwise rotation code from the `irot` property, or -1 when absent
+    /// @param mirrorAxis the mirror axis from the `imir` property, or -1 when absent
+    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
+    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
+    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
+    /// @param repetitionCount the animated-sequence repetition count, `REPETITION_COUNT_UNKNOWN`, or
+    /// `REPETITION_COUNT_INFINITE`
+    /// @param alphaPremultiplied whether color samples are premultiplied by the alpha auxiliary image
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
+            int mediaTimescale,
+            long mediaDuration,
+            int @Nullable [] frameDurations,
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight,
+            int rotationCode,
+            int mirrorAxis,
+            String @Nullable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
+            @Nullable AvifGainMapInfo gainMapInfo,
+            int repetitionCount,
+            boolean alphaPremultiplied
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -531,6 +619,7 @@ public final class AvifImageInfo {
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
         this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         this.alphaPresent = alphaPresent;
+        this.alphaPremultiplied = alphaPresent && alphaPremultiplied;
         this.animated = animated;
         this.frameCount = frameCount;
         this.mediaTimescale = mediaTimescale;
@@ -588,6 +677,16 @@ public final class AvifImageInfo {
     /// @return whether an alpha auxiliary image is present
     public boolean alphaPresent() {
         return alphaPresent;
+    }
+
+    /// Returns whether color samples are premultiplied by the alpha auxiliary image.
+    ///
+    /// Decoded [AvifFrame] pixels are still exposed as non-premultiplied ARGB. This flag reports the
+    /// source container semantics before conversion.
+    ///
+    /// @return whether the source color samples are premultiplied by alpha
+    public boolean alphaPremultiplied() {
+        return alphaPremultiplied;
     }
 
     /// Returns whether the input is an animated image sequence.

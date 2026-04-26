@@ -56,6 +56,10 @@ public final class AvifImageReader implements AutoCloseable {
     private @Nullable Av1ImageReader sequenceAv1Reader;
     /// The expected next frame index from the persistent sequence reader.
     private int sequenceAv1FrameIndex;
+    /// A persistent AV1 reader for image-sequence alpha samples, or `null`.
+    private @Nullable Av1ImageReader sequenceAlphaAv1Reader;
+    /// The expected next frame index from the persistent sequence alpha reader.
+    private int sequenceAlphaAv1FrameIndex;
 
     /// Creates an AVIF image reader.
     ///
@@ -248,7 +252,12 @@ public final class AvifImageReader implements AutoCloseable {
                     frameIndex
             );
             if (alphaPayload != null) {
-                rawFrame = adaptFrameWithAlpha(rawFrame, alphaPayload, frameIndex);
+                rawFrame = adaptFrameWithAlpha(
+                        rawFrame,
+                        alphaPayload,
+                        frameIndex,
+                        container.info().alphaPremultiplied()
+                );
             }
             return applyTransforms(rawFrame);
         } catch (AvifDecodeException exception) {
@@ -464,7 +473,13 @@ public final class AvifImageReader implements AutoCloseable {
             if (decodedFrame == null)
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Sequence produced no frame: " + frameIndex, null);
             sequenceAv1FrameIndex++;
-            return adaptFrame(decodedFrame, sequenceAv1Reader.lastPlanes(), container.info().colorInfo(), frameIndex);
+            AvifFrame rawFrame = adaptFrame(
+                    decodedFrame,
+                    sequenceAv1Reader.lastPlanes(),
+                    container.info().colorInfo(),
+                    frameIndex
+            );
+            return combineFrameWithSequenceAlphaSequential(rawFrame, frameIndex);
         } catch (AvifDecodeException e) {
             throw e;
         } catch (IOException e) {
@@ -912,7 +927,13 @@ public final class AvifImageReader implements AutoCloseable {
                     );
                 }
             }
-            return adaptFrame(decodedFrame, randomAccessReader.lastPlanes(), container.info().colorInfo(), frameIndex);
+            AvifFrame rawFrame = adaptFrame(
+                    decodedFrame,
+                    randomAccessReader.lastPlanes(),
+                    container.info().colorInfo(),
+                    frameIndex
+            );
+            return combineFrameWithSequenceAlphaRandomAccess(rawFrame, frameIndex);
         } catch (AvifDecodeException e) {
             throw e;
         } catch (IOException e) {
@@ -936,13 +957,19 @@ public final class AvifImageReader implements AutoCloseable {
 
         ByteBuffer alphaPayload = container.alphaItemPayload();
         if (alphaPayload != null) {
-            rawFrame = adaptFrameWithAlpha(rawFrame, alphaPayload, frameIndex);
+            rawFrame = adaptFrameWithAlpha(
+                    rawFrame,
+                    alphaPayload,
+                    frameIndex,
+                    container.info().alphaPremultiplied()
+            );
         }
         @Unmodifiable ByteBuffer @Nullable [] alphaCellPayloads = container.gridAlphaCellPayloads();
         if (alphaCellPayloads != null) {
             rawFrame = combineFrameWithAlphaGrid(rawFrame, alphaCellPayloads,
                     container.gridAlphaRows(), container.gridAlphaColumns(),
-                    container.gridAlphaOutputWidth(), container.gridAlphaOutputHeight(), frameIndex);
+                    container.gridAlphaOutputWidth(), container.gridAlphaOutputHeight(), frameIndex,
+                    container.info().alphaPremultiplied());
         }
         return applyTransforms(rawFrame);
     }
@@ -1133,6 +1160,10 @@ public final class AvifImageReader implements AutoCloseable {
         if (sequenceAv1Reader != null) {
             try { sequenceAv1Reader.close(); } catch (IOException ignored) {}
             sequenceAv1Reader = null;
+        }
+        if (sequenceAlphaAv1Reader != null) {
+            try { sequenceAlphaAv1Reader.close(); } catch (IOException ignored) {}
+            sequenceAlphaAv1Reader = null;
         }
         closed = true;
     }
@@ -1486,6 +1517,87 @@ public final class AvifImageReader implements AutoCloseable {
         throw new IllegalArgumentException("Unsupported decoded bit depth: " + frame.bitDepth());
     }
 
+    /// Combines a sequentially read sequence frame with its matching alpha sample when present.
+    ///
+    /// @param colorFrame the decoded color frame
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @return the color frame with sequence alpha applied, or the original frame
+    /// @throws IOException if the alpha sample cannot be decoded
+    private AvifFrame combineFrameWithSequenceAlphaSequential(AvifFrame colorFrame, int frameIndex) throws IOException {
+        @Unmodifiable ByteBuffer @Nullable [] alphaPayloads = container.sequenceAlphaSamplePayloads();
+        if (alphaPayloads == null) {
+            return colorFrame;
+        }
+        if (frameIndex != sequenceAlphaAv1FrameIndex && sequenceAlphaAv1Reader != null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    "Sequential AVIF alpha reader is out of sync at frame " + frameIndex,
+                    null
+            );
+        }
+        if (sequenceAlphaAv1Reader == null) {
+            sequenceAlphaAv1Reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffers(alphaPayloads),
+                    config.av1DecoderConfig()
+            );
+            sequenceAlphaAv1FrameIndex = 0;
+        }
+        while (sequenceAlphaAv1FrameIndex < frameIndex) {
+            DecodedFrame skipped = sequenceAlphaAv1Reader.readFrame();
+            if (skipped == null) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.AV1_DECODE_FAILED,
+                        "Sequence alpha ended before frame " + frameIndex,
+                        null
+                );
+            }
+            sequenceAlphaAv1FrameIndex++;
+        }
+        DecodedFrame alphaFrame = sequenceAlphaAv1Reader.readFrame();
+        if (alphaFrame == null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    "Sequence alpha produced no frame: " + frameIndex,
+                    null
+            );
+        }
+        sequenceAlphaAv1FrameIndex++;
+        return combineFrameWithDecodedAlpha(
+                colorFrame, alphaFrame, sequenceAlphaAv1Reader.lastPlanes(), frameIndex
+        );
+    }
+
+    /// Combines a randomly accessed sequence frame with its matching alpha sample when present.
+    ///
+    /// @param colorFrame the decoded color frame
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @return the color frame with sequence alpha applied, or the original frame
+    /// @throws IOException if the alpha sample cannot be decoded
+    private AvifFrame combineFrameWithSequenceAlphaRandomAccess(AvifFrame colorFrame, int frameIndex)
+            throws IOException {
+        @Unmodifiable ByteBuffer @Nullable [] alphaPayloads = container.sequenceAlphaSamplePayloads();
+        if (alphaPayloads == null) {
+            return colorFrame;
+        }
+        try (Av1ImageReader alphaReader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffers(alphaPayloads),
+                config.av1DecoderConfig()
+        )) {
+            DecodedFrame alphaFrame = null;
+            for (int index = 0; index <= frameIndex; index++) {
+                alphaFrame = alphaReader.readFrame();
+                if (alphaFrame == null) {
+                    throw new AvifDecodeException(
+                            AvifErrorCode.AV1_DECODE_FAILED,
+                            "Sequence alpha ended before frame " + frameIndex,
+                            null
+                    );
+                }
+            }
+            return combineFrameWithDecodedAlpha(colorFrame, alphaFrame, alphaReader.lastPlanes(), frameIndex);
+        }
+    }
+
     /// Decodes an alpha auxiliary AV1 payload and combines it with a decoded color frame.
     ///
     /// @param colorFrame the decoded color frame
@@ -1494,7 +1606,10 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return the combined AVIF frame
     /// @throws IOException if the alpha payload cannot be decoded
     private AvifFrame adaptFrameWithAlpha(
-            AvifFrame colorFrame, @Unmodifiable ByteBuffer alphaPayload, int frameIndex
+            AvifFrame colorFrame,
+            @Unmodifiable ByteBuffer alphaPayload,
+            int frameIndex,
+            boolean alphaPremultiplied
     ) throws IOException {
         try (Av1ImageReader alphaReader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(alphaPayload),
@@ -1504,19 +1619,67 @@ public final class AvifImageReader implements AutoCloseable {
             if (alphaFrame == null) {
                 throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha auxiliary item produced no frame", null);
             }
-            if (alphaFrame.width() != colorFrame.width() || alphaFrame.height() != colorFrame.height()) {
-                throw unsupported("Alpha with different decoded dimensions than master image", null);
-            }
             DecodedPlanes alphaPlanes = alphaReader.lastPlanes();
-            if (alphaPlanes == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha planes not available", null);
-            }
-            return combineFrameWithAlphaPlane(colorFrame, alphaPlanes, alphaFrame.bitDepth(), frameIndex);
+            return combineFrameWithDecodedAlpha(colorFrame, alphaFrame, alphaPlanes, frameIndex, alphaPremultiplied);
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
         }
+    }
+
+    /// Combines one decoded alpha frame with a color frame.
+    ///
+    /// @param colorFrame the decoded color frame
+    /// @param alphaFrame the decoded alpha frame metadata
+    /// @param alphaPlanes the decoded alpha planes, or `null`
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @return the combined AVIF frame
+    /// @throws AvifDecodeException if alpha planes are unavailable or dimensions differ
+    private AvifFrame combineFrameWithDecodedAlpha(
+            AvifFrame colorFrame,
+            DecodedFrame alphaFrame,
+            @Nullable DecodedPlanes alphaPlanes,
+            int frameIndex
+    ) throws AvifDecodeException {
+        return combineFrameWithDecodedAlpha(
+                colorFrame,
+                alphaFrame,
+                alphaPlanes,
+                frameIndex,
+                container.info().alphaPremultiplied()
+        );
+    }
+
+    /// Combines one decoded alpha frame with a color frame.
+    ///
+    /// @param colorFrame the decoded color frame
+    /// @param alphaFrame the decoded alpha frame metadata
+    /// @param alphaPlanes the decoded alpha planes, or `null`
+    /// @param frameIndex the zero-based AVIF frame index
+    /// @param alphaPremultiplied whether color samples are premultiplied by alpha
+    /// @return the combined AVIF frame
+    /// @throws AvifDecodeException if alpha planes are unavailable or dimensions differ
+    private static AvifFrame combineFrameWithDecodedAlpha(
+            AvifFrame colorFrame,
+            DecodedFrame alphaFrame,
+            @Nullable DecodedPlanes alphaPlanes,
+            int frameIndex,
+            boolean alphaPremultiplied
+    ) throws AvifDecodeException {
+        if (alphaFrame.width() != colorFrame.width() || alphaFrame.height() != colorFrame.height()) {
+            throw unsupported("Alpha with different decoded dimensions than master image", null);
+        }
+        if (alphaPlanes == null) {
+            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha planes not available", null);
+        }
+        return combineFrameWithAlphaPlane(
+                colorFrame,
+                alphaPlanes,
+                alphaFrame.bitDepth(),
+                frameIndex,
+                alphaPremultiplied
+        );
     }
 
     /// Decodes alpha grid cells and combines their luma planes into a color frame.
@@ -1537,17 +1700,36 @@ public final class AvifImageReader implements AutoCloseable {
             int columns,
             int outputWidth,
             int outputHeight,
-            int frameIndex
+            int frameIndex,
+            boolean alphaPremultiplied
     ) throws IOException {
         if (outputWidth != colorFrame.width() || outputHeight != colorFrame.height()) {
             throw unsupported("Alpha grid with different decoded dimensions than master image", null);
         }
         DecodedAlphaCell[] alphaCells = decodeAlphaGridCells(alphaCellPayloads);
         if (colorFrame.bitDepth().isEightBit()) {
-            return combineIntGridAlpha(colorFrame, alphaCells, rows, columns, outputWidth, outputHeight, frameIndex);
+            return combineIntGridAlpha(
+                    colorFrame,
+                    alphaCells,
+                    rows,
+                    columns,
+                    outputWidth,
+                    outputHeight,
+                    frameIndex,
+                    alphaPremultiplied
+            );
         }
         if (colorFrame.bitDepth().isHighBitDepth()) {
-            return combineLongGridAlpha(colorFrame, alphaCells, rows, columns, outputWidth, outputHeight, frameIndex);
+            return combineLongGridAlpha(
+                    colorFrame,
+                    alphaCells,
+                    rows,
+                    columns,
+                    outputWidth,
+                    outputHeight,
+                    frameIndex,
+                    alphaPremultiplied
+            );
         }
         throw unsupported("Unsupported alpha color frame bit depth: " + colorFrame.bitDepth(), null);
     }
@@ -1597,20 +1779,28 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frameIndex the zero-based AVIF frame index
     /// @return the combined frame
     private static AvifFrame combineFrameWithAlphaPlane(
-            AvifFrame color, DecodedPlanes alphaPlanes, AvifBitDepth alphaBitDepth, int frameIndex
+            AvifFrame color,
+            DecodedPlanes alphaPlanes,
+            AvifBitDepth alphaBitDepth,
+            int frameIndex,
+            boolean alphaPremultiplied
     ) {
         if (color.bitDepth().isEightBit()) {
-            return combineIntPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex);
+            return combineIntPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex, alphaPremultiplied);
         }
         if (color.bitDepth().isHighBitDepth()) {
-            return combineLongPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex);
+            return combineLongPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex, alphaPremultiplied);
         }
         throw new IllegalArgumentException("Unsupported alpha color frame bit depth: " + color.bitDepth());
     }
 
     /// Combines alpha from raw luma plane into an 8-bit color frame.
     private static AvifFrame combineIntPlaneAlpha(
-            AvifFrame color, DecodedPlanes alphaPlanes, AvifBitDepth alphaBitDepth, int frameIndex
+            AvifFrame color,
+            DecodedPlanes alphaPlanes,
+            AvifBitDepth alphaBitDepth,
+            int frameIndex,
+            boolean alphaPremultiplied
     ) {
         IntBuffer colorPixels = color.intPixelBuffer();
         int width = color.width();
@@ -1626,12 +1816,19 @@ public final class AvifImageReader implements AutoCloseable {
                 combined[i] = (colorPixels.get(i) & 0x00FFFFFF) | (alpha8 << 24);
             }
         }
+        if (alphaPremultiplied) {
+            unpremultiplyIntPixels(combined);
+        }
         return new AvifFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
     /// Combines alpha from raw luma plane into a 10/12-bit color frame.
     private static AvifFrame combineLongPlaneAlpha(
-            AvifFrame color, DecodedPlanes alphaPlanes, AvifBitDepth alphaBitDepth, int frameIndex
+            AvifFrame color,
+            DecodedPlanes alphaPlanes,
+            AvifBitDepth alphaBitDepth,
+            int frameIndex,
+            boolean alphaPremultiplied
     ) {
         LongBuffer colorPixels = color.longPixelBuffer();
         int width = color.width();
@@ -1647,6 +1844,9 @@ public final class AvifImageReader implements AutoCloseable {
                 combined[i] = (colorPixels.get(i) & 0x0000FFFF_FFFFFFFFL) | ((alpha16 & 0xFFFFL) << 48);
             }
         }
+        if (alphaPremultiplied) {
+            unpremultiplyLongPixels(combined);
+        }
         return new AvifFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
@@ -1658,10 +1858,14 @@ public final class AvifImageReader implements AutoCloseable {
             int columns,
             int outputWidth,
             int outputHeight,
-            int frameIndex
+            int frameIndex,
+            boolean alphaPremultiplied
     ) {
         int[] combined = intBufferToArray(color.intPixelBuffer());
         copyGridAlphaToIntPixels(combined, alphaCells, rows, columns, outputWidth, outputHeight);
+        if (alphaPremultiplied) {
+            unpremultiplyIntPixels(combined);
+        }
         return new AvifFrame(outputWidth, outputHeight, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
@@ -1673,10 +1877,14 @@ public final class AvifImageReader implements AutoCloseable {
             int columns,
             int outputWidth,
             int outputHeight,
-            int frameIndex
+            int frameIndex,
+            boolean alphaPremultiplied
     ) {
         long[] combined = longBufferToArray(color.longPixelBuffer());
         copyGridAlphaToLongPixels(combined, alphaCells, rows, columns, outputWidth, outputHeight);
+        if (alphaPremultiplied) {
+            unpremultiplyLongPixels(combined);
+        }
         return new AvifFrame(outputWidth, outputHeight, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
@@ -1763,6 +1971,59 @@ public final class AvifImageReader implements AutoCloseable {
             }
             yOffset += maxCellHeight;
         }
+    }
+
+    /// Converts packed 8-bit ARGB pixels from premultiplied to straight alpha in place.
+    ///
+    /// @param pixels the pixels to convert
+    private static void unpremultiplyIntPixels(int[] pixels) {
+        for (int i = 0; i < pixels.length; i++) {
+            int pixel = pixels[i];
+            int alpha = pixel >>> 24;
+            if (alpha == 0) {
+                pixels[i] = 0;
+                continue;
+            }
+            if (alpha == 255) {
+                continue;
+            }
+            int red = unpremultiplyChannel((pixel >>> 16) & 0xFF, alpha, 255);
+            int green = unpremultiplyChannel((pixel >>> 8) & 0xFF, alpha, 255);
+            int blue = unpremultiplyChannel(pixel & 0xFF, alpha, 255);
+            pixels[i] = (alpha << 24) | (red << 16) | (green << 8) | blue;
+        }
+    }
+
+    /// Converts packed 16-bit-per-channel ARGB pixels from premultiplied to straight alpha in place.
+    ///
+    /// @param pixels the pixels to convert
+    private static void unpremultiplyLongPixels(long[] pixels) {
+        for (int i = 0; i < pixels.length; i++) {
+            long pixel = pixels[i];
+            int alpha = (int) ((pixel >>> 48) & 0xFFFFL);
+            if (alpha == 0) {
+                pixels[i] = 0L;
+                continue;
+            }
+            if (alpha == 65_535) {
+                continue;
+            }
+            long red = unpremultiplyChannel((int) ((pixel >>> 32) & 0xFFFFL), alpha, 65_535);
+            long green = unpremultiplyChannel((int) ((pixel >>> 16) & 0xFFFFL), alpha, 65_535);
+            long blue = unpremultiplyChannel((int) (pixel & 0xFFFFL), alpha, 65_535);
+            pixels[i] = ((long) alpha << 48) | (red << 32) | (green << 16) | blue;
+        }
+    }
+
+    /// Converts one premultiplied channel to straight alpha.
+    ///
+    /// @param sample the premultiplied color sample
+    /// @param alpha the alpha sample
+    /// @param maxSample the maximum channel sample value
+    /// @return the straight-alpha channel sample
+    private static int unpremultiplyChannel(int sample, int alpha, int maxSample) {
+        long value = ((long) sample * maxSample + alpha / 2L) / alpha;
+        return value > maxSample ? maxSample : (int) value;
     }
 
     /// Returns the x offset of one alpha grid cell.
