@@ -69,6 +69,10 @@ final class AvifImageReaderTest {
     /// A still-image fixture copied from libavif's test data that uses an extended `pixi` property.
     private static final String LIBAVIF_EXTENDED_PIXI_FIXTURE = "libavif-test-data/extended_pixi.avif";
 
+    /// A still-image fixture copied from libavif's test data with custom opaque item properties.
+    private static final String LIBAVIF_CIRCLE_CUSTOM_PROPERTIES_FIXTURE =
+            "libavif-test-data/circle_custom_properties.avif";
+
     /// A basic SDR sRGB still-image fixture copied from libavif's test data.
     private static final String LIBAVIF_COLORS_SDR_SRGB_FIXTURE = "libavif-test-data/colors_sdr_srgb.avif";
 
@@ -531,6 +535,35 @@ final class AvifImageReaderTest {
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
+        }
+    }
+
+    /// Verifies that custom opaque item properties are exposed in libavif's property fixture.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void openParsesCircleCustomPropertiesFixtureItemProperties() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_CIRCLE_CUSTOM_PROPERTIES_FIXTURE))) {
+            AvifImageItemProperty[] properties = reader.info().itemProperties();
+
+            assertEquals(3, properties.length);
+
+            AvifImageItemProperty p1234 = properties[0];
+            assertEquals("1234", p1234.type());
+            assertNull(p1234.userType());
+            assertArrayEquals(new byte[]{0, 0, 0, 0, 1, 2, 3, 4}, remainingBytes(p1234.payload()));
+
+            AvifImageItemProperty abcd = properties[1];
+            assertEquals("abcd", abcd.type());
+            assertNull(abcd.userType());
+            assertArrayEquals(new byte[]{'a', 'b', 'c', 'd', 0}, remainingBytes(abcd.payload()));
+
+            AvifImageItemProperty uuid = properties[2];
+            assertEquals("uuid", uuid.type());
+            ByteBuffer uuidUserType = uuid.userType();
+            assertNotNull(uuidUserType);
+            assertArrayEquals("extended_type 16".getBytes(StandardCharsets.ISO_8859_1), remainingBytes(uuidUserType));
+            assertEquals(0, uuid.payload().remaining());
         }
     }
 

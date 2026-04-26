@@ -23,6 +23,7 @@ import org.glavo.avif.AvifErrorCode;
 import org.glavo.avif.AvifGainMapInfo;
 import org.glavo.avif.AvifGainMapMetadata;
 import org.glavo.avif.AvifImageInfo;
+import org.glavo.avif.AvifImageItemProperty;
 import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.AvifSignedFraction;
 import org.glavo.avif.AvifUnsignedFraction;
@@ -179,7 +180,8 @@ public final class AvifContainerParser {
                 auxiliaryImages(primaryItem.id, ispe.width, ispe.height),
                 gainMapPayloads.info,
                 AvifImageInfo.REPETITION_COUNT_UNKNOWN,
-                alphaPremultiplied
+                alphaPremultiplied,
+                opaqueItemProperties(primaryItem)
         );
 
         return new AvifContainer(info, payload,
@@ -243,7 +245,8 @@ public final class AvifContainerParser {
                 auxiliaryImages(gridItem.id, colorGrid.outputWidth, colorGrid.outputHeight),
                 gainMapPayloads.info,
                 AvifImageInfo.REPETITION_COUNT_UNKNOWN,
-                alphaPremultiplied
+                alphaPremultiplied,
+                opaqueItemProperties(gridItem)
         );
 
         return new AvifContainer(info, colorGrid.cellPayloads,
@@ -735,6 +738,20 @@ public final class AvifContainerParser {
         return new MetadataPayloads(iccProfile, exif, xmp);
     }
 
+    /// Collects opaque item properties associated with one rendered image item.
+    ///
+    /// @param imageItem the color or grid image item
+    /// @return the opaque item properties in association order
+    private static AvifImageItemProperty @Unmodifiable [] opaqueItemProperties(Item imageItem) {
+        ArrayList<AvifImageItemProperty> result = new ArrayList<>();
+        for (Property property : imageItem.properties) {
+            if (property instanceof OpaqueProperty opaqueProperty) {
+                result.add(opaqueProperty.toImageItemProperty());
+            }
+        }
+        return result.toArray(AvifImageItemProperty[]::new);
+    }
+
     /// Reads and normalizes an Exif metadata item.
     ///
     /// @param item the Exif item
@@ -1165,8 +1182,25 @@ public final class AvifContainerParser {
             case "irot" -> parseIrot(input);
             case "imir" -> parseImir(input);
             case "a1op" -> parseA1op(input);
-            default -> new OpaqueProperty(header.type());
+            default -> parseOpaqueProperty(header, input);
         };
+    }
+
+    /// Parses an opaque or currently unsupported item property.
+    ///
+    /// @param header the property box header
+    /// @param input the property payload input
+    /// @return the parsed opaque property
+    /// @throws AvifDecodeException if a UUID property is missing its user type
+    private static OpaqueProperty parseOpaqueProperty(BoxHeader header, BoxInput input) throws AvifDecodeException {
+        byte @Nullable [] userType = null;
+        if ("uuid".equals(header.type())) {
+            if (input.remaining() < 16) {
+                throw parseFailed("uuid item property is missing its 16-byte user type", input.offset());
+            }
+            userType = input.readBytes(16);
+        }
+        return new OpaqueProperty(header.type(), userType, input.readBytes(input.remaining()));
     }
 
     /// Parses an `ispe` property.
@@ -1232,7 +1266,10 @@ public final class AvifContainerParser {
             return new IccColorProfile(profile);
         }
         if (!"nclx".equals(colourType)) {
-            return new OpaqueProperty("colr");
+            ByteArrayOutputStream payload = new ByteArrayOutputStream();
+            payload.writeBytes(colourType.getBytes(StandardCharsets.ISO_8859_1));
+            payload.writeBytes(input.readBytes(input.remaining()));
+            return new OpaqueProperty("colr", null, payload.toByteArray());
         }
         int colorPrimaries = input.readU16();
         int transferCharacteristics = input.readU16();
@@ -3784,12 +3821,27 @@ public final class AvifContainerParser {
     private static final class OpaqueProperty implements Property {
         /// The property type.
         private final String type;
+        /// The UUID property user type, or `null` for non-UUID properties.
+        private final byte @Nullable @Unmodifiable [] userType;
+        /// The property payload after any UUID user type.
+        private final byte @Unmodifiable [] payload;
 
-        /// Creates an opaque property marker.
+        /// Creates an opaque property.
         ///
         /// @param type the property type
-        private OpaqueProperty(String type) {
+        /// @param userType the UUID property user type, or `null`
+        /// @param payload the property payload after any UUID user type
+        private OpaqueProperty(String type, byte @Nullable [] userType, byte[] payload) {
             this.type = Objects.requireNonNull(type, "type");
+            this.userType = userType != null ? userType.clone() : null;
+            this.payload = Objects.requireNonNull(payload, "payload").clone();
+        }
+
+        /// Creates a public item property descriptor.
+        ///
+        /// @return the public item property descriptor
+        private AvifImageItemProperty toImageItemProperty() {
+            return new AvifImageItemProperty(type, userType, payload);
         }
     }
 

@@ -86,6 +86,8 @@ public final class AvifImageInfo {
     private final @Nullable @Unmodifiable ByteBuffer exif;
     /// The embedded XMP metadata payload, or `null`.
     private final @Nullable @Unmodifiable ByteBuffer xmp;
+    /// Opaque item properties associated with the primary image item.
+    private final AvifImageItemProperty @Unmodifiable [] itemProperties;
 
     /// Creates image metadata.
     ///
@@ -579,6 +581,95 @@ public final class AvifImageInfo {
             int repetitionCount,
             boolean alphaPremultiplied
     ) {
+        this(
+                width,
+                height,
+                bitDepth,
+                pixelFormat,
+                alphaPresent,
+                animated,
+                frameCount,
+                colorInfo,
+                iccProfile,
+                exif,
+                xmp,
+                mediaTimescale,
+                mediaDuration,
+                frameDurations,
+                cleanApertureCropX,
+                cleanApertureCropY,
+                cleanApertureCropWidth,
+                cleanApertureCropHeight,
+                rotationCode,
+                mirrorAxis,
+                auxiliaryImageTypes,
+                auxiliaryImages,
+                gainMapInfo,
+                repetitionCount,
+                alphaPremultiplied,
+                null
+        );
+    }
+
+    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, gain-map metadata,
+    /// sequence repetition metadata, alpha premultiplication metadata, and opaque item property metadata.
+    ///
+    /// @param width the display width in pixels
+    /// @param height the display height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param alphaPresent whether an alpha auxiliary image is present
+    /// @param animated whether the input is an animated image sequence
+    /// @param frameCount the number of frames advertised by the container
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
+    /// @param xmp the embedded XMP metadata payload, or `null`
+    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
+    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
+    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
+    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
+    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
+    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
+    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
+    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
+    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
+    /// @param repetitionCount the animated-sequence repetition count, `REPETITION_COUNT_UNKNOWN`, or
+    /// `REPETITION_COUNT_INFINITE`
+    /// @param alphaPremultiplied whether color samples are premultiplied by the alpha auxiliary image
+    /// @param itemProperties opaque item properties associated with the primary image item, or `null`
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public AvifImageInfo(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            boolean alphaPresent,
+            boolean animated,
+            int frameCount,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
+            int mediaTimescale,
+            long mediaDuration,
+            int @Nullable [] frameDurations,
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight,
+            int rotationCode,
+            int mirrorAxis,
+            String @Nullable [] auxiliaryImageTypes,
+            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
+            @Nullable AvifGainMapInfo gainMapInfo,
+            int repetitionCount,
+            boolean alphaPremultiplied,
+            AvifImageItemProperty @Nullable [] itemProperties
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -661,6 +752,7 @@ public final class AvifImageInfo {
         this.iccProfile = immutableBytes(iccProfile);
         this.exif = immutableBytes(exif);
         this.xmp = immutableBytes(xmp);
+        this.itemProperties = immutableItemProperties(itemProperties);
     }
 
     /// Returns the display width in pixels.
@@ -903,6 +995,16 @@ public final class AvifImageInfo {
         return byteView(xmp);
     }
 
+    /// Returns opaque item properties associated with the primary image item.
+    ///
+    /// The reader stores properties whose box type is not interpreted as a typed AVIF feature. The
+    /// returned array is empty when no such properties are associated with the primary image item.
+    ///
+    /// @return opaque item properties associated with the primary image item
+    public AvifImageItemProperty @Unmodifiable [] itemProperties() {
+        return itemProperties.clone();
+    }
+
     /// Creates immutable byte-buffer storage for one optional payload.
     ///
     /// @param bytes the source bytes, or `null`
@@ -959,6 +1061,23 @@ public final class AvifImageInfo {
         AvifAuxiliaryImageInfo[] result = auxiliaryImages.clone();
         for (AvifAuxiliaryImageInfo auxiliaryImage : result) {
             Objects.requireNonNull(auxiliaryImage, "auxiliaryImages element");
+        }
+        return result;
+    }
+
+    /// Creates immutable storage for opaque item property descriptors.
+    ///
+    /// @param itemProperties the source item property descriptors, or `null`
+    /// @return immutable item property descriptor storage
+    private static AvifImageItemProperty @Unmodifiable [] immutableItemProperties(
+            AvifImageItemProperty @Nullable [] itemProperties
+    ) {
+        if (itemProperties == null || itemProperties.length == 0) {
+            return new AvifImageItemProperty[0];
+        }
+        AvifImageItemProperty[] result = itemProperties.clone();
+        for (AvifImageItemProperty itemProperty : result) {
+            Objects.requireNonNull(itemProperty, "itemProperties element");
         }
         return result;
     }
