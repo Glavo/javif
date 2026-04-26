@@ -53,7 +53,11 @@ final class LibavifTestDataCorpusTest {
             decode("libavif-test-data/alpha_noispe.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif", 64, 64, 8, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/circle_custom_properties.avif", 100, 60, 8, AvifPixelFormat.I444, true, false, 1),
-            parseFailure("libavif-test-data/clap_irot_imir_non_essential.avif", AvifErrorCode.BMFF_PARSE_FAILED),
+            parseFailure(
+                    "libavif-test-data/clap_irot_imir_non_essential.avif",
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "has a clap property association which must be marked essential, but is not"
+            ),
             decode("libavif-test-data/clop_irot_imor.avif", 12, 34, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
             parseFailure("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", AvifErrorCode.UNSUPPORTED_FEATURE),
@@ -147,6 +151,9 @@ final class LibavifTestDataCorpusTest {
         if (testCase.parseFailureCode != null) {
             AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
             assertEquals(testCase.parseFailureCode, exception.code());
+            if (testCase.parseFailureMessageFragment != null) {
+                assertTrue(exception.getMessage().contains(testCase.parseFailureMessageFragment), exception.getMessage());
+            }
             return;
         }
 
@@ -318,6 +325,7 @@ final class LibavifTestDataCorpusTest {
                 resourceName,
                 new ExpectedInfo(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount),
                 null,
+                null,
                 null
         );
     }
@@ -349,6 +357,7 @@ final class LibavifTestDataCorpusTest {
                 resourceName,
                 new ExpectedInfo(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount),
                 null,
+                null,
                 decodeFailureCode
         );
     }
@@ -359,7 +368,21 @@ final class LibavifTestDataCorpusTest {
     /// @param parseFailureCode the expected parse failure code
     /// @return the corpus case
     private static CorpusCase parseFailure(String resourceName, AvifErrorCode parseFailureCode) {
-        return new CorpusCase(resourceName, null, parseFailureCode, null);
+        return parseFailure(resourceName, parseFailureCode, null);
+    }
+
+    /// Creates a corpus case that must fail during container parsing with a diagnostic fragment.
+    ///
+    /// @param resourceName                the classpath resource name
+    /// @param parseFailureCode            the expected parse failure code
+    /// @param parseFailureMessageFragment the expected diagnostic message fragment
+    /// @return the corpus case
+    private static CorpusCase parseFailure(
+            String resourceName,
+            AvifErrorCode parseFailureCode,
+            @Nullable String parseFailureMessageFragment
+    ) {
+        return new CorpusCase(resourceName, null, parseFailureCode, parseFailureMessageFragment, null);
     }
 
     /// Expected behavior for one libavif AVIF fixture.
@@ -367,10 +390,13 @@ final class LibavifTestDataCorpusTest {
     /// @param resourceName      The classpath resource name.
     /// @param expectedInfo      The expected parsed image info, or `null` when parsing must fail.
     /// @param parseFailureCode  The expected parse failure code, or `null` when parsing must succeed.
-    /// @param decodeFailureCode The expected frame decode failure code, or `null` when frame decoding must succeed.
+    /// @param parseFailureMessageFragment The expected parse-failure diagnostic fragment, or `null`.
+    /// @param decodeFailureCode           The expected frame decode failure code, or `null` when frame decoding must succeed.
     @NotNullByDefault
     private record CorpusCase(String resourceName, @Nullable ExpectedInfo expectedInfo,
-                              @Nullable AvifErrorCode parseFailureCode, @Nullable AvifErrorCode decodeFailureCode) {
+                              @Nullable AvifErrorCode parseFailureCode,
+                              @Nullable String parseFailureMessageFragment,
+                              @Nullable AvifErrorCode decodeFailureCode) {
 
     }
 

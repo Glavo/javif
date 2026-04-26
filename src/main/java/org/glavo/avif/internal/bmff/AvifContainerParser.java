@@ -2247,22 +2247,34 @@ public final class AvifContainerParser {
                 if (property instanceof OpaqueProperty && essential) {
                     item.hasUnsupportedEssentialProperty = true;
                 }
-                if (!essential && isTransformativeProperty(property)) {
-                    throw parseFailed("Transformative item property must be marked essential", input.offset());
+                @Nullable String transformativePropertyType = transformativePropertyType(property);
+                if (!essential && transformativePropertyType != null) {
+                    throw parseFailed(
+                            "Item ID [" + itemId + "] has a " + transformativePropertyType
+                                    + " property association which must be marked essential, but is not",
+                            input.offset()
+                    );
                 }
                 item.properties.add(property);
             }
         }
     }
 
-    /// Returns whether a parsed item property changes the rendered image geometry.
+    /// Returns the box type for a parsed item property that changes the rendered image geometry.
     ///
     /// @param property the parsed item property
-    /// @return whether the property is a transformative item property
-    private static boolean isTransformativeProperty(Property property) {
-        return property instanceof CleanAperture
-                || property instanceof ImageRotation
-                || property instanceof ImageMirror;
+    /// @return the transformative property type, or `null`
+    private static @Nullable String transformativePropertyType(Property property) {
+        if (property instanceof CleanAperture) {
+            return "clap";
+        }
+        if (property instanceof ImageRotation) {
+            return "irot";
+        }
+        if (property instanceof ImageMirror) {
+            return "imir";
+        }
+        return null;
     }
 
     /// Parses an `iref` box.
