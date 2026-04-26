@@ -2098,14 +2098,11 @@ public final class FrameHeader {
             requireRange(arCoeffLag, 0, 3, "arCoeffLag");
             this.arCoeffLag = arCoeffLag;
             this.arCoefficientsY = Arrays.copyOf(Objects.requireNonNull(arCoefficientsY, "arCoefficientsY"), arCoefficientsY.length);
-            int expectedLumaCoefficientCount = this.yPoints.length > 0
-                    ? 2 * arCoeffLag * (arCoeffLag + 1)
-                    : 0;
+            int autoregressiveCoefficientCount = 2 * arCoeffLag * (arCoeffLag + 1);
+            int expectedLumaCoefficientCount = this.yPoints.length > 0 ? autoregressiveCoefficientCount : 0;
             validateCoefficientArray(this.arCoefficientsY, expectedLumaCoefficientCount, "arCoefficientsY");
             this.arCoefficientsCb = Arrays.copyOf(Objects.requireNonNull(arCoefficientsCb, "arCoefficientsCb"), arCoefficientsCb.length);
-            int expectedChromaCoefficientCount = this.yPoints.length > 0
-                    ? expectedLumaCoefficientCount + 1
-                    : expectedLumaCoefficientCount;
+            int expectedChromaCoefficientCount = autoregressiveCoefficientCount + (this.yPoints.length > 0 ? 1 : 0);
             validateCoefficientArray(
                     this.arCoefficientsCb,
                     chromaScalingFromLuma || this.cbPoints.length > 0 ? expectedChromaCoefficientCount : 0,
