@@ -17,13 +17,18 @@ package org.glavo.avif.javafx;
 
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifFrame;
+import org.glavo.avif.AvifImageReader;
 import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.nio.LongBuffer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /// Tests for converting decoded AVIF frames into JavaFX images.
 @NotNullByDefault
@@ -45,5 +50,22 @@ final class AvifFXImageTest {
         assertEquals(1, (int) image.getWidth());
         assertEquals(1, (int) image.getHeight());
         assertEquals(0xFF80_4000, image.getPixelReader().getArgb(0, 0));
+    }
+
+    /// Verifies that the high-bit-depth `clop_irot_imor` fixture paints real JavaFX pixels.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void rendersClopIrotImorFixturePixels() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/clop_irot_imor.avif"))) {
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+
+            AvifFXImage image = new AvifFXImage(frame);
+
+            assertEquals(34, (int) image.getWidth());
+            assertEquals(12, (int) image.getHeight());
+            assertNotEquals(0, image.getPixelReader().getArgb(0, 0));
+        }
     }
 }
