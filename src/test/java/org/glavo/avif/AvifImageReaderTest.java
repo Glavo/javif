@@ -1852,14 +1852,39 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
     }
 
-    /// Verifies that a libavif fixture with an alpha auxiliary item missing ispe is rejected.
+    /// Verifies that a libavif fixture with a legacy alpha auxiliary item missing `ispe` is accepted.
     ///
     /// @throws IOException if the fixture cannot be read
     @Test
-    void rejectsAlphaMissingIspeFixture() throws IOException {
-        byte[] bytes = testResourceBytes(LIBAVIF_ALPHA_NOISPE_FIXTURE);
-        AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
-        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    void readsAlphaMissingIspeFixture() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ALPHA_NOISPE_FIXTURE))) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.alphaPresent());
+            assertFalse(info.alphaPremultiplied());
+            assertEquals(1, info.frameCount());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_ALPHA_TYPE));
+
+            AvifAuxiliaryImageInfo[] auxiliaryImages = info.auxiliaryImages();
+            assertEquals(1, auxiliaryImages.length);
+            AvifAuxiliaryImageInfo alphaInfo = auxiliaryImages[0];
+            assertEquals(AUXILIARY_ALPHA_TYPE, alphaInfo.auxiliaryType());
+            assertEquals(info.width(), alphaInfo.width());
+            assertEquals(info.height(), alphaInfo.height());
+            assertEquals(AvifBitDepth.EIGHT_BITS, alphaInfo.bitDepth());
+            assertEquals(AvifPixelFormat.I400, alphaInfo.pixelFormat());
+
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertEquals(info.width(), alphaPlanes.codedWidth());
+            assertEquals(info.height(), alphaPlanes.codedHeight());
+            assertFalse(alphaPlanes.hasChroma());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(info.width(), frame.width());
+            assertEquals(info.height(), frame.height());
+            assertNull(reader.readFrame());
+        }
     }
 
     /// Verifies that truncated ispe payload is rejected.

@@ -176,7 +176,7 @@ public final class AvifContainerParser {
                 transformParams[4],
                 transformParams[5],
                 null,
-                auxiliaryImages(primaryItem.id),
+                auxiliaryImages(primaryItem.id, ispe.width, ispe.height),
                 gainMapPayloads.info,
                 AvifImageInfo.REPETITION_COUNT_UNKNOWN,
                 alphaPremultiplied
@@ -240,7 +240,7 @@ public final class AvifContainerParser {
                 transforms[4],
                 transforms[5],
                 null,
-                auxiliaryImages(gridItem.id),
+                auxiliaryImages(gridItem.id, colorGrid.outputWidth, colorGrid.outputHeight),
                 gainMapPayloads.info,
                 AvifImageInfo.REPETITION_COUNT_UNKNOWN,
                 alphaPremultiplied
@@ -406,9 +406,11 @@ public final class AvifContainerParser {
             throw unsupported("Unsupported " + label + " auxiliary item type: " + auxiliaryItem.type, null);
         }
         validateOperatingPointStructure(auxiliaryItem, label + " auxiliary image");
-        validateAuxiliaryItemDimensions(auxiliaryItem, label, expectedWidth, expectedHeight);
         if (isAlphaAuxiliaryType(auxiliaryType)) {
+            validateAlphaAuxiliaryItemDimensions(auxiliaryItem, label, expectedWidth, expectedHeight);
             validateAuxiliaryTransformProperties(imageItem, auxiliaryItem, label);
+        } else {
+            validateAuxiliaryItemDimensions(auxiliaryItem, label, expectedWidth, expectedHeight);
         }
         return AuxiliaryPayloads.item(mergeItemExtents(auxiliaryItem));
     }
@@ -448,7 +450,11 @@ public final class AvifContainerParser {
                 throw unsupported("Unsupported " + label + " auxiliary item type: " + auxiliaryItem.type, null);
             }
             validateOperatingPointStructure(auxiliaryItem, label + " auxiliary image");
-            validateAuxiliaryItemDimensions(auxiliaryItem, label, colorGrid.outputWidth, colorGrid.outputHeight);
+            if (isAlphaAuxiliaryType(auxiliaryType)) {
+                validateAlphaAuxiliaryItemDimensions(auxiliaryItem, label, colorGrid.outputWidth, colorGrid.outputHeight);
+            } else {
+                validateAuxiliaryItemDimensions(auxiliaryItem, label, colorGrid.outputWidth, colorGrid.outputHeight);
+            }
             return AuxiliaryPayloads.item(mergeItemExtents(auxiliaryItem));
         }
 
@@ -500,9 +506,11 @@ public final class AvifContainerParser {
             validateOperatingPointStructure(auxiliaryCellItem, "Per-cell " + label + " auxiliary image");
             ImageSpatialExtents colorIspe = colorCellItem.firstProperty(ImageSpatialExtents.class);
             assert colorIspe != null;
-            validateAuxiliaryItemDimensions(auxiliaryCellItem, label, colorIspe.width, colorIspe.height);
             if (isAlphaAuxiliaryType(auxiliaryType)) {
+                validateAlphaAuxiliaryItemDimensions(auxiliaryCellItem, label, colorIspe.width, colorIspe.height);
                 validateAuxiliaryTransformProperties(colorCellItem, auxiliaryCellItem, "Per-cell " + label);
+            } else {
+                validateAuxiliaryItemDimensions(auxiliaryCellItem, label, colorIspe.width, colorIspe.height);
             }
             auxiliaryCellPayloads[i] = mergeItemExtents(auxiliaryCellItem);
         }
@@ -557,6 +565,39 @@ public final class AvifContainerParser {
             );
         }
         if (auxiliaryIspe.width != expectedWidth || auxiliaryIspe.height != expectedHeight) {
+            throw unsupported(
+                    label + " auxiliary image with different dimensions than the master image is not implemented in this slice",
+                    null
+            );
+        }
+        if (auxiliaryItem.firstProperty(Av1Config.class) == null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    label + " auxiliary item is missing av1C: " + auxiliaryItem.id,
+                    null
+            );
+        }
+    }
+
+    /// Validates one alpha auxiliary item against the expected output dimensions.
+    ///
+    /// Legacy alpha items are allowed to omit `ispe`; in that case AVIF readers treat the alpha
+    /// canvas as matching the associated master image.
+    ///
+    /// @param auxiliaryItem the alpha auxiliary item
+    /// @param label the diagnostic auxiliary label
+    /// @param expectedWidth the expected alpha width
+    /// @param expectedHeight the expected alpha height
+    /// @throws AvifDecodeException if the item is malformed or has unsupported dimensions
+    private void validateAlphaAuxiliaryItemDimensions(
+            Item auxiliaryItem,
+            String label,
+            int expectedWidth,
+            int expectedHeight
+    ) throws AvifDecodeException {
+        ImageSpatialExtents auxiliaryIspe = auxiliaryItem.firstProperty(ImageSpatialExtents.class);
+        if (auxiliaryIspe != null
+                && (auxiliaryIspe.width != expectedWidth || auxiliaryIspe.height != expectedHeight)) {
             throw unsupported(
                     label + " auxiliary image with different dimensions than the master image is not implemented in this slice",
                     null
@@ -2346,15 +2387,17 @@ public final class AvifContainerParser {
     /// Returns auxiliary image descriptors associated with one master image item.
     ///
     /// @param itemId the master image item id
+    /// @param fallbackWidth the master image width used by legacy alpha items without `ispe`
+    /// @param fallbackHeight the master image height used by legacy alpha items without `ispe`
     /// @return auxiliary image descriptors
-    private AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages(int itemId) {
+    private AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages(int itemId, int fallbackWidth, int fallbackHeight) {
         Item masterItem = meta.item(itemId);
         ArrayList<AvifAuxiliaryImageInfo> images = new ArrayList<>();
         for (Item item : meta.items.values()) {
             if (item.auxForId == itemId || (masterItem != null && masterItem.auxForId == item.id)) {
                 AuxiliaryType aux = item.firstProperty(AuxiliaryType.class);
                 if (aux != null) {
-                    images.add(auxiliaryImageInfo(item, aux));
+                    images.add(auxiliaryImageInfo(item, aux, fallbackWidth, fallbackHeight));
                 }
             }
         }
@@ -2365,12 +2408,20 @@ public final class AvifContainerParser {
     ///
     /// @param item the auxiliary item
     /// @param auxiliaryType the parsed auxiliary image type
+    /// @param fallbackWidth the master image width used by legacy alpha items without `ispe`
+    /// @param fallbackHeight the master image height used by legacy alpha items without `ispe`
     /// @return an auxiliary image descriptor
-    private static AvifAuxiliaryImageInfo auxiliaryImageInfo(Item item, AuxiliaryType auxiliaryType) {
+    private static AvifAuxiliaryImageInfo auxiliaryImageInfo(
+            Item item,
+            AuxiliaryType auxiliaryType,
+            int fallbackWidth,
+            int fallbackHeight
+    ) {
         @Nullable ImageSpatialExtents ispe = item.firstProperty(ImageSpatialExtents.class);
         @Nullable Av1Config av1Config = item.firstProperty(Av1Config.class);
-        int width = ispe != null ? ispe.width : -1;
-        int height = ispe != null ? ispe.height : -1;
+        boolean alphaWithoutIspe = ispe == null && AvifAuxiliaryImageInfo.ALPHA_TYPE.equals(auxiliaryType.type);
+        int width = ispe != null ? ispe.width : (alphaWithoutIspe ? fallbackWidth : -1);
+        int height = ispe != null ? ispe.height : (alphaWithoutIspe ? fallbackHeight : -1);
         @Nullable AvifBitDepth bitDepth = av1Config != null ? AvifBitDepth.fromBits(av1Config.bitDepth()) : null;
         @Nullable AvifPixelFormat pixelFormat = av1Config != null ? av1Config.pixelFormat() : null;
         return new AvifAuxiliaryImageInfo(item.id, auxiliaryType.type, item.type, width, height, bitDepth, pixelFormat);

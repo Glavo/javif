@@ -1726,7 +1726,10 @@ public final class TileBlockHeaderReader {
         if (segmentation.temporalUpdate()) {
             boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
             if (segmentPredicted) {
-                return new SegmentReadResult(true, prediction.predictedSegmentId());
+                return new SegmentReadResult(
+                        true,
+                        validSegmentIdOrZero(prediction.predictedSegmentId(), segmentation.lastActiveSegmentId())
+                );
             }
         }
 
@@ -1751,16 +1754,31 @@ public final class TileBlockHeaderReader {
         }
         BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
         if (skip) {
-            return new SegmentReadResult(false, prediction.predictedSegmentId());
+            return new SegmentReadResult(
+                    false,
+                    validSegmentIdOrZero(prediction.predictedSegmentId(), segmentation.lastActiveSegmentId())
+            );
         }
         if (segmentation.temporalUpdate()) {
             boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
             if (segmentPredicted) {
-                return new SegmentReadResult(true, prediction.predictedSegmentId());
+                return new SegmentReadResult(
+                        true,
+                        validSegmentIdOrZero(prediction.predictedSegmentId(), segmentation.lastActiveSegmentId())
+                );
             }
         }
         int segmentId = decodeSegmentId(prediction, segmentation.lastActiveSegmentId());
         return new SegmentReadResult(false, segmentId);
+    }
+
+    /// Returns a valid segment identifier, or `0` when prediction produced an out-of-range value.
+    ///
+    /// @param segmentId the predicted segment identifier
+    /// @param lastActiveSegmentId the highest active segment identifier, or `-1`
+    /// @return a segment identifier safe for the active segmentation table
+    private static int validSegmentIdOrZero(int segmentId, int lastActiveSegmentId) {
+        return segmentId >= 0 && segmentId <= lastActiveSegmentId && segmentId < 8 ? segmentId : 0;
     }
 
     /// Decodes one segment identifier from a predicted segment and segment-id context.
@@ -1771,10 +1789,7 @@ public final class TileBlockHeaderReader {
     private int decodeSegmentId(BlockNeighborContext.SegmentPrediction prediction, int lastActiveSegmentId) {
         int diff = syntaxReader.readSegmentId(prediction.context());
         int segmentId = negDeinterleave(diff, prediction.predictedSegmentId(), lastActiveSegmentId + 1);
-        if (segmentId > lastActiveSegmentId || segmentId >= 8) {
-            return 0;
-        }
-        return segmentId;
+        return validSegmentIdOrZero(segmentId, lastActiveSegmentId);
     }
 
     /// Applies the AV1 `neg_deinterleave` mapping used by segment-id decoding.
