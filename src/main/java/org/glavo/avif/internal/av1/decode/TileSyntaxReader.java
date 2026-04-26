@@ -1030,7 +1030,7 @@ public final class TileSyntaxReader {
     public boolean readHorizontalSplitOnly(PartitionBlockLevel blockLevel, int context) {
         PartitionBlockLevel nonNullBlockLevel = Objects.requireNonNull(blockLevel, "blockLevel");
         int[] cdf = cdfContext.mutablePartitionCdf(nonNullBlockLevel.cdfIndex(), context);
-        return msacDecoder.decodeBoolean(gatherTopPartitionProbability(cdf, nonNullBlockLevel));
+        return msacDecoder.decodeBoolean(gatherVerticalAlikePartitionProbability(cdf, nonNullBlockLevel));
     }
 
     /// Decodes a partition decision when only a vertical split or no split is allowed.
@@ -1041,35 +1041,55 @@ public final class TileSyntaxReader {
     public boolean readVerticalSplitOnly(PartitionBlockLevel blockLevel, int context) {
         PartitionBlockLevel nonNullBlockLevel = Objects.requireNonNull(blockLevel, "blockLevel");
         int[] cdf = cdfContext.mutablePartitionCdf(nonNullBlockLevel.cdfIndex(), context);
-        return msacDecoder.decodeBoolean(gatherLeftPartitionProbability(cdf, nonNullBlockLevel));
+        return msacDecoder.decodeBoolean(gatherHorizontalAlikePartitionProbability(cdf, nonNullBlockLevel));
     }
 
-    /// Gathers the effective split probability from a partition CDF when only horizontal splitting is legal.
+    /// Gathers the effective split probability from a partition CDF when only horizontal partitioning or splitting is legal.
     ///
     /// @param cdf the active partition CDF
     /// @param blockLevel the partition block level that constrains the symbol set
     /// @return the effective split probability in AV1 Q15 form
-    private static int gatherTopPartitionProbability(int[] cdf, PartitionBlockLevel blockLevel) {
-        int probability = cdf[PartitionType.VERTICAL.symbolIndex() - 1] - cdf[PartitionType.T_TOP_SPLIT.symbolIndex()];
-        probability += cdf[PartitionType.T_LEFT_SPLIT.symbolIndex() - 1];
+    private static int gatherVerticalAlikePartitionProbability(int[] cdf, PartitionBlockLevel blockLevel) {
+        int symbolLimit = blockLevel.symbolLimit();
+        int probability = partitionElementProbability(cdf, PartitionType.VERTICAL.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.SPLIT.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.T_TOP_SPLIT.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.T_LEFT_SPLIT.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.T_RIGHT_SPLIT.symbolIndex(), symbolLimit);
         if (blockLevel != PartitionBlockLevel.BLOCK_128X128) {
-            probability += cdf[PartitionType.VERTICAL_4.symbolIndex() - 1] - cdf[PartitionType.T_RIGHT_SPLIT.symbolIndex()];
+            probability += partitionElementProbability(cdf, PartitionType.VERTICAL_4.symbolIndex(), symbolLimit);
         }
         return probability;
     }
 
-    /// Gathers the effective split probability from a partition CDF when only vertical splitting is legal.
+    /// Gathers the effective split probability from a partition CDF when only vertical partitioning or splitting is legal.
     ///
     /// @param cdf the active partition CDF
     /// @param blockLevel the partition block level that constrains the symbol set
     /// @return the effective split probability in AV1 Q15 form
-    private static int gatherLeftPartitionProbability(int[] cdf, PartitionBlockLevel blockLevel) {
-        int probability = cdf[PartitionType.HORIZONTAL.symbolIndex() - 1] - cdf[PartitionType.HORIZONTAL.symbolIndex()];
-        probability += cdf[PartitionType.SPLIT.symbolIndex() - 1] - cdf[PartitionType.T_LEFT_SPLIT.symbolIndex()];
+    private static int gatherHorizontalAlikePartitionProbability(int[] cdf, PartitionBlockLevel blockLevel) {
+        int symbolLimit = blockLevel.symbolLimit();
+        int probability = partitionElementProbability(cdf, PartitionType.HORIZONTAL.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.SPLIT.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.T_TOP_SPLIT.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.T_BOTTOM_SPLIT.symbolIndex(), symbolLimit);
+        probability += partitionElementProbability(cdf, PartitionType.T_LEFT_SPLIT.symbolIndex(), symbolLimit);
         if (blockLevel != PartitionBlockLevel.BLOCK_128X128) {
-            probability += cdf[PartitionType.HORIZONTAL_4.symbolIndex() - 1] - cdf[PartitionType.HORIZONTAL_4.symbolIndex()];
+            probability += partitionElementProbability(cdf, PartitionType.HORIZONTAL_4.symbolIndex(), symbolLimit);
         }
         return probability;
+    }
+
+    /// Returns the probability mass of one partition symbol from an AV1 inverse CDF table.
+    ///
+    /// @param cdf the active partition inverse CDF
+    /// @param symbol the partition symbol index
+    /// @param symbolLimit the maximum symbol index covered by the CDF
+    /// @return the probability mass of the supplied symbol in AV1 Q15 form
+    private static int partitionElementProbability(int[] cdf, int symbol, int symbolLimit) {
+        int upper = symbol == 0 ? 32768 : cdf[symbol - 1];
+        int lower = symbol == symbolLimit ? 0 : cdf[symbol];
+        return upper - lower;
     }
 
     /// Partition block levels that select one of the five AV1 partition CDF groups.

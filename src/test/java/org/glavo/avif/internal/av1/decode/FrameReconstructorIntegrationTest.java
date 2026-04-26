@@ -98,14 +98,14 @@ final class FrameReconstructorIntegrationTest {
 
     /// The top-left `8x8` luma block produced by the current legacy directional still-picture fixture.
     private static final int @Unmodifiable [] @Unmodifiable [] LEGACY_DIRECTIONAL_LUMA_TOP_LEFT_8X8 = {
-            {130, 127, 127, 128, 129, 128, 128, 128},
-            {132, 133, 134, 134, 129, 129, 129, 129},
-            {127, 127, 126, 128, 129, 128, 128, 128},
-            {124, 123, 114, 117, 129, 128, 128, 128},
-            {128, 128, 128, 128, 128, 128, 128, 128},
-            {128, 128, 128, 128, 128, 128, 128, 128},
-            {128, 128, 128, 128, 128, 128, 128, 128},
-            {128, 128, 128, 128, 128, 128, 128, 128}
+            {128, 123, 129, 132, 133, 133, 133, 132},
+            {128, 123, 128, 132, 133, 132, 133, 132},
+            {128, 122, 129, 141, 142, 141, 142, 141},
+            {127, 122, 127, 138, 139, 138, 139, 138},
+            {139, 131, 133, 144, 144, 144, 144, 144},
+            {130, 123, 134, 146, 146, 145, 146, 146},
+            {125, 121, 125, 137, 138, 137, 139, 138},
+            {128, 122, 132, 144, 144, 144, 145, 145}
     };
 
     /// Verifies that one monochrome all-zero intra leaf reconstructs to midpoint DC samples.
@@ -4002,7 +4002,7 @@ final class FrameReconstructorIntegrationTest {
         assertTrue(directionalLeaf.header().intra());
         LumaIntraPredictionMode mode = directionalLeaf.header().yMode();
         assertTrue(mode != null && mode.isDirectional());
-        assertEquals(-2, directionalLeaf.header().yAngle());
+        assertEquals(0, directionalLeaf.header().yAngle());
         assertLegacyDirectionalStillPicturePlanes(new FrameReconstructor().reconstruct(syntaxDecodeResult));
     }
 
@@ -4026,10 +4026,10 @@ final class FrameReconstructorIntegrationTest {
                 0,
                 0,
                 new int[][]{
-                        {128, 128, 128, 128},
-                        {128, 128, 128, 128},
-                        {128, 128, 128, 128},
-                        {128, 128, 128, 128}
+                        {128, 127, 127, 126},
+                        {127, 126, 127, 125},
+                        {126, 125, 126, 124},
+                        {127, 126, 128, 126}
                 }
         );
     }

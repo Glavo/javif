@@ -23,7 +23,6 @@ import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -72,11 +71,17 @@ public final class TilePartitionTreeReader {
     /// The loop-restoration syntax reader used before each superblock partition tree.
     private final TileLoopRestorationReader loopRestorationReader;
 
-    /// The tile width rounded up to 4x4 units.
+    /// The tile width in AV1 4x4 coding units after 8x8 frame-grid rounding.
     private final int tileWidth4;
 
-    /// The tile height rounded up to 4x4 units.
+    /// The tile height in AV1 4x4 coding units after 8x8 frame-grid rounding.
     private final int tileHeight4;
+
+    /// The tile width in visible 4x4 units clipped to the decoded frame size.
+    private final int visibleTileWidth4;
+
+    /// The tile height in visible 4x4 units clipped to the decoded frame size.
+    private final int visibleTileHeight4;
 
     /// Creates one recursive tile partition tree reader.
     ///
@@ -90,8 +95,10 @@ public final class TilePartitionTreeReader {
         this.transformLayoutReader = new TileTransformLayoutReader(nonNullTileContext);
         this.residualSyntaxReader = new TileResidualSyntaxReader(nonNullTileContext);
         this.loopRestorationReader = new TileLoopRestorationReader(nonNullTileContext, syntaxReader);
-        this.tileWidth4 = (nonNullTileContext.width() + 3) >> 2;
-        this.tileHeight4 = (nonNullTileContext.height() + 3) >> 2;
+        this.tileWidth4 = nonNullTileContext.codedWidth4();
+        this.tileHeight4 = nonNullTileContext.codedHeight4();
+        this.visibleTileWidth4 = (nonNullTileContext.width() + 3) >> 2;
+        this.visibleTileHeight4 = (nonNullTileContext.height() + 3) >> 2;
     }
 
     /// Returns the tile-local decode state that owns this tree reader.
@@ -247,7 +254,7 @@ public final class TilePartitionTreeReader {
     /// @param size the block size to read
     /// @return the leaf node for the supplied block, or `null` when fully outside the tile
     private @Nullable LeafNode leaf(BlockPosition position, BlockSize size) {
-        if (position.x4() >= tileWidth4 || position.y4() >= tileHeight4) {
+        if (position.x4() >= visibleTileWidth4 || position.y4() >= visibleTileHeight4) {
             return null;
         }
         TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, size, neighborContext, false);

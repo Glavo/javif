@@ -38,6 +38,7 @@ import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -49,6 +50,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `TileBlockHeaderReader`.
 @NotNullByDefault
 final class TileBlockHeaderReaderTest {
+    /// The number of palette colors supported by AV1 screen-content palette syntax.
+    private static final int PALETTE_COLOR_COUNT = 8;
+
+    /// The AV1 score-to-hash multipliers for palette color-map context derivation.
+    private static final int @Unmodifiable [] PALETTE_COLOR_HASH_MULTIPLIERS = {1, 2, 2};
+
+    /// The AV1 mapping from palette color-neighbor hash to color-map CDF context.
+    private static final int @Unmodifiable [] PALETTE_COLOR_CONTEXTS_BY_HASH = {-1, -1, 0, -1, -1, 4, 3, 2, 1};
+
     /// Classpath resource containing named entropy payload fixtures for block-header tests.
     private static final String TILE_BLOCK_HEADER_FIXTURE_RESOURCE =
             "av1/fixtures/generated/tile-block-header-fixtures.txt";
@@ -1185,7 +1195,7 @@ final class TileBlockHeaderReaderTest {
             int last = Math.max(0, i - visibleHeight + 1);
             for (int x = first; x >= last; x--) {
                 int y = i - x;
-                int context = buildPaletteOrder(unpacked, fullWidth, x, y, order);
+                int context = buildPaletteOrder(unpacked, fullWidth, x, y, paletteSize, order);
                 int colorIndex = decoder.decodeSymbolAdapt(cdfContext.mutableColorMapCdf(plane, paletteSize - 2, context), paletteSize - 1);
                 unpacked[y * fullWidth + x] = (byte) order[colorIndex];
             }
@@ -1199,62 +1209,52 @@ final class TileBlockHeaderReaderTest {
     /// @param stride the unpacked palette row stride in pixels
     /// @param x the current X coordinate in pixels
     /// @param y the current Y coordinate in pixels
+    /// @param paletteSize the number of active palette colors
     /// @param order the reusable destination array that receives the palette-order permutation
     /// @return the zero-based palette color-map context
-    private static int buildPaletteOrder(byte[] indices, int stride, int x, int y, int[] order) {
-        int count = 0;
-        int mask = 0;
-        int context;
-        if (x == 0) {
-            int top = indices[(y - 1) * stride] & 0xFF;
-            order[count++] = top;
-            mask |= 1 << top;
-            context = 0;
-        } else if (y == 0) {
-            int left = indices[x - 1] & 0xFF;
-            order[count++] = left;
-            mask |= 1 << left;
-            context = 0;
-        } else {
-            int left = indices[y * stride + x - 1] & 0xFF;
-            int top = indices[(y - 1) * stride + x] & 0xFF;
-            int topLeft = indices[(y - 1) * stride + x - 1] & 0xFF;
-            boolean sameTopLeft = top == left;
-            boolean sameTopTopLeft = top == topLeft;
-            boolean sameLeftTopLeft = left == topLeft;
-            if (sameTopLeft && sameTopTopLeft) {
-                order[count++] = top;
-                mask |= 1 << top;
-                context = 4;
-            } else if (sameTopLeft) {
-                order[count++] = top;
-                order[count++] = topLeft;
-                mask |= 1 << top;
-                mask |= 1 << topLeft;
-                context = 3;
-            } else if (sameTopTopLeft || sameLeftTopLeft) {
-                order[count++] = topLeft;
-                order[count++] = sameTopTopLeft ? left : top;
-                mask |= 1 << topLeft;
-                mask |= 1 << (sameTopTopLeft ? left : top);
-                context = 2;
-            } else {
-                int first = Math.min(top, left);
-                int second = Math.max(top, left);
-                order[count++] = first;
-                order[count++] = second;
-                order[count++] = topLeft;
-                mask |= 1 << first;
-                mask |= 1 << second;
-                mask |= 1 << topLeft;
-                context = 1;
+    private static int buildPaletteOrder(byte[] indices, int stride, int x, int y, int paletteSize, int[] order) {
+        int[] scores = new int[PALETTE_COLOR_COUNT];
+        for (int i = 0; i < PALETTE_COLOR_COUNT; i++) {
+            order[i] = i;
+        }
+
+        if (x > 0) {
+            scores[indices[y * stride + x - 1] & 0xFF] += 2;
+        }
+        if (y > 0 && x > 0) {
+            scores[indices[(y - 1) * stride + x - 1] & 0xFF]++;
+        }
+        if (y > 0) {
+            scores[indices[(y - 1) * stride + x] & 0xFF] += 2;
+        }
+
+        for (int i = 0; i < PALETTE_COLOR_HASH_MULTIPLIERS.length; i++) {
+            int maxScore = scores[i];
+            int maxIndex = i;
+            for (int j = i + 1; j < paletteSize; j++) {
+                if (scores[j] > maxScore) {
+                    maxScore = scores[j];
+                    maxIndex = j;
+                }
+            }
+            if (maxIndex != i) {
+                int maxColorOrder = order[maxIndex];
+                for (int j = maxIndex; j > i; j--) {
+                    scores[j] = scores[j - 1];
+                    order[j] = order[j - 1];
+                }
+                scores[i] = maxScore;
+                order[i] = maxColorOrder;
             }
         }
 
-        for (int value = 0; value < 8; value++) {
-            if ((mask & (1 << value)) == 0) {
-                order[count++] = value;
-            }
+        int contextHash = 0;
+        for (int i = 0; i < PALETTE_COLOR_HASH_MULTIPLIERS.length; i++) {
+            contextHash += scores[i] * PALETTE_COLOR_HASH_MULTIPLIERS[i];
+        }
+        int context = PALETTE_COLOR_CONTEXTS_BY_HASH[contextHash];
+        if (context < 0) {
+            throw new IllegalStateException("Invalid palette color context hash");
         }
         return context;
     }

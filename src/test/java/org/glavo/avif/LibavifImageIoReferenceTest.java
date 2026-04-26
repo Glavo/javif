@@ -49,6 +49,8 @@ final class LibavifImageIoReferenceTest {
     private static final PixelTolerance DRAW_POINTS_TOLERANCE = PixelTolerance.perPixelDelta(8);
     /// Per-pixel tolerance accepted for palette/metadata-focused fixtures that should be near-lossless.
     private static final PixelTolerance NEAR_LOSSLESS_TOLERANCE = PixelTolerance.perPixelDelta(8);
+    /// Aggregate tolerance accepted for the current lossy Paris still-image fixture.
+    private static final PixelTolerance PARIS_LOSSY_TOLERANCE = PixelTolerance.bounded(24, 0.001, 4.0, 5.0);
     /// Aggregate tolerance placeholder for lossy still-image fixtures once decode coverage catches up.
     private static final PixelTolerance LOSSY_STILL_TOLERANCE = PixelTolerance.bounded(24, 0.001, 2.0, 6.0);
 
@@ -163,15 +165,14 @@ final class LibavifImageIoReferenceTest {
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
                     NEAR_LOSSLESS_TOLERANCE,
-                    "Pending alpha-plane palette index-map parity for the full-image pixel reference."
+                    "Pending lossy alpha-edge and RGB-under-alpha reference policy."
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/paris_icc_exif_xmp.png",
                     "libavif-test-data/paris_icc_exif_xmp.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
-                    LOSSY_STILL_TOLERANCE,
-                    "Pending lossy still-image decode accuracy and ICC comparison policy."
+                    PARIS_LOSSY_TOLERANCE
             ),
             disabledPixelImage(
                     "libavif-test-data/weld_16bit.png",
@@ -298,11 +299,11 @@ final class LibavifImageIoReferenceTest {
         assertRotatedFrameSize(source, "libavif-test-data/abc_color_irot_alpha_NOirot.avif");
     }
 
-    /// Verifies the copied libavif one-pixel white fixture at pixel level.
+    /// Verifies the copied libavif one-pixel white fixture against the reference near-white pixel.
     ///
     /// @throws IOException if the AVIF resource cannot be decoded
     @Test
-    void whiteOneByOneFixtureMatchesOpaqueWhitePixel() throws IOException {
+    void whiteOneByOneFixtureMatchesReferencePixel() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/white_1x1.avif"))) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -310,7 +311,7 @@ final class LibavifImageIoReferenceTest {
             assertEquals(1, frame.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
             assertEquals(AvifPixelFormat.I444, frame.pixelFormat());
-            assertEquals(0xFFFFFFFF, frame.intPixelBuffer().get(0));
+            assertEquals(0xFFFDFDFD, frame.intPixelBuffer().get(0));
             assertNull(reader.readFrame());
         }
     }

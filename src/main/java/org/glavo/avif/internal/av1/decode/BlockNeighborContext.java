@@ -450,10 +450,10 @@ public final class BlockNeighborContext {
     /// @return initialized neighbor context state for one tile
     public static BlockNeighborContext create(TileDecodeContext tileContext) {
         TileDecodeContext nonNullTileContext = Objects.requireNonNull(tileContext, "tileContext");
-        int tileWidth4 = (nonNullTileContext.width() + 3) >> 2;
-        int tileHeight4 = (nonNullTileContext.height() + 3) >> 2;
-        int tileWidth8 = (nonNullTileContext.width() + 7) >> 3;
-        int tileHeight8 = (nonNullTileContext.height() + 7) >> 3;
+        int tileWidth4 = nonNullTileContext.codedWidth4();
+        int tileHeight4 = nonNullTileContext.codedHeight4();
+        int tileWidth8 = (tileWidth4 + 1) >> 1;
+        int tileHeight8 = (tileHeight4 + 1) >> 1;
         int chromaSubsamplingX = chromaSubsamplingX(nonNullTileContext.sequenceHeader().colorConfig().pixelFormat());
         int chromaSubsamplingY = chromaSubsamplingY(nonNullTileContext.sequenceHeader().colorConfig().pixelFormat());
         int chromaTileWidth4 = chromaTileSpan(tileWidth4, chromaSubsamplingX);

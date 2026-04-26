@@ -99,6 +99,12 @@ public final class TileDecodeContext {
     /// The exclusive end Y coordinate in pixels.
     private final int endY;
 
+    /// The tile width in AV1 4x4 coding units after 8x8 frame-grid rounding.
+    private final int codedWidth4;
+
+    /// The tile height in AV1 4x4 coding units after 8x8 frame-grid rounding.
+    private final int codedHeight4;
+
     /// Creates tile-local decode state.
     ///
     /// @param assembly the frame assembly that owns the tile
@@ -123,6 +129,8 @@ public final class TileDecodeContext {
     /// @param endX the exclusive end X coordinate in pixels
     /// @param startY the inclusive start Y coordinate in pixels
     /// @param endY the exclusive end Y coordinate in pixels
+    /// @param codedWidth4 the tile width in AV1 4x4 coding units after 8x8 frame-grid rounding
+    /// @param codedHeight4 the tile height in AV1 4x4 coding units after 8x8 frame-grid rounding
     private TileDecodeContext(
             FrameAssembly assembly,
             SequenceHeader sequenceHeader,
@@ -145,7 +153,9 @@ public final class TileDecodeContext {
             int startX,
             int endX,
             int startY,
-            int endY
+            int endY,
+            int codedWidth4,
+            int codedHeight4
     ) {
         this.assembly = Objects.requireNonNull(assembly, "assembly");
         this.sequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
@@ -169,6 +179,8 @@ public final class TileDecodeContext {
         this.endX = endX;
         this.startY = startY;
         this.endY = endY;
+        this.codedWidth4 = codedWidth4;
+        this.codedHeight4 = codedHeight4;
     }
 
     /// Creates tile-local decode state with a fresh default CDF context.
@@ -249,8 +261,17 @@ public final class TileDecodeContext {
         int endX = Math.min(frameHeader.frameSize().codedWidth(), columnEndSuperblock * superblockSize);
         int startY = rowStartSuperblock * superblockSize;
         int endY = Math.min(frameHeader.frameSize().height(), rowEndSuperblock * superblockSize);
-        int width8 = (endX - startX + 7) >> 3;
-        int height8 = (endY - startY + 7) >> 3;
+        int superblockSize4 = superblockSize >> 2;
+        int frameWidth4 = ((frameHeader.frameSize().codedWidth() + 7) >> 3) << 1;
+        int frameHeight4 = ((frameHeader.frameSize().height() + 7) >> 3) << 1;
+        int startX4 = columnStartSuperblock * superblockSize4;
+        int endX4 = Math.min(frameWidth4, columnEndSuperblock * superblockSize4);
+        int startY4 = rowStartSuperblock * superblockSize4;
+        int endY4 = Math.min(frameHeight4, rowEndSuperblock * superblockSize4);
+        int codedWidth4 = endX4 - startX4;
+        int codedHeight4 = endY4 - startY4;
+        int width8 = (codedWidth4 + 1) >> 1;
+        int height8 = (codedHeight4 + 1) >> 1;
         TemporalMotionField effectiveTemporalMotionField = temporalMotionField == null
                 ? new TemporalMotionField(width8, height8)
                 : temporalMotionField;
@@ -285,7 +306,9 @@ public final class TileDecodeContext {
                 startX,
                 endX,
                 startY,
-                endY
+                endY,
+                codedWidth4,
+                codedHeight4
         );
     }
 
@@ -463,6 +486,20 @@ public final class TileDecodeContext {
     /// @return the tile height in pixels
     public int height() {
         return endY - startY;
+    }
+
+    /// Returns the tile width in AV1 4x4 coding units after 8x8 frame-grid rounding.
+    ///
+    /// @return the tile width in AV1 4x4 coding units after 8x8 frame-grid rounding
+    public int codedWidth4() {
+        return codedWidth4;
+    }
+
+    /// Returns the tile height in AV1 4x4 coding units after 8x8 frame-grid rounding.
+    ///
+    /// @return the tile height in AV1 4x4 coding units after 8x8 frame-grid rounding
+    public int codedHeight4() {
+        return codedHeight4;
     }
 
     /// A tile-local temporal motion field sampled in 8x8 units.
