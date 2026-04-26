@@ -1,90 +1,60 @@
-# AVIF Support Plan
+# Complete AVIF Decode Plan
 
-## Current State
+## Summary
 
-The project has a pure-Java AVIF reader backed by the in-tree AV1 decoder and no
-runtime dependency beyond `java.base`.
+The current test baseline is stable: `./gradlew -g .gradle-user-home compileJava compileTestJava test`
+passes, libavif test data is copied through `processTestResources`, and tests do not read `external`
+directly.
 
-Implemented container/API coverage:
+The remaining work is to make the pure-Java AVIF reader match dav1d/libavif decode behavior for
+still images, sequences, AV1 reconstruction, postfiltering, color output, gain maps, and
+reference-style tests. This plan targets decoding support only; libavif encoders, command-line
+tools, native ABI compatibility, fuzzers, and apps are out of scope.
 
-- still images, grids, progressive still images, and basic AVIS sequences
-- embedded ICC, Exif, and XMP metadata
-- structured auxiliary-image metadata and gain-map descriptors
-- random indexed AVIS reads
-- AVIS `stsc`, `stco`, `co64`, `stts`, media-duration reconciliation, and
-  edit-list repetition metadata
-- AVIS media handler filtering for image, auxiliary-image, and unrelated tracks
-- AVIS `tref/auxl` matching for alpha/depth auxiliary tracks
-- explicit rejection for ambiguous AVIS color tracks and unsupported AVIS
-  track-reference types
-- AVIS/still/grid premultiplied-alpha metadata and straight-alpha frame output
-- sequence alpha frame composition for `readFrame()`
-- raw plane access for color, alpha, depth, and gain-map images
-- typed public descriptors for AVIS sequence timing/repetition and AVIF image
-  transforms
-- explicit RGB output-mode controls for automatic, ARGB_8888, and
-  ARGB_16161616 frame buffers across still, sequence, grid, alpha, and
-  high-bit-depth paths
-- bounded buffered input ingestion for byte arrays, `ByteBuffer`, `InputStream`,
-  `ReadableByteChannel`, and `Path`, controlled by `AvifDecoderConfig.inputSizeLimit()`
-- alpha edge-case validation for still images, grids, AVIS auxiliary tracks,
-  premultiplied-alpha references, decoded alpha luma planes, and alpha-grid layout
-- default AVIF operating-point semantics: `a1op` value `0` is accepted, non-default
-  still/progressive/grid/auxiliary/gain-map operating points are rejected explicitly,
-  and raw AV1 OBU streams honor `Av1DecoderConfig.operatingPoint()` layer filtering
-- frame reconstruction covers CFL chroma prediction for `I420`, `I422`, and `I444`,
-  plus non-zero residual reconstruction for every declared AV1 transform size
-- AV1 loop filtering skips non-edge 4x4 grid lines, selects luma/chroma filter
-  widths by edge direction and transform size, and uses exact narrow, 6-tap,
-  8-tap, and 16-tap sample filters with regression coverage
-- AV1 CDEF uses dav1d-aligned luma direction detection, bit-depth-scaled
-  strengths, luma-driven chroma directions, non-skip unit masking, and
-  missing-edge sentinel handling, with skipped-unit and high-bit-depth regression
-  coverage
-- AV1 loop restoration now keeps non-tight plane strides intact and applies
-  Wiener restoration with AV1 two-stage horizontal/vertical rounding semantics,
-  with exact stride-aware regression coverage
-- libavif ImageIO reference validation covers copied PNG/JPEG source resources,
-  documented source-to-AVIF dimensions, rotated output dimensions, and stable
-  `I444` draw-points regions across normal, metadata-size-zero, and IDAT
-  progressive variants
+## Implementation Work
 
-## Remaining Work
+- Replace approximate AV1 paths with normative behavior: full `refmvs` temporal projection,
+  remaining inter, compound, warped, intrabc, and inter-palette behavior, plus `show_existing_frame`
+  cases that currently require reconstructed reference surfaces.
+- Finish postfilter parity with dav1d: normative self-guided restoration, AV1 film grain synthesis,
+  and cross-stage verification of loop filter, CDEF, Wiener restoration, self-guided restoration,
+  super-resolution, and film grain in the correct pipeline order.
+- Improve display semantics while preserving raw-plane APIs: clarify ICC/CICP behavior, implement
+  pure-Java CICP transfer and primaries conversion where feasible under the `java.base` runtime
+  boundary, and keep ICC application metadata-only unless the dependency policy changes.
+- Complete AVIF-level feature handling covered by libavif data: gain-map tone mapping, AVIS
+  gain-map/depth/alpha sequencing gaps, non-default operating-point policy, auxiliary grid/layout
+  edge cases, and stricter `clap`/`irot`/`imir` validation against libavif behavior.
+- Keep public APIs conservative. Add configuration only where behavior must be selectable, such as
+  color-management mode, film-grain enablement, operating-point selection, and gain-map application
+  mode.
 
-### Decode Correctness
+## Test Plan
 
-- Extend `I444` pixel-accuracy coverage from stable fixture regions to validated
-  full-image, high-bit-depth, and color-managed reference comparisons.
-- Finish or explicitly reject AV1 reconstruction paths that can still fail as
-  `NOT_IMPLEMENTED`, especially defensive inter-palette states and remaining
-  inter/compound/warped prediction edge cases.
-- Audit inter prediction, compound prediction, warped motion, self-guided
-  restoration, super-resolution, film grain, and any remaining cross-stage
-  postfilter interactions found by whole-image reference tests against dav1d
-  behavior.
-- Add regression fixtures for real-world AVIF files that parse but still decode
-  with visible corruption.
+- Build a coverage ledger mapping relevant libavif gtest/cmd tests and dav1d checkasm categories to
+  Java tests, expected pass/fail status, and fixture sources.
+- Port dav1d checkasm-style coverage into deterministic Java tests for `msac`, palette, `refmvs`,
+  intra prediction, inverse transforms, motion compensation, loop filter, CDEF, loop restoration,
+  and film grain.
+- Expand libavif corpus coverage from metadata and dimension checks into pixel comparisons using
+  copied test resources only: ImageIO for PNG/JPEG references and JavaCPP FFmpeg for Y4M/video
+  references.
+- Add whole-image comparisons for `I420`, `I422`, `I444`, 8/10/12-bit, alpha, grids, progressive
+  stills, AVIS sequences, HDR/WCG fixtures, and gain-map fixtures.
+- Keep unsupported boundaries covered by explicit `AvifDecodeException` or `DecodeException`
+  assertions until implemented, then remove those expected-failure cases when support lands.
 
-### Display Semantics
+## Execution Order
 
-- Implement display-ready color management beyond the current nclx matrix/range
-  conversion: ICC application, primaries/transfer adaptation, and RGB color-space
-  conversion for 8/10/12-bit inputs.
-- Implement gain-map tone mapping and display adaptation.
-- Implement real layered/scalable AVIF output for selectable non-default operating
-  points instead of the current explicit unsupported boundary.
-
-### Validation
-
-- Port remaining relevant libavif and dav1d tests into Java tests using
-  resources under `src/test/resources`, not files under `external`.
-- Expand Java ImageIO and JavaCPP FFmpeg comparisons where source assets are
-  codec-equivalent references rather than lossy or semantically different
-  fixtures.
-- Keep unsupported cases covered by stable `AvifDecodeException` or
-  `DecodeException` error-code assertions until implemented.
+1. Establish the coverage ledger so missing dav1d/libavif parity is tracked explicitly.
+2. Fix AV1 core correctness first: syntax, CDFs, `refmvs`, inter prediction, compound prediction,
+   warped prediction, and intrabc.
+3. Fix postfilter parity next: self-guided restoration, film grain, and pipeline interactions.
+4. Fix AVIF-level display and auxiliary semantics: gain maps, color handling, sequence auxiliary
+   planes, transforms, and operating points.
+5. Tighten validation last by replacing broad corpus smoke checks with pixel/reference comparisons.
 
 ## Completion Rule
 
-Run `./gradlew -g .gradle-user-home compileJava compileTestJava test` before
-considering a plan item complete.
+Run `./gradlew -g .gradle-user-home compileJava compileTestJava test` before considering an
+implementation item complete.
