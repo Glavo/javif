@@ -14,6 +14,10 @@ These rules apply to all Java code written or modified in this repository.
 - Represent optional or absent values with `@Nullable` instead.
 - Do not introduce APIs that require callers to unwrap `Optional`.
 
+## Java Types
+
+- Use Java `record` types when they fit the data model.
+
 ## Immutability Annotations
 
 - Annotate immutable collections and arrays with JetBrains Annotations `@Unmodifiable`.
