@@ -1496,8 +1496,12 @@ public final class AvifContainerParser {
                     if (parsedTrack.auxiliaryType != null) {
                         meta.moovAuxiliaryCandidates.add(parsedTrack);
                         meta.moovState.copyFrom(selectedTrack);
-                    } else if (selectedTrack.seqHeaderObu != null || parsedTrack.seqHeaderObu == null) {
+                    } else if (parsedTrack.seqHeaderObu == null) {
                         meta.moovState.copyFrom(selectedTrack);
+                    } else if (selectedTrack.seqHeaderObu != null) {
+                        throw unsupported("Multiple AVIS color tracks are not supported", null);
+                    } else {
+                        ensureSupportedMoovTrackReferences(parsedTrack);
                     }
                 } else {
                     meta.moovState.copyFrom(selectedTrack);
@@ -1521,7 +1525,7 @@ public final class AvifContainerParser {
     }
 
     /// Resolves AVIS auxiliary tracks against the selected color track.
-    private void resolveMoovAuxiliaryTracks() {
+    private void resolveMoovAuxiliaryTracks() throws AvifDecodeException {
         meta.moovAuxiliaryTypes.clear();
         meta.moovAlphaState = null;
         meta.moovDepthState = null;
@@ -1529,6 +1533,7 @@ public final class AvifContainerParser {
             if (candidate.seqHeaderObu == null || !auxiliaryTrackMatchesColor(candidate, meta.moovState)) {
                 continue;
             }
+            ensureSupportedMoovTrackReferences(candidate);
             if (!meta.moovAuxiliaryTypes.contains(candidate.auxiliaryType)) {
                 meta.moovAuxiliaryTypes.add(candidate.auxiliaryType);
             }
@@ -1549,6 +1554,19 @@ public final class AvifContainerParser {
     private static boolean auxiliaryTrackMatchesColor(MoovState auxiliaryTrack, MoovState colorTrack) {
         return auxiliaryTrack.auxiliaryForTrackIds.isEmpty()
                 || (colorTrack.trackId != 0 && auxiliaryTrack.auxiliaryForTrackIds.contains(colorTrack.trackId));
+    }
+
+    /// Rejects AVIS track-reference policies that are not implemented for a selected image track.
+    ///
+    /// @param track the selected color or matched auxiliary track
+    /// @throws AvifDecodeException if the track uses an unsupported reference type
+    private static void ensureSupportedMoovTrackReferences(MoovState track) throws AvifDecodeException {
+        if (!track.unsupportedTrackReferenceTypes.isEmpty()) {
+            throw unsupported(
+                    "Unsupported AVIS track reference type: " + track.unsupportedTrackReferenceTypes.get(0),
+                    null
+            );
+        }
     }
 
     /// Parses a `trak` box and extracts video track metadata.
@@ -1616,7 +1634,7 @@ public final class AvifContainerParser {
             switch (child.type()) {
                 case "auxl" -> parseMoovTrackReference(payload, meta.moovState.auxiliaryForTrackIds, "auxl");
                 case "prem" -> parseMoovTrackReference(payload, meta.moovState.premultipliedByTrackIds, "prem");
-                default -> {}
+                default -> meta.moovState.unsupportedTrackReferenceTypes.add(child.type());
             }
             input.skipBoxPayload(child);
         }
@@ -2697,6 +2715,8 @@ public final class AvifContainerParser {
         private final List<Integer> auxiliaryForTrackIds = new ArrayList<>();
         /// The `tref/prem` alpha track IDs referenced by this color track.
         private final List<Integer> premultipliedByTrackIds = new ArrayList<>();
+        /// The unsupported `tref` reference types used by this track.
+        private final List<String> unsupportedTrackReferenceTypes = new ArrayList<>();
         /// The parsed sample timing deltas.
         private final List<Integer> sampleDeltas = new ArrayList<>();
         /// The parsed chunk offsets.
@@ -2741,6 +2761,8 @@ public final class AvifContainerParser {
             auxiliaryForTrackIds.addAll(other.auxiliaryForTrackIds);
             premultipliedByTrackIds.clear();
             premultipliedByTrackIds.addAll(other.premultipliedByTrackIds);
+            unsupportedTrackReferenceTypes.clear();
+            unsupportedTrackReferenceTypes.addAll(other.unsupportedTrackReferenceTypes);
             sampleDeltas.clear();
             sampleDeltas.addAll(other.sampleDeltas);
             chunkOffsets.clear();

@@ -737,6 +737,26 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
+    /// Verifies that ambiguous AVIS color-track selection is rejected.
+    @Test
+    void rejectsAnimatedSequenceWithMultipleColorTracks() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithMultipleColorTracks())
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
+    /// Verifies that unsupported AVIS track-reference policies are rejected on selected image tracks.
+    @Test
+    void rejectsAnimatedSequenceWithUnsupportedTrackReference() {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvisSequenceWithUnsupportedTrackReference())
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
     /// Verifies that AVIS alpha auxiliary tracks are exposed and decoded as raw planes.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
@@ -1848,6 +1868,83 @@ final class AvifImageReaderTest {
                                 1,
                                 2,
                                 null,
+                                sample.length,
+                                sample.length
+                        )
+                )
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with two supported color image tracks.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithMultipleColorTracks() {
+        byte[] sample = av1StillPicturePayload();
+        return concat(
+                sequenceFileTypeBox(),
+                box(
+                        "moov",
+                        avisTrackBox(
+                                1,
+                                "pict",
+                                null,
+                                null,
+                                new int[]{0, 0},
+                                false,
+                                3,
+                                1,
+                                3,
+                                1,
+                                3,
+                                null,
+                                sample.length,
+                                sample.length,
+                                sample.length
+                        ),
+                        avisTrackBox(
+                                2,
+                                "pict",
+                                null,
+                                null,
+                                new int[]{0, 0},
+                                false,
+                                3,
+                                1,
+                                3,
+                                1,
+                                3,
+                                null,
+                                sample.length,
+                                sample.length,
+                                sample.length
+                        )
+                )
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with an unsupported track-reference type.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithUnsupportedTrackReference() {
+        byte[] sample = av1StillPicturePayload();
+        return concat(
+                sequenceFileTypeBox(),
+                box(
+                        "moov",
+                        avisTrackBox(
+                                1,
+                                "pict",
+                                trackReferenceBox("hint", 2),
+                                null,
+                                new int[]{0, 0},
+                                false,
+                                3,
+                                1,
+                                3,
+                                1,
+                                3,
+                                null,
+                                sample.length,
                                 sample.length,
                                 sample.length
                         )
