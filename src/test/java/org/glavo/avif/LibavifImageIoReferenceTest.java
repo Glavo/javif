@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -324,15 +325,42 @@ final class LibavifImageIoReferenceTest {
         assertPixelImageReference(PIXEL_IMAGE_REFERENCES[4]);
     }
 
-    /// Verifies that high-bit-depth rotation transforms are applied to decoded frame dimensions.
+    /// Verifies the `clop_irot_imor` fixture ignores fake transforms while decoding the generated gradient.
     ///
     /// @throws IOException if the AVIF resource cannot be decoded
     @Test
-    void highBitDepthIrotFixtureDecodesWithRotatedFrameDimensions() throws IOException {
+    void clopIrotImorFixtureIgnoresFakeTransformsAndDecodesGradient() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/clop_irot_imor.avif"))) {
             AvifImageInfo info = reader.info();
             assertEquals(12, info.width());
             assertEquals(34, info.height());
+            assertEquals(1, info.rotationCode());
+            assertEquals(-1, info.mirrorAxis());
+            AvifImageTransformInfo transformInfo = info.transformInfo();
+            assertNotNull(transformInfo);
+            assertFalse(transformInfo.hasCleanApertureCrop());
+            assertTrue(transformInfo.hasRotation());
+            assertEquals(1, transformInfo.rotationCode());
+            assertFalse(transformInfo.hasMirror());
+
+            AvifPlanes colorPlanes = reader.readRawColorPlanes(0);
+            assertEquals(AvifBitDepth.TEN_BITS, colorPlanes.bitDepth());
+            assertEquals(AvifPixelFormat.I444, colorPlanes.pixelFormat());
+            assertEquals(12, colorPlanes.renderWidth());
+            assertEquals(34, colorPlanes.renderHeight());
+            assertGradientPlaneClose("Y", colorPlanes.lumaPlane(), 12, 34, 10, 32, 40.0);
+            AvifPlane chromaUPlane = colorPlanes.chromaUPlane();
+            assertNotNull(chromaUPlane);
+            assertGradientPlaneClose("U", chromaUPlane, 12, 34, 10, 32, 40.0);
+            AvifPlane chromaVPlane = colorPlanes.chromaVPlane();
+            assertNotNull(chromaVPlane);
+            assertGradientPlaneClose("V", chromaVPlane, 12, 34, 10, 32, 40.0);
+
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertEquals(AvifBitDepth.TEN_BITS, alphaPlanes.bitDepth());
+            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertGradientPlaneClose("A", alphaPlanes.lumaPlane(), 12, 34, 10, 32, 40.0);
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -341,6 +369,61 @@ final class LibavifImageIoReferenceTest {
             assertEquals(12, frame.height());
             assertNull(reader.readFrame());
         }
+    }
+
+    /// Asserts that one decoded plane remains close to libavif's generated full-range gradient fixture.
+    ///
+    /// @param label the diagnostic plane label
+    /// @param plane the decoded plane
+    /// @param width the expected plane width
+    /// @param height the expected plane height
+    /// @param bitDepth the plane bit depth
+    /// @param maxDelta the largest accepted absolute sample delta
+    /// @param minPsnr the minimum accepted PSNR in decibels
+    private static void assertGradientPlaneClose(
+            String label,
+            AvifPlane plane,
+            int width,
+            int height,
+            int bitDepth,
+            int maxDelta,
+            double minPsnr
+    ) {
+        assertEquals(width, plane.width());
+        assertEquals(height, plane.height());
+
+        long squaredDiffSum = 0;
+        int largestDelta = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int expected = libavifFullRangeGradientSample(x, y, width, height, bitDepth);
+                int delta = Math.abs(plane.sample(x, y) - expected);
+                largestDelta = Math.max(largestDelta, delta);
+                squaredDiffSum += (long) delta * delta;
+            }
+        }
+
+        double meanSquaredError = squaredDiffSum / (double) (width * height);
+        int maxSample = (1 << bitDepth) - 1;
+        double psnr = meanSquaredError == 0.0
+                ? Double.POSITIVE_INFINITY
+                : 20.0 * Math.log10(maxSample / Math.sqrt(meanSquaredError));
+        assertTrue(largestDelta <= maxDelta, label + " max sample delta: " + largestDelta);
+        assertTrue(psnr >= minPsnr, label + " PSNR: " + psnr);
+    }
+
+    /// Returns one sample from libavif's `FillImageGradient()` helper for full-range planes.
+    ///
+    /// @param x the plane x coordinate
+    /// @param y the plane y coordinate
+    /// @param width the plane width
+    /// @param height the plane height
+    /// @param bitDepth the sample bit depth
+    /// @return the generated gradient sample
+    private static int libavifFullRangeGradientSample(int x, int y, int width, int height, int bitDepth) {
+        int maxXySum = width + height - 2;
+        int value = (x + y) % (maxXySum + 1);
+        return value * ((1 << bitDepth) - 1) / Math.max(1, maxXySum);
     }
 
     /// Asserts one ImageIO-readable image resource.
