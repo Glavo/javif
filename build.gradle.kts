@@ -1,3 +1,5 @@
+import org.gradle.kotlin.dsl.attributes
+
 plugins {
     id("java-library")
     id("jacoco")
@@ -66,6 +68,12 @@ tasks.withType<JavaCompile> {
 }
 
 val mainClassName = "org.glavo.avif.javafx.AvifViewerApp"
+
+tasks.jar {
+    manifest.attributes(
+        "Main-Class" to mainClassName,
+    )
+}
 
 tasks.register<JavaExec>("run") {
     group = "application"
