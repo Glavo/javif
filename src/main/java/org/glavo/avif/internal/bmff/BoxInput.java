@@ -210,9 +210,11 @@ public final class BoxInput {
         String type = readFourCc();
 
         long boxSize = smallSize;
+        boolean sizeZero = false;
         if (smallSize == 1) {
             boxSize = readU64();
         } else if (smallSize == 0) {
+            sizeZero = true;
             boxSize = end - boxOffset;
         }
 
@@ -224,7 +226,7 @@ public final class BoxInput {
         if (payloadSize > end - offset) {
             throw truncated("BMFF box payload exceeds parent bounds: " + type, boxOffset);
         }
-        return new BoxHeader(type, boxOffset, offset, payloadSize);
+        return new BoxHeader(type, boxOffset, offset, payloadSize, sizeZero);
     }
 
     /// Moves to the end of one parsed box.

@@ -28,6 +28,8 @@ public final class BoxHeader {
     private final int payloadOffset;
     /// The byte length of the box payload.
     private final int payloadSize;
+    /// Whether the serialized box used a size field of zero.
+    private final boolean sizeZero;
 
     /// Creates a BMFF box header.
     ///
@@ -36,10 +38,22 @@ public final class BoxHeader {
     /// @param payloadOffset the absolute byte offset of the box payload
     /// @param payloadSize the byte length of the box payload
     public BoxHeader(String type, int offset, int payloadOffset, int payloadSize) {
+        this(type, offset, payloadOffset, payloadSize, false);
+    }
+
+    /// Creates a BMFF box header.
+    ///
+    /// @param type the four-character box type
+    /// @param offset the absolute byte offset of the box header
+    /// @param payloadOffset the absolute byte offset of the box payload
+    /// @param payloadSize the byte length of the box payload
+    /// @param sizeZero whether the serialized box used a size field of zero
+    public BoxHeader(String type, int offset, int payloadOffset, int payloadSize, boolean sizeZero) {
         this.type = type;
         this.offset = offset;
         this.payloadOffset = payloadOffset;
         this.payloadSize = payloadSize;
+        this.sizeZero = sizeZero;
     }
 
     /// Returns the four-character box type.
@@ -68,6 +82,13 @@ public final class BoxHeader {
     /// @return the byte length of the box payload
     public int payloadSize() {
         return payloadSize;
+    }
+
+    /// Returns whether the serialized box used a size field of zero.
+    ///
+    /// @return whether the serialized box used a size field of zero
+    public boolean sizeZero() {
+        return sizeZero;
     }
 
     /// Returns the absolute byte offset immediately after this box.

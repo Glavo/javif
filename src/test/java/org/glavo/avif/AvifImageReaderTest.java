@@ -2049,6 +2049,38 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.INVALID_FTYP, ex.code());
     }
 
+    /// Verifies that an `mdat` box with size 0 is accepted as extending to EOF.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameAcceptsMdatBoxWithSizeZero() throws IOException {
+        byte[] bytes = withTopLevelBoxSizeZero(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE), "mdat");
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            assertNotNull(reader.readFrame());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that an `ftyp` box with size 0 is rejected.
+    ///
+    /// @throws IOException if the fixture cannot be read
+    @Test
+    void rejectsFtypBoxWithSizeZero() throws IOException {
+        byte[] bytes = withTopLevelBoxSizeZero(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE), "ftyp");
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    }
+
+    /// Verifies that an unknown top-level box with size 0 is rejected.
+    ///
+    /// @throws IOException if the fixture cannot be read
+    @Test
+    void rejectsUnknownTopLevelBoxWithSizeZero() throws IOException {
+        byte[] bytes = withUnknownTopLevelBoxSizeZeroAfterFtyp(testResourceBytes(LIBAVIF_WHITE_1X1_FIXTURE));
+        AvifDecodeException ex = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, ex.code());
+    }
+
     /// Verifies that a meta box without hdlr is rejected.
     ///
     /// @throws IOException if an unexpected error occurs
@@ -3921,6 +3953,69 @@ final class AvifImageReaderTest {
         return output.toByteArray();
     }
 
+    /// Creates a copy of one AVIF file with a top-level box size changed to zero.
+    ///
+    /// @param bytes the source AVIF bytes
+    /// @param type the top-level box type
+    /// @return the modified AVIF bytes
+    private static byte[] withTopLevelBoxSizeZero(byte[] bytes, String type) {
+        byte[] result = bytes.clone();
+        int boxOffset = topLevelBoxOffset(result, type);
+        writeU32(result, boxOffset, 0);
+        return result;
+    }
+
+    /// Inserts an unknown top-level size-zero box immediately after `ftyp`.
+    ///
+    /// @param bytes the source AVIF bytes
+    /// @return the modified AVIF bytes
+    private static byte[] withUnknownTopLevelBoxSizeZeroAfterFtyp(byte[] bytes) {
+        int ftypOffset = topLevelBoxOffset(bytes, "ftyp");
+        int ftypSize = readU32(bytes, ftypOffset);
+        byte[] before = Arrays.copyOfRange(bytes, 0, ftypOffset + ftypSize);
+        byte[] after = Arrays.copyOfRange(bytes, ftypOffset + ftypSize, bytes.length);
+        return concat(before, new byte[8], after);
+    }
+
+    /// Finds a top-level BMFF box offset.
+    ///
+    /// @param bytes the source BMFF bytes
+    /// @param type the box type
+    /// @return the box offset
+    private static int topLevelBoxOffset(byte[] bytes, String type) {
+        byte[] encodedType = fourCc(type);
+        int offset = 0;
+        while (offset + 8 <= bytes.length) {
+            int size = readU32(bytes, offset);
+            if (bytes[offset + 4] == encodedType[0]
+                    && bytes[offset + 5] == encodedType[1]
+                    && bytes[offset + 6] == encodedType[2]
+                    && bytes[offset + 7] == encodedType[3]) {
+                return offset;
+            }
+            if (size == 0) {
+                break;
+            }
+            if (size < 8 || size > bytes.length - offset) {
+                throw new AssertionError("Invalid top-level box size while searching for " + type);
+            }
+            offset += size;
+        }
+        throw new AssertionError("Missing top-level box: " + type);
+    }
+
+    /// Reads an unsigned 32-bit integer.
+    ///
+    /// @param bytes the source bytes
+    /// @param offset the byte offset
+    /// @return the unsigned value as a signed int
+    private static int readU32(byte[] bytes, int offset) {
+        return (Byte.toUnsignedInt(bytes[offset]) << 24)
+                | (Byte.toUnsignedInt(bytes[offset + 1]) << 16)
+                | (Byte.toUnsignedInt(bytes[offset + 2]) << 8)
+                | Byte.toUnsignedInt(bytes[offset + 3]);
+    }
+
     /// Encodes a four-character code.
     ///
     /// @param value the four-character code
@@ -3977,6 +4072,18 @@ final class AvifImageReaderTest {
         output.write(value >>> 16);
         output.write(value >>> 8);
         output.write(value);
+    }
+
+    /// Writes an unsigned 32-bit integer into an existing byte array.
+    ///
+    /// @param output the destination bytes
+    /// @param offset the byte offset
+    /// @param value the unsigned value
+    private static void writeU32(byte[] output, int offset, int value) {
+        output[offset] = (byte) (value >>> 24);
+        output[offset + 1] = (byte) (value >>> 16);
+        output[offset + 2] = (byte) (value >>> 8);
+        output[offset + 3] = (byte) value;
     }
 
     /// Writes an unsigned 64-bit integer.

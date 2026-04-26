@@ -87,6 +87,9 @@ public final class AvifContainerParser {
         BoxInput input = new BoxInput(source);
         while (input.hasRemaining()) {
             BoxHeader header = input.readBoxHeader();
+            if (header.sizeZero() && !allowsTopLevelSizeZero(header.type())) {
+                throw parseFailed("Top-level BMFF box cannot have size 0: " + header.type(), header.offset());
+            }
             BoxInput payload = input.slice(header.payloadOffset(), header.payloadSize());
             switch (header.type()) {
                 case "ftyp" -> parseFileType(payload);
@@ -1459,6 +1462,14 @@ public final class AvifContainerParser {
                 depthPayloads,
                 colorPayloads.frameDeltas,
                 colorPayloads.sampleCount, ts, dur);
+    }
+
+    /// Returns whether one top-level BMFF box may use size 0 to extend to EOF.
+    ///
+    /// @param type the box type
+    /// @return whether this parser accepts size 0 for the box type
+    private static boolean allowsTopLevelSizeZero(String type) {
+        return "mdat".equals(type) || "meta".equals(type) || "moov".equals(type);
     }
 
     /// Resolves and validates the total sequence duration.
