@@ -36,6 +36,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `FramePostprocessor`.
 @NotNullByDefault
 final class FramePostprocessorTest {
+    /// The AV1 self-guided restoration parameter table in `{r0, e0, r1, e1}` order.
+    private static final int @Unmodifiable [] @Unmodifiable [] SELF_GUIDED_PARAMS = {
+            {2, 140, 1, 3236},
+            {2, 112, 1, 2158},
+            {2, 93, 1, 1618},
+            {2, 80, 1, 1438},
+            {2, 70, 1, 1295},
+            {2, 58, 1, 1177},
+            {2, 47, 1, 1079},
+            {2, 37, 1, 996},
+            {2, 30, 1, 925},
+            {2, 25, 1, 863},
+            {0, -1, 1, 2589},
+            {0, -1, 1, 1618},
+            {0, -1, 1, 1177},
+            {0, -1, 1, 925},
+            {2, 56, 0, -1},
+            {2, 22, 0, -1}
+    };
+
+    /// The maximum self-guided variance table index.
+    private static final int SELF_GUIDED_MAX_Z = 255;
+
     /// Verifies that inactive in-loop filters preserve samples while freezing stage order.
     @Test
     void postprocessPreservesDecodedSamplesWhenInLoopFiltersAreInactive() {
@@ -824,6 +847,72 @@ final class FramePostprocessorTest {
         assertEquals(96, decodedPlanes.lumaPlane().sample(3, 3));
     }
 
+    /// Verifies exact AV1 self-guided restoration while preserving non-tight plane strides.
+    @Test
+    void postprocessAppliesExactSelfGuidedRestorationWithPlaneStride() {
+        short[] samples = new short[]{
+                120, 128, 136, 144, 152, 777, 777, 777,
+                132, 140, 148, 156, 164, 777, 777, 777,
+                144, 152, 300, 168, 176, 777, 777, 777,
+                156, 164, 172, 180, 188, 777, 777, 777,
+                168, 176, 184, 192, 200, 777, 777, 777
+        };
+        DecodedPlane lumaPlane = new DecodedPlane(5, 5, 8, samples);
+        DecodedPlanes decodedPlanes = new DecodedPlanes(
+                10,
+                AvifPixelFormat.I400,
+                5,
+                5,
+                5,
+                5,
+                lumaPlane,
+                null,
+                null
+        );
+        int @Unmodifiable [] projectionCoefficients = new int[]{31, 31};
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        true,
+                        true,
+                        new int[]{1, 0, 0, 0, -1, 0, -1, -1},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.SELF_GUIDED,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        6,
+                        6
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(
+                frameHeader,
+                0,
+                RestorationUnit.selfGuided(0, projectionCoefficients)
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertNotSame(decodedPlanes, postprocessed);
+        assertEquals(8, postprocessed.lumaPlane().stride());
+        assertSelfGuidedRestoredPlaneEquals(lumaPlane, postprocessed.lumaPlane(), 10, 0, projectionCoefficients);
+        short[] restoredSamples = postprocessed.lumaPlane().samples();
+        for (int y = 0; y < postprocessed.lumaPlane().height(); y++) {
+            for (int x = postprocessed.lumaPlane().width(); x < postprocessed.lumaPlane().stride(); x++) {
+                assertEquals(777, restoredSamples[y * postprocessed.lumaPlane().stride() + x] & 0xFFFF);
+            }
+        }
+    }
+
     /// Verifies that active loop restoration fails explicitly when decoded restoration units are unavailable.
     @Test
     void postprocessRejectsActiveRestoration() {
@@ -873,6 +962,309 @@ final class FramePostprocessorTest {
             System.arraycopy(row, 0, result[y], 0, row.length);
         }
         return result;
+    }
+
+    /// Asserts exact AV1 self-guided restoration for every visible plane sample.
+    ///
+    /// @param source the source plane before restoration
+    /// @param actual the restored plane to verify
+    /// @param bitDepth the decoded bit depth
+    /// @param set the self-guided restoration parameter set
+    /// @param projectionCoefficients the decoded self-guided projection coefficients
+    private static void assertSelfGuidedRestoredPlaneEquals(
+            DecodedPlane source,
+            DecodedPlane actual,
+            int bitDepth,
+            int set,
+            int @Unmodifiable [] projectionCoefficients
+    ) {
+        int maximumSample = (1 << bitDepth) - 1;
+        for (int y = 0; y < source.height(); y++) {
+            for (int x = 0; x < source.width(); x++) {
+                assertEquals(
+                        clamp(
+                                expectedSelfGuidedSample(source, bitDepth, set, projectionCoefficients, x, y, y),
+                                0,
+                                maximumSample
+                        ),
+                        actual.sample(x, y)
+                );
+            }
+        }
+    }
+
+    /// Returns one expected AV1 self-guided-restored sample.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param set the self-guided restoration parameter set
+    /// @param projectionCoefficients the decoded self-guided projection coefficients
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @param localY the sample Y coordinate relative to the restoration unit
+    /// @return one expected AV1 self-guided-restored sample
+    private static int expectedSelfGuidedSample(
+            DecodedPlane source,
+            int bitDepth,
+            int set,
+            int @Unmodifiable [] projectionCoefficients,
+            int x,
+            int y,
+            int localY
+    ) {
+        int @Unmodifiable [] params = SELF_GUIDED_PARAMS[set];
+        int base = source.sample(x, y);
+        int adjustment = 0;
+        if (params[0] != 0 && projectionCoefficients[0] != 0) {
+            adjustment += projectionCoefficients[0] * expectedSelfGuidedResidual5(
+                    source,
+                    bitDepth,
+                    params[1],
+                    x,
+                    y,
+                    localY,
+                    base
+            );
+        }
+        int radius1Weight = params[2] != 0 ? 128 - projectionCoefficients[0] - projectionCoefficients[1] : 0;
+        if (params[2] != 0 && radius1Weight != 0) {
+            adjustment += radius1Weight * expectedSelfGuidedResidual3(
+                    source,
+                    bitDepth,
+                    params[3],
+                    x,
+                    y,
+                    base
+            );
+        }
+        return base + round2(adjustment, 11);
+    }
+
+    /// Returns one expected 3x3 self-guided residual.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param strength the self-guided strength value
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @param sourceSample the original source sample
+    /// @return one expected 3x3 self-guided residual
+    private static int expectedSelfGuidedResidual3(
+            DecodedPlane source,
+            int bitDepth,
+            int strength,
+            int x,
+            int y,
+            int sourceSample
+    ) {
+        int weightedB = eightNeighborProjectionWeight(source, bitDepth, 1, strength, false, x, y);
+        int weightedA = eightNeighborProjectionWeight(source, bitDepth, 1, strength, true, x, y);
+        return round2(weightedA - weightedB * sourceSample, 9);
+    }
+
+    /// Returns one expected 5x5 self-guided residual.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param strength the self-guided strength value
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @param localY the sample Y coordinate relative to the restoration unit
+    /// @param sourceSample the original source sample
+    /// @return one expected 5x5 self-guided residual
+    private static int expectedSelfGuidedResidual5(
+            DecodedPlane source,
+            int bitDepth,
+            int strength,
+            int x,
+            int y,
+            int localY,
+            int sourceSample
+    ) {
+        if ((localY & 1) == 0) {
+            int weightedB = sixNeighborPairProjectionWeight(source, bitDepth, strength, false, x, y);
+            int weightedA = sixNeighborPairProjectionWeight(source, bitDepth, strength, true, x, y);
+            return round2(weightedA - weightedB * sourceSample, 9);
+        }
+        int weightedB = sixNeighborSingleProjectionWeight(source, bitDepth, strength, false, x, y);
+        int weightedA = sixNeighborSingleProjectionWeight(source, bitDepth, strength, true, x, y);
+        return round2(weightedA - weightedB * sourceSample, 8);
+    }
+
+    /// Returns the dav1d eight-neighbor weighted projection sum.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param radius the self-guided filter radius
+    /// @param strength the self-guided strength value
+    /// @param aComponent whether to return the A component instead of B
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return the weighted projection sum
+    private static int eightNeighborProjectionWeight(
+            DecodedPlane source,
+            int bitDepth,
+            int radius,
+            int strength,
+            boolean aComponent,
+            int x,
+            int y
+    ) {
+        return (expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x, y)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x - 1, y)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x + 1, y)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x, y - 1)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x, y + 1)) * 4
+                + (expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x - 1, y - 1)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x + 1, y - 1)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x - 1, y + 1)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, radius, strength, aComponent, x + 1, y + 1)) * 3;
+    }
+
+    /// Returns the dav1d paired-row 5x5 weighted projection sum.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param strength the self-guided strength value
+    /// @param aComponent whether to return the A component instead of B
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return the weighted projection sum
+    private static int sixNeighborPairProjectionWeight(
+            DecodedPlane source,
+            int bitDepth,
+            int strength,
+            boolean aComponent,
+            int x,
+            int y
+    ) {
+        int topY = y - 1;
+        int bottomY = y + 1;
+        return (expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x, topY)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x, bottomY)) * 6
+                + (expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x - 1, topY)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x + 1, topY)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x - 1, bottomY)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x + 1, bottomY)) * 5;
+    }
+
+    /// Returns the dav1d single-row 5x5 weighted projection sum.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param strength the self-guided strength value
+    /// @param aComponent whether to return the A component instead of B
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return the weighted projection sum
+    private static int sixNeighborSingleProjectionWeight(
+            DecodedPlane source,
+            int bitDepth,
+            int strength,
+            boolean aComponent,
+            int x,
+            int y
+    ) {
+        return expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x, y) * 6
+                + (expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x - 1, y)
+                + expectedSelfGuidedProjectionComponent(source, bitDepth, 2, strength, aComponent, x + 1, y)) * 5;
+    }
+
+    /// Returns one expected self-guided A or B projection component.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param radius the self-guided filter radius
+    /// @param strength the self-guided strength value
+    /// @param aComponent whether to return the A component instead of B
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return one expected self-guided projection component
+    private static int expectedSelfGuidedProjectionComponent(
+            DecodedPlane source,
+            int bitDepth,
+            int radius,
+            int strength,
+            boolean aComponent,
+            int x,
+            int y
+    ) {
+        ExpectedProjection projection = expectedSelfGuidedProjection(source, bitDepth, radius, strength, x, y);
+        return aComponent ? projection.a() : projection.b();
+    }
+
+    /// Returns one expected self-guided projection.
+    ///
+    /// @param source the source plane before restoration
+    /// @param bitDepth the decoded bit depth
+    /// @param radius the self-guided filter radius
+    /// @param strength the self-guided strength value
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return one expected self-guided projection
+    private static ExpectedProjection expectedSelfGuidedProjection(
+            DecodedPlane source,
+            int bitDepth,
+            int radius,
+            int strength,
+            int x,
+            int y
+    ) {
+        int count = radius == 1 ? 9 : 25;
+        int oneByX = radius == 1 ? 455 : 164;
+        ExpectedBoxSum box = expectedSelfGuidedBoxSum(source, radius, x, y);
+        int bitDepthShift = bitDepth - 8;
+        int scaledSumSquares = roundForBitDepth(box.sumSquares(), bitDepthShift * 2);
+        int scaledSum = roundForBitDepth(box.sum(), bitDepthShift);
+        long variance = Math.max((long) scaledSumSquares * count - (long) scaledSum * scaledSum, 0L);
+        int z = (int) Math.min(SELF_GUIDED_MAX_Z, (variance * strength + (1 << 19)) >> 20);
+        int xByX = expectedSelfGuidedXByX(z);
+        int a = (int) (((long) xByX * box.sum() * oneByX + (1 << 11)) >> 12);
+        return new ExpectedProjection(a, xByX);
+    }
+
+    /// Returns one expected self-guided box sum.
+    ///
+    /// @param source the source plane before restoration
+    /// @param radius the self-guided filter radius
+    /// @param x the sample X coordinate
+    /// @param y the sample Y coordinate
+    /// @return one expected self-guided box sum
+    private static ExpectedBoxSum expectedSelfGuidedBoxSum(DecodedPlane source, int radius, int x, int y) {
+        int sum = 0;
+        int sumSquares = 0;
+        for (int dy = -radius; dy <= radius; dy++) {
+            int sampleY = clamp(y + dy, 0, source.height() - 1);
+            for (int dx = -radius; dx <= radius; dx++) {
+                int sample = source.sample(clamp(x + dx, 0, source.width() - 1), sampleY);
+                sum += sample;
+                sumSquares += sample * sample;
+            }
+        }
+        return new ExpectedBoxSum(sum, sumSquares);
+    }
+
+    /// Rounds one expected self-guided statistic down to the normalized 8-bit domain.
+    ///
+    /// @param value the source statistic
+    /// @param bits the number of bits to remove
+    /// @return the rounded statistic
+    private static int roundForBitDepth(int value, int bits) {
+        if (bits == 0) {
+            return value;
+        }
+        return (value + ((1 << bits) >> 1)) >> bits;
+    }
+
+    /// Returns one expected entry from dav1d's `sgr_x_by_x` table.
+    ///
+    /// @param z the clamped variance index
+    /// @return the self-guided reciprocal table value
+    private static int expectedSelfGuidedXByX(int z) {
+        if (z == SELF_GUIDED_MAX_Z) {
+            return 0;
+        }
+        return Math.min(255, (256 + (z >> 1)) / (z + 1));
     }
 
     /// Asserts exact AV1 two-stage Wiener restoration for every visible plane sample.
@@ -978,5 +1370,33 @@ final class FramePostprocessorTest {
     /// @return the clamped value
     private static int clamp(int value, int minimum, int maximum) {
         return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    /// Rounds one signed value right by the requested number of bits.
+    ///
+    /// @param value the value to round
+    /// @param bits the number of bits to remove
+    /// @return the rounded value
+    private static int round2(int value, int bits) {
+        if (bits == 0) {
+            return value;
+        }
+        return (value + (1 << (bits - 1))) >> bits;
+    }
+
+    /// Expected self-guided box sums.
+    ///
+    /// @param sum the sample sum
+    /// @param sumSquares the squared sample sum
+    @NotNullByDefault
+    private record ExpectedBoxSum(int sum, int sumSquares) {
+    }
+
+    /// Expected self-guided projection components.
+    ///
+    /// @param a the inverted A value
+    /// @param b the inverted B value
+    @NotNullByDefault
+    private record ExpectedProjection(int a, int b) {
     }
 }

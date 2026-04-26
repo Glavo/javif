@@ -31,8 +31,8 @@ import java.util.Objects;
 ///
 /// Inactive restoration preserves samples exactly. Active restoration consumes decoded
 /// restoration-unit syntax and applies per-unit Wiener or self-guided filtering. Wiener filtering
-/// uses the AV1 two-stage horizontal/vertical rounding model, while self-guided filtering currently
-/// uses the local projection model implemented below.
+/// uses the AV1 two-stage horizontal/vertical rounding model, while self-guided filtering uses the
+/// AV1 self-guided A/B projection model.
 @NotNullByDefault
 public final class RestorationApplier {
     /// The AV1 Wiener coefficient precision.
@@ -44,11 +44,20 @@ public final class RestorationApplier {
     /// The signed source-sample offset of the first Wiener tap.
     private static final int WIENER_TAP_OFFSET = 3;
 
-    /// The self-guided projection coefficient precision.
-    private static final int SELF_GUIDED_PROJECTION_BITS = 7;
+    /// The final self-guided projection rounding shift used by dav1d.
+    private static final int SELF_GUIDED_WEIGHT_BITS = 11;
 
-    /// The extra restoration precision used before self-guided projection.
-    private static final int SELF_GUIDED_RESTORATION_BITS = 4;
+    /// The self-guided 3x3 A/B finish rounding shift.
+    private static final int SELF_GUIDED_FILTER_3_BITS = 9;
+
+    /// The self-guided paired 5x5 A/B finish rounding shift.
+    private static final int SELF_GUIDED_FILTER_5_PAIR_BITS = 9;
+
+    /// The self-guided single-row 5x5 A/B finish rounding shift.
+    private static final int SELF_GUIDED_FILTER_5_SINGLE_BITS = 8;
+
+    /// The maximum self-guided variance table index.
+    private static final int SELF_GUIDED_MAX_Z = 255;
 
     /// The AV1 self-guided restoration parameter table in `{r0, e0, r1, e1}` order.
     private static final int @Unmodifiable [] @Unmodifiable [] SELF_GUIDED_PARAMS = {
@@ -315,23 +324,28 @@ public final class RestorationApplier {
             int endX,
             int endY
     ) {
-        int[] params = SELF_GUIDED_PARAMS[unit.selfGuidedSet()];
-        int[] projection = unit.selfGuidedProjectionCoefficients();
-        int shift = SELF_GUIDED_PROJECTION_BITS + SELF_GUIDED_RESTORATION_BITS;
+        int @Unmodifiable [] params = SELF_GUIDED_PARAMS[unit.selfGuidedSet()];
+        int @Unmodifiable [] projection = unit.selfGuidedProjectionCoefficients();
+        @Nullable SelfGuidedIntermediate radius2Filter = params[0] != 0
+                ? SelfGuidedIntermediate.create(source, 2, params[1])
+                : null;
+        @Nullable SelfGuidedIntermediate radius1Filter = params[2] != 0
+                ? SelfGuidedIntermediate.create(source, 1, params[3])
+                : null;
+        int weight0 = radius2Filter != null ? projection[0] : 0;
+        int weight1 = radius1Filter != null ? 128 - projection[0] - projection[1] : 0;
         for (int y = startY; y < endY; y++) {
+            int localY = y - startY;
             for (int x = startX; x < endX; x++) {
                 int base = source.sample(x, y);
-                int baseRestoration = base << SELF_GUIDED_RESTORATION_BITS;
                 int adjustment = 0;
-                for (int filter = 0; filter < 2; filter++) {
-                    int radius = params[filter * 2];
-                    if (radius == 0 || projection[filter] == 0) {
-                        continue;
-                    }
-                    int guided = boxAverage(source, x, y, radius) << SELF_GUIDED_RESTORATION_BITS;
-                    adjustment += projection[filter] * (guided - baseRestoration);
+                if (radius2Filter != null && weight0 != 0) {
+                    adjustment += weight0 * radius2Filter.residual5(x, y, localY, base);
                 }
-                destination.setSample(x, y, base + round2(adjustment, shift));
+                if (radius1Filter != null && weight1 != 0) {
+                    adjustment += weight1 * radius1Filter.residual3(x, y, base);
+                }
+                destination.setSample(x, y, base + round2(adjustment, SELF_GUIDED_WEIGHT_BITS));
             }
         }
     }
@@ -355,26 +369,6 @@ public final class RestorationApplier {
         };
     }
 
-    /// Computes one clamped square box average.
-    ///
-    /// @param source the source plane
-    /// @param x the sample X coordinate
-    /// @param y the sample Y coordinate
-    /// @param radius the box radius
-    /// @return one clamped square box average
-    private static int boxAverage(PlaneBuffer source, int x, int y, int radius) {
-        int sum = 0;
-        int count = 0;
-        for (int dy = -radius; dy <= radius; dy++) {
-            int sampleY = clamp(y + dy, 0, source.height() - 1);
-            for (int dx = -radius; dx <= radius; dx++) {
-                sum += source.sample(clamp(x + dx, 0, source.width() - 1), sampleY);
-                count++;
-            }
-        }
-        return (sum + (count >> 1)) / count;
-    }
-
     /// Clips one integer into inclusive bounds.
     ///
     /// @param value the input value
@@ -395,6 +389,229 @@ public final class RestorationApplier {
             return value;
         }
         return (value + (1 << (bits - 1))) >> bits;
+    }
+
+    /// Self-guided A/B projection fields for one filter radius.
+    @NotNullByDefault
+    private static final class SelfGuidedIntermediate {
+        /// The source plane width in samples.
+        private final int width;
+
+        /// The source plane height in samples.
+        private final int height;
+
+        /// The inverted A field used by the dav1d finish equations.
+        private final int @Unmodifiable [] a;
+
+        /// The inverted B field used by the dav1d finish equations.
+        private final int @Unmodifiable [] b;
+
+        /// Creates one self-guided intermediate field.
+        ///
+        /// @param width the source plane width in samples
+        /// @param height the source plane height in samples
+        /// @param a the inverted A field
+        /// @param b the inverted B field
+        private SelfGuidedIntermediate(int width, int height, int @Unmodifiable [] a, int @Unmodifiable [] b) {
+            this.width = width;
+            this.height = height;
+            this.a = Objects.requireNonNull(a, "a");
+            this.b = Objects.requireNonNull(b, "b");
+        }
+
+        /// Computes one self-guided intermediate field.
+        ///
+        /// @param source the source plane
+        /// @param radius the self-guided filter radius
+        /// @param strength the self-guided strength value from the AV1 parameter table
+        /// @return one self-guided intermediate field
+        public static SelfGuidedIntermediate create(PlaneBuffer source, int radius, int strength) {
+            if (radius != 1 && radius != 2) {
+                throw new IllegalArgumentException("radius must be 1 or 2: " + radius);
+            }
+            int width = source.width();
+            int height = source.height();
+            int[] a = new int[(width + 2) * (height + 2)];
+            int[] b = new int[(width + 2) * (height + 2)];
+            int count = radius == 1 ? 9 : 25;
+            int oneByX = radius == 1 ? 455 : 164;
+            int bitDepthShift = source.bitDepth() - 8;
+            for (int y = -1; y <= height; y++) {
+                for (int x = -1; x <= width; x++) {
+                    BoxSum box = boxSum(source, x, y, radius);
+                    Projection projection = projection(box, count, strength, oneByX, bitDepthShift);
+                    int index = (y + 1) * (width + 2) + x + 1;
+                    a[index] = projection.a();
+                    b[index] = projection.b();
+                }
+            }
+            return new SelfGuidedIntermediate(width, height, a, b);
+        }
+
+        /// Returns one 3x3 residual from the inverted A/B fields.
+        ///
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @param sourceSample the original source sample
+        /// @return one 3x3 residual
+        public int residual3(int x, int y, int sourceSample) {
+            int weightedB = eightNeighborWeight(b, x, y);
+            int weightedA = eightNeighborWeight(a, x, y);
+            return round2(weightedA - weightedB * sourceSample, SELF_GUIDED_FILTER_3_BITS);
+        }
+
+        /// Returns one 5x5 residual from the inverted A/B fields.
+        ///
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @param localY the sample Y coordinate relative to the restoration unit
+        /// @param sourceSample the original source sample
+        /// @return one 5x5 residual
+        public int residual5(int x, int y, int localY, int sourceSample) {
+            if ((localY & 1) == 0) {
+                int weightedB = sixNeighborPairWeight(b, x, y);
+                int weightedA = sixNeighborPairWeight(a, x, y);
+                return round2(weightedA - weightedB * sourceSample, SELF_GUIDED_FILTER_5_PAIR_BITS);
+            }
+            int weightedB = sixNeighborSingleWeight(b, x, y);
+            int weightedA = sixNeighborSingleWeight(a, x, y);
+            return round2(weightedA - weightedB * sourceSample, SELF_GUIDED_FILTER_5_SINGLE_BITS);
+        }
+
+        /// Returns one clamped field value.
+        ///
+        /// @param values the field storage
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @return one clamped field value
+        private int value(int @Unmodifiable [] values, int x, int y) {
+            int clampedX = clamp(x, -1, width);
+            int clampedY = clamp(y, -1, height);
+            return values[(clampedY + 1) * (width + 2) + clampedX + 1];
+        }
+
+        /// Returns the dav1d eight-neighbor weighted sum for one field.
+        ///
+        /// @param values the field storage
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @return the weighted field sum
+        private int eightNeighborWeight(int @Unmodifiable [] values, int x, int y) {
+            return (value(values, x, y)
+                    + value(values, x - 1, y)
+                    + value(values, x + 1, y)
+                    + value(values, x, y - 1)
+                    + value(values, x, y + 1)) * 4
+                    + (value(values, x - 1, y - 1)
+                    + value(values, x + 1, y - 1)
+                    + value(values, x - 1, y + 1)
+                    + value(values, x + 1, y + 1)) * 3;
+        }
+
+        /// Returns the dav1d paired-row weighted sum for one 5x5 field.
+        ///
+        /// @param values the field storage
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @return the weighted field sum
+        private int sixNeighborPairWeight(int @Unmodifiable [] values, int x, int y) {
+            int topY = y - 1;
+            int bottomY = y + 1;
+            return (value(values, x, topY) + value(values, x, bottomY)) * 6
+                    + (value(values, x - 1, topY)
+                    + value(values, x + 1, topY)
+                    + value(values, x - 1, bottomY)
+                    + value(values, x + 1, bottomY)) * 5;
+        }
+
+        /// Returns the dav1d single-row weighted sum for one 5x5 field.
+        ///
+        /// @param values the field storage
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @return the weighted field sum
+        private int sixNeighborSingleWeight(int @Unmodifiable [] values, int x, int y) {
+            return value(values, x, y) * 6
+                    + (value(values, x - 1, y) + value(values, x + 1, y)) * 5;
+        }
+
+        /// Computes one clamped box sum and squared sum.
+        ///
+        /// @param source the source plane
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @param radius the self-guided filter radius
+        /// @return the box sums
+        private static BoxSum boxSum(PlaneBuffer source, int x, int y, int radius) {
+            int sum = 0;
+            int sumSquares = 0;
+            for (int dy = -radius; dy <= radius; dy++) {
+                int sampleY = clamp(y + dy, 0, source.height() - 1);
+                for (int dx = -radius; dx <= radius; dx++) {
+                    int sample = source.sample(clamp(x + dx, 0, source.width() - 1), sampleY);
+                    sum += sample;
+                    sumSquares += sample * sample;
+                }
+            }
+            return new BoxSum(sum, sumSquares);
+        }
+
+        /// Computes the inverted dav1d A/B projection values for one box.
+        ///
+        /// @param box the source box sums
+        /// @param count the number of samples in the box
+        /// @param strength the self-guided strength value
+        /// @param oneByX the reciprocal normalization constant
+        /// @param bitDepthShift the decoded bit depth minus eight
+        /// @return the inverted A/B projection values
+        private static Projection projection(BoxSum box, int count, int strength, int oneByX, int bitDepthShift) {
+            int scaledSumSquares = roundForBitDepth(box.sumSquares(), bitDepthShift * 2);
+            int scaledSum = roundForBitDepth(box.sum(), bitDepthShift);
+            long variance = Math.max((long) scaledSumSquares * count - (long) scaledSum * scaledSum, 0L);
+            int z = (int) Math.min(SELF_GUIDED_MAX_Z, (variance * strength + (1 << 19)) >> 20);
+            int xByX = selfGuidedXByX(z);
+            int a = (int) (((long) xByX * box.sum() * oneByX + (1 << 11)) >> 12);
+            return new Projection(a, xByX);
+        }
+
+        /// Rounds one box statistic down to the normalized 8-bit domain.
+        ///
+        /// @param value the source statistic
+        /// @param bits the number of bits to remove
+        /// @return the rounded statistic
+        private static int roundForBitDepth(int value, int bits) {
+            if (bits == 0) {
+                return value;
+            }
+            return (value + ((1 << bits) >> 1)) >> bits;
+        }
+
+        /// Returns one entry from dav1d's `sgr_x_by_x` table.
+        ///
+        /// @param z the clamped variance index
+        /// @return the self-guided reciprocal table value
+        private static int selfGuidedXByX(int z) {
+            if (z == SELF_GUIDED_MAX_Z) {
+                return 0;
+            }
+            return Math.min(255, (256 + (z >> 1)) / (z + 1));
+        }
+    }
+
+    /// Box sums used by self-guided restoration.
+    ///
+    /// @param sum the sample sum
+    /// @param sumSquares the squared sample sum
+    @NotNullByDefault
+    private record BoxSum(int sum, int sumSquares) {
+    }
+
+    /// Inverted self-guided projection values.
+    ///
+    /// @param a the inverted A value
+    /// @param b the inverted B value
+    @NotNullByDefault
+    private record Projection(int a, int b) {
     }
 
     /// Mutable plane storage used by restoration filtering.

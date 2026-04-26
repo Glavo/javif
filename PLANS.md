@@ -16,9 +16,9 @@ tools, native ABI compatibility, fuzzers, and apps are out of scope.
 - Replace approximate AV1 paths with normative behavior: full `refmvs` temporal projection,
   remaining inter, compound, warped, intrabc, and inter-palette behavior, plus `show_existing_frame`
   cases that currently require reconstructed reference surfaces.
-- Finish postfilter parity with dav1d: normative self-guided restoration, AV1 film grain synthesis,
-  and cross-stage verification of loop filter, CDEF, Wiener restoration, self-guided restoration,
-  super-resolution, and film grain in the correct pipeline order.
+- Finish postfilter parity with dav1d: AV1 film grain synthesis and cross-stage verification of
+  loop filter, CDEF, Wiener restoration, self-guided restoration, super-resolution, and film grain
+  in the correct pipeline order.
 - Improve display semantics while preserving raw-plane APIs: clarify ICC/CICP behavior, implement
   pure-Java CICP transfer and primaries conversion where feasible under the `java.base` runtime
   boundary, and keep ICC application metadata-only unless the dependency policy changes.
@@ -49,7 +49,7 @@ tools, native ABI compatibility, fuzzers, and apps are out of scope.
 1. Establish the coverage ledger so missing dav1d/libavif parity is tracked explicitly.
 2. Fix AV1 core correctness first: syntax, CDFs, `refmvs`, inter prediction, compound prediction,
    warped prediction, and intrabc.
-3. Fix postfilter parity next: self-guided restoration, film grain, and pipeline interactions.
+3. Fix postfilter parity next: film grain and pipeline interactions.
 4. Fix AVIF-level display and auxiliary semantics: gain maps, color handling, sequence auxiliary
    planes, transforms, and operating points.
 5. Tighten validation last by replacing broad corpus smoke checks with pixel/reference comparisons.
