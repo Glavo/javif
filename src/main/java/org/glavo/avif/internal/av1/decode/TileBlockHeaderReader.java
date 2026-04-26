@@ -366,10 +366,10 @@ public final class TileBlockHeaderReader {
         }
 
         if (yPaletteSize > 0) {
-            yPaletteIndices = readPaletteIndices(0, yPaletteSize, nonNullPosition, nonNullSize);
+            yPaletteIndices = readPaletteIndices(0, yPaletteSize, nonNullSize);
         }
         if (uvPaletteSize > 0) {
-            uvPaletteIndices = readPaletteIndices(1, uvPaletteSize, nonNullPosition, nonNullSize);
+            uvPaletteIndices = readPaletteIndices(1, uvPaletteSize, nonNullSize);
         }
 
         BlockHeader header = new BlockHeader(
@@ -1431,28 +1431,26 @@ public final class TileBlockHeaderReader {
     /// Decodes one packed palette index map for luma or chroma.
     ///
     /// AV1 signals palette indices in wave-front diagonal order, then packs the visible map to
-    /// two 4-bit entries per output byte while replicating invisible right and bottom edges.
+    /// two 4-bit entries per output byte. The token stream covers the coded block footprint; later
+    /// reconstruction clips the footprint to the actual frame plane.
     ///
     /// @param plane the palette plane index, where `0` is luma and `1` is chroma
     /// @param paletteSize the decoded palette size in `[2, 8]`
-    /// @param position the local tile-relative block origin
     /// @param size the block size that owns the palette
     /// @return the packed palette index map, or an empty array when palette mode is disabled
-    private byte[] readPaletteIndices(int plane, int paletteSize, BlockPosition position, BlockSize size) {
-        int visibleWidth4 = visibleWidth4(position, size);
-        int visibleHeight4 = visibleHeight4(position, size);
-        int fullWidth4 = size.width4();
-        int fullHeight4 = size.height4();
+    private byte[] readPaletteIndices(int plane, int paletteSize, BlockSize size) {
+        int mapWidth = size.widthPixels();
+        int mapHeight = size.heightPixels();
         if (plane != 0) {
             int subsamplingX = tileContext.sequenceHeader().colorConfig().chromaSubsamplingX() ? 1 : 0;
             int subsamplingY = tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
-            visibleWidth4 = chromaSpan4(position.x4(), visibleWidth4, subsamplingX);
-            visibleHeight4 = chromaSpan4(position.y4(), visibleHeight4, subsamplingY);
-            fullWidth4 = chromaSpan4(position.x4(), fullWidth4, subsamplingX);
-            fullHeight4 = chromaSpan4(position.y4(), fullHeight4, subsamplingY);
+            int sub8WidthExtra = chromaSub8Extra(mapWidth, subsamplingX);
+            int sub8HeightExtra = chromaSub8Extra(mapHeight, subsamplingY);
+            mapWidth = planeDimension(mapWidth, subsamplingX, sub8WidthExtra);
+            mapHeight = planeDimension(mapHeight, subsamplingY, sub8HeightExtra);
         }
 
-        return readPaletteIndices(plane, paletteSize, visibleWidth4 << 2, visibleHeight4 << 2, fullWidth4 << 2, fullHeight4 << 2);
+        return readPaletteIndices(plane, paletteSize, mapWidth, mapHeight, mapWidth, mapHeight);
     }
 
     /// Decodes one packed palette index map for the supplied visible and coded dimensions.
@@ -1488,36 +1486,23 @@ public final class TileBlockHeaderReader {
         return finishPaletteIndices(unpacked, fullWidth, fullHeight, visibleWidth, visibleHeight);
     }
 
-    /// Returns the visible block width in 4x4 units after clipping against the tile bounds.
+    /// Returns the extra chroma samples used by AV1 for sub-8x8 chroma palette blocks.
     ///
-    /// @param position the local tile-relative block origin
-    /// @param size the block size to clip
-    /// @return the visible block width in 4x4 units after clipping against the tile bounds
-    private int visibleWidth4(BlockPosition position, BlockSize size) {
-        int tileWidth4 = (tileContext.width() + 3) >> 2;
-        return Math.min(size.width4(), tileWidth4 - position.x4());
-    }
-
-    /// Returns the visible block height in 4x4 units after clipping against the tile bounds.
-    ///
-    /// @param position the local tile-relative block origin
-    /// @param size the block size to clip
-    /// @return the visible block height in 4x4 units after clipping against the tile bounds
-    private int visibleHeight4(BlockPosition position, BlockSize size) {
-        int tileHeight4 = (tileContext.height() + 3) >> 2;
-        return Math.min(size.height4(), tileHeight4 - position.y4());
-    }
-
-    /// Returns the covered chroma span in 4x4 units for one luma-aligned block span.
-    ///
-    /// @param start4 the luma start coordinate in 4x4 units
-    /// @param span4 the luma span in 4x4 units
+    /// @param lumaDimension the coded luma block dimension in pixels
     /// @param subsampling the chroma subsampling shift for the axis
-    /// @return the covered chroma span in 4x4 units
-    private static int chromaSpan4(int start4, int span4, int subsampling) {
-        int chromaStart = start4 >> subsampling;
-        int chromaEnd = (start4 + span4 + (1 << subsampling) - 1) >> subsampling;
-        return Math.max(1, chromaEnd - chromaStart);
+    /// @return the number of extra chroma samples on this axis
+    private static int chromaSub8Extra(int lumaDimension, int subsampling) {
+        return (lumaDimension >> subsampling) < 4 ? 2 : 0;
+    }
+
+    /// Returns the palette dimension for a subsampled plane.
+    ///
+    /// @param lumaDimension the luma dimension in pixels
+    /// @param subsampling the chroma subsampling shift for the axis
+    /// @param sub8Extra the extra samples required for sub-8x8 chroma blocks
+    /// @return the palette dimension for the subsampled plane
+    private static int planeDimension(int lumaDimension, int subsampling, int sub8Extra) {
+        return (lumaDimension >> subsampling) + sub8Extra;
     }
 
     /// Builds the palette-order permutation and context for one palette color-map sample.

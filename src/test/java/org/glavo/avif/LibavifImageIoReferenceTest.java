@@ -112,7 +112,7 @@ final class LibavifImageIoReferenceTest {
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE,
-                    "Pending full-image AV1 reconstruction accuracy; the bottom-row region test remains enabled."
+                    "Pending full-image AV1 color reconstruction accuracy; the alpha auxiliary sample test remains enabled."
             ),
             disabledPixelImage(
                     "libavif-test-data/draw_points.png",
@@ -314,6 +314,19 @@ final class LibavifImageIoReferenceTest {
             assertEquals(AvifPixelFormat.I444, frame.pixelFormat());
             assertEquals(0xFFFDFDFD, frame.intPixelBuffer().get(0));
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that the `draw_points` idat fixture exposes its non-opaque alpha auxiliary samples.
+    ///
+    /// @throws IOException if the resources cannot be read or decoded
+    @Test
+    void drawPointsIdatFixtureDecodesReferenceAlphaSample() throws IOException {
+        BufferedImage source = TestResources.readImage("libavif-test-data/draw_points.png");
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/draw_points_idat.avif"))) {
+            AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
+            assertNotNull(alphaPlanes);
+            assertEquals(source.getRGB(22, 0) >>> 24, alphaPlanes.lumaPlane().sample(22, 0));
         }
     }
 
