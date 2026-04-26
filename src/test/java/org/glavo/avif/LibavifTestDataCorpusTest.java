@@ -50,7 +50,7 @@ final class LibavifTestDataCorpusTest {
     private static final CorpusCase @Unmodifiable [] CASES = new CorpusCase[]{
             decode("libavif-test-data/abc_color_irot_alpha_NOirot.avif", 512, 256, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/abc_color_irot_alpha_irot.avif", 512, 256, 8, AvifPixelFormat.I444, true, false, 1),
-            parseFailure("libavif-test-data/alpha_noispe.avif", AvifErrorCode.BMFF_PARSE_FAILED),
+            decode("libavif-test-data/alpha_noispe.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif", 64, 64, 8, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/circle_custom_properties.avif", 100, 60, 8, AvifPixelFormat.I444, true, false, 1),
             parseFailure("libavif-test-data/clap_irot_imir_non_essential.avif", AvifErrorCode.BMFF_PARSE_FAILED),

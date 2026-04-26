@@ -142,13 +142,12 @@ final class LibavifImageIoReferenceTest {
                     PixelTransform.ROTATE_90_COUNTER_CLOCKWISE,
                     ABC_TOLERANCE
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/abc.png",
                     "libavif-test-data/abc_color_irot_alpha_NOirot.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.ROTATE_90_COUNTER_CLOCKWISE,
-                    ABC_TOLERANCE,
-                    "Pending AV1 reconstruction fix and alpha transform compatibility verification."
+                    ABC_TOLERANCE
             ),
             disabledPixelImage(
                     "libavif-test-data/ArcTriomphe-cHRM-orig.png",
@@ -164,7 +163,7 @@ final class LibavifImageIoReferenceTest {
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
                     NEAR_LOSSLESS_TOLERANCE,
-                    "Pending palette/alpha full-image validation."
+                    "Pending alpha-plane palette index-map parity for the full-image pixel reference."
             ),
             disabledPixelImage(
                     "libavif-test-data/paris_icc_exif_xmp.png",
