@@ -300,6 +300,23 @@ final class LibavifImageIoReferenceTest {
         assertRotatedFrameSize(source, "libavif-test-data/abc_color_irot_alpha_NOirot.avif");
     }
 
+    /// Verifies the copied libavif one-pixel white fixture at pixel level.
+    ///
+    /// @throws IOException if the AVIF resource cannot be decoded
+    @Test
+    void whiteOneByOneFixtureMatchesOpaqueWhitePixel() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/white_1x1.avif"))) {
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(1, frame.width());
+            assertEquals(1, frame.height());
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
+            assertEquals(AvifPixelFormat.I444, frame.pixelFormat());
+            assertEquals(0xFFFFFFFF, frame.intPixelBuffer().get(0));
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Verifies the current expected full-image pixels for the color-and-alpha `irot` fixture.
     ///
     /// @throws IOException if a resource cannot be read or decoded

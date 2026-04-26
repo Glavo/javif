@@ -554,16 +554,18 @@ public final class TileSyntaxReader {
     ///
     /// @param chroma whether the syntax belongs to a chroma plane
     /// @param context the zero-based DC-sign context in `[0, 3)`
-    /// @return whether the decoded DC coefficient is negative
+    /// @return whether the decoded DC coefficient is negative after coefficient-polarity normalization
     public boolean readDcSignFlag(boolean chroma, int context) {
-        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableDcSignCdf(chroma, context));
+        // Normalize the raw MSAC partition result into the signed-coefficient polarity used by reconstruction.
+        return !msacDecoder.decodeBooleanAdapt(cdfContext.mutableDcSignCdf(chroma, context));
     }
 
     /// Decodes one coefficient sign flag from the equiprobable residual-sign path.
     ///
-    /// @return whether the decoded coefficient is negative
+    /// @return whether the decoded coefficient is negative after coefficient-polarity normalization
     public boolean readCoefficientSignFlag() {
-        return msacDecoder.decodeBooleanEqui();
+        // Normalize the raw MSAC partition result into the signed-coefficient polarity used by reconstruction.
+        return !msacDecoder.decodeBooleanEqui();
     }
 
     /// Decodes one AV1 coefficient Golomb extension value.
