@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -525,6 +526,8 @@ final class AvifImageReaderTest {
             assertTrue(info.height() > 0);
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
+            assertNull(info.sequenceInfo());
+            assertNull(info.transformInfo());
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -543,11 +546,19 @@ final class AvifImageReaderTest {
             assertEquals(5, info.frameCount());
             assertTrue(info.mediaTimescale() > 0);
             assertTrue(info.mediaDuration() > 0);
+            AvifSequenceInfo sequenceInfo = info.sequenceInfo();
+            assertNotNull(sequenceInfo);
+            assertEquals(info.frameCount(), sequenceInfo.frameCount());
+            assertEquals(info.mediaTimescale(), sequenceInfo.mediaTimescale());
+            assertEquals(info.mediaDuration(), sequenceInfo.mediaDuration());
+            assertEquals(info.repetitionCount(), sequenceInfo.repetitionCount());
             int[] frameDurations = info.frameDurations();
             assertEquals(5, frameDurations.length);
+            assertArrayEquals(frameDurations, sequenceInfo.frameDurations());
             assertTrue(allPositive(frameDurations));
             frameDurations[0] = 0;
             assertTrue(info.frameDurations()[0] > 0);
+            assertTrue(sequenceInfo.frameDurations()[0] > 0);
 
             List<AvifFrame> frames = reader.readAllFrames();
             assertEquals(5, frames.size());
@@ -937,6 +948,14 @@ final class AvifImageReaderTest {
             assertEquals(1, info.rotationCode());
             assertEquals(-1, info.mirrorAxis());
             assertEquals(0, info.auxiliaryImageTypes().length);
+            AvifImageTransformInfo transformInfo = info.transformInfo();
+            assertNotNull(transformInfo);
+            assertFalse(transformInfo.hasCleanApertureCrop());
+            assertTrue(transformInfo.hasRotation());
+            assertEquals(1, transformInfo.rotationCode());
+            assertEquals(90, transformInfo.rotationDegreesClockwise());
+            assertFalse(transformInfo.hasMirror());
+            assertEquals(-1, transformInfo.mirrorAxis());
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -958,6 +977,13 @@ final class AvifImageReaderTest {
             assertFalse(info.hasCleanApertureCrop());
             assertEquals(-1, info.rotationCode());
             assertEquals(1, info.mirrorAxis());
+            AvifImageTransformInfo transformInfo = info.transformInfo();
+            assertNotNull(transformInfo);
+            assertFalse(transformInfo.hasCleanApertureCrop());
+            assertFalse(transformInfo.hasRotation());
+            assertEquals(-1, transformInfo.rotationDegreesClockwise());
+            assertTrue(transformInfo.hasMirror());
+            assertEquals(1, transformInfo.mirrorAxis());
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -982,6 +1008,15 @@ final class AvifImageReaderTest {
             assertEquals(16, info.cleanApertureCropHeight());
             assertEquals(-1, info.rotationCode());
             assertEquals(-1, info.mirrorAxis());
+            AvifImageTransformInfo transformInfo = info.transformInfo();
+            assertNotNull(transformInfo);
+            assertTrue(transformInfo.hasCleanApertureCrop());
+            assertEquals(8, transformInfo.cleanApertureCropX());
+            assertEquals(4, transformInfo.cleanApertureCropY());
+            assertEquals(32, transformInfo.cleanApertureCropWidth());
+            assertEquals(16, transformInfo.cleanApertureCropHeight());
+            assertFalse(transformInfo.hasRotation());
+            assertFalse(transformInfo.hasMirror());
 
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);

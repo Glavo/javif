@@ -20,6 +20,8 @@ Implemented container/API coverage:
 - AVIS/still/grid premultiplied-alpha metadata and straight-alpha frame output
 - sequence alpha frame composition for `readFrame()`
 - raw plane access for color, alpha, depth, and gain-map images
+- typed public descriptors for AVIS sequence timing/repetition and AVIF image
+  transforms
 
 ## Remaining Work
 
@@ -47,7 +49,6 @@ Implemented container/API coverage:
 
 - Add incremental or streaming input behavior instead of requiring a complete
   buffered source.
-- Expose remaining useful metadata through typed public descriptors.
 - Complete explicit output controls for display-converted RGB and high-bit-depth
   buffers without unnecessary copies.
 - Audit alpha edge cases and public buffer immutability annotations.

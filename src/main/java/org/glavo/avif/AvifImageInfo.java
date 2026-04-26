@@ -56,6 +56,8 @@ public final class AvifImageInfo {
     private final int repetitionCount;
     /// Per-frame durations in media timescale units.
     private final int @Unmodifiable [] frameDurations;
+    /// The typed sequence descriptor for animated inputs, or `null` for still images.
+    private final @Nullable AvifSequenceInfo sequenceInfo;
     /// The clean-aperture crop x coordinate, or -1 when absent.
     private final int cleanApertureCropX;
     /// The clean-aperture crop y coordinate, or -1 when absent.
@@ -68,6 +70,8 @@ public final class AvifImageInfo {
     private final int rotationCode;
     /// The mirror axis from the `imir` property, or -1 when absent.
     private final int mirrorAxis;
+    /// The typed image-transform descriptor, or `null` when no image transform is present.
+    private final @Nullable AvifImageTransformInfo transformInfo;
     /// Auxiliary image type strings associated with the primary image.
     private final String @Unmodifiable [] auxiliaryImageTypes;
     /// Auxiliary image descriptors associated with the primary image.
@@ -626,12 +630,27 @@ public final class AvifImageInfo {
         this.mediaDuration = mediaDuration;
         this.repetitionCount = repetitionCount;
         this.frameDurations = checkedFrameDurations;
+        this.sequenceInfo = animated ? new AvifSequenceInfo(
+                frameCount,
+                mediaTimescale,
+                mediaDuration,
+                repetitionCount,
+                checkedFrameDurations
+        ) : null;
         this.cleanApertureCropX = cleanApertureCropX;
         this.cleanApertureCropY = cleanApertureCropY;
         this.cleanApertureCropWidth = cleanApertureCropWidth;
         this.cleanApertureCropHeight = cleanApertureCropHeight;
         this.rotationCode = rotationCode;
         this.mirrorAxis = mirrorAxis;
+        this.transformInfo = imageTransformInfo(
+                cleanApertureCropX,
+                cleanApertureCropY,
+                cleanApertureCropWidth,
+                cleanApertureCropHeight,
+                rotationCode,
+                mirrorAxis
+        );
         AvifAuxiliaryImageInfo @Unmodifiable [] checkedAuxiliaryImages = immutableAuxiliaryImages(auxiliaryImages);
         this.auxiliaryImageTypes = auxiliaryImageTypes != null
                 ? immutableAuxiliaryImageTypes(auxiliaryImageTypes)
@@ -733,6 +752,15 @@ public final class AvifImageInfo {
         return repetitionCount;
     }
 
+    /// Returns the typed animated-sequence descriptor.
+    ///
+    /// Still images return `null`.
+    ///
+    /// @return the sequence descriptor, or `null`
+    public @Nullable AvifSequenceInfo sequenceInfo() {
+        return sequenceInfo;
+    }
+
     /// Returns per-frame durations for animated sequences.
     ///
     /// Values are expressed in `mediaTimescale()` units. Still images and inputs without timing
@@ -804,6 +832,15 @@ public final class AvifImageInfo {
     /// @return the mirror axis, or -1 when absent
     public int mirrorAxis() {
         return mirrorAxis;
+    }
+
+    /// Returns the typed AVIF image-transform descriptor.
+    ///
+    /// Inputs without `clap`, `irot`, or `imir` item properties return `null`.
+    ///
+    /// @return the image-transform descriptor, or `null`
+    public @Nullable AvifImageTransformInfo transformInfo() {
+        return transformInfo;
     }
 
     /// Returns auxiliary image type strings associated with the primary image.
@@ -971,6 +1008,37 @@ public final class AvifImageInfo {
                 && cleanApertureCropY == -1
                 && cleanApertureCropWidth == -1
                 && cleanApertureCropHeight == -1;
+    }
+
+    /// Creates typed image-transform metadata when any transform property is present.
+    ///
+    /// @param cleanApertureCropX the clean-aperture crop x coordinate
+    /// @param cleanApertureCropY the clean-aperture crop y coordinate
+    /// @param cleanApertureCropWidth the clean-aperture crop width
+    /// @param cleanApertureCropHeight the clean-aperture crop height
+    /// @param rotationCode the clockwise rotation code
+    /// @param mirrorAxis the mirror axis
+    /// @return typed image-transform metadata, or `null`
+    private static @Nullable AvifImageTransformInfo imageTransformInfo(
+            int cleanApertureCropX,
+            int cleanApertureCropY,
+            int cleanApertureCropWidth,
+            int cleanApertureCropHeight,
+            int rotationCode,
+            int mirrorAxis
+    ) {
+        if (isAbsentCleanAperture(cleanApertureCropX, cleanApertureCropY, cleanApertureCropWidth, cleanApertureCropHeight)
+                && rotationCode == -1 && mirrorAxis == -1) {
+            return null;
+        }
+        return new AvifImageTransformInfo(
+                cleanApertureCropX,
+                cleanApertureCropY,
+                cleanApertureCropWidth,
+                cleanApertureCropHeight,
+                rotationCode,
+                mirrorAxis
+        );
     }
 
     /// Returns a read-only view over immutable payload storage.
