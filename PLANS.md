@@ -34,13 +34,17 @@ Implemented container/API coverage:
   and raw AV1 OBU streams honor `Av1DecoderConfig.operatingPoint()` layer filtering
 - frame reconstruction covers CFL chroma prediction for `I420`, `I422`, and `I444`,
   plus non-zero residual reconstruction for every declared AV1 transform size
+- libavif ImageIO reference validation covers copied PNG/JPEG source resources,
+  documented source-to-AVIF dimensions, rotated output dimensions, and stable
+  `I444` draw-points regions across normal, metadata-size-zero, and IDAT
+  progressive variants
 
 ## Remaining Work
 
 ### Decode Correctness
 
-- Close the remaining `I444` pixel-accuracy gap with broader reference-image
-  assertions.
+- Extend `I444` pixel-accuracy coverage from stable fixture regions to validated
+  full-image, high-bit-depth, and color-managed reference comparisons.
 - Finish or explicitly reject AV1 reconstruction paths that can still fail as
   `NOT_IMPLEMENTED`, especially defensive inter-palette states and remaining
   inter/compound/warped prediction edge cases.
@@ -62,8 +66,9 @@ Implemented container/API coverage:
 
 - Port remaining relevant libavif and dav1d tests into Java tests using
   resources under `src/test/resources`, not files under `external`.
-- Add reference comparisons using Java ImageIO for images and JavaCPP FFmpeg
-  bindings for videos where appropriate.
+- Expand Java ImageIO and JavaCPP FFmpeg comparisons where source assets are
+  codec-equivalent references rather than lossy or semantically different
+  fixtures.
 - Keep unsupported cases covered by stable `AvifDecodeException` or
   `DecodeException` error-code assertions until implemented.
 

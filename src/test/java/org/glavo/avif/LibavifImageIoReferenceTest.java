@@ -86,6 +86,50 @@ final class LibavifImageIoReferenceTest {
             new SourceAvifPair("libavif-test-data/weld_16bit.png", "libavif-test-data/weld_sato_12B_8B_q0.avif"),
     };
 
+    /// Source-image regions that must match selected encoded AVIF fixtures after decoding.
+    private static final PixelRegionReference @Unmodifiable [] PIXEL_REGION_REFERENCES = new PixelRegionReference[]{
+            new PixelRegionReference(
+                    "libavif-test-data/draw_points.png",
+                    "libavif-test-data/draw_points_idat.avif",
+                    AvifPixelFormat.I444,
+                    0,
+                    8,
+                    11,
+                    3,
+                    8
+            ),
+            new PixelRegionReference(
+                    "libavif-test-data/draw_points.png",
+                    "libavif-test-data/draw_points_idat_metasize0.avif",
+                    AvifPixelFormat.I444,
+                    0,
+                    8,
+                    11,
+                    3,
+                    8
+            ),
+            new PixelRegionReference(
+                    "libavif-test-data/draw_points.png",
+                    "libavif-test-data/draw_points_idat_progressive.avif",
+                    AvifPixelFormat.I444,
+                    0,
+                    8,
+                    11,
+                    3,
+                    8
+            ),
+            new PixelRegionReference(
+                    "libavif-test-data/draw_points.png",
+                    "libavif-test-data/draw_points_idat_progressive_metasize0.avif",
+                    AvifPixelFormat.I444,
+                    0,
+                    8,
+                    11,
+                    3,
+                    8
+            ),
+    };
+
     /// Verifies that ImageIO can read every copied libavif PNG/JPEG reference resource.
     ///
     /// @return the dynamic image resource tests
@@ -102,6 +146,18 @@ final class LibavifImageIoReferenceTest {
     Stream<DynamicTest> imageIoSourceDimensionsMatchEncodedAvifMetadata() {
         return Arrays.stream(SOURCE_AVIF_PAIRS)
                 .map(pair -> DynamicTest.dynamicTest(pair.avifResource, () -> assertSourceAvifPair(pair)));
+    }
+
+    /// Verifies selected I444 AVIF regions against their ImageIO-readable source images.
+    ///
+    /// @return the dynamic pixel region reference tests
+    @TestFactory
+    Stream<DynamicTest> decodedAvifRegionsMatchImageIoReferences() {
+        return Arrays.stream(PIXEL_REGION_REFERENCES)
+                .map(reference -> DynamicTest.dynamicTest(
+                        reference.avifResource,
+                        () -> assertPixelRegionReference(reference)
+                ));
     }
 
     /// Verifies the two Paris PNG metadata-placement variants decode to identical pixels through ImageIO.
@@ -150,30 +206,6 @@ final class LibavifImageIoReferenceTest {
         }
     }
 
-    /// Verifies that the clipped left-edge Paeth block in `draw_points_idat.avif` remains red.
-    ///
-    /// @throws IOException if the AVIF resource cannot be decoded
-    @Test
-    void drawPointsIdatKeepsLeftEdgePaethRowsRed() throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes("libavif-test-data/draw_points_idat.avif"))) {
-            AvifFrame frame = reader.readFrame();
-            assertNotNull(frame);
-            assertEquals(33, frame.width());
-            assertEquals(11, frame.height());
-            IntBuffer pixels = frame.intPixelBuffer();
-            for (int y = 8; y < 11; y++) {
-                for (int x = 0; x < 11; x++) {
-                    int argb = pixels.get(y * frame.width() + x);
-                    assertTrue(((argb >>> 24) & 0xFF) >= 240);
-                    assertTrue(((argb >>> 16) & 0xFF) >= 240);
-                    assertTrue(((argb >>> 8) & 0xFF) <= 8);
-                    assertTrue((argb & 0xFF) <= 8);
-                }
-            }
-            assertNull(reader.readFrame());
-        }
-    }
-
     /// Asserts one ImageIO-readable image resource.
     ///
     /// @param resource the expected image resource
@@ -198,6 +230,95 @@ final class LibavifImageIoReferenceTest {
             assertEquals(source.getWidth(), info.width());
             assertEquals(source.getHeight(), info.height());
         }
+    }
+
+    /// Asserts one AVIF fixture region against an ImageIO-readable source image.
+    ///
+    /// @param reference the expected pixel region reference
+    /// @throws IOException if a resource cannot be read or decoded
+    private static void assertPixelRegionReference(PixelRegionReference reference) throws IOException {
+        BufferedImage expected = readImage(reference.sourceResource);
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(reference.avifResource))) {
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(expected.getWidth(), frame.width());
+            assertEquals(expected.getHeight(), frame.height());
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
+            assertEquals(reference.pixelFormat, frame.pixelFormat());
+
+            IntBuffer actualPixels = frame.intPixelBuffer();
+            assertEquals(expected.getWidth() * expected.getHeight(), actualPixels.remaining());
+            assertReferenceRegionMatches(expected, actualPixels, reference);
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Asserts that one decoded region matches a reference image within the allowed channel delta.
+    ///
+    /// @param expected     the expected ImageIO-decoded image
+    /// @param actualPixels the actual decoded AVIF pixels
+    /// @param reference    the expected pixel region reference
+    private static void assertReferenceRegionMatches(
+            BufferedImage expected,
+            IntBuffer actualPixels,
+            PixelRegionReference reference
+    ) {
+        int largestDelta = 0;
+        String firstMismatch = null;
+        int maxY = reference.y + reference.height;
+        int maxX = reference.x + reference.width;
+        for (int y = reference.y; y < maxY; y++) {
+            for (int x = reference.x; x < maxX; x++) {
+                int expectedArgb = expected.getRGB(x, y);
+                int actualArgb = actualPixels.get(y * expected.getWidth() + x);
+                int delta = displayRelevantChannelDelta(expectedArgb, actualArgb);
+                largestDelta = Math.max(largestDelta, delta);
+                if (delta > reference.maxChannelDelta && firstMismatch == null) {
+                    firstMismatch = "Pixel mismatch in " + reference.avifResource + " at (" + x + ", " + y
+                            + "): expected " + argbText(expectedArgb)
+                            + ", actual " + argbText(actualArgb)
+                            + ", max channel delta " + delta;
+                }
+            }
+        }
+
+        assertNull(firstMismatch, firstMismatch);
+        assertTrue(largestDelta <= reference.maxChannelDelta);
+    }
+
+    /// Returns the largest display-relevant unsigned 8-bit channel delta between two packed ARGB pixels.
+    ///
+    /// @param expectedArgb the expected packed ARGB pixel
+    /// @param actualArgb   the actual packed ARGB pixel
+    /// @return the largest display-relevant channel delta
+    private static int displayRelevantChannelDelta(int expectedArgb, int actualArgb) {
+        int alphaDelta = channelDelta(expectedArgb, actualArgb, 24);
+        if (((expectedArgb >>> 24) & 0xFF) == 0 && ((actualArgb >>> 24) & 0xFF) == 0) {
+            return alphaDelta;
+        }
+
+        return Math.max(
+                Math.max(alphaDelta, channelDelta(expectedArgb, actualArgb, 16)),
+                Math.max(channelDelta(expectedArgb, actualArgb, 8), channelDelta(expectedArgb, actualArgb, 0))
+        );
+    }
+
+    /// Returns one unsigned 8-bit channel delta between two packed ARGB pixels.
+    ///
+    /// @param expectedArgb the expected packed ARGB pixel
+    /// @param actualArgb   the actual packed ARGB pixel
+    /// @param shift        the channel bit shift
+    /// @return the unsigned 8-bit channel delta
+    private static int channelDelta(int expectedArgb, int actualArgb, int shift) {
+        return Math.abs(((expectedArgb >>> shift) & 0xFF) - ((actualArgb >>> shift) & 0xFF));
+    }
+
+    /// Formats a packed ARGB pixel for assertion messages.
+    ///
+    /// @param argb the packed ARGB pixel
+    /// @return the formatted pixel text
+    private static String argbText(int argb) {
+        return String.format("0x%08X", argb);
     }
 
     /// Asserts that one rotated AVIF fixture decodes with source dimensions swapped.
@@ -286,6 +407,57 @@ final class LibavifImageIoReferenceTest {
         private SourceAvifPair(String sourceResource, String avifResource) {
             this.sourceResource = sourceResource;
             this.avifResource = avifResource;
+        }
+    }
+
+    /// Source-image to encoded-AVIF pixel region reference.
+    @NotNullByDefault
+    private static final class PixelRegionReference {
+        /// The source image classpath resource name.
+        private final String sourceResource;
+        /// The encoded AVIF classpath resource name.
+        private final String avifResource;
+        /// The expected decoded AV1 chroma sampling layout.
+        private final AvifPixelFormat pixelFormat;
+        /// The reference region left coordinate.
+        private final int x;
+        /// The reference region top coordinate.
+        private final int y;
+        /// The reference region width.
+        private final int width;
+        /// The reference region height.
+        private final int height;
+        /// The maximum allowed unsigned 8-bit channel delta.
+        private final int maxChannelDelta;
+
+        /// Creates a pixel region reference.
+        ///
+        /// @param sourceResource  the source image classpath resource name
+        /// @param avifResource    the encoded AVIF classpath resource name
+        /// @param pixelFormat     the expected decoded AV1 chroma sampling layout
+        /// @param x               the reference region left coordinate
+        /// @param y               the reference region top coordinate
+        /// @param width           the reference region width
+        /// @param height          the reference region height
+        /// @param maxChannelDelta the maximum allowed unsigned 8-bit channel delta
+        private PixelRegionReference(
+                String sourceResource,
+                String avifResource,
+                AvifPixelFormat pixelFormat,
+                int x,
+                int y,
+                int width,
+                int height,
+                int maxChannelDelta
+        ) {
+            this.sourceResource = sourceResource;
+            this.avifResource = avifResource;
+            this.pixelFormat = pixelFormat;
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+            this.maxChannelDelta = maxChannelDelta;
         }
     }
 }
