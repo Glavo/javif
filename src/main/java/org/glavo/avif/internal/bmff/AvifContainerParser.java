@@ -119,12 +119,7 @@ public final class AvifContainerParser {
             return parseGridContainer(primaryItem);
         }
 
-        if (hasLayeredStructure(primaryItem)) {
-            throw unsupported(
-                    "Layered/scalable AVIF images with operating points are not implemented in this slice",
-                    null
-            );
-        }
+        validateOperatingPointStructure(primaryItem, "Primary image");
 
         ImageSpatialExtents ispe = primaryItem.firstProperty(ImageSpatialExtents.class);
         if (ispe == null) {
@@ -272,6 +267,7 @@ public final class AvifContainerParser {
     /// @return parsed grid payloads and geometry
     /// @throws AvifDecodeException if the grid is malformed or unsupported
     private GridPayloads parseGridPayloads(Item gridItem) throws AvifDecodeException {
+        validateOperatingPointStructure(gridItem, "Grid image");
         byte[] gridPayload = mergeItemExtents(gridItem);
         BoxInput input = new BoxInput(gridPayload);
         int version = input.readU8();
@@ -338,6 +334,7 @@ public final class AvifContainerParser {
                         null
                 );
             }
+            validateOperatingPointStructure(cellItem, "Grid cell image");
             ImageSpatialExtents cellIspe = cellItem.firstProperty(ImageSpatialExtents.class);
             if (cellIspe == null) {
                 throw new AvifDecodeException(
@@ -405,6 +402,7 @@ public final class AvifContainerParser {
         if (!"av01".equals(auxiliaryItem.type)) {
             throw unsupported("Unsupported " + label + " auxiliary item type: " + auxiliaryItem.type, null);
         }
+        validateOperatingPointStructure(auxiliaryItem, label + " auxiliary image");
         validateAuxiliaryItemDimensions(auxiliaryItem, label, expectedWidth, expectedHeight);
         return AuxiliaryPayloads.item(mergeItemExtents(auxiliaryItem));
     }
@@ -440,6 +438,7 @@ public final class AvifContainerParser {
             if (!"av01".equals(auxiliaryItem.type)) {
                 throw unsupported("Unsupported " + label + " auxiliary item type: " + auxiliaryItem.type, null);
             }
+            validateOperatingPointStructure(auxiliaryItem, label + " auxiliary image");
             validateAuxiliaryItemDimensions(auxiliaryItem, label, colorGrid.outputWidth, colorGrid.outputHeight);
             return AuxiliaryPayloads.item(mergeItemExtents(auxiliaryItem));
         }
@@ -489,6 +488,7 @@ public final class AvifContainerParser {
                         null
                 );
             }
+            validateOperatingPointStructure(auxiliaryCellItem, "Per-cell " + label + " auxiliary image");
             ImageSpatialExtents colorIspe = colorCellItem.firstProperty(ImageSpatialExtents.class);
             assert colorIspe != null;
             validateAuxiliaryItemDimensions(auxiliaryCellItem, label, colorIspe.width, colorIspe.height);
@@ -649,28 +649,40 @@ public final class AvifContainerParser {
         return new int[]{clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis};
     }
 
-    /// Returns whether the item has a layered progressive structure.
+    /// Validates the operating-point metadata for one renderable image item.
     ///
-    /// @param item the primary item
-    /// @return whether the item has a layered progressive structure
-    private boolean hasLayeredStructure(Item item) {
-        OperatingPoint primaryOp = item.firstProperty(OperatingPoint.class);
+    /// The AVIF reader currently decodes the default AV1 operating point. A zero-valued `a1op`
+    /// property is equivalent to that default and can be ignored, while non-zero operating points
+    /// require layered/scalable selection that is not yet wired through the public AVIF API.
+    ///
+    /// @param item the image item to validate
+    /// @param label the diagnostic label used in failure messages
+    /// @throws AvifDecodeException if the item requires unsupported operating-point selection
+    private void validateOperatingPointStructure(Item item, String label) throws AvifDecodeException {
+        validateDefaultOperatingPoint(item, label);
         for (int depId : item.progDeps) {
             Item depItem = meta.item(depId);
-            if (depItem != null) {
-                OperatingPoint depOp = depItem.firstProperty(OperatingPoint.class);
-                if (primaryOp != null && depOp != null && depOp.operatingPoint != primaryOp.operatingPoint) {
-                    return true;
-                }
-                if (primaryOp == null && depOp != null) {
-                    return true;
-                }
-                if (depItem.firstProperty(OperatingPoint.class) != null && primaryOp == null) {
-                    return true;
-                }
+            if (depItem == null) {
+                throw parseFailed(label + " progressive dependency item not found: " + depId, 0);
             }
+            validateDefaultOperatingPoint(depItem, label + " progressive dependency");
         }
-        return false;
+    }
+
+    /// Validates that one item does not request a non-default AV1 operating point.
+    ///
+    /// @param item the image item to validate
+    /// @param label the diagnostic label used in failure messages
+    /// @throws AvifDecodeException if the item requires unsupported operating-point selection
+    private static void validateDefaultOperatingPoint(Item item, String label) throws AvifDecodeException {
+        OperatingPoint operatingPoint = item.firstProperty(OperatingPoint.class);
+        if (operatingPoint != null && operatingPoint.operatingPoint != 0) {
+            throw unsupported(
+                    label + " requires AV1 operating point " + operatingPoint.operatingPoint
+                            + ", but AVIF operating-point selection is not implemented",
+                    null
+            );
+        }
     }
 
     /// Computes grid output width from cell ispe dimensions.
@@ -2286,6 +2298,7 @@ public final class AvifContainerParser {
             if (gainMapItem == null || gainMapItem.hasUnsupportedEssentialProperty) {
                 return GainMapPayloads.empty();
             }
+            validateOperatingPointStructure(gainMapItem, "Gain-map image");
 
             ToneMapMetadataVersions versions = toneMapMetadataVersions(item);
             ItemDimensions toneMappedDimensions = itemDimensions(item);

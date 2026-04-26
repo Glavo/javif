@@ -141,9 +141,14 @@ public final class Av1ImageReader implements AutoCloseable {
             ObuType type = packet.header().type();
             if (type == ObuType.SEQUENCE_HEADER) {
                 ensureNoPendingFrameAssembly(packet, "Sequence header OBU appeared before the current frame was completed");
-                sequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
+                SequenceHeader parsedSequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
+                validateSelectedOperatingPoint(parsedSequenceHeader, packet);
+                sequenceHeader = parsedSequenceHeader;
                 clearReferenceSlots();
                 lastFrameSyntaxDecodeResult = null;
+                continue;
+            }
+            if (!matchesSelectedOperatingPoint(packet)) {
                 continue;
             }
             if (type == ObuType.FRAME_HEADER) {
@@ -319,6 +324,62 @@ public final class Av1ImageReader implements AutoCloseable {
         if (closed) {
             throw new IOException("Av1ImageReader is closed");
         }
+    }
+
+    /// Validates that the configured operating point is declared by a parsed sequence header.
+    ///
+    /// @param parsedSequenceHeader the parsed sequence header
+    /// @param packet the packet carrying the sequence header
+    /// @throws DecodeException if the configured operating point is absent
+    private void validateSelectedOperatingPoint(SequenceHeader parsedSequenceHeader, ObuPacket packet)
+            throws DecodeException {
+        selectedOperatingPoint(parsedSequenceHeader, packet);
+    }
+
+    /// Returns whether one OBU belongs to the configured operating point.
+    ///
+    /// @param packet the OBU packet to test
+    /// @return whether the packet should be decoded for the configured operating point
+    /// @throws DecodeException if the configured operating point is absent from the active sequence
+    private boolean matchesSelectedOperatingPoint(ObuPacket packet) throws DecodeException {
+        SequenceHeader activeSequenceHeader = sequenceHeader;
+        if (activeSequenceHeader == null) {
+            return true;
+        }
+
+        SequenceHeader.OperatingPoint operatingPoint = selectedOperatingPoint(activeSequenceHeader, packet);
+        int idc = operatingPoint.idc();
+        if (idc == 0) {
+            return true;
+        }
+
+        int temporalBit = 1 << packet.header().temporalId();
+        int spatialBit = 1 << (packet.header().spatialId() + 8);
+        return (idc & temporalBit) != 0 && (idc & spatialBit) != 0;
+    }
+
+    /// Returns the configured operating point from one sequence header.
+    ///
+    /// @param activeSequenceHeader the active sequence header
+    /// @param packet the packet used for error context
+    /// @return the configured operating point
+    /// @throws DecodeException if the configured operating point is absent
+    private SequenceHeader.OperatingPoint selectedOperatingPoint(
+            SequenceHeader activeSequenceHeader,
+            ObuPacket packet
+    ) throws DecodeException {
+        int operatingPoint = config.operatingPoint();
+        if (operatingPoint >= activeSequenceHeader.operatingPointCount()) {
+            throw new DecodeException(
+                    DecodeErrorCode.INVALID_BITSTREAM,
+                    DecodeStage.SEQUENCE_HEADER_PARSE,
+                    "Configured operating point is not declared by the sequence header: " + operatingPoint,
+                    packet.streamOffset(),
+                    packet.obuIndex(),
+                    null
+            );
+        }
+        return activeSequenceHeader.operatingPoint(operatingPoint);
     }
 
     /// Starts a new frame assembly from a standalone frame-header OBU.

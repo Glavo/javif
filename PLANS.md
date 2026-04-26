@@ -29,6 +29,9 @@ Implemented container/API coverage:
   `ReadableByteChannel`, and `Path`, controlled by `AvifDecoderConfig.inputSizeLimit()`
 - alpha edge-case validation for still images, grids, AVIS auxiliary tracks,
   premultiplied-alpha references, decoded alpha luma planes, and alpha-grid layout
+- default AVIF operating-point semantics: `a1op` value `0` is accepted, non-default
+  still/progressive/grid/auxiliary/gain-map operating points are rejected explicitly,
+  and raw AV1 OBU streams honor `Av1DecoderConfig.operatingPoint()` layer filtering
 
 ## Remaining Work
 
@@ -46,11 +49,12 @@ Implemented container/API coverage:
 
 ### Display Semantics
 
-- Implement display-ready color management: ICC application, nclx primaries,
-  transfer characteristics, matrix handling, range conversion, and RGB
-  adaptation for 8/10/12-bit inputs.
+- Implement display-ready color management beyond the current nclx matrix/range
+  conversion: ICC application, primaries/transfer adaptation, and RGB color-space
+  conversion for 8/10/12-bit inputs.
 - Implement gain-map tone mapping and display adaptation.
-- Define and test layered/scalable AVIF and operating-point selection.
+- Implement real layered/scalable AVIF output for selectable non-default operating
+  points instead of the current explicit unsupported boundary.
 
 ### Validation
 

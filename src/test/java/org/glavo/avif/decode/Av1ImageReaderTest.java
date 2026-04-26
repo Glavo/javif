@@ -178,6 +178,44 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Verifies that `operatingPoint` rejects sequence headers that do not declare that point.
+    @Test
+    void readFrameRejectsUndeclaredOperatingPoint() {
+        byte[] stream = obu(1, fullSequenceHeaderPayload());
+        Av1DecoderConfig config = Av1DecoderConfig.builder().operatingPoint(1).build();
+
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
+                    config
+            )) {
+                reader.readFrame();
+            }
+        });
+        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(DecodeStage.SEQUENCE_HEADER_PARSE, exception.stage());
+    }
+
+    /// Verifies that OBUs outside the selected operating point are skipped instead of decoded.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readFrameSkipsObuOutsideSelectedOperatingPoint() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayloadWithOperatingPointIdc(0x101)),
+                obu(6, 1, 0, new byte[]{0})
+        );
+        Av1DecoderConfig config = Av1DecoderConfig.builder().operatingPoint(0).build();
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
+                config
+        )) {
+            assertNull(reader.readFrame());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
+        }
+    }
+
     /// Verifies that `readAllFrames()` returns an empty list when the stream only contains a sequence header.
     ///
     /// @throws IOException if the reader cannot consume the test stream
@@ -3771,6 +3809,22 @@ final class Av1ImageReaderTest {
         return output.toByteArray();
     }
 
+    /// Encodes a single self-delimited OBU with an extension header.
+    ///
+    /// @param typeId the numeric OBU type identifier
+    /// @param temporalId the temporal layer identifier
+    /// @param spatialId the spatial layer identifier
+    /// @param payload the OBU payload
+    /// @return the encoded OBU bytes
+    private static byte[] obu(int typeId, int temporalId, int spatialId, byte[] payload) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write((typeId << 3) | (1 << 2) | (1 << 1));
+        output.write((temporalId << 5) | (spatialId << 3));
+        writeLeb128(output, payload.length);
+        output.writeBytes(payload);
+        return output.toByteArray();
+    }
+
     /// Concatenates multiple byte arrays.
     ///
     /// @param arrays the byte arrays to concatenate
@@ -4066,6 +4120,45 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writeReducedStillPictureColorConfig(writer, pixelFormat, bitDepth, filmGrainPresent);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates one non-reduced sequence header payload with a caller-selected operating-point IDC.
+    ///
+    /// @param operatingPointIdc the `operating_point_idc[0]` value
+    /// @return one sequence header payload
+    private static byte[] fullSequenceHeaderPayloadWithOperatingPointIdc(int operatingPointIdc) {
+        BitWriter writer = new BitWriter();
+        writer.writeBits(reducedStillPictureProfile(AvifPixelFormat.I420), 3);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 5);
+        writer.writeBits(operatingPointIdc, 12);
+        writer.writeBits(3, 3);
+        writer.writeBits(1, 2);
+        writer.writeFlag(false);
+        writer.writeBits(5, 4);
+        writer.writeBits(5, 4);
+        writer.writeBits(63, 6);
+        writer.writeBits(63, 6);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(true);
+        writeReducedStillPictureColorConfig(writer, AvifPixelFormat.I420, 8, false);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }

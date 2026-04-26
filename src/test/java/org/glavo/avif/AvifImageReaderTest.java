@@ -715,6 +715,57 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that an explicit default `a1op` property is accepted as the normal operating point.
+    ///
+    /// @throws IOException if the synthetic image cannot be read
+    @Test
+    void openAcceptsPrimaryDefaultOperatingPoint() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvifWithOperatingPoint(0))) {
+            AvifFrame frame = reader.readFrame();
+
+            assertNotNull(frame);
+            assertEquals(64, frame.width());
+            assertEquals(64, frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that non-default AVIF operating-point selection has a stable unsupported boundary.
+    ///
+    /// @throws IOException if an unexpected I/O error occurs
+    @Test
+    void rejectsPrimaryNonDefaultOperatingPoint() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvifWithOperatingPoint(1))
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
+    /// Verifies that invalid `a1op` property values are rejected during BMFF parsing.
+    ///
+    /// @throws IOException if an unexpected I/O error occurs
+    @Test
+    void rejectsInvalidOperatingPointProperty() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvifWithOperatingPoint(32))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that progressive dependencies cannot silently select a non-default AV1 operating point.
+    ///
+    /// @throws IOException if an unexpected I/O error occurs
+    @Test
+    void rejectsProgressiveDependencyNonDefaultOperatingPoint() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(syntheticProgressiveAvifWithDependencyOperatingPoint(1))
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
     /// Verifies that an animated AVIS sequence parses and decodes the first frame.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
@@ -1242,6 +1293,32 @@ final class AvifImageReaderTest {
         return concat(ftyp, meta, box("mdat", av1Payload));
     }
 
+    /// Builds a minimal AVIF whose primary item carries one `a1op` property.
+    ///
+    /// @param operatingPoint the operating point value to encode
+    /// @return the AVIF container bytes
+    private static byte[] minimalAvifWithOperatingPoint(int operatingPoint) {
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] iprpBox = box("iprp",
+                box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty(),
+                        operatingPointProperty(operatingPoint)),
+                fullBox("ipma", 0, 0,
+                        u32(1), u16(1),
+                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, 0x04}
+                )
+        );
+        byte[] metaFull = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), ilocPlaceholder(), itemInfoBox(), iprpBox
+        );
+        int itemPayloadOffset = ftyp.length + metaFull.length + 8;
+        byte[] iloc = itemLocationBox(itemPayloadOffset, av1Payload.length);
+        byte[] meta = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), iloc, itemInfoBox(), iprpBox
+        );
+        return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
     /// Creates a `clap` property payload.
     ///
     /// @param width the clean-aperture width
@@ -1489,6 +1566,18 @@ final class AvifImageReaderTest {
         AvifDecodeException exception = assertThrows(
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(syntheticAlphaAvifWithAlphaDimensions(32, 64))
+        );
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    }
+
+    /// Verifies that alpha auxiliary images cannot silently request a non-default AV1 operating point.
+    ///
+    /// @throws IOException if an unexpected I/O error occurs
+    @Test
+    void rejectsAlphaAuxiliaryNonDefaultOperatingPoint() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(syntheticAlphaAvifWithAlphaOperatingPoint(1))
         );
         assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
     }
@@ -1780,6 +1869,30 @@ final class AvifImageReaderTest {
         return syntheticAlphaAvif(false, 0, alphaWidth, alphaHeight);
     }
 
+    /// Creates a synthetic AVIF still image with an alpha auxiliary item carrying `a1op`.
+    ///
+    /// @param operatingPoint the alpha item operating point
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvifWithAlphaOperatingPoint(int operatingPoint) {
+        byte[] colorPayload = av1StillPicturePayload();
+        byte[] alphaPayload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] firstMeta = buildDualItemMetaWithAlphaOperatingPoint(
+                colorPayload.length + alphaPayload.length,
+                operatingPoint
+        );
+        int colorOffset = ftyp.length + firstMeta.length + 8;
+        int alphaOffset = colorOffset + colorPayload.length;
+        byte[] meta = buildDualItemMetaWithAlphaOperatingPoint(
+                colorOffset,
+                colorPayload.length,
+                alphaOffset,
+                alphaPayload.length,
+                operatingPoint
+        );
+        return concat(ftyp, meta, box("mdat", concat(colorPayload, alphaPayload)));
+    }
+
     /// Creates a synthetic AVIF still image with configurable alpha metadata.
     ///
     /// @param premultiplied whether to add a `prem` item reference from color to alpha
@@ -1932,6 +2045,154 @@ final class AvifImageReaderTest {
 
         return fullBox("meta", 0, 0,
                 handlerBox(), primaryItemBox(), iloc, iinf, iprp, iref);
+    }
+
+    /// Creates a dual-item meta box with placeholder sizes and alpha operating-point metadata.
+    ///
+    /// @param totalPayloadLength the total mdat payload length
+    /// @param operatingPoint the alpha item operating point
+    /// @return the dual-item meta box bytes
+    private static byte[] buildDualItemMetaWithAlphaOperatingPoint(int totalPayloadLength, int operatingPoint) {
+        return buildDualItemMetaWithAlphaOperatingPoint(0, 0, 0, totalPayloadLength, operatingPoint);
+    }
+
+    /// Creates a dual-item meta box with actual payload offsets and alpha operating-point metadata.
+    ///
+    /// @param colorOffset the absolute color item payload offset
+    /// @param colorLength the color item payload length
+    /// @param alphaOffset the absolute alpha item payload offset
+    /// @param alphaLength the alpha item payload length
+    /// @param operatingPoint the alpha item operating point
+    /// @return the dual-item meta box bytes
+    private static byte[] buildDualItemMetaWithAlphaOperatingPoint(
+            int colorOffset,
+            int colorLength,
+            int alphaOffset,
+            int alphaLength,
+            int operatingPoint
+    ) {
+        byte[] iloc = fullBox("iloc", 0, 0,
+                new byte[]{0x44, 0x40},
+                u16(2),
+                u16(1),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(colorOffset),
+                u32(colorLength),
+                u16(2),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(alphaOffset),
+                u32(alphaLength)
+        );
+
+        byte[] iinf = fullBox("iinf", 0, 0,
+                u16(2),
+                fullBox("infe", 2, 0, u16(1), u16(0), fourCc("av01"), new byte[]{0}),
+                fullBox("infe", 2, 0, u16(2), u16(0), fourCc("av01"), new byte[]{0})
+        );
+
+        byte[] iprp = box("iprp",
+                box("ipco",
+                        imageSpatialExtentsProperty(),
+                        av1ConfigProperty(),
+                        colorProperty(),
+                        imageSpatialExtentsProperty(64, 64),
+                        monochromeAv1ConfigProperty(),
+                        auxCAlphaProperty(),
+                        operatingPointProperty(operatingPoint)
+                ),
+                fullBox("ipma", 0, 0,
+                        u32(2),
+                        u16(1),
+                        new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03},
+                        u16(2),
+                        new byte[]{4, (byte) 0x84, (byte) 0x85, (byte) 0x86, 0x07}
+                )
+        );
+
+        return fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), iloc, iinf, iprp, refBox(1, 2, false));
+    }
+
+    /// Creates a synthetic progressive AVIF whose dependency carries `a1op`.
+    ///
+    /// @param operatingPoint the dependency operating point
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticProgressiveAvifWithDependencyOperatingPoint(int operatingPoint) {
+        byte[] primaryPayload = av1StillPicturePayload();
+        byte[] dependencyPayload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] firstMeta = buildProgressiveDependencyOperatingPointMeta(
+                0,
+                primaryPayload.length,
+                0,
+                dependencyPayload.length,
+                operatingPoint
+        );
+        int primaryOffset = ftyp.length + firstMeta.length + 8;
+        int dependencyOffset = primaryOffset + primaryPayload.length;
+        byte[] meta = buildProgressiveDependencyOperatingPointMeta(
+                primaryOffset,
+                primaryPayload.length,
+                dependencyOffset,
+                dependencyPayload.length,
+                operatingPoint
+        );
+        return concat(ftyp, meta, box("mdat", concat(primaryPayload, dependencyPayload)));
+    }
+
+    /// Creates a two-item progressive meta box whose dependency carries `a1op`.
+    ///
+    /// @param primaryOffset the absolute primary item payload offset
+    /// @param primaryLength the primary item payload length
+    /// @param dependencyOffset the absolute dependency item payload offset
+    /// @param dependencyLength the dependency item payload length
+    /// @param operatingPoint the dependency operating point
+    /// @return the progressive meta box bytes
+    private static byte[] buildProgressiveDependencyOperatingPointMeta(
+            int primaryOffset,
+            int primaryLength,
+            int dependencyOffset,
+            int dependencyLength,
+            int operatingPoint
+    ) {
+        byte[] iloc = fullBox("iloc", 0, 0,
+                new byte[]{0x44, 0x40},
+                u16(2),
+                u16(1),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(primaryOffset),
+                u32(primaryLength),
+                u16(2),
+                u16(0),
+                u32(0),
+                u16(1),
+                u32(dependencyOffset),
+                u32(dependencyLength)
+        );
+        byte[] iinf = fullBox("iinf", 0, 0,
+                u16(2),
+                fullBox("infe", 2, 0, u16(1), u16(0), fourCc("av01"), new byte[]{0}),
+                fullBox("infe", 2, 0, u16(2), u16(0), fourCc("av01"), new byte[]{0})
+        );
+        byte[] iprp = box("iprp",
+                box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty(),
+                        operatingPointProperty(operatingPoint)),
+                fullBox("ipma", 0, 0,
+                        u32(2),
+                        u16(1),
+                        new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03},
+                        u16(2),
+                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, 0x04}
+                )
+        );
+        byte[] iref = fullBox("iref", 0, 0, box("prog", u16(1), u16(1), u16(2)));
+        return fullBox("meta", 0, 0, handlerBox(), primaryItemBox(), iloc, iinf, iprp, iref);
     }
 
     /// Creates an `iref` box with an `auxl` reference from one item to another.
@@ -3207,6 +3468,14 @@ final class AvifImageReaderTest {
     /// @return the color property bytes
     private static byte[] colorProperty() {
         return box("colr", fourCc("nclx"), u16(1), u16(13), u16(6), new byte[]{(byte) 0x80});
+    }
+
+    /// Creates an `a1op` operating-point property.
+    ///
+    /// @param operatingPoint the operating point value to encode
+    /// @return the operating-point property bytes
+    private static byte[] operatingPointProperty(int operatingPoint) {
+        return fullBox("a1op", 0, 0, new byte[]{(byte) operatingPoint});
     }
 
     /// Creates a reduced still-picture AV1 stream with one supported frame OBU.
