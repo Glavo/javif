@@ -21,7 +21,6 @@ import javafx.animation.Timeline;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.util.Duration;
-import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifFrame;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -112,17 +111,15 @@ public final class AvifFXImage extends WritableImage {
     private void renderFrame(int frameIndex) {
         if (frameIndex != renderedFrameIndex) {
             AvifFrame frame = frames.get(frameIndex);
-            if (frame.bitDepth() == AvifBitDepth.EIGHT_BITS) {
-                getPixelWriter().setPixels(
-                        0,
-                        0,
-                        frame.width(),
-                        frame.height(),
-                        PixelFormat.getIntArgbInstance(),
-                        frame.intPixelBuffer(),
-                        frame.width()
-                );
-            }
+            getPixelWriter().setPixels(
+                    0,
+                    0,
+                    frame.width(),
+                    frame.height(),
+                    PixelFormat.getIntArgbInstance(),
+                    frame.intPixelBuffer(),
+                    frame.width()
+            );
             renderedFrameIndex = frameIndex;
         }
     }
