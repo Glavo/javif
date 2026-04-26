@@ -287,6 +287,23 @@ public final class YuvToRgbTransform {
         return toOpaqueArgb(ySample, chromaCenter, chromaCenter);
     }
 
+    /// Converts one luma sample with neutral chroma into an opaque grayscale ARGB pixel.
+    ///
+    /// @param ySample the luma sample in the caller-supplied bit depth
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the packed opaque grayscale ARGB pixel
+    public int toOpaqueGrayArgb(int ySample, int bitDepth) {
+        if (bitDepth == 8) {
+            return toOpaqueGrayArgb(ySample);
+        }
+        if (identityMatrix) {
+            int gray = sampleToByte(clampToSampleDepth(ySample, maxSample(bitDepth)), bitDepth);
+            return packOpaqueArgb(gray, gray, gray);
+        }
+        int neutralChroma = scaleNominalCodeValue(chromaCenter, bitDepth);
+        return toOpaqueArgb(ySample, neutralChroma, neutralChroma, bitDepth);
+    }
+
     /// Converts one YUV sample triplet into a packed opaque ARGB pixel.
     ///
     /// @param ySample the 8-bit luma sample
@@ -308,6 +325,58 @@ public final class YuvToRgbTransform {
         );
         int blue = clampToByte((scaledLuma + centeredU * blueCoefficientU + ROUNDING) >> FRACTION_BITS);
         return 0xFF00_0000 | (red << 16) | (green << 8) | blue;
+    }
+
+    /// Converts one YUV sample triplet into a packed opaque ARGB pixel.
+    ///
+    /// The YUV samples are interpreted in their original decoded bit depth. RGB channels are first
+    /// computed in that same sample domain, then reduced to unsigned 8-bit output channels.
+    ///
+    /// @param ySample the luma sample in the caller-supplied bit depth
+    /// @param uSample the chroma U sample in the caller-supplied bit depth
+    /// @param vSample the chroma V sample in the caller-supplied bit depth
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the packed opaque non-premultiplied ARGB pixel
+    public int toOpaqueArgb(int ySample, int uSample, int vSample, int bitDepth) {
+        if (bitDepth == 8) {
+            return toOpaqueArgb(ySample, uSample, vSample);
+        }
+
+        int sampleMax = maxSample(bitDepth);
+        if (identityMatrix) {
+            return packOpaqueArgb(
+                    sampleToByte(clampToSampleDepth(vSample, sampleMax), bitDepth),
+                    sampleToByte(clampToSampleDepth(ySample, sampleMax), bitDepth),
+                    sampleToByte(clampToSampleDepth(uSample, sampleMax), bitDepth)
+            );
+        }
+
+        int scaledLumaOffset = scaleNominalCodeValue(lumaOffset, bitDepth);
+        int scaledChromaCenter = scaleNominalCodeValue(chromaCenter, bitDepth);
+
+        long scaledLuma = (long) Math.max(0, ySample - scaledLumaOffset) * lumaCoefficient;
+        int centeredU = uSample - scaledChromaCenter;
+        int centeredV = vSample - scaledChromaCenter;
+
+        int red = normalizeHighBitDepthChannel(
+                (int) ((scaledLuma + (long) centeredV * redCoefficientV + ROUNDING) >> FRACTION_BITS),
+                bitDepth,
+                sampleMax
+        );
+        int green = normalizeHighBitDepthChannel(
+                (int) ((scaledLuma
+                        + (long) centeredU * greenCoefficientU
+                        + (long) centeredV * greenCoefficientV
+                        + ROUNDING) >> FRACTION_BITS),
+                bitDepth,
+                sampleMax
+        );
+        int blue = normalizeHighBitDepthChannel(
+                (int) ((scaledLuma + (long) centeredU * blueCoefficientU + ROUNDING) >> FRACTION_BITS),
+                bitDepth,
+                sampleMax
+        );
+        return packOpaqueArgb(sampleToByte(red, bitDepth), sampleToByte(green, bitDepth), sampleToByte(blue, bitDepth));
     }
 
     /// Converts one luma sample with neutral chroma into an opaque 16-bit-per-channel grayscale
@@ -473,6 +542,16 @@ public final class YuvToRgbTransform {
             return sampleMax;
         }
         return value;
+    }
+
+    /// Reduces one decoded sample value to an unsigned 8-bit output channel.
+    ///
+    /// @param sample the decoded sample value
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the reduced unsigned 8-bit channel
+    private static int sampleToByte(int sample, int bitDepth) {
+        int sampleMax = maxSample(bitDepth);
+        return (int) (((long) sample * 255 + (sampleMax >>> 1)) / sampleMax);
     }
 
     /// Packs three unsigned 16-bit channels into opaque `0xAAAA_RRRR_GGGG_BBBB` output.

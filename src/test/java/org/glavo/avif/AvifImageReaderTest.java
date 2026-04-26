@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.nio.ShortBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -66,6 +67,9 @@ final class AvifImageReaderTest {
 
     /// A basic SDR sRGB still-image fixture copied from libavif's test data.
     private static final String LIBAVIF_COLORS_SDR_SRGB_FIXTURE = "libavif-test-data/colors_sdr_srgb.avif";
+
+    /// A 10bpc HDR sRGB still-image fixture copied from libavif's test data.
+    private static final String LIBAVIF_COLORS_HDR_SRGB_FIXTURE = "libavif-test-data/colors_hdr_srgb.avif";
 
     /// A still-image fixture copied from libavif's test data with embedded ICC, Exif, and XMP metadata.
     private static final String LIBAVIF_PARIS_ICC_EXIF_XMP_FIXTURE =
@@ -196,6 +200,9 @@ final class AvifImageReaderTest {
             assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
             assertEquals(AvifPixelFormat.I420, intFrame.pixelFormat());
             assertEquals(0, intFrame.frameIndex());
+            assertEquals(AvifRgbOutputMode.ARGB_8888, intFrame.rgbOutputMode());
+            assertTrue(intFrame.hasIntPixelBuffer());
+            assertFalse(intFrame.hasLongPixelBuffer());
 
             IntBuffer pixelBuffer = intFrame.intPixelBuffer();
             assertTrue(pixelBuffer.isReadOnly());
@@ -208,6 +215,87 @@ final class AvifImageReaderTest {
             assertEquals(OPAQUE_MID_GRAY, pixels[0]);
             assertEquals(OPAQUE_MID_GRAY, pixels[pixels.length - 1]);
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that an 8-bit still image can be exposed primarily as 16-bit-per-channel ARGB.
+    ///
+    /// @throws IOException if the reader cannot decode the test stream
+    @Test
+    void readFrameCanForceLongRgbOutputForEightBitStillImage() throws IOException {
+        AvifDecoderConfig config = AvifDecoderConfig.builder()
+                .rgbOutputMode(AvifRgbOutputMode.ARGB_16161616)
+                .build();
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage(), config)) {
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+
+            assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
+            assertEquals(AvifRgbOutputMode.ARGB_16161616, frame.rgbOutputMode());
+            assertFalse(frame.hasIntPixelBuffer());
+            assertTrue(frame.hasLongPixelBuffer());
+
+            LongBuffer pixels = frame.longPixelBuffer();
+            assertTrue(pixels.isReadOnly());
+            assertEquals(64 * 64, pixels.remaining());
+            assertEquals(0xFFFF_8080_8080_8080L, pixels.get(0));
+
+            frame.intPixelBuffer();
+            assertTrue(frame.hasIntPixelBuffer());
+            assertTrue(frame.hasLongPixelBuffer());
+        }
+    }
+
+    /// Verifies that a 10-bit still image can be exposed primarily as 8-bit ARGB.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameCanForceIntRgbOutputForTenBitStillImage() throws IOException {
+        AvifDecoderConfig config = AvifDecoderConfig.builder()
+                .rgbOutputMode(AvifRgbOutputMode.ARGB_8888)
+                .build();
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_COLORS_HDR_SRGB_FIXTURE), config)) {
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+
+            assertEquals(AvifBitDepth.TEN_BITS, frame.bitDepth());
+            assertEquals(AvifRgbOutputMode.ARGB_8888, frame.rgbOutputMode());
+            assertTrue(frame.hasIntPixelBuffer());
+            assertFalse(frame.hasLongPixelBuffer());
+
+            IntBuffer pixels = frame.intPixelBuffer();
+            assertTrue(pixels.isReadOnly());
+            assertEquals(frame.width() * frame.height(), pixels.remaining());
+
+            frame.longPixelBuffer();
+            assertTrue(frame.hasIntPixelBuffer());
+            assertTrue(frame.hasLongPixelBuffer());
+        }
+    }
+
+    /// Verifies that high-bit-depth grid color and alpha composition preserves forced 8-bit output.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameCanForceIntRgbOutputForHighBitDepthGridWithAlpha() throws IOException {
+        AvifDecoderConfig config = AvifDecoderConfig.builder()
+                .rgbOutputMode(AvifRgbOutputMode.ARGB_8888)
+                .build();
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE),
+                config
+        )) {
+            AvifImageInfo info = reader.info();
+            assertEquals(AvifBitDepth.TEN_BITS, info.bitDepth());
+            assertTrue(info.alphaPresent());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(AvifBitDepth.TEN_BITS, frame.bitDepth());
+            assertEquals(AvifRgbOutputMode.ARGB_8888, frame.rgbOutputMode());
+            assertTrue(frame.hasIntPixelBuffer());
+            assertFalse(frame.hasLongPixelBuffer());
+            assertEquals(frame.width() * frame.height(), frame.intPixelBuffer().remaining());
         }
     }
 

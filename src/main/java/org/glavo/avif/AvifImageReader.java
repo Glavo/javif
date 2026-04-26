@@ -249,7 +249,8 @@ public final class AvifImageReader implements AutoCloseable {
                     colorFrame,
                     colorReader.lastPlanes(),
                     container.info().colorInfo(),
-                    frameIndex
+                    frameIndex,
+                    config.rgbOutputMode()
             );
             if (alphaPayload != null) {
                 rawFrame = adaptFrameWithAlpha(
@@ -477,7 +478,8 @@ public final class AvifImageReader implements AutoCloseable {
                     decodedFrame,
                     sequenceAv1Reader.lastPlanes(),
                     container.info().colorInfo(),
-                    frameIndex
+                    frameIndex,
+                    config.rgbOutputMode()
             );
             return combineFrameWithSequenceAlphaSequential(rawFrame, frameIndex);
         } catch (AvifDecodeException e) {
@@ -931,7 +933,8 @@ public final class AvifImageReader implements AutoCloseable {
                     decodedFrame,
                     randomAccessReader.lastPlanes(),
                     container.info().colorInfo(),
-                    frameIndex
+                    frameIndex,
+                    config.rgbOutputMode()
             );
             return combineFrameWithSequenceAlphaRandomAccess(rawFrame, frameIndex);
         } catch (AvifDecodeException e) {
@@ -953,7 +956,7 @@ public final class AvifImageReader implements AutoCloseable {
         }
         DecodedFrame[] cellFrames = decodeGridFrames(cellPayloads, "Grid cell");
         AvifFrame rawFrame = composeGridFrames(cellFrames, container.gridRows(), container.gridColumns(),
-                container.gridOutputWidth(), container.gridOutputHeight(), frameIndex);
+                container.gridOutputWidth(), container.gridOutputHeight(), frameIndex, config.rgbOutputMode());
 
         ByteBuffer alphaPayload = container.alphaItemPayload();
         if (alphaPayload != null) {
@@ -1016,22 +1019,25 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param outputWidth the output width
     /// @param outputHeight the output height
     /// @param frameIndex the zero-based frame index
+    /// @param outputMode the requested packed RGB output mode
     /// @return the composed frame
     private static AvifFrame composeGridFrames(
             DecodedFrame[] cellFrames, int rows, int columns,
-            int outputWidth, int outputHeight, int frameIndex
+            int outputWidth, int outputHeight, int frameIndex,
+            AvifRgbOutputMode outputMode
     ) throws AvifDecodeException {
         if (cellFrames.length == 0) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cells", null);
         }
         DecodedFrame firstCell = cellFrames[0];
-        if (firstCell.bitDepth().isEightBit()) {
+        AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(firstCell.bitDepth());
+        if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
             return composeGridIntFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
         }
-        if (firstCell.bitDepth().isHighBitDepth()) {
+        if (resolvedMode == AvifRgbOutputMode.ARGB_16161616) {
             return composeGridLongFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
         }
-        throw unsupported("Unsupported grid cell bit depth: " + firstCell.bitDepth(), null);
+        throw unsupported("Unsupported grid RGB output mode: " + resolvedMode, null);
     }
 
     /// Composes 8-bit grid cell frames into a single canvas.
@@ -1185,7 +1191,7 @@ public final class AvifImageReader implements AutoCloseable {
         if (!container.hasClapCrop() && container.rotationCode() <= 0 && container.mirrorAxis() < 0) {
             return frame;
         }
-        if (frame.bitDepth().isEightBit()) {
+        if (frame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
             int[] pixels = intBufferToArray(frame.intPixelBuffer());
             int width = frame.width();
             int height = frame.height();
@@ -1218,7 +1224,7 @@ public final class AvifImageReader implements AutoCloseable {
             return new AvifFrame(width, height, frame.bitDepth(),
                     frame.pixelFormat(), frame.frameIndex(), pixels);
         }
-        if (frame.bitDepth().isHighBitDepth()) {
+        if (frame.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
             long[] pixels = longBufferToArray(frame.longPixelBuffer());
             int width = frame.width();
             int height = frame.height();
@@ -1443,18 +1449,23 @@ public final class AvifImageReader implements AutoCloseable {
     /// Adapts an AV1 decoded frame to the AVIF public frame model.
     ///
     /// @param frame the decoded AV1 frame
+    /// @param planes the decoded AV1 planes, or `null`
+    /// @param colorInfo the AVIF `nclx` color metadata, or `null`
     /// @param frameIndex the zero-based AVIF frame index
+    /// @param outputMode the requested packed RGB output mode
     /// @return an AVIF public frame
     private static AvifFrame adaptFrame(
             DecodedFrame frame,
             @Nullable DecodedPlanes planes,
             @Nullable AvifColorInfo colorInfo,
-            int frameIndex
+            int frameIndex,
+            AvifRgbOutputMode outputMode
     ) {
+        AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(frame.bitDepth());
         if (colorInfo != null && planes != null) {
-            return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex);
+            return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex, resolvedMode);
         }
-        if (frame.bitDepth().isEightBit()) {
+        if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1464,7 +1475,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.intPixelBuffer()
             );
         }
-        if (frame.bitDepth().isHighBitDepth()) {
+        if (resolvedMode == AvifRgbOutputMode.ARGB_16161616) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1474,7 +1485,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.longPixelBuffer()
             );
         }
-        throw new IllegalArgumentException("Unsupported decoded bit depth: " + frame.bitDepth());
+        throw new IllegalArgumentException("Unsupported RGB output mode: " + resolvedMode);
     }
 
     /// Adapts decoded AV1 planes to the AVIF public frame model using container color metadata.
@@ -1483,18 +1494,20 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param planes the decoded AV1 planes to render
     /// @param colorInfo the AVIF `nclx` color metadata
     /// @param frameIndex the zero-based AVIF frame index
+    /// @param resolvedOutputMode the concrete packed RGB output mode
     /// @return an AVIF public frame rendered with the container-selected YUV transform
     private static AvifFrame adaptFrameFromPlanes(
             DecodedFrame frame,
             DecodedPlanes planes,
             AvifColorInfo colorInfo,
-            int frameIndex
+            int frameIndex,
+            AvifRgbOutputMode resolvedOutputMode
     ) {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorInfo(
                 colorInfo,
                 frame.pixelFormat() == AvifPixelFormat.I400
         );
-        if (frame.bitDepth().isEightBit()) {
+        if (resolvedOutputMode == AvifRgbOutputMode.ARGB_8888) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1504,7 +1517,7 @@ public final class AvifImageReader implements AutoCloseable {
                     ArgbOutput.toOpaqueArgbPixels(planes, transform)
             );
         }
-        if (frame.bitDepth().isHighBitDepth()) {
+        if (resolvedOutputMode == AvifRgbOutputMode.ARGB_16161616) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1514,7 +1527,7 @@ public final class AvifImageReader implements AutoCloseable {
                     ArgbOutput.toOpaqueArgbLongPixels(planes, transform)
             );
         }
-        throw new IllegalArgumentException("Unsupported decoded bit depth: " + frame.bitDepth());
+        throw new IllegalArgumentException("Unsupported RGB output mode: " + resolvedOutputMode);
     }
 
     /// Combines a sequentially read sequence frame with its matching alpha sample when present.
@@ -1707,7 +1720,7 @@ public final class AvifImageReader implements AutoCloseable {
             throw unsupported("Alpha grid with different decoded dimensions than master image", null);
         }
         DecodedAlphaCell[] alphaCells = decodeAlphaGridCells(alphaCellPayloads);
-        if (colorFrame.bitDepth().isEightBit()) {
+        if (colorFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
             return combineIntGridAlpha(
                     colorFrame,
                     alphaCells,
@@ -1719,7 +1732,7 @@ public final class AvifImageReader implements AutoCloseable {
                     alphaPremultiplied
             );
         }
-        if (colorFrame.bitDepth().isHighBitDepth()) {
+        if (colorFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
             return combineLongGridAlpha(
                     colorFrame,
                     alphaCells,
@@ -1731,7 +1744,7 @@ public final class AvifImageReader implements AutoCloseable {
                     alphaPremultiplied
             );
         }
-        throw unsupported("Unsupported alpha color frame bit depth: " + colorFrame.bitDepth(), null);
+        throw unsupported("Unsupported alpha color frame RGB output mode: " + colorFrame.rgbOutputMode(), null);
     }
 
     /// Decodes alpha grid cells and retains their raw luma planes.
@@ -1785,13 +1798,13 @@ public final class AvifImageReader implements AutoCloseable {
             int frameIndex,
             boolean alphaPremultiplied
     ) {
-        if (color.bitDepth().isEightBit()) {
+        if (color.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
             return combineIntPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex, alphaPremultiplied);
         }
-        if (color.bitDepth().isHighBitDepth()) {
+        if (color.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
             return combineLongPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex, alphaPremultiplied);
         }
-        throw new IllegalArgumentException("Unsupported alpha color frame bit depth: " + color.bitDepth());
+        throw new IllegalArgumentException("Unsupported alpha color frame RGB output mode: " + color.rgbOutputMode());
     }
 
     /// Combines alpha from raw luma plane into an 8-bit color frame.

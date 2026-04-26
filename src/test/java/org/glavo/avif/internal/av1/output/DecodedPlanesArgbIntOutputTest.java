@@ -115,6 +115,37 @@ final class DecodedPlanesArgbIntOutputTest {
         assertFrameMetadata(output.frame(), planes);
     }
 
+    /// Verifies that high-bit-depth planes can be reduced directly into opaque 8-bit ARGB output.
+    ///
+    /// @throws ReflectiveOperationException if reflective output invocation fails
+    @Test
+    void convertsTenBitI400SamplesIntoOpaqueArgbPixels() throws ReflectiveOperationException {
+        DecodedPlanes planes = new DecodedPlanes(
+                10,
+                AvifPixelFormat.I400,
+                3,
+                1,
+                3,
+                1,
+                plane(3, 1, 4, 0, 512, 1023, 7),
+                null,
+                null
+        );
+
+        ConvertedOutput output = requireOutputInvoker().convert(planes);
+
+        assertArrayEquals(
+                new int[]{
+                        0xFF000000,
+                        0xFF808080,
+                        0xFFFFFFFF
+                },
+                output.pixels()
+        );
+        assertOpaquePixels(output.pixels());
+        assertFrameMetadata(output.frame(), planes);
+    }
+
     /// Verifies that 8-bit `I420` output reuses one chroma sample for each 2x2 luma block and packs `AARRGGBB`.
     ///
     /// The left block uses neutral chroma so its pixels must stay grayscale. The right block uses strongly

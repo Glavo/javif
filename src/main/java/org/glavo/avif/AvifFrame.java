@@ -38,6 +38,8 @@ public final class AvifFrame {
     private final AvifPixelFormat pixelFormat;
     /// The zero-based frame index.
     private final int frameIndex;
+    /// The concrete packed RGB storage mode used by this frame before lazy conversion.
+    private final AvifRgbOutputMode rgbOutputMode;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
     private @Nullable @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
@@ -139,6 +141,7 @@ public final class AvifFrame {
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
         this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
         this.frameIndex = frameIndex;
+        this.rgbOutputMode = intPixels != null ? AvifRgbOutputMode.ARGB_8888 : AvifRgbOutputMode.ARGB_16161616;
         this.intPixels = intPixels;
         this.longPixels = longPixels;
     }
@@ -176,6 +179,33 @@ public final class AvifFrame {
     /// @return the zero-based frame index
     public int frameIndex() {
         return frameIndex;
+    }
+
+    /// Returns the concrete packed RGB storage mode used by this frame before lazy conversion.
+    ///
+    /// The value is either `ARGB_8888` or `ARGB_16161616`; it is never `AUTOMATIC`.
+    ///
+    /// @return the concrete packed RGB storage mode
+    public AvifRgbOutputMode rgbOutputMode() {
+        return rgbOutputMode;
+    }
+
+    /// Returns whether this frame already has native `IntBuffer` ARGB_8888 storage.
+    ///
+    /// This method does not trigger lazy conversion.
+    ///
+    /// @return whether native `IntBuffer` storage is present
+    public boolean hasIntPixelBuffer() {
+        return intPixels != null;
+    }
+
+    /// Returns whether this frame already has native `LongBuffer` ARGB_16161616 storage.
+    ///
+    /// This method does not trigger lazy conversion.
+    ///
+    /// @return whether native `LongBuffer` storage is present
+    public boolean hasLongPixelBuffer() {
+        return longPixels != null;
     }
 
     /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.

@@ -28,12 +28,15 @@ public final class AvifDecoderConfig {
 
     /// The underlying AV1 decoder configuration.
     private final Av1DecoderConfig av1DecoderConfig;
+    /// The requested packed RGB output storage mode.
+    private final AvifRgbOutputMode rgbOutputMode;
 
     /// Creates a configuration from a validated builder.
     ///
     /// @param builder the validated builder state
     private AvifDecoderConfig(Builder builder) {
         this.av1DecoderConfig = builder.av1DecoderConfig;
+        this.rgbOutputMode = builder.rgbOutputMode;
     }
 
     /// Creates a mutable configuration builder.
@@ -50,11 +53,20 @@ public final class AvifDecoderConfig {
         return av1DecoderConfig;
     }
 
+    /// Returns the requested packed RGB output storage mode.
+    ///
+    /// @return the requested packed RGB output storage mode
+    public AvifRgbOutputMode rgbOutputMode() {
+        return rgbOutputMode;
+    }
+
     /// Mutable builder for `AvifDecoderConfig`.
     @NotNullByDefault
     public static final class Builder {
         /// The underlying AV1 decoder configuration.
         private Av1DecoderConfig av1DecoderConfig = Av1DecoderConfig.DEFAULT;
+        /// The requested packed RGB output storage mode.
+        private AvifRgbOutputMode rgbOutputMode = AvifRgbOutputMode.AUTOMATIC;
 
         /// Creates a builder with default values.
         public Builder() {
@@ -66,6 +78,18 @@ public final class AvifDecoderConfig {
         /// @return this builder
         public Builder av1DecoderConfig(Av1DecoderConfig value) {
             this.av1DecoderConfig = Objects.requireNonNull(value, "value");
+            return this;
+        }
+
+        /// Sets the requested packed RGB output storage mode.
+        ///
+        /// `AUTOMATIC` preserves the legacy behavior: 8-bit inputs expose `IntBuffer` pixels first,
+        /// while 10/12-bit inputs expose `LongBuffer` pixels first.
+        ///
+        /// @param value the requested packed RGB output storage mode
+        /// @return this builder
+        public Builder rgbOutputMode(AvifRgbOutputMode value) {
+            this.rgbOutputMode = Objects.requireNonNull(value, "value");
             return this;
         }
 

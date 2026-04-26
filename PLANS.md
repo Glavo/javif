@@ -22,6 +22,9 @@ Implemented container/API coverage:
 - raw plane access for color, alpha, depth, and gain-map images
 - typed public descriptors for AVIS sequence timing/repetition and AVIF image
   transforms
+- explicit RGB output-mode controls for automatic, ARGB_8888, and
+  ARGB_16161616 frame buffers across still, sequence, grid, alpha, and
+  high-bit-depth paths
 
 ## Remaining Work
 
@@ -49,8 +52,6 @@ Implemented container/API coverage:
 
 - Add incremental or streaming input behavior instead of requiring a complete
   buffered source.
-- Complete explicit output controls for display-converted RGB and high-bit-depth
-  buffers without unnecessary copies.
 - Audit alpha edge cases and public buffer immutability annotations.
 
 ### Validation
