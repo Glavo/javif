@@ -57,6 +57,9 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/alpha_noispe.avif",
             "libavif-test-data/circle_custom_properties.avif",
             "libavif-test-data/clop_irot_imor.avif",
+            "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
+            "libavif-test-data/color_grid_alpha_nogrid.avif",
+            "libavif-test-data/color_grid_gainmap_different_grid.avif",
             "libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif",
             "libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif",
             "libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif",
@@ -90,11 +93,21 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/seine_sdr_gainmap_notmapbrand.avif",
             "libavif-test-data/seine_sdr_gainmap_srgb.avif",
             "libavif-test-data/seine_sdr_gainmap_srgb_icc.avif",
+            "libavif-test-data/sofa_grid1x5_420.avif",
+            "libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif",
             "libavif-test-data/unsupported_gainmap_minimum_version.avif",
             "libavif-test-data/unsupported_gainmap_version.avif",
             "libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif",
             "libavif-test-data/weld_sato_12B_8B_q0.avif",
             "libavif-test-data/white_1x1.avif",
+    };
+    /// AVIF resources where FFmpeg exposes a derived tile or source image instead of javif's composed output size.
+    private static final String @Unmodifiable [] FFMPEG_DERIVED_DIMENSION_REFERENCE_RESOURCES = new String[]{
+            "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
+            "libavif-test-data/color_grid_alpha_nogrid.avif",
+            "libavif-test-data/color_grid_gainmap_different_grid.avif",
+            "libavif-test-data/sofa_grid1x5_420.avif",
+            "libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif",
     };
 
     /// FFmpeg reference expectations for every copied libavif AVIF resource.
@@ -272,8 +285,11 @@ final class LibavifFFmpegAvifReferenceTest {
         String resourceName = reference.resourceName();
         ArgbImage rawExpected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
-            assertEquals(rawExpected.width(), reader.info().width());
-            assertEquals(rawExpected.height(), reader.info().height());
+            boolean dimensionsComparable = !hasDerivedFFmpegDimensions(resourceName);
+            if (dimensionsComparable) {
+                assertEquals(rawExpected.width(), reader.info().width());
+                assertEquals(rawExpected.height(), reader.info().height());
+            }
             assertImageInfoMatchesFFmpegMetadata(reader.info(), rawExpected);
 
             AvifFrame actual = reader.readFrame();
@@ -281,8 +297,10 @@ final class LibavifFFmpegAvifReferenceTest {
             ArgbImage transformedExpected =
                     rawExpected.transformed(reader.info().rotationCode(), reader.info().mirrorAxis());
             assertFrameMetadataMatchesFFmpegMetadata(actual, transformedExpected);
-            assertEquals(transformedExpected.width(), actual.width());
-            assertEquals(transformedExpected.height(), actual.height());
+            if (dimensionsComparable) {
+                assertEquals(transformedExpected.width(), actual.width());
+                assertEquals(transformedExpected.height(), actual.height());
+            }
         }
     }
 
@@ -375,6 +393,14 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @return whether FFmpeg source metadata comparison currently passes
     private static boolean isEnabledMetadataReference(String resourceName) {
         return Arrays.asList(ENABLED_METADATA_REFERENCE_RESOURCES).contains(resourceName);
+    }
+
+    /// Returns whether FFmpeg exposes derived input dimensions instead of javif composed output dimensions.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @return whether FFmpeg dimensions are not comparable to javif output dimensions
+    private static boolean hasDerivedFFmpegDimensions(String resourceName) {
+        return Arrays.asList(FFMPEG_DERIVED_DIMENSION_REFERENCE_RESOURCES).contains(resourceName);
     }
 
     /// Creates an FFmpeg reference case.
