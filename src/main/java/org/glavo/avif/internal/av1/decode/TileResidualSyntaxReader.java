@@ -169,9 +169,7 @@ public final class TileResidualSyntaxReader {
         TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[0];
         TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[0];
         TransformUnit[] chromaUnits = nonNullTransformLayout.chromaUnits();
-        if (nonNullHeader.hasChroma()
-                && nonNullHeader.uvPaletteSize() == 0
-                && chromaUnits.length != 0) {
+        if (nonNullHeader.hasChroma() && chromaUnits.length != 0) {
             chromaUUnits = readChromaResidualUnits(
                     nonNullHeader,
                     nonNullTransformLayout,

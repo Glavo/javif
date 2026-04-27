@@ -38,6 +38,9 @@ final class MutablePlaneBuffer {
     /// The tightly packed mutable sample buffer.
     private final short[] samples;
 
+    /// Whether each sample position has been written by reconstruction.
+    private final boolean[] writtenSamples;
+
     /// Creates one mutable decoded-plane buffer.
     ///
     /// @param width the plane width in samples
@@ -58,6 +61,7 @@ final class MutablePlaneBuffer {
         this.bitDepth = bitDepth;
         this.maxSampleValue = (1 << bitDepth) - 1;
         this.samples = new short[width * height];
+        this.writtenSamples = new boolean[width * height];
     }
 
     /// Returns the plane width in samples.
@@ -115,7 +119,18 @@ final class MutablePlaneBuffer {
         if (y < 0 || y >= height) {
             throw new IndexOutOfBoundsException("y out of range: " + y);
         }
-        samples[y * width + x] = (short) clipped(value);
+        int index = y * width + x;
+        samples[index] = (short) clipped(value);
+        writtenSamples[index] = true;
+    }
+
+    /// Returns whether one in-range sample has been written by reconstruction.
+    ///
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @return whether the sample has been written
+    boolean hasWrittenSample(int x, int y) {
+        return x >= 0 && x < width && y >= 0 && y < height && writtenSamples[y * width + x];
     }
 
     /// Returns one sample when it lies inside the plane, or the supplied fallback value otherwise.
@@ -166,6 +181,7 @@ final class MutablePlaneBuffer {
     MutablePlaneBuffer copy() {
         MutablePlaneBuffer copy = new MutablePlaneBuffer(width, height, bitDepth);
         System.arraycopy(samples, 0, copy.samples, 0, samples.length);
+        System.arraycopy(writtenSamples, 0, copy.writtenSamples, 0, writtenSamples.length);
         return copy;
     }
 

@@ -1067,6 +1067,7 @@ public final class FrameReconstructor {
             int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
             int codedChromaWidth = chromaDimension(codedLumaWidth, chromaSubsamplingX);
             int codedChromaHeight = chromaDimension(codedLumaHeight, chromaSubsamplingY);
+            boolean chromaResidualsApplied = false;
             if (header.intra()) {
                 if (header.uvPaletteSize() != 0) {
                     reconstructChromaPalette(
@@ -1077,6 +1078,19 @@ public final class FrameReconstructor {
                             visibleChromaWidth,
                             visibleChromaHeight
                     );
+                } else if (frameHeader.segmentation().lossless(header.segmentId())
+                        && header.uvMode() != UvIntraPredictionMode.CFL) {
+                    reconstructLosslessIntraChroma(
+                            chromaUPlane,
+                            chromaVPlane,
+                            residualLayout,
+                            header,
+                            frameHeader,
+                            pixelFormat,
+                            intraEdgeFilterEnabled,
+                            chromaSmoothEdgeReferences(header, decodedBlockMap)
+                    );
+                    chromaResidualsApplied = true;
                 } else if (header.uvMode() == UvIntraPredictionMode.CFL) {
                     IntraPredictor.predictChromaCfl(
                             chromaUPlane,
@@ -1130,7 +1144,16 @@ public final class FrameReconstructor {
                 }
             }
 
-            reconstructChromaResiduals(chromaUPlane, chromaVPlane, residualLayout, frameHeader, pixelFormat, header.qIndex());
+            if (!chromaResidualsApplied) {
+                reconstructChromaResiduals(
+                        chromaUPlane,
+                        chromaVPlane,
+                        residualLayout,
+                        frameHeader,
+                        pixelFormat,
+                        header.qIndex()
+                );
+            }
         }
     }
 
@@ -3983,16 +4006,34 @@ public final class FrameReconstructor {
         LumaIntraPredictionMode yMode = Objects.requireNonNull(header.yMode(), "header.yMode()");
         LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
         for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
+            int predictionX = residualUnit.position().x4() << 2;
+            int predictionY = residualUnit.position().y4() << 2;
+            int predictionWidth = residualUnit.size().widthPixels();
+            int predictionHeight = residualUnit.size().heightPixels();
             IntraPredictor.predictLuma(
                     lumaPlane,
-                    residualUnit.position().x4() << 2,
-                    residualUnit.position().y4() << 2,
-                    residualUnit.size().widthPixels(),
-                    residualUnit.size().heightPixels(),
+                    predictionX,
+                    predictionY,
+                    predictionWidth,
+                    predictionHeight,
                     yMode,
                     header.yAngle(),
                     intraEdgeFilterEnabled,
-                    smoothEdgeReferences
+                    smoothEdgeReferences,
+                    availableDirectionalTopReferenceLength(
+                            lumaPlane,
+                            predictionX,
+                            predictionY,
+                            predictionWidth,
+                            predictionHeight
+                    ),
+                    availableDirectionalLeftReferenceLength(
+                            lumaPlane,
+                            predictionX,
+                            predictionY,
+                            predictionWidth,
+                            predictionHeight
+                    )
             );
             reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext);
         }
@@ -4047,6 +4088,204 @@ public final class FrameReconstructor {
                 quantization.useQuantizationMatrices(),
                 quantization.quantizationMatrixY()
         );
+    }
+
+    /// Returns the available top-edge directional reference length for one transform prediction.
+    ///
+    /// @param plane the mutable plane whose written samples are tracked
+    /// @param x the plane-local transform X coordinate
+    /// @param y the plane-local transform Y coordinate
+    /// @param width the transform width in plane samples
+    /// @param height the transform height in plane samples
+    /// @return the available top-edge directional reference length
+    private static int availableDirectionalTopReferenceLength(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height
+    ) {
+        int availableLength = width;
+        int maximumExtraLength = Math.min(width, height);
+        for (int extra = 0; extra < maximumExtraLength; extra++) {
+            if (!isDirectionalReferenceSampleDecoded(
+                    plane,
+                    x + width + extra,
+                    y - 1
+            )) {
+                break;
+            }
+            availableLength++;
+        }
+        return availableLength;
+    }
+
+    /// Returns the available left-edge directional reference length for one transform prediction.
+    ///
+    /// @param plane the mutable plane whose written samples are tracked
+    /// @param x the plane-local transform X coordinate
+    /// @param y the plane-local transform Y coordinate
+    /// @param width the transform width in plane samples
+    /// @param height the transform height in plane samples
+    /// @return the available left-edge directional reference length
+    private static int availableDirectionalLeftReferenceLength(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height
+    ) {
+        int availableLength = height;
+        int maximumExtraLength = Math.min(width, height);
+        for (int extra = 0; extra < maximumExtraLength; extra++) {
+            if (!isDirectionalReferenceSampleDecoded(
+                    plane,
+                    x - 1,
+                    y + height + extra
+            )) {
+                break;
+            }
+            availableLength++;
+        }
+        return availableLength;
+    }
+
+    /// Returns whether one directional reference sample has already been reconstructed.
+    ///
+    /// @param plane the mutable plane whose written samples are tracked
+    /// @param sampleX the plane-local reference sample X coordinate
+    /// @param sampleY the plane-local reference sample Y coordinate
+    /// @return whether the reference sample is causally available
+    private static boolean isDirectionalReferenceSampleDecoded(
+            MutablePlaneBuffer plane,
+            int sampleX,
+            int sampleY
+    ) {
+        return plane.hasWrittenSample(sampleX, sampleY);
+    }
+
+    /// Reconstructs lossless intra chroma by predicting and applying residuals per transform unit.
+    ///
+    /// @param chromaUPlane the mutable chroma U destination plane
+    /// @param chromaVPlane the mutable chroma V destination plane
+    /// @param residualLayout the decoded chroma residual layout
+    /// @param header the decoded block header that owns the residuals
+    /// @param frameHeader the frame header that owns the active quantization state
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    private static void reconstructLosslessIntraChroma(
+            MutablePlaneBuffer chromaUPlane,
+            MutablePlaneBuffer chromaVPlane,
+            ResidualLayout residualLayout,
+            TileBlockHeaderReader.BlockHeader header,
+            FrameHeader frameHeader,
+            AvifPixelFormat pixelFormat,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences
+    ) {
+        UvIntraPredictionMode uvMode = Objects.requireNonNull(header.uvMode(), "header.uvMode()");
+        FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
+        reconstructLosslessIntraChromaPlane(
+                chromaUPlane,
+                residualLayout.chromaUUnits(),
+                uvMode,
+                header.uvAngle(),
+                intraEdgeFilterEnabled,
+                smoothEdgeReferences,
+                new ChromaDequantizer.Context(
+                        header.qIndex(),
+                        quantization.uDcDelta(),
+                        quantization.uAcDelta(),
+                        chromaUPlane.bitDepth(),
+                        quantization.useQuantizationMatrices(),
+                        quantization.quantizationMatrixU()
+                ),
+                pixelFormat,
+                chromaUPlane
+        );
+        reconstructLosslessIntraChromaPlane(
+                chromaVPlane,
+                residualLayout.chromaVUnits(),
+                uvMode,
+                header.uvAngle(),
+                intraEdgeFilterEnabled,
+                smoothEdgeReferences,
+                new ChromaDequantizer.Context(
+                        header.qIndex(),
+                        quantization.vDcDelta(),
+                        quantization.vAcDelta(),
+                        chromaVPlane.bitDepth(),
+                        quantization.useQuantizationMatrices(),
+                        quantization.quantizationMatrixV()
+                ),
+                pixelFormat,
+                chromaVPlane
+        );
+    }
+
+    /// Reconstructs one lossless intra chroma plane per transform unit.
+    ///
+    /// @param chromaPlane the mutable destination chroma plane
+    /// @param residualUnits the decoded transform residual units in bitstream order
+    /// @param uvMode the chroma intra prediction mode
+    /// @param uvAngle the derived chroma directional prediction angle
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param dequantizationContext the plane-local chroma dequantization context
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param referencePlane the mutable plane whose written samples are tracked
+    private static void reconstructLosslessIntraChromaPlane(
+            MutablePlaneBuffer chromaPlane,
+            TransformResidualUnit[] residualUnits,
+            UvIntraPredictionMode uvMode,
+            int uvAngle,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences,
+            ChromaDequantizer.Context dequantizationContext,
+            AvifPixelFormat pixelFormat,
+            MutablePlaneBuffer referencePlane
+    ) {
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        for (TransformResidualUnit residualUnit : residualUnits) {
+            int predictionX = residualUnit.position().x4() << (2 - chromaSubsamplingX);
+            int predictionY = residualUnit.position().y4() << (2 - chromaSubsamplingY);
+            int predictionWidth = residualUnit.size().widthPixels();
+            int predictionHeight = residualUnit.size().heightPixels();
+            IntraPredictor.predictChroma(
+                    chromaPlane,
+                    predictionX,
+                    predictionY,
+                    predictionWidth,
+                    predictionHeight,
+                    uvMode,
+                    uvAngle,
+                    intraEdgeFilterEnabled,
+                    smoothEdgeReferences,
+                    availableDirectionalTopReferenceLength(
+                            referencePlane,
+                            predictionX,
+                            predictionY,
+                            predictionWidth,
+                            predictionHeight
+                    ),
+                    availableDirectionalLeftReferenceLength(
+                            referencePlane,
+                            predictionX,
+                            predictionY,
+                            predictionWidth,
+                            predictionHeight
+                    )
+            );
+            reconstructChromaResidualUnit(
+                    chromaPlane,
+                    residualUnit,
+                    dequantizationContext,
+                    chromaSubsamplingX,
+                    chromaSubsamplingY
+            );
+        }
     }
 
     /// Reconstructs decoded chroma residuals into the destination planes.
@@ -4108,25 +4347,48 @@ public final class FrameReconstructor {
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
         for (TransformResidualUnit residualUnit : residualUnits) {
-            if (residualUnit.allZero()) {
-                continue;
-            }
-            int[] dequantizedCoefficients = ChromaDequantizer.dequantize(residualUnit, dequantizationContext);
-            int[] residualSamples = InverseTransformer.reconstructResidualBlock(
-                    dequantizedCoefficients,
-                    residualUnit.size(),
-                    residualUnit.transformType()
-            );
-            InverseTransformer.addResidualBlock(
+            reconstructChromaResidualUnit(
                     chromaPlane,
-                    residualUnit.position().x4() << (2 - chromaSubsamplingX),
-                    residualUnit.position().y4() << (2 - chromaSubsamplingY),
-                    residualUnit.size(),
-                    residualUnit.visibleWidthPixels(),
-                    residualUnit.visibleHeightPixels(),
-                    residualSamples
+                    residualUnit,
+                    dequantizationContext,
+                    chromaSubsamplingX,
+                    chromaSubsamplingY
             );
         }
+    }
+
+    /// Reconstructs one decoded chroma residual unit into the destination plane.
+    ///
+    /// @param chromaPlane the mutable destination chroma plane
+    /// @param residualUnit the decoded residual unit
+    /// @param dequantizationContext the active chroma dequantization context
+    /// @param chromaSubsamplingX the horizontal chroma subsampling shift
+    /// @param chromaSubsamplingY the vertical chroma subsampling shift
+    private static void reconstructChromaResidualUnit(
+            MutablePlaneBuffer chromaPlane,
+            TransformResidualUnit residualUnit,
+            ChromaDequantizer.Context dequantizationContext,
+            int chromaSubsamplingX,
+            int chromaSubsamplingY
+    ) {
+        if (residualUnit.allZero()) {
+            return;
+        }
+        int[] dequantizedCoefficients = ChromaDequantizer.dequantize(residualUnit, dequantizationContext);
+        int[] residualSamples = InverseTransformer.reconstructResidualBlock(
+                dequantizedCoefficients,
+                residualUnit.size(),
+                residualUnit.transformType()
+        );
+        InverseTransformer.addResidualBlock(
+                chromaPlane,
+                residualUnit.position().x4() << (2 - chromaSubsamplingX),
+                residualUnit.position().y4() << (2 - chromaSubsamplingY),
+                residualUnit.size(),
+                residualUnit.visibleWidthPixels(),
+                residualUnit.visibleHeightPixels(),
+                residualSamples
+        );
     }
 
     /// Returns the horizontal chroma subsampling shift for one decoded pixel format.

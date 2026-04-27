@@ -17,6 +17,7 @@ package org.glavo.avif;
 
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder.ArgbImage;
+import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder.SourcePlanes;
 import org.glavo.avif.testutil.ImagePixelAssertions.PixelTolerance;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -49,8 +50,13 @@ final class LibavifFFmpegAvifReferenceTest {
     private static final String TEST_DATA_ROOT = "libavif-test-data";
     /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
     private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
+            pixelReference("libavif-test-data/colors_sdr_srgb.avif", PixelTolerance.bounded(1, 0.003, 0.004, 0.06)),
             pixelReference("libavif-test-data/paris_icc_exif_xmp.avif", PixelTolerance.bounded(9, 0.0, 0.8, 1.0)),
             pixelReference("libavif-test-data/white_1x1.avif", PixelTolerance.perPixelDelta(0)),
+    };
+    /// AVIF resources whose raw decoded planes match FFmpeg source planes exactly.
+    private static final String @Unmodifiable [] ENABLED_SOURCE_PLANE_REFERENCE_RESOURCES = new String[]{
+            "libavif-test-data/colors_sdr_srgb.avif",
     };
     /// AVIF resources whose source metadata comparison against FFmpeg currently passes.
     private static final String @Unmodifiable [] ENABLED_METADATA_REFERENCE_RESOURCES = new String[]{
@@ -224,6 +230,18 @@ final class LibavifFFmpegAvifReferenceTest {
                 ));
     }
 
+    /// Verifies enabled libavif AVIF fixtures against FFmpeg decoded source planes.
+    ///
+    /// @return the dynamic FFmpeg source-plane reference tests
+    @TestFactory
+    Stream<DynamicTest> libavifAvifResourcesMatchFFmpegSourcePlanes() {
+        return Arrays.stream(AVIF_REFERENCES)
+                .map(reference -> DynamicTest.dynamicTest(
+                        reference.resourceName(),
+                        () -> assertFFmpegSourcePlaneReferenceCase(reference)
+                ));
+    }
+
     /// Asserts one FFmpeg reference case.
     ///
     /// @param reference the reference case
@@ -255,6 +273,22 @@ final class LibavifFFmpegAvifReferenceTest {
             Assumptions.assumeTrue(false, "Pending FFmpeg source metadata parity for this fixture.");
         }
         assertFirstFrameMetadataMatchesFFmpegReference(reference);
+    }
+
+    /// Asserts one FFmpeg source-plane reference case.
+    ///
+    /// @param reference the reference case
+    /// @throws IOException if a resource cannot be read or decoded
+    /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
+    private static void assertFFmpegSourcePlaneReferenceCase(FFmpegReferenceCase reference)
+            throws IOException, URISyntaxException {
+        if (reference.disabledReason() != null) {
+            Assumptions.assumeTrue(false, reference.disabledReason());
+        }
+        if (!isEnabledSourcePlaneReference(reference.resourceName())) {
+            Assumptions.assumeTrue(false, "Pending FFmpeg source-plane parity for this fixture.");
+        }
+        assertFirstFrameSourcePlanesMatchFFmpegReference(reference);
     }
 
     /// Asserts that javif and FFmpeg render the first frame of one AVIF resource within tolerance.
@@ -311,6 +345,52 @@ final class LibavifFFmpegAvifReferenceTest {
         }
     }
 
+    /// Asserts that javif raw decoded color planes match FFmpeg source planes exactly.
+    ///
+    /// @param reference the FFmpeg reference case
+    /// @throws IOException if a resource cannot be read or decoded
+    /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
+    private static void assertFirstFrameSourcePlanesMatchFFmpegReference(FFmpegReferenceCase reference)
+            throws IOException, URISyntaxException {
+        String resourceName = reference.resourceName();
+        SourcePlanes expected = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
+            AvifPlanes actual = reader.readRawColorPlanes(0);
+            assertEquals(expected.width(), actual.codedWidth());
+            assertEquals(expected.height(), actual.codedHeight());
+            assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), ffmpegSourcePlaneMessage(expected));
+            assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), ffmpegSourcePlaneMessage(expected));
+
+            assertPlaneMatches(
+                    resourceName + " Y",
+                    expected.width(),
+                    expected.height(),
+                    actual.lumaPlane(),
+                    expected::lumaSample
+            );
+            if (expected.sourceMetadata().pixelFormat() != AvifPixelFormat.I400) {
+                AvifPlane chromaUPlane = actual.chromaUPlane();
+                AvifPlane chromaVPlane = actual.chromaVPlane();
+                assertNotNull(chromaUPlane);
+                assertNotNull(chromaVPlane);
+                assertPlaneMatches(
+                        resourceName + " U",
+                        expected.chromaWidth(),
+                        expected.chromaHeight(),
+                        chromaUPlane,
+                        expected::chromaUSample
+                );
+                assertPlaneMatches(
+                        resourceName + " V",
+                        expected.chromaWidth(),
+                        expected.chromaHeight(),
+                        chromaVPlane,
+                        expected::chromaVSample
+                );
+            }
+        }
+    }
+
     /// Asserts parsed javif metadata against normalized source FFmpeg metadata.
     ///
     /// @param actual the parsed javif image metadata
@@ -337,6 +417,14 @@ final class LibavifFFmpegAvifReferenceTest {
         return "FFmpeg source pixel format: " + expected.sourceMetadata().pixelFormatName();
     }
 
+    /// Returns a diagnostic label for FFmpeg source-plane comparisons.
+    ///
+    /// @param expected the FFmpeg source planes
+    /// @return the diagnostic label
+    private static String ffmpegSourcePlaneMessage(SourcePlanes expected) {
+        return "FFmpeg source pixel format: " + expected.sourceMetadata().pixelFormatName();
+    }
+
     /// Lists copied libavif AVIF resources.
     ///
     /// @return sorted AVIF resource names
@@ -356,6 +444,34 @@ final class LibavifFFmpegAvifReferenceTest {
                     .map(path -> TEST_DATA_ROOT + "/" + root.relativize(path).toString().replace('\\', '/'))
                     .sorted()
                     .toList();
+        }
+    }
+
+    /// Asserts that one javif decoded plane matches one FFmpeg source plane exactly.
+    ///
+    /// @param label the diagnostic label
+    /// @param expectedWidth the expected plane width
+    /// @param expectedHeight the expected plane height
+    /// @param actual the javif decoded plane
+    /// @param expectedSample the FFmpeg source sample supplier
+    private static void assertPlaneMatches(
+            String label,
+            int expectedWidth,
+            int expectedHeight,
+            AvifPlane actual,
+            SourceSample expectedSample
+    ) {
+        assertEquals(expectedWidth, actual.width(), label + " width");
+        assertEquals(expectedHeight, actual.height(), label + " height");
+        for (int y = 0; y < expectedHeight; y++) {
+            for (int x = 0; x < expectedWidth; x++) {
+                int expected = expectedSample.sample(x, y);
+                int sample = actual.sample(x, y);
+                if (sample != expected) {
+                    throw new AssertionError(label + " mismatch at (" + x + "," + y + "): expected "
+                            + expected + ", actual " + sample);
+                }
+            }
         }
     }
 
@@ -473,6 +589,14 @@ final class LibavifFFmpegAvifReferenceTest {
         return Arrays.asList(ENABLED_METADATA_REFERENCE_RESOURCES).contains(resourceName);
     }
 
+    /// Returns whether one FFmpeg source-plane reference case is currently enabled.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @return whether FFmpeg source-plane comparison currently passes
+    private static boolean isEnabledSourcePlaneReference(String resourceName) {
+        return Arrays.asList(ENABLED_SOURCE_PLANE_REFERENCE_RESOURCES).contains(resourceName);
+    }
+
     /// Returns whether FFmpeg exposes derived input dimensions instead of javif composed output dimensions.
     ///
     /// @param resourceName the AVIF resource name
@@ -513,6 +637,17 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @param tolerance the accepted FFmpeg pixel tolerance
     @NotNullByDefault
     private record FFmpegPixelReference(String resourceName, PixelTolerance tolerance) {
+    }
+
+    /// Supplies one expected FFmpeg source-plane sample.
+    @FunctionalInterface
+    private interface SourceSample {
+        /// Returns one expected sample.
+        ///
+        /// @param x the zero-based sample X coordinate
+        /// @param y the zero-based sample Y coordinate
+        /// @return the expected unsigned sample value
+        int sample(int x, int y);
     }
 
     /// FFmpeg reference expectation for one libavif AVIF fixture.

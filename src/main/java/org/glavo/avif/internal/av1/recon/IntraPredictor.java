@@ -224,6 +224,48 @@ final class IntraPredictor {
             boolean intraEdgeFilterEnabled,
             boolean smoothEdgeReferences
     ) {
+        predictLuma(
+                plane,
+                x,
+                y,
+                width,
+                height,
+                mode,
+                angleDelta,
+                intraEdgeFilterEnabled,
+                smoothEdgeReferences,
+                -1,
+                -1
+        );
+    }
+
+    /// Reconstructs one luma intra-predicted block directly into the destination plane with
+    /// explicit directional-edge availability.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param mode the luma intra prediction mode
+    /// @param angleDelta the signed directional angle delta
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
+    /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
+    static void predictLuma(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            LumaIntraPredictionMode mode,
+            int angleDelta,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences,
+            int directionalTopReferenceLength,
+            int directionalLeftReferenceLength
+    ) {
         predict(
                 plane,
                 x,
@@ -233,7 +275,9 @@ final class IntraPredictor {
                 checkedPredictionMode(mode, angleDelta),
                 angleDelta,
                 intraEdgeFilterEnabled,
-                smoothEdgeReferences
+                smoothEdgeReferences,
+                directionalTopReferenceLength,
+                directionalLeftReferenceLength
         );
     }
 
@@ -418,6 +462,48 @@ final class IntraPredictor {
             boolean intraEdgeFilterEnabled,
             boolean smoothEdgeReferences
     ) {
+        predictChroma(
+                plane,
+                x,
+                y,
+                width,
+                height,
+                mode,
+                angleDelta,
+                intraEdgeFilterEnabled,
+                smoothEdgeReferences,
+                -1,
+                -1
+        );
+    }
+
+    /// Reconstructs one chroma intra-predicted block directly into the destination plane with
+    /// explicit directional-edge availability.
+    ///
+    /// @param plane the mutable destination plane
+    /// @param x the zero-based horizontal sample coordinate
+    /// @param y the zero-based vertical sample coordinate
+    /// @param width the block width in samples
+    /// @param height the block height in samples
+    /// @param mode the chroma intra prediction mode
+    /// @param angleDelta the signed directional angle delta
+    /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
+    /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
+    /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
+    static void predictChroma(
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            int width,
+            int height,
+            UvIntraPredictionMode mode,
+            int angleDelta,
+            boolean intraEdgeFilterEnabled,
+            boolean smoothEdgeReferences,
+            int directionalTopReferenceLength,
+            int directionalLeftReferenceLength
+    ) {
         predict(
                 plane,
                 x,
@@ -427,7 +513,9 @@ final class IntraPredictor {
                 checkedPredictionMode(mode, angleDelta),
                 angleDelta,
                 intraEdgeFilterEnabled,
-                smoothEdgeReferences
+                smoothEdgeReferences,
+                directionalTopReferenceLength,
+                directionalLeftReferenceLength
         );
     }
 
@@ -568,6 +656,8 @@ final class IntraPredictor {
     /// @param angleDelta the signed directional angle delta
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
+    /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
     private static void predict(
             MutablePlaneBuffer plane,
             int x,
@@ -577,7 +667,9 @@ final class IntraPredictor {
             PredictionMode mode,
             int angleDelta,
             boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences
+            boolean smoothEdgeReferences,
+            int directionalTopReferenceLength,
+            int directionalLeftReferenceLength
     ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
@@ -595,7 +687,9 @@ final class IntraPredictor {
                     mode,
                     angleDelta,
                     intraEdgeFilterEnabled,
-                    smoothEdgeReferences
+                    smoothEdgeReferences,
+                    directionalTopReferenceLength,
+                    directionalLeftReferenceLength
             );
             return;
         }
@@ -610,7 +704,9 @@ final class IntraPredictor {
                     mode,
                     angleDelta,
                     intraEdgeFilterEnabled,
-                    smoothEdgeReferences
+                    smoothEdgeReferences,
+                    directionalTopReferenceLength,
+                    directionalLeftReferenceLength
             );
             return;
         }
@@ -654,6 +750,8 @@ final class IntraPredictor {
     /// @param angleDelta the signed directional angle delta
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
+    /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
     private static void predictLargeBlock(
             MutablePlaneBuffer plane,
             int x,
@@ -663,7 +761,9 @@ final class IntraPredictor {
             PredictionMode mode,
             int angleDelta,
             boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences
+            boolean smoothEdgeReferences,
+            int directionalTopReferenceLength,
+            int directionalLeftReferenceLength
     ) {
         for (int offsetY = 0; offsetY < height; offsetY += MAX_INTRA_PREDICTION_AXIS_SIZE) {
             int subHeight = Math.min(MAX_INTRA_PREDICTION_AXIS_SIZE, height - offsetY);
@@ -678,7 +778,9 @@ final class IntraPredictor {
                         mode,
                         angleDelta,
                         intraEdgeFilterEnabled,
-                        smoothEdgeReferences
+                        smoothEdgeReferences,
+                        directionalTopReferenceLength,
+                        directionalLeftReferenceLength
                 );
             }
         }
@@ -698,6 +800,8 @@ final class IntraPredictor {
     /// @param angleDelta the signed directional angle delta
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
+    /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
     private static void predictDirectional(
             MutablePlaneBuffer plane,
             int x,
@@ -707,7 +811,9 @@ final class IntraPredictor {
             PredictionMode mode,
             int angleDelta,
             boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences
+            boolean smoothEdgeReferences,
+            int directionalTopReferenceLength,
+            int directionalLeftReferenceLength
     ) {
         int angle = mode.directionalBaseAngle() + 3 * angleDelta;
         if (angle < 0 || angle > 270) {
@@ -733,7 +839,8 @@ final class IntraPredictor {
                     angle,
                     defaultSample,
                     intraEdgeFilterEnabled,
-                    smoothEdgeReferences
+                    smoothEdgeReferences,
+                    directionalTopReferenceLength
             );
             return;
         }
@@ -760,7 +867,8 @@ final class IntraPredictor {
                 angle,
                 defaultSample,
                 intraEdgeFilterEnabled,
-                smoothEdgeReferences
+                smoothEdgeReferences,
+                directionalLeftReferenceLength
         );
     }
 
@@ -784,9 +892,14 @@ final class IntraPredictor {
             int angle,
             int defaultSample,
             boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences
+            boolean smoothEdgeReferences,
+            int directionalTopReferenceLength
     ) {
-        int availableTopLength = width + Math.min(width, height);
+        int availableTopLength = directionalReferenceLength(
+                directionalTopReferenceLength,
+                width,
+                width + Math.min(width, height)
+        );
         int[] topReferences = topDirectionalReferences(
                 plane,
                 x,
@@ -902,7 +1015,7 @@ final class IntraPredictor {
         boolean upsampleLeft = intraEdgeFilterEnabled
                 && useDirectionalEdgeUpsample(referenceSpan, 180 - angle, smoothEdgeReferences);
         int[] topEdge;
-        int topBaseOffset;
+        int topBaseIncrement;
         if (upsampleTop) {
             topEdge = upsampleDirectionalEdge(
                     topReferences,
@@ -914,7 +1027,7 @@ final class IntraPredictor {
                     true
             );
             dx <<= 1;
-            topBaseOffset = 2;
+            topBaseIncrement = 2;
         } else {
             int filterStrength = intraEdgeFilterEnabled
                     ? directionalEdgeFilterStrength(referenceSpan, angle - 90, smoothEdgeReferences)
@@ -922,10 +1035,10 @@ final class IntraPredictor {
             topEdge = edgeWithTopLeft(filterStrength != 0
                     ? filterDirectionalEdge(topReferences, topLeft, width, 0, width, -1, width, filterStrength)
                     : topReferences, topLeft);
-            topBaseOffset = 1;
+            topBaseIncrement = 1;
         }
         int[] leftEdge;
-        int leftBaseOffset;
+        int leftBaseOffset = 1;
         if (upsampleLeft) {
             leftEdge = upsampleDirectionalEdge(
                     leftReferences,
@@ -945,28 +1058,27 @@ final class IntraPredictor {
             leftEdge = edgeWithTopLeft(filterStrength != 0
                     ? filterDirectionalEdge(leftReferences, topLeft, height, 0, height, -1, height, filterStrength)
                     : leftReferences, topLeft);
-            leftBaseOffset = 1;
         }
-        int minBaseX = -(1 + (upsampleTop ? 1 : 0));
-        for (int row = 0; row < height; row++) {
+        for (int row = 0, topPosition = ((1 + (upsampleTop ? 1 : 0)) << 6) - dx;
+             row < height;
+             row++, topPosition -= dx) {
+            int baseX = topPosition >> 6;
+            int topFraction = topPosition & 0x3E;
+            int leftPosition = (row << (6 + (upsampleLeft ? 1 : 0))) - dy;
             for (int column = 0; column < width; column++) {
-                int projectedX = (column << 6) - (row + 1) * dx;
-                int baseX = projectedX >> (6 - (upsampleTop ? 1 : 0));
-                if (baseX >= minBaseX) {
-                    int index = topBaseOffset + baseX;
+                if (baseX >= 0) {
                     setSampleIfInside(
                             plane,
                             x + column,
                             y + row,
                             interpolate(
-                                    edgeSample(topEdge, index),
-                                    edgeSample(topEdge, index + 1),
-                                    directionalFraction(projectedX, upsampleTop)
+                                    edgeSample(topEdge, baseX),
+                                    edgeSample(topEdge, baseX + 1),
+                                    topFraction
                             )
                     );
                 } else {
-                    int projectedY = (row << 6) - (column + 1) * dy;
-                    int baseY = projectedY >> (6 - (upsampleLeft ? 1 : 0));
+                    int baseY = leftPosition >> 6;
                     int leftIndex = leftBaseOffset + baseY;
                     setSampleIfInside(
                             plane,
@@ -975,10 +1087,12 @@ final class IntraPredictor {
                             interpolate(
                                     edgeSample(leftEdge, leftIndex),
                                     edgeSample(leftEdge, leftIndex + 1),
-                                    directionalFraction(projectedY, upsampleLeft)
+                                    leftPosition & 0x3E
                             )
                     );
                 }
+                baseX += topBaseIncrement;
+                leftPosition -= dy;
             }
         }
     }
@@ -1003,9 +1117,14 @@ final class IntraPredictor {
             int angle,
             int defaultSample,
             boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences
+            boolean smoothEdgeReferences,
+            int directionalLeftReferenceLength
     ) {
-        int availableLeftLength = height + Math.min(width, height);
+        int availableLeftLength = directionalReferenceLength(
+                directionalLeftReferenceLength,
+                height,
+                height + Math.min(width, height)
+        );
         int[] leftReferences = leftDirectionalReferences(
                 plane,
                 x,
@@ -1061,7 +1180,8 @@ final class IntraPredictor {
             int frac = ypos & 0x3E;
             for (int row = 0, base = ypos >> 6; row < height; row++, base += baseIncrement) {
                 if (base < maxBase) {
-                    setSampleIfInside(plane, x + column, y + row, interpolate(left[base], left[base + 1], frac));
+                    int predicted = interpolate(left[base], left[base + 1], frac);
+                    setSampleIfInside(plane, x + column, y + row, predicted);
                 } else {
                     for (int remaining = row; remaining < height; remaining++) {
                         setSampleIfInside(plane, x + column, y + remaining, left[maxBase]);
@@ -1070,6 +1190,19 @@ final class IntraPredictor {
                 }
             }
         }
+    }
+
+    /// Returns a bounded directional reference length.
+    ///
+    /// @param requestedLength the requested available reference length, or a negative value for default
+    /// @param minimumLength the minimum number of references required by the predictor
+    /// @param defaultLength the default reference length when availability is not explicitly constrained
+    /// @return the bounded directional reference length
+    private static int directionalReferenceLength(int requestedLength, int minimumLength, int defaultLength) {
+        if (requestedLength < 0) {
+            return defaultLength;
+        }
+        return clamp(requestedLength, minimumLength, defaultLength);
     }
 
     /// Returns the fallback top-left predictor sample for one block origin.

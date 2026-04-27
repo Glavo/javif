@@ -38,6 +38,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Objects;
 
 import static org.bytedeco.ffmpeg.global.avcodec.av_packet_alloc;
 import static org.bytedeco.ffmpeg.global.avcodec.av_packet_free;
@@ -127,6 +128,34 @@ public final class FFmpegAvifReferenceDecoder {
         }
     }
 
+    /// Decodes the first video frame from one classpath AVIF resource with FFmpeg and copies its
+    /// decoded 8-bit source planes before RGB conversion.
+    ///
+    /// @param resourceName the classpath AVIF resource name
+    /// @return the decoded first-frame source planes
+    /// @throws IOException if FFmpeg or resource resolution fails
+    /// @throws URISyntaxException if the classpath resource URL cannot be converted to a path
+    public static SourcePlanes decodeFirstFrameSourcePlanes(String resourceName) throws IOException, URISyntaxException {
+        AVFormatContext formatContext = avformat_alloc_context();
+        if (formatContext == null) {
+            throw new IOException("Failed to allocate FFmpeg format context");
+        }
+
+        try {
+            Path path = resourcePath(resourceName);
+            check(avformat_open_input(formatContext, path.toString(), null, null), "open input: " + resourceName);
+            check(avformat_find_stream_info(formatContext, (PointerPointer<?>) null), "find stream info: " + resourceName);
+
+            int videoStreamIndex = findVideoStream(formatContext);
+            if (videoStreamIndex < 0) {
+                throw new IOException("FFmpeg found no video stream: " + resourceName);
+            }
+            return decodeFirstFrameSourcePlanes(formatContext, videoStreamIndex, resourceName);
+        } finally {
+            avformat_close_input(formatContext);
+        }
+    }
+
     /// Decodes the first frame from one selected FFmpeg stream.
     ///
     /// @param formatContext the opened format context
@@ -190,6 +219,69 @@ public final class FFmpegAvifReferenceDecoder {
         }
     }
 
+    /// Decodes the first frame from one selected FFmpeg stream and copies source planes.
+    ///
+    /// @param formatContext the opened format context
+    /// @param videoStreamIndex the selected video stream index
+    /// @param label the diagnostic label
+    /// @return the decoded first-frame source planes
+    /// @throws IOException if FFmpeg decoding fails
+    private static SourcePlanes decodeFirstFrameSourcePlanes(
+            AVFormatContext formatContext,
+            int videoStreamIndex,
+            String label
+    ) throws IOException {
+        AVCodecParameters parameters = formatContext.streams(videoStreamIndex).codecpar();
+        AVCodec codec = avcodec_find_decoder(parameters.codec_id());
+        if (codec == null) {
+            throw new IOException("FFmpeg found no decoder for video stream: " + label);
+        }
+
+        AVCodecContext codecContext = avcodec_alloc_context3(codec);
+        if (codecContext == null) {
+            throw new IOException("Failed to allocate FFmpeg codec context: " + label);
+        }
+
+        AVPacket packet = av_packet_alloc();
+        AVFrame frame = av_frame_alloc();
+        if (packet == null || frame == null) {
+            av_packet_free(packet);
+            av_frame_free(frame);
+            avcodec_free_context(codecContext);
+            throw new IOException("Failed to allocate FFmpeg decode buffers: " + label);
+        }
+
+        try {
+            check(avcodec_parameters_to_context(codecContext, parameters), "copy codec parameters: " + label);
+            check(avcodec_open2(codecContext, codec, (PointerPointer<?>) null), "open decoder: " + label);
+
+            while (av_read_frame(formatContext, packet) >= 0) {
+                try {
+                    if (packet.stream_index() == videoStreamIndex) {
+                        check(avcodec_send_packet(codecContext, packet), "send packet: " + label);
+                        SourcePlanes planes = receiveFrameSourcePlanes(codecContext, frame, label);
+                        if (planes != null) {
+                            return planes;
+                        }
+                    }
+                } finally {
+                    av_packet_unref(packet);
+                }
+            }
+
+            check(avcodec_send_packet(codecContext, null), "flush decoder: " + label);
+            SourcePlanes planes = receiveFrameSourcePlanes(codecContext, frame, label);
+            if (planes != null) {
+                return planes;
+            }
+            throw new IOException("FFmpeg produced no decoded frame: " + label);
+        } finally {
+            av_packet_free(packet);
+            av_frame_free(frame);
+            avcodec_free_context(codecContext);
+        }
+    }
+
     /// Receives at most one decoded frame from FFmpeg.
     ///
     /// @param codecContext the opened codec context
@@ -210,6 +302,85 @@ public final class FFmpegAvifReferenceDecoder {
             return null;
         }
         throw ffmpegException(result, "receive frame: " + label);
+    }
+
+    /// Receives at most one decoded frame from FFmpeg and copies its source planes.
+    ///
+    /// @param codecContext the opened codec context
+    /// @param frame the reusable destination frame
+    /// @param label the diagnostic label
+    /// @return the decoded source planes, or `null` when FFmpeg needs more packet data
+    /// @throws IOException if FFmpeg decoding or plane copying fails
+    private static @Nullable SourcePlanes receiveFrameSourcePlanes(
+            AVCodecContext codecContext,
+            AVFrame frame,
+            String label
+    ) throws IOException {
+        int result = avcodec_receive_frame(codecContext, frame);
+        if (result == 0) {
+            try {
+                return copyFrameToSourcePlanes(frame, label);
+            } finally {
+                av_frame_unref(frame);
+            }
+        }
+        if (result == AVERROR_EAGAIN || result == AVERROR_EOF) {
+            return null;
+        }
+        throw ffmpegException(result, "receive frame: " + label);
+    }
+
+    /// Copies one decoded FFmpeg 8-bit planar source frame.
+    ///
+    /// @param sourceFrame the decoded source frame
+    /// @param label the diagnostic label
+    /// @return the copied source planes
+    /// @throws IOException if the frame format is unsupported
+    private static SourcePlanes copyFrameToSourcePlanes(AVFrame sourceFrame, String label) throws IOException {
+        int width = sourceFrame.width();
+        int height = sourceFrame.height();
+        if (width <= 0 || height <= 0) {
+            throw new IOException("FFmpeg returned invalid frame dimensions for " + label + ": " + width + "x" + height);
+        }
+
+        FrameMetadata sourceMetadata = frameMetadata(sourceFrame.format());
+        if (!sourceMetadata.bitDepth().isEightBit()) {
+            throw new IOException("Only 8-bit FFmpeg source-plane copies are supported: " + sourceMetadata.pixelFormatName());
+        }
+
+        byte[] luma = copyPlane(sourceFrame.data(0), sourceFrame.linesize(0), width, height);
+        byte @Nullable [] chromaU = null;
+        byte @Nullable [] chromaV = null;
+        if (sourceMetadata.pixelFormat() != AvifPixelFormat.I400) {
+            int chromaWidth = chromaWidth(width, sourceMetadata.pixelFormat());
+            int chromaHeight = chromaHeight(height, sourceMetadata.pixelFormat());
+            chromaU = copyPlane(sourceFrame.data(1), sourceFrame.linesize(1), chromaWidth, chromaHeight);
+            chromaV = copyPlane(sourceFrame.data(2), sourceFrame.linesize(2), chromaWidth, chromaHeight);
+        }
+        return new SourcePlanes(width, height, sourceMetadata, luma, chromaU, chromaV);
+    }
+
+    /// Copies one byte-addressed FFmpeg plane into tightly packed row-major storage.
+    ///
+    /// @param data the source plane pointer
+    /// @param lineSize the source plane line size in bytes
+    /// @param width the visible plane width in samples
+    /// @param height the visible plane height in samples
+    /// @return a tightly packed copy of the plane
+    /// @throws IOException if the source plane is unavailable
+    private static byte[] copyPlane(BytePointer data, int lineSize, int width, int height) throws IOException {
+        if (data == null) {
+            throw new IOException("FFmpeg returned a null source plane");
+        }
+        byte[] copy = new byte[width * height];
+        for (int y = 0; y < height; y++) {
+            long sourceRow = (long) y * lineSize;
+            int destinationRow = y * width;
+            for (int x = 0; x < width; x++) {
+                copy[destinationRow + x] = data.get(sourceRow + x);
+            }
+        }
+        return copy;
     }
 
     /// Converts one decoded FFmpeg frame to packed 8-bit ARGB pixels.
@@ -427,6 +598,30 @@ public final class FFmpegAvifReferenceDecoder {
         return -1;
     }
 
+    /// Returns the chroma plane width for one luma width and AVIF pixel format.
+    ///
+    /// @param lumaWidth the luma width in samples
+    /// @param pixelFormat the AVIF pixel format
+    /// @return the chroma plane width in samples
+    private static int chromaWidth(int lumaWidth, AvifPixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I444 -> lumaWidth;
+            case I420, I422 -> (lumaWidth + 1) >> 1;
+        };
+    }
+
+    /// Returns the chroma plane height for one luma height and AVIF pixel format.
+    ///
+    /// @param lumaHeight the luma height in samples
+    /// @param pixelFormat the AVIF pixel format
+    /// @return the chroma plane height in samples
+    private static int chromaHeight(int lumaHeight, AvifPixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I422, I444 -> lumaHeight;
+            case I420 -> (lumaHeight + 1) >> 1;
+        };
+    }
+
     /// Resolves one classpath resource to a filesystem path.
     ///
     /// @param resourceName the classpath resource name
@@ -635,6 +830,117 @@ public final class FFmpegAvifReferenceDecoder {
                 }
             }
             return result;
+        }
+    }
+
+    /// FFmpeg source planes decoded before RGB conversion.
+    @NotNullByDefault
+    public static final class SourcePlanes {
+        /// The luma plane width.
+        private final int width;
+        /// The luma plane height.
+        private final int height;
+        /// The normalized source FFmpeg frame metadata.
+        private final FrameMetadata sourceMetadata;
+        /// The tightly packed luma plane.
+        private final byte[] luma;
+        /// The tightly packed chroma U plane, or `null` for monochrome frames.
+        private final byte @Nullable [] chromaU;
+        /// The tightly packed chroma V plane, or `null` for monochrome frames.
+        private final byte @Nullable [] chromaV;
+
+        /// Creates copied source planes.
+        ///
+        /// @param width the luma plane width
+        /// @param height the luma plane height
+        /// @param sourceMetadata the normalized source FFmpeg frame metadata
+        /// @param luma the tightly packed luma plane
+        /// @param chromaU the tightly packed chroma U plane, or `null`
+        /// @param chromaV the tightly packed chroma V plane, or `null`
+        private SourcePlanes(
+                int width,
+                int height,
+                FrameMetadata sourceMetadata,
+                byte[] luma,
+                byte @Nullable [] chromaU,
+                byte @Nullable [] chromaV
+        ) {
+            if (width <= 0 || height <= 0) {
+                throw new IllegalArgumentException("Plane dimensions must be positive");
+            }
+            if (luma.length != width * height) {
+                throw new IllegalArgumentException("Luma sample count does not match image dimensions");
+            }
+            this.width = width;
+            this.height = height;
+            this.sourceMetadata = Objects.requireNonNull(sourceMetadata, "sourceMetadata");
+            this.luma = Arrays.copyOf(Objects.requireNonNull(luma, "luma"), luma.length);
+            this.chromaU = chromaU != null ? Arrays.copyOf(chromaU, chromaU.length) : null;
+            this.chromaV = chromaV != null ? Arrays.copyOf(chromaV, chromaV.length) : null;
+        }
+
+        /// Returns the luma plane width.
+        ///
+        /// @return the luma plane width
+        public int width() {
+            return width;
+        }
+
+        /// Returns the luma plane height.
+        ///
+        /// @return the luma plane height
+        public int height() {
+            return height;
+        }
+
+        /// Returns the normalized source FFmpeg frame metadata.
+        ///
+        /// @return the normalized source FFmpeg frame metadata
+        public FrameMetadata sourceMetadata() {
+            return sourceMetadata;
+        }
+
+        /// Returns one luma sample.
+        ///
+        /// @param x the zero-based luma X coordinate
+        /// @param y the zero-based luma Y coordinate
+        /// @return the unsigned luma sample
+        public int lumaSample(int x, int y) {
+            return luma[y * width + x] & 0xFF;
+        }
+
+        /// Returns one chroma U sample.
+        ///
+        /// @param x the zero-based chroma X coordinate
+        /// @param y the zero-based chroma Y coordinate
+        /// @return the unsigned chroma U sample
+        public int chromaUSample(int x, int y) {
+            byte[] plane = Objects.requireNonNull(chromaU, "chromaU");
+            return plane[y * chromaWidth() + x] & 0xFF;
+        }
+
+        /// Returns one chroma V sample.
+        ///
+        /// @param x the zero-based chroma X coordinate
+        /// @param y the zero-based chroma Y coordinate
+        /// @return the unsigned chroma V sample
+        public int chromaVSample(int x, int y) {
+            byte[] plane = Objects.requireNonNull(chromaV, "chromaV");
+            return plane[y * chromaWidth() + x] & 0xFF;
+        }
+
+        /// Returns the chroma plane width.
+        ///
+        /// @return the chroma plane width
+        public int chromaWidth() {
+            return FFmpegAvifReferenceDecoder.chromaWidth(width, sourceMetadata.pixelFormat());
+        }
+
+        /// Returns the chroma plane height.
+        ///
+        /// @return the chroma plane height
+        public int chromaHeight() {
+            return FFmpegAvifReferenceDecoder.chromaHeight(height, sourceMetadata.pixelFormat());
         }
     }
 

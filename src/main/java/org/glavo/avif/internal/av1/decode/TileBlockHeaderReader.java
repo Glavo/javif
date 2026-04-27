@@ -366,10 +366,10 @@ public final class TileBlockHeaderReader {
         }
 
         if (yPaletteSize > 0) {
-            yPaletteIndices = readPaletteIndices(0, yPaletteSize, nonNullSize);
+            yPaletteIndices = readPaletteIndices(0, yPaletteSize, nonNullPosition, nonNullSize);
         }
         if (uvPaletteSize > 0) {
-            uvPaletteIndices = readPaletteIndices(1, uvPaletteSize, nonNullSize);
+            uvPaletteIndices = readPaletteIndices(1, uvPaletteSize, nonNullPosition, nonNullSize);
         }
 
         BlockHeader header = new BlockHeader(
@@ -1430,27 +1430,59 @@ public final class TileBlockHeaderReader {
 
     /// Decodes one packed palette index map for luma or chroma.
     ///
-    /// AV1 signals palette indices in wave-front diagonal order, then packs the visible map to
-    /// two 4-bit entries per output byte. The token stream covers the coded block footprint; later
-    /// reconstruction clips the footprint to the actual frame plane.
+    /// AV1 signals palette indices in wave-front diagonal order, then packs the map to two 4-bit
+    /// entries per output byte. The token stream covers columns and rows inside the AV1 aligned
+    /// frame grid; any remaining coded-block edges are filled by replicating the last decoded
+    /// column and row.
     ///
     /// @param plane the palette plane index, where `0` is luma and `1` is chroma
     /// @param paletteSize the decoded palette size in `[2, 8]`
+    /// @param position the tile-local block position that owns the palette
     /// @param size the block size that owns the palette
     /// @return the packed palette index map, or an empty array when palette mode is disabled
-    private byte[] readPaletteIndices(int plane, int paletteSize, BlockSize size) {
-        int mapWidth = size.widthPixels();
-        int mapHeight = size.heightPixels();
+    private byte[] readPaletteIndices(int plane, int paletteSize, BlockPosition position, BlockSize size) {
+        int fullWidth = size.widthPixels();
+        int fullHeight = size.heightPixels();
+        int visibleWidth = visiblePaletteLumaDimension(
+                tileContext.startX() + (position.x4() << 2),
+                fullWidth,
+                alignedPaletteFrameDimension(tileContext.frameHeader().frameSize().codedWidth())
+        );
+        int visibleHeight = visiblePaletteLumaDimension(
+                tileContext.startY() + (position.y4() << 2),
+                fullHeight,
+                alignedPaletteFrameDimension(tileContext.frameHeader().frameSize().height())
+        );
         if (plane != 0) {
             int subsamplingX = tileContext.sequenceHeader().colorConfig().chromaSubsamplingX() ? 1 : 0;
             int subsamplingY = tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
-            int sub8WidthExtra = chromaSub8Extra(mapWidth, subsamplingX);
-            int sub8HeightExtra = chromaSub8Extra(mapHeight, subsamplingY);
-            mapWidth = planeDimension(mapWidth, subsamplingX, sub8WidthExtra);
-            mapHeight = planeDimension(mapHeight, subsamplingY, sub8HeightExtra);
+            int sub8WidthExtra = chromaSub8Extra(fullWidth, subsamplingX);
+            int sub8HeightExtra = chromaSub8Extra(fullHeight, subsamplingY);
+            fullWidth = planeDimension(fullWidth, subsamplingX, sub8WidthExtra);
+            fullHeight = planeDimension(fullHeight, subsamplingY, sub8HeightExtra);
+            visibleWidth = planeDimension(visibleWidth, subsamplingX, sub8WidthExtra);
+            visibleHeight = planeDimension(visibleHeight, subsamplingY, sub8HeightExtra);
         }
 
-        return readPaletteIndices(plane, paletteSize, mapWidth, mapHeight, mapWidth, mapHeight);
+        return readPaletteIndices(plane, paletteSize, visibleWidth, visibleHeight, fullWidth, fullHeight);
+    }
+
+    /// Returns the luma palette dimension inside the AV1 aligned frame boundary.
+    ///
+    /// @param start the absolute block start coordinate on one luma axis
+    /// @param fullDimension the coded block dimension on that axis
+    /// @param frameDimension the AV1 MI-grid-aligned frame dimension on that axis
+    /// @return the clipped luma dimension, in pixels
+    private static int visiblePaletteLumaDimension(int start, int fullDimension, int frameDimension) {
+        return Math.max(1, Math.min(fullDimension, frameDimension - start));
+    }
+
+    /// Returns the AV1 luma frame dimension rounded up to the 8-pixel MI allocation grid.
+    ///
+    /// @param frameDimension the unaligned frame dimension in pixels
+    /// @return the AV1 MI-grid-aligned frame dimension in pixels
+    private static int alignedPaletteFrameDimension(int frameDimension) {
+        return ((frameDimension + 7) >> 3) << 3;
     }
 
     /// Decodes one packed palette index map for the supplied visible and coded dimensions.
