@@ -164,24 +164,53 @@ final class LibavifFFmpegAvifReferenceTest {
         if (!isEnabledReference(reference.resourceName())) {
             Assumptions.assumeTrue(false, "Pending exact FFmpeg first-frame parity for this fixture.");
         }
-        assertFirstFrameMatchesFFmpegReferenceExactly(reference.resourceName());
+        assertFirstFrameMatchesFFmpegReferenceExactly(reference);
     }
 
     /// Asserts that javif and FFmpeg render the first frame of one AVIF resource identically.
     ///
-    /// @param resourceName the classpath AVIF resource name
+    /// @param reference the FFmpeg reference case
     /// @throws IOException if a resource cannot be read or decoded
     /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
-    private static void assertFirstFrameMatchesFFmpegReferenceExactly(String resourceName)
+    private static void assertFirstFrameMatchesFFmpegReferenceExactly(FFmpegReferenceCase reference)
             throws IOException, URISyntaxException {
+        String resourceName = reference.resourceName();
         ArgbImage expected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
+            assertImageInfoMatchesFFmpegMetadata(reader.info(), expected);
             AvifFrame actual = reader.readFrame();
             assertNotNull(actual);
+            assertFrameMetadataMatchesFFmpegMetadata(actual, expected);
             assertEquals(expected.width(), actual.width());
             assertEquals(expected.height(), actual.height());
             assertPixelsMatch(resourceName, expected, actual.intPixelBuffer());
         }
+    }
+
+    /// Asserts parsed javif metadata against normalized source FFmpeg metadata.
+    ///
+    /// @param actual the parsed javif image metadata
+    /// @param expected the FFmpeg reference image
+    private static void assertImageInfoMatchesFFmpegMetadata(AvifImageInfo actual, ArgbImage expected) {
+        assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), ffmpegPixelFormatMessage(expected));
+        assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), ffmpegPixelFormatMessage(expected));
+    }
+
+    /// Asserts decoded javif frame metadata against normalized source FFmpeg metadata.
+    ///
+    /// @param actual the decoded javif frame
+    /// @param expected the FFmpeg reference image
+    private static void assertFrameMetadataMatchesFFmpegMetadata(AvifFrame actual, ArgbImage expected) {
+        assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), ffmpegPixelFormatMessage(expected));
+        assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), ffmpegPixelFormatMessage(expected));
+    }
+
+    /// Returns a diagnostic label for FFmpeg source pixel format comparisons.
+    ///
+    /// @param expected the FFmpeg reference image
+    /// @return the diagnostic label
+    private static String ffmpegPixelFormatMessage(ArgbImage expected) {
+        return "FFmpeg source pixel format: " + expected.sourceMetadata().pixelFormatName();
     }
 
     /// Lists copied libavif AVIF resources.

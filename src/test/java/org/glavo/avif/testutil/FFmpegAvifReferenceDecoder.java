@@ -15,6 +15,8 @@
  */
 package org.glavo.avif.testutil;
 
+import org.glavo.avif.AvifBitDepth;
+import org.glavo.avif.AvifPixelFormat;
 import org.bytedeco.ffmpeg.avcodec.AVCodec;
 import org.bytedeco.ffmpeg.avcodec.AVCodecContext;
 import org.bytedeco.ffmpeg.avcodec.AVCodecParameters;
@@ -27,6 +29,7 @@ import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.DoublePointer;
 import org.bytedeco.javacpp.PointerPointer;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
@@ -66,6 +69,7 @@ import static org.bytedeco.ffmpeg.global.avutil.av_frame_alloc;
 import static org.bytedeco.ffmpeg.global.avutil.av_frame_free;
 import static org.bytedeco.ffmpeg.global.avutil.av_frame_get_buffer;
 import static org.bytedeco.ffmpeg.global.avutil.av_frame_unref;
+import static org.bytedeco.ffmpeg.global.avutil.av_get_pix_fmt_name;
 import static org.bytedeco.ffmpeg.global.avutil.av_strerror;
 import static org.bytedeco.ffmpeg.global.swscale.SWS_BILINEAR;
 import static org.bytedeco.ffmpeg.global.swscale.SWS_CS_BT2020;
@@ -272,7 +276,7 @@ public final class FFmpegAvifReferenceDecoder {
             if (scaledRows != height) {
                 throw new IOException("FFmpeg scaled " + scaledRows + " rows instead of " + height + ": " + label);
             }
-            return copyRgbaFrameToArgb(rgbaFrame, width, height);
+            return copyRgbaFrameToArgb(rgbaFrame, width, height, frameMetadata(sourceFrame.format()));
         } finally {
             if (swsContext != null) {
                 sws_freeContext(swsContext);
@@ -286,8 +290,14 @@ public final class FFmpegAvifReferenceDecoder {
     /// @param rgbaFrame the FFmpeg RGBA frame
     /// @param width the frame width
     /// @param height the frame height
+    /// @param sourceMetadata the source FFmpeg frame metadata before RGBA conversion
     /// @return the packed ARGB image
-    private static ArgbImage copyRgbaFrameToArgb(AVFrame rgbaFrame, int width, int height) {
+    private static ArgbImage copyRgbaFrameToArgb(
+            AVFrame rgbaFrame,
+            int width,
+            int height,
+            FrameMetadata sourceMetadata
+    ) {
         int[] pixels = new int[width * height];
         BytePointer data = rgbaFrame.data(0);
         int lineSize = rgbaFrame.linesize(0);
@@ -302,7 +312,78 @@ public final class FFmpegAvifReferenceDecoder {
                 pixels[y * width + x] = (a << 24) | (r << 16) | (g << 8) | b;
             }
         }
-        return new ArgbImage(width, height, pixels);
+        return new ArgbImage(width, height, sourceMetadata, pixels);
+    }
+
+    /// Returns normalized metadata for a source FFmpeg pixel format id.
+    ///
+    /// @param pixelFormat the FFmpeg pixel format id
+    /// @return the normalized frame metadata
+    /// @throws IOException if the pixel format cannot be mapped to javif metadata
+    private static FrameMetadata frameMetadata(int pixelFormat) throws IOException {
+        String pixelFormatName = pixelFormatName(pixelFormat);
+        if (pixelFormatName.startsWith("unknown(")) {
+            throw new IOException("Cannot map unknown FFmpeg pixel format: " + pixelFormatName);
+        }
+        return new FrameMetadata(
+                pixelFormatName,
+                avifBitDepth(pixelFormatName),
+                avifPixelFormat(pixelFormatName)
+        );
+    }
+
+    /// Returns the FFmpeg pixel format name for a pixel format id.
+    ///
+    /// @param pixelFormat the FFmpeg pixel format id
+    /// @return the pixel format name
+    private static String pixelFormatName(int pixelFormat) {
+        @Nullable BytePointer name = av_get_pix_fmt_name(pixelFormat);
+        return name == null ? "unknown(" + pixelFormat + ")" : name.getString();
+    }
+
+    /// Maps one FFmpeg pixel format name to an AVIF bit depth.
+    ///
+    /// @param pixelFormatName the FFmpeg pixel format name
+    /// @return the matching AVIF bit depth
+    /// @throws IOException if the bit depth cannot be mapped
+    private static AvifBitDepth avifBitDepth(String pixelFormatName) throws IOException {
+        if (pixelFormatName.contains("12")) {
+            return AvifBitDepth.TWELVE_BITS;
+        }
+        if (pixelFormatName.contains("10")) {
+            return AvifBitDepth.TEN_BITS;
+        }
+        if (pixelFormatName.startsWith("gray")
+                || pixelFormatName.startsWith("yuv")
+                || pixelFormatName.startsWith("yuva")
+                || pixelFormatName.startsWith("yuvj")) {
+            return AvifBitDepth.EIGHT_BITS;
+        }
+        throw new IOException("Cannot map FFmpeg pixel format to AVIF bit depth: " + pixelFormatName);
+    }
+
+    /// Maps one FFmpeg pixel format name to an AVIF pixel format.
+    ///
+    /// @param pixelFormatName the FFmpeg pixel format name
+    /// @return the matching AVIF pixel format
+    /// @throws IOException if the chroma layout cannot be mapped
+    private static AvifPixelFormat avifPixelFormat(String pixelFormatName) throws IOException {
+        if (pixelFormatName.startsWith("gray")) {
+            return AvifPixelFormat.I400;
+        }
+        if (pixelFormatName.startsWith("yuv420") || pixelFormatName.startsWith("yuva420")
+                || pixelFormatName.startsWith("yuvj420")) {
+            return AvifPixelFormat.I420;
+        }
+        if (pixelFormatName.startsWith("yuv422") || pixelFormatName.startsWith("yuva422")
+                || pixelFormatName.startsWith("yuvj422")) {
+            return AvifPixelFormat.I422;
+        }
+        if (pixelFormatName.startsWith("yuv444") || pixelFormatName.startsWith("yuva444")
+                || pixelFormatName.startsWith("yuvj444")) {
+            return AvifPixelFormat.I444;
+        }
+        throw new IOException("Cannot map FFmpeg pixel format to AVIF chroma layout: " + pixelFormatName);
     }
 
     /// Maps one FFmpeg color-space id to the matching swscale matrix id.
@@ -402,6 +483,8 @@ public final class FFmpegAvifReferenceDecoder {
         private final int width;
         /// The image height.
         private final int height;
+        /// The normalized source FFmpeg frame metadata before RGBA conversion.
+        private final FrameMetadata sourceMetadata;
         /// The packed immutable `0xAARRGGBB` pixel array.
         private final int @Unmodifiable [] pixels;
 
@@ -409,8 +492,9 @@ public final class FFmpegAvifReferenceDecoder {
         ///
         /// @param width the image width
         /// @param height the image height
+        /// @param sourceMetadata the normalized source FFmpeg frame metadata before RGBA conversion
         /// @param pixels the packed `0xAARRGGBB` pixels
-        private ArgbImage(int width, int height, int[] pixels) {
+        private ArgbImage(int width, int height, FrameMetadata sourceMetadata, int[] pixels) {
             if (width <= 0 || height <= 0) {
                 throw new IllegalArgumentException("Image dimensions must be positive");
             }
@@ -419,6 +503,7 @@ public final class FFmpegAvifReferenceDecoder {
             }
             this.width = width;
             this.height = height;
+            this.sourceMetadata = sourceMetadata;
             this.pixels = Arrays.copyOf(pixels, pixels.length);
         }
 
@@ -436,6 +521,13 @@ public final class FFmpegAvifReferenceDecoder {
             return height;
         }
 
+        /// Returns the normalized source FFmpeg frame metadata before RGBA conversion.
+        ///
+        /// @return the normalized source FFmpeg frame metadata
+        public FrameMetadata sourceMetadata() {
+            return sourceMetadata;
+        }
+
         /// Returns one packed `0xAARRGGBB` pixel.
         ///
         /// @param x the pixel X coordinate
@@ -444,5 +536,14 @@ public final class FFmpegAvifReferenceDecoder {
         public int pixel(int x, int y) {
             return pixels[y * width + x];
         }
+    }
+
+    /// Normalized metadata from one FFmpeg source frame before RGBA conversion.
+    ///
+    /// @param pixelFormatName the FFmpeg source pixel format name
+    /// @param bitDepth the normalized AVIF bit depth
+    /// @param pixelFormat the normalized AVIF pixel format
+    @NotNullByDefault
+    public record FrameMetadata(String pixelFormatName, AvifBitDepth bitDepth, AvifPixelFormat pixelFormat) {
     }
 }
