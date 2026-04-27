@@ -68,6 +68,9 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/draw_points_idat.avif",
             "libavif-test-data/draw_points_idat_metasize0.avif",
             "libavif-test-data/extended_pixi.avif",
+            "libavif-test-data/unsupported_gainmap_minimum_version.avif",
+            "libavif-test-data/unsupported_gainmap_version.avif",
+            "libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif",
             "libavif-test-data/white_1x1.avif",
     };
     /// AVIF resources whose source metadata comparison against FFmpeg currently passes.
