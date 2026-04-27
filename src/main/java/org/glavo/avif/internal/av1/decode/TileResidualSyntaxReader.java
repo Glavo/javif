@@ -882,12 +882,12 @@ public final class TileResidualSyntaxReader {
         if (!nonNullTransformType.oneDimensional()) {
             return DEFAULT_SCANS[nonNullTransformSize.ordinal()][scanIndex];
         }
-        if (!verticalOneDimensional(nonNullTransformType)) {
+        if (verticalOneDimensional(nonNullTransformType)) {
             return scanIndex;
         }
-        int x = scanIndex & (nonNullTransformSize.widthPixels() - 1);
-        int y = scanIndex >> (nonNullTransformSize.log2Width4() + 2);
-        return (x << (nonNullTransformSize.log2Height4() + 2)) | y;
+        int row = scanIndex & (nonNullTransformSize.heightPixels() - 1);
+        int column = scanIndex >> (nonNullTransformSize.log2Height4() + 2);
+        return (row << (nonNullTransformSize.log2Width4() + 2)) | column;
     }
 
     /// Creates the padded larger-transform `levels` grid used by coefficient token contexts.
@@ -1072,7 +1072,7 @@ public final class TileResidualSyntaxReader {
         if (!nonNullTransformType.oneDimensional()) {
             return FOUR_BY_FOUR_SCAN[scanIndex];
         }
-        if (verticalOneDimensional(nonNullTransformType)) {
+        if (!verticalOneDimensional(nonNullTransformType)) {
             int x = scanIndex & 3;
             int y = scanIndex >> 2;
             return (x << 2) | y;

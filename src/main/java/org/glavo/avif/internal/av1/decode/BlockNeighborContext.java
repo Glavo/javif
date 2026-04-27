@@ -1391,9 +1391,9 @@ public final class BlockNeighborContext {
         int x4 = nonNullPosition.x4();
         int y4 = nonNullPosition.y4();
         if (haveLeft && haveTop) {
-            int left = leftSegmentId[y4] & 0xFF;
-            int above = aboveSegmentId[x4] & 0xFF;
-            int aboveLeft = aboveSegmentId[x4 - 1] & 0xFF;
+            int left = storedSegmentIdOrZero(x4 - 1, y4);
+            int above = storedSegmentIdOrZero(x4, y4 - 1);
+            int aboveLeft = storedSegmentIdOrZero(x4 - 1, y4 - 1);
             int context;
             if (left == above && aboveLeft == left) {
                 context = 2;
@@ -1411,6 +1411,23 @@ public final class BlockNeighborContext {
                 ? aboveSegmentId[x4] & 0xFF
                 : 0;
         return new SegmentPrediction(predictedSegmentId, 0);
+    }
+
+    /// Returns the decoded segment id at one already-decoded 4x4 coordinate, or zero when unavailable.
+    ///
+    /// Spatial segment prediction uses the full current segment map. This accessor avoids using the
+    /// rolling above-edge arrays for the top-left sample because they may already contain the block
+    /// immediately to the left in the current row.
+    ///
+    /// @param x4 the tile-relative X coordinate in 4x4 units
+    /// @param y4 the tile-relative Y coordinate in 4x4 units
+    /// @return the stored segment id, or zero when no decoded block covers the coordinate
+    private int storedSegmentIdOrZero(int x4, int y4) {
+        if (x4 < 0 || x4 >= tileWidth4 || y4 < 0 || y4 >= tileHeight4) {
+            return 0;
+        }
+        @Nullable StoredBlock storedBlock = storedBlockAt(x4, y4);
+        return storedBlock != null ? storedBlock.segmentId() : 0;
     }
 
     /// Returns the above-edge luma palette size for the supplied X coordinate in 4x4 units.
@@ -2066,6 +2083,7 @@ public final class BlockNeighborContext {
                 position.y4(),
                 size.width4(),
                 size.height4(),
+                segmentId & 0xFF,
                 intra != 0,
                 compoundReference != 0,
                 referenceFrame0,
@@ -3198,6 +3216,9 @@ public final class BlockNeighborContext {
         /// The block height in 4x4 units.
         private final int height4;
 
+        /// The decoded segment identifier.
+        private final int segmentId;
+
         /// Whether the stored block is intra-coded.
         private final boolean intra;
 
@@ -3225,6 +3246,7 @@ public final class BlockNeighborContext {
         /// @param originY4 the block origin Y coordinate in tile-relative 4x4 units
         /// @param width4 the block width in 4x4 units
         /// @param height4 the block height in 4x4 units
+        /// @param segmentId the decoded segment identifier
         /// @param intra whether the stored block is intra-coded
         /// @param compoundReference whether the stored block uses compound inter references
         /// @param referenceFrame0 the stored primary inter reference in internal LAST..ALTREF order
@@ -3237,6 +3259,7 @@ public final class BlockNeighborContext {
                 int originY4,
                 int width4,
                 int height4,
+                int segmentId,
                 boolean intra,
                 boolean compoundReference,
                 int referenceFrame0,
@@ -3249,6 +3272,7 @@ public final class BlockNeighborContext {
             this.originY4 = originY4;
             this.width4 = width4;
             this.height4 = height4;
+            this.segmentId = segmentId;
             this.intra = intra;
             this.compoundReference = compoundReference;
             this.referenceFrame0 = referenceFrame0;
@@ -3284,6 +3308,13 @@ public final class BlockNeighborContext {
         /// @return the block height in 4x4 units
         public int height4() {
             return height4;
+        }
+
+        /// Returns the decoded segment identifier.
+        ///
+        /// @return the decoded segment identifier
+        public int segmentId() {
+            return segmentId;
         }
 
         /// Returns whether the stored block is intra-coded.

@@ -169,7 +169,6 @@ public final class TilePartitionTreeReader {
                     ? PartitionType.SPLIT
                     : PartitionType.VERTICAL;
         }
-
         Node node = switch (partitionType) {
             case NONE -> leaf(position, level.noneSize());
             case HORIZONTAL -> partition(position, level, partitionType,

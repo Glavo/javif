@@ -282,15 +282,33 @@ public final class MsacDecoder {
             throw new IllegalArgumentException("k < 0: " + k);
         }
 
+        int groupIndex = 0;
         int offset = 0;
-        if (decodeBooleanEqui()) {
-            if (decodeBooleanEqui()) {
-                k += (decodeBooleanEqui() ? 1 : 0) + 1;
+        while (true) {
+            int groupBits = groupIndex == 0 ? k : k + groupIndex - 1;
+            int groupSize = 1 << groupBits;
+            if (symbolCount <= offset + 3 * groupSize) {
+                int value = decodeUniform(symbolCount - offset) + offset;
+                return inverseRecenterFinite(reference, symbolCount, value);
             }
-            offset = 1 << k;
-        }
 
-        int value = decodeBools(k) + offset;
+            if (!decodeBooleanEqui()) {
+                int value = decodeBools(groupBits) + offset;
+                return inverseRecenterFinite(reference, symbolCount, value);
+            }
+
+            groupIndex++;
+            offset += groupSize;
+        }
+    }
+
+    /// Re-centers a finite subexponential coded value around the supplied reference.
+    ///
+    /// @param reference the recentering reference value
+    /// @param symbolCount the exclusive upper bound of the decoded value
+    /// @param value the raw finite subexponential code value
+    /// @return the decoded value in `[0, symbolCount)`
+    private static int inverseRecenterFinite(int reference, int symbolCount, int value) {
         return reference * 2 <= symbolCount
                 ? inverseRecenter(reference, value)
                 : symbolCount - 1 - inverseRecenter(symbolCount - 1 - reference, value);

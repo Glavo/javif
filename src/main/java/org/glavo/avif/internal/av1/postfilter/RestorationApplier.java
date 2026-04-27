@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
@@ -35,6 +36,15 @@ import java.util.Objects;
 /// AV1 self-guided A/B projection model.
 @NotNullByDefault
 public final class RestorationApplier {
+    /// The AV1 restoration processing stripe size in luma samples.
+    private static final int RESTORATION_PROC_UNIT_SIZE = 64;
+
+    /// The AV1 vertical offset between restoration units and processing stripes.
+    private static final int RESTORATION_UNIT_OFFSET = 8;
+
+    /// The number of rows overwritten above and below an internal processing stripe.
+    private static final int RESTORATION_STRIPE_BORDER = 3;
+
     /// The AV1 Wiener coefficient precision.
     private static final int FILTER_BITS = 7;
 
@@ -104,10 +114,31 @@ public final class RestorationApplier {
             FrameHeader.RestorationInfo restoration,
             @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
     ) {
+        return apply(decodedPlanes, decodedPlanes, restoration, syntaxDecodeResult);
+    }
+
+    /// Applies restoration to one decoded frame using decoded restoration-unit syntax.
+    ///
+    /// @param decodedPlanes the decoded planes after CDEF
+    /// @param boundaryPlanes the decoded planes after loop filtering and before CDEF
+    /// @param restoration the normalized frame-level restoration state
+    /// @param syntaxDecodeResult the decoded frame syntax that carries restoration units, or `null`
+    /// @return the post-restoration planes
+    public DecodedPlanes apply(
+            DecodedPlanes decodedPlanes,
+            DecodedPlanes boundaryPlanes,
+            FrameHeader.RestorationInfo restoration,
+            @Nullable FrameSyntaxDecodeResult syntaxDecodeResult
+    ) {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        DecodedPlanes checkedBoundaryPlanes = Objects.requireNonNull(boundaryPlanes, "boundaryPlanes");
         FrameHeader.RestorationInfo checkedRestoration = Objects.requireNonNull(restoration, "restoration");
         if (!hasActiveRestoration(checkedRestoration, checkedDecodedPlanes.hasChroma())) {
             return checkedDecodedPlanes;
+        }
+        if (checkedBoundaryPlanes.bitDepth() != checkedDecodedPlanes.bitDepth()
+                || checkedBoundaryPlanes.pixelFormat() != checkedDecodedPlanes.pixelFormat()) {
+            throw new IllegalArgumentException("Boundary planes must match decoded plane format");
         }
         if (syntaxDecodeResult == null) {
             throw new IllegalStateException("Active AV1 loop restoration requires decoded restoration unit syntax");
@@ -116,7 +147,9 @@ public final class RestorationApplier {
         RestorationUnitMap unitMap = syntaxDecodeResult.restorationUnitMap();
         DecodedPlane lumaPlane = applyPlane(
                 checkedDecodedPlanes.lumaPlane(),
+                checkedBoundaryPlanes.lumaPlane(),
                 checkedDecodedPlanes.bitDepth(),
+                checkedDecodedPlanes.pixelFormat(),
                 checkedRestoration,
                 unitMap,
                 0
@@ -127,14 +160,18 @@ public final class RestorationApplier {
         if (checkedDecodedPlanes.hasChroma()) {
             chromaUPlane = applyPlane(
                     Objects.requireNonNull(chromaUPlane, "chromaUPlane"),
+                    Objects.requireNonNull(checkedBoundaryPlanes.chromaUPlane(), "boundaryChromaUPlane"),
                     checkedDecodedPlanes.bitDepth(),
+                    checkedDecodedPlanes.pixelFormat(),
                     checkedRestoration,
                     unitMap,
                     1
             );
             chromaVPlane = applyPlane(
                     Objects.requireNonNull(chromaVPlane, "chromaVPlane"),
+                    Objects.requireNonNull(checkedBoundaryPlanes.chromaVPlane(), "boundaryChromaVPlane"),
                     checkedDecodedPlanes.bitDepth(),
+                    checkedDecodedPlanes.pixelFormat(),
                     checkedRestoration,
                     unitMap,
                     2
@@ -174,14 +211,18 @@ public final class RestorationApplier {
     /// Applies restoration to one plane.
     ///
     /// @param plane the source plane
+    /// @param boundaryPlane the source plane before CDEF, used for internal stripe boundaries
     /// @param bitDepth the decoded bit depth
+    /// @param pixelFormat the decoded pixel format
     /// @param restoration the frame-level restoration state
     /// @param unitMap the decoded restoration-unit map
     /// @param planeIndex the plane index
     /// @return the restored plane, or the original plane when all selected units are disabled
     private static DecodedPlane applyPlane(
             DecodedPlane plane,
+            DecodedPlane boundaryPlane,
             int bitDepth,
+            AvifPixelFormat pixelFormat,
             FrameHeader.RestorationInfo restoration,
             RestorationUnitMap unitMap,
             int planeIndex
@@ -190,9 +231,13 @@ public final class RestorationApplier {
         if (frameType == FrameHeader.RestorationType.NONE) {
             return plane;
         }
+        if (boundaryPlane.width() != plane.width() || boundaryPlane.height() != plane.height()) {
+            throw new IllegalArgumentException("Boundary plane dimensions must match decoded plane dimensions");
+        }
 
         int unitSize = 1 << (planeIndex == 0 ? restoration.unitSizeLog2Y() : restoration.unitSizeLog2Uv());
         PlaneBuffer source = PlaneBuffer.create(plane, bitDepth);
+        PlaneBuffer boundarySource = PlaneBuffer.create(boundaryPlane, bitDepth);
         PlaneBuffer destination = PlaneBuffer.create(plane, bitDepth);
         boolean changed = false;
         int rows = unitMap.rows(planeIndex);
@@ -200,7 +245,17 @@ public final class RestorationApplier {
         if (rows == 0 || columns == 0) {
             throw new IllegalStateException("Active AV1 loop restoration requires decoded restoration unit syntax");
         }
+        int subX = chromaSubsamplingX(pixelFormat, planeIndex);
+        int subY = chromaSubsamplingY(pixelFormat, planeIndex);
+        int verticalOffset = RESTORATION_UNIT_OFFSET >> subY;
+        int processingStripeHeight = RESTORATION_PROC_UNIT_SIZE >> subY;
+        int processingUnitWidth = RESTORATION_PROC_UNIT_SIZE >> subX;
         for (int unitRow = 0; unitRow < rows; unitRow++) {
+            UnitLimits baseVerticalLimits = unitLimits(unitRow, unitSize, plane.height());
+            int startY = Math.max(0, baseVerticalLimits.start() - verticalOffset);
+            int endY = baseVerticalLimits.end() < plane.height()
+                    ? baseVerticalLimits.end() - verticalOffset
+                    : baseVerticalLimits.end();
             for (int unitColumn = 0; unitColumn < columns; unitColumn++) {
                 @Nullable RestorationUnit unit = unitMap.unit(planeIndex, unitRow, unitColumn);
                 if (unit == null) {
@@ -209,21 +264,87 @@ public final class RestorationApplier {
                 if (unit.type() == FrameHeader.RestorationType.NONE) {
                     continue;
                 }
-                int startX = unitColumn * unitSize;
-                int startY = unitRow * unitSize;
-                int endX = Math.min(plane.width(), startX + unitSize);
-                int endY = Math.min(plane.height(), startY + unitSize);
-                if (unit.type() == FrameHeader.RestorationType.WIENER) {
-                    applyWienerUnit(source, destination, unit, startX, startY, endX, endY);
-                } else if (unit.type() == FrameHeader.RestorationType.SELF_GUIDED) {
-                    applySelfGuidedUnit(source, destination, unit, startX, startY, endX, endY);
-                } else {
-                    throw new IllegalStateException("Unsupported restoration unit type: " + unit.type());
-                }
+                UnitLimits horizontalLimits = unitLimits(unitColumn, unitSize, plane.width());
+                applyRestorationUnit(
+                        source,
+                        boundarySource,
+                        destination,
+                        unit,
+                        horizontalLimits.start(),
+                        startY,
+                        horizontalLimits.end(),
+                        endY,
+                        processingStripeHeight,
+                        verticalOffset,
+                        processingUnitWidth
+                );
                 changed = true;
             }
         }
         return changed ? destination.toDecodedPlane() : plane;
+    }
+
+    /// Applies one restoration unit one processing stripe at a time.
+    ///
+    /// @param source the immutable post-CDEF source plane view
+    /// @param boundarySource the immutable pre-CDEF boundary plane view
+    /// @param destination the mutable destination plane view
+    /// @param unit the decoded restoration unit
+    /// @param startX the inclusive unit start X
+    /// @param startY the inclusive unit start Y
+    /// @param endX the exclusive unit end X
+    /// @param endY the exclusive unit end Y
+    /// @param processingStripeHeight the processing stripe height for this plane
+    /// @param verticalOffset the vertical processing stripe offset for this plane
+    /// @param processingUnitWidth the horizontal processing unit width for this plane
+    private static void applyRestorationUnit(
+            PlaneBuffer source,
+            PlaneBuffer boundarySource,
+            PlaneBuffer destination,
+            RestorationUnit unit,
+            int startX,
+            int startY,
+            int endX,
+            int endY,
+            int processingStripeHeight,
+            int verticalOffset,
+            int processingUnitWidth
+    ) {
+        int stripeStart = startY;
+        while (stripeStart < endY) {
+            int frameStripe = (stripeStart + verticalOffset) / processingStripeHeight;
+            int nominalStripeHeight = processingStripeHeight
+                    - (frameStripe == 0 ? verticalOffset : 0);
+            int stripeEnd = Math.min(endY, stripeStart + nominalStripeHeight);
+            boolean copyAbove = stripeStart != 0;
+            int stripeBoundaryHeight = processingStripeHeight - (stripeStart == 0 ? verticalOffset : 0);
+            boolean copyBelow = stripeStart + stripeBoundaryHeight < source.height();
+            StripeBoundarySource stripeSource = new StripeBoundarySource(
+                    source,
+                    boundarySource,
+                    stripeStart,
+                    stripeEnd,
+                    copyAbove,
+                    copyBelow
+            );
+            if (unit.type() == FrameHeader.RestorationType.WIENER) {
+                applyWienerUnit(stripeSource, destination, unit, startX, stripeStart, endX, stripeEnd);
+            } else if (unit.type() == FrameHeader.RestorationType.SELF_GUIDED) {
+                applySelfGuidedUnit(
+                        stripeSource,
+                        destination,
+                        unit,
+                        startX,
+                        stripeStart,
+                        endX,
+                        stripeEnd,
+                        processingUnitWidth
+                );
+            } else {
+                throw new IllegalStateException("Unsupported restoration unit type: " + unit.type());
+            }
+            stripeStart = stripeEnd;
+        }
     }
 
     /// Applies one Wiener restoration unit.
@@ -236,7 +357,7 @@ public final class RestorationApplier {
     /// @param endX the exclusive unit end X
     /// @param endY the exclusive unit end Y
     private static void applyWienerUnit(
-            PlaneBuffer source,
+            PlaneSampleSource source,
             PlaneBuffer destination,
             RestorationUnit unit,
             int startX,
@@ -263,7 +384,7 @@ public final class RestorationApplier {
     /// @param y the sample Y coordinate
     /// @return one restored sample before final bit-depth clipping
     private static int wienerSample(
-            PlaneBuffer source,
+            PlaneSampleSource source,
             int @Unmodifiable [] horizontalKernel,
             int @Unmodifiable [] verticalKernel,
             int x,
@@ -275,7 +396,7 @@ public final class RestorationApplier {
         int roundOffset = 1 << (bitDepth + roundBitsV - 1);
         int sum = -roundOffset;
         for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
-            int sourceY = clamp(y + tap - WIENER_TAP_OFFSET, 0, source.height() - 1);
+            int sourceY = y + tap - WIENER_TAP_OFFSET;
             sum += verticalKernel[tap] * wienerHorizontalSample(source, horizontalKernel, x, sourceY);
         }
         return (sum + roundingOffsetV) >> roundBitsV;
@@ -289,7 +410,7 @@ public final class RestorationApplier {
     /// @param y the sample Y coordinate
     /// @return one clipped horizontal Wiener intermediate sample
     private static int wienerHorizontalSample(
-            PlaneBuffer source,
+            PlaneSampleSource source,
             int @Unmodifiable [] horizontalKernel,
             int x,
             int y
@@ -300,8 +421,7 @@ public final class RestorationApplier {
         int clipLimit = 1 << (bitDepth + 1 + FILTER_BITS - roundBitsH);
         int sum = 1 << (bitDepth + 6);
         for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
-            int sourceX = clamp(x + tap - WIENER_TAP_OFFSET, 0, source.width() - 1);
-            sum += horizontalKernel[tap] * source.sample(sourceX, y);
+            sum += horizontalKernel[tap] * source.sample(x + tap - WIENER_TAP_OFFSET, y);
         }
         return clamp((sum + roundingOffsetH) >> roundBitsH, 0, clipLimit - 1);
     }
@@ -315,37 +435,45 @@ public final class RestorationApplier {
     /// @param startY the inclusive unit start Y
     /// @param endX the exclusive unit end X
     /// @param endY the exclusive unit end Y
+    /// @param processingUnitWidth the horizontal processing unit width for this plane
     private static void applySelfGuidedUnit(
-            PlaneBuffer source,
+            PlaneSampleSource source,
             PlaneBuffer destination,
             RestorationUnit unit,
             int startX,
             int startY,
             int endX,
-            int endY
+            int endY,
+            int processingUnitWidth
     ) {
         int @Unmodifiable [] params = SELF_GUIDED_PARAMS[unit.selfGuidedSet()];
         int @Unmodifiable [] projection = unit.selfGuidedProjectionCoefficients();
-        @Nullable SelfGuidedIntermediate radius2Filter = params[0] != 0
-                ? SelfGuidedIntermediate.create(source, 2, params[1])
-                : null;
-        @Nullable SelfGuidedIntermediate radius1Filter = params[2] != 0
-                ? SelfGuidedIntermediate.create(source, 1, params[3])
-                : null;
-        int weight0 = radius2Filter != null ? projection[0] : 0;
-        int weight1 = radius1Filter != null ? 128 - projection[0] - projection[1] : 0;
-        for (int y = startY; y < endY; y++) {
-            int localY = y - startY;
-            for (int x = startX; x < endX; x++) {
-                int base = source.sample(x, y);
-                int adjustment = 0;
-                if (radius2Filter != null && weight0 != 0) {
-                    adjustment += weight0 * radius2Filter.residual5(x, y, localY, base);
+        for (int chunkStartX = startX; chunkStartX < endX; chunkStartX += processingUnitWidth) {
+            int chunkEndX = Math.min(endX, chunkStartX + processingUnitWidth);
+            int chunkWidth = chunkEndX - chunkStartX;
+            int stripeHeight = endY - startY;
+            @Nullable SelfGuidedIntermediate radius2Filter = params[0] != 0
+                    ? SelfGuidedIntermediate.create(source, chunkStartX, startY, chunkWidth, stripeHeight, 2, params[1])
+                    : null;
+            @Nullable SelfGuidedIntermediate radius1Filter = params[2] != 0
+                    ? SelfGuidedIntermediate.create(source, chunkStartX, startY, chunkWidth, stripeHeight, 1, params[3])
+                    : null;
+            int weight0 = radius2Filter != null ? projection[0] : 0;
+            int weight1 = radius1Filter != null ? 128 - projection[0] - projection[1] : 0;
+            for (int y = startY; y < endY; y++) {
+                int localY = y - startY;
+                for (int x = chunkStartX; x < chunkEndX; x++) {
+                    int localX = x - chunkStartX;
+                    int base = source.sample(x, y);
+                    int adjustment = 0;
+                    if (radius2Filter != null && weight0 != 0) {
+                        adjustment += weight0 * radius2Filter.residual5(localX, localY, base);
+                    }
+                    if (radius1Filter != null && weight1 != 0) {
+                        adjustment += weight1 * radius1Filter.residual3(localX, localY, base);
+                    }
+                    destination.setSample(x, y, base + round2(adjustment, SELF_GUIDED_WEIGHT_BITS));
                 }
-                if (radius1Filter != null && weight1 != 0) {
-                    adjustment += weight1 * radius1Filter.residual3(x, y, base);
-                }
-                destination.setSample(x, y, base + round2(adjustment, SELF_GUIDED_WEIGHT_BITS));
             }
         }
     }
@@ -391,13 +519,69 @@ public final class RestorationApplier {
         return (value + (1 << (bits - 1))) >> bits;
     }
 
+    /// Returns one restoration-unit span using AV1's shortened final-unit rule.
+    ///
+    /// @param unitIndex the zero-based restoration unit index
+    /// @param unitSize the nominal restoration unit size
+    /// @param extent the plane extent in samples
+    /// @return the inclusive-exclusive sample limits for the unit
+    private static UnitLimits unitLimits(int unitIndex, int unitSize, int extent) {
+        int start = 0;
+        for (int index = 0; index < unitIndex; index++) {
+            start += unitSpan(start, unitSize, extent);
+        }
+        return new UnitLimits(start, start + unitSpan(start, unitSize, extent));
+    }
+
+    /// Returns one restoration-unit span length from a starting coordinate.
+    ///
+    /// @param start the unit start coordinate
+    /// @param unitSize the nominal restoration unit size
+    /// @param extent the plane extent in samples
+    /// @return the unit span length
+    private static int unitSpan(int start, int unitSize, int extent) {
+        int remaining = extent - start;
+        int extendedSize = unitSize * 3 / 2;
+        return remaining < extendedSize ? remaining : unitSize;
+    }
+
+    /// Returns the chroma horizontal subsampling shift for one plane.
+    ///
+    /// @param pixelFormat the decoded pixel format
+    /// @param planeIndex the plane index
+    /// @return the chroma horizontal subsampling shift for one plane
+    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat, int planeIndex) {
+        if (planeIndex == 0) {
+            return 0;
+        }
+        return switch (pixelFormat) {
+            case I400, I444 -> 0;
+            case I420, I422 -> 1;
+        };
+    }
+
+    /// Returns the chroma vertical subsampling shift for one plane.
+    ///
+    /// @param pixelFormat the decoded pixel format
+    /// @param planeIndex the plane index
+    /// @return the chroma vertical subsampling shift for one plane
+    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat, int planeIndex) {
+        if (planeIndex == 0) {
+            return 0;
+        }
+        return switch (pixelFormat) {
+            case I400, I422, I444 -> 0;
+            case I420 -> 1;
+        };
+    }
+
     /// Self-guided A/B projection fields for one filter radius.
     @NotNullByDefault
     private static final class SelfGuidedIntermediate {
-        /// The source plane width in samples.
+        /// The processing block width in samples.
         private final int width;
 
-        /// The source plane height in samples.
+        /// The processing stripe height in samples.
         private final int height;
 
         /// The inverted A field used by the dav1d finish equations.
@@ -408,8 +592,8 @@ public final class RestorationApplier {
 
         /// Creates one self-guided intermediate field.
         ///
-        /// @param width the source plane width in samples
-        /// @param height the source plane height in samples
+        /// @param width the processing block width in samples
+        /// @param height the processing stripe height in samples
         /// @param a the inverted A field
         /// @param b the inverted B field
         private SelfGuidedIntermediate(int width, int height, int @Unmodifiable [] a, int @Unmodifiable [] b) {
@@ -422,15 +606,25 @@ public final class RestorationApplier {
         /// Computes one self-guided intermediate field.
         ///
         /// @param source the source plane
+        /// @param startX the global processing block start X
+        /// @param startY the global processing stripe start Y
+        /// @param width the processing block width in samples
+        /// @param height the processing stripe height in samples
         /// @param radius the self-guided filter radius
         /// @param strength the self-guided strength value from the AV1 parameter table
         /// @return one self-guided intermediate field
-        public static SelfGuidedIntermediate create(PlaneBuffer source, int radius, int strength) {
+        public static SelfGuidedIntermediate create(
+                PlaneSampleSource source,
+                int startX,
+                int startY,
+                int width,
+                int height,
+                int radius,
+                int strength
+        ) {
             if (radius != 1 && radius != 2) {
                 throw new IllegalArgumentException("radius must be 1 or 2: " + radius);
             }
-            int width = source.width();
-            int height = source.height();
             int[] a = new int[(width + 2) * (height + 2)];
             int[] b = new int[(width + 2) * (height + 2)];
             int count = radius == 1 ? 9 : 25;
@@ -438,7 +632,7 @@ public final class RestorationApplier {
             int bitDepthShift = source.bitDepth() - 8;
             for (int y = -1; y <= height; y++) {
                 for (int x = -1; x <= width; x++) {
-                    BoxSum box = boxSum(source, x, y, radius);
+                    BoxSum box = boxSum(source, startX + x, startY + y, radius);
                     Projection projection = projection(box, count, strength, oneByX, bitDepthShift);
                     int index = (y + 1) * (width + 2) + x + 1;
                     a[index] = projection.a();
@@ -450,8 +644,8 @@ public final class RestorationApplier {
 
         /// Returns one 3x3 residual from the inverted A/B fields.
         ///
-        /// @param x the sample X coordinate
-        /// @param y the sample Y coordinate
+        /// @param x the sample X coordinate relative to the processing block
+        /// @param y the sample Y coordinate relative to the processing stripe
         /// @param sourceSample the original source sample
         /// @return one 3x3 residual
         public int residual3(int x, int y, int sourceSample) {
@@ -462,13 +656,12 @@ public final class RestorationApplier {
 
         /// Returns one 5x5 residual from the inverted A/B fields.
         ///
-        /// @param x the sample X coordinate
-        /// @param y the sample Y coordinate
-        /// @param localY the sample Y coordinate relative to the restoration unit
+        /// @param x the sample X coordinate relative to the processing block
+        /// @param y the sample Y coordinate relative to the processing stripe
         /// @param sourceSample the original source sample
         /// @return one 5x5 residual
-        public int residual5(int x, int y, int localY, int sourceSample) {
-            if ((localY & 1) == 0) {
+        public int residual5(int x, int y, int sourceSample) {
+            if ((y & 1) == 0) {
                 int weightedB = sixNeighborPairWeight(b, x, y);
                 int weightedA = sixNeighborPairWeight(a, x, y);
                 return round2(weightedA - weightedB * sourceSample, SELF_GUIDED_FILTER_5_PAIR_BITS);
@@ -535,20 +728,19 @@ public final class RestorationApplier {
                     + (value(values, x - 1, y) + value(values, x + 1, y)) * 5;
         }
 
-        /// Computes one clamped box sum and squared sum.
+        /// Computes one box sum and squared sum using the source border extension.
         ///
         /// @param source the source plane
-        /// @param x the sample X coordinate
-        /// @param y the sample Y coordinate
+        /// @param x the global sample X coordinate
+        /// @param y the global sample Y coordinate
         /// @param radius the self-guided filter radius
         /// @return the box sums
-        private static BoxSum boxSum(PlaneBuffer source, int x, int y, int radius) {
+        private static BoxSum boxSum(PlaneSampleSource source, int x, int y, int radius) {
             int sum = 0;
             int sumSquares = 0;
             for (int dy = -radius; dy <= radius; dy++) {
-                int sampleY = clamp(y + dy, 0, source.height() - 1);
                 for (int dx = -radius; dx <= radius; dx++) {
-                    int sample = source.sample(clamp(x + dx, 0, source.width() - 1), sampleY);
+                    int sample = source.sample(x + dx, y + dy);
                     sum += sample;
                     sumSquares += sample * sample;
                 }
@@ -614,9 +806,131 @@ public final class RestorationApplier {
     private record Projection(int a, int b) {
     }
 
+    /// Inclusive-exclusive restoration unit limits.
+    ///
+    /// @param start the inclusive start coordinate
+    /// @param end the exclusive end coordinate
+    @NotNullByDefault
+    private record UnitLimits(int start, int end) {
+    }
+
+    /// Read-only plane source with AV1 frame-border extension.
+    @NotNullByDefault
+    private interface PlaneSampleSource {
+        /// Returns the plane width in samples.
+        ///
+        /// @return the plane width in samples
+        int width();
+
+        /// Returns the plane height in samples.
+        ///
+        /// @return the plane height in samples
+        int height();
+
+        /// Returns the decoded bit depth.
+        ///
+        /// @return the decoded bit depth
+        int bitDepth();
+
+        /// Returns one frame-border-extended sample.
+        ///
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @return one sample
+        int sample(int x, int y);
+    }
+
+    /// Source view that substitutes AV1 internal restoration stripe boundary rows.
+    @NotNullByDefault
+    private static final class StripeBoundarySource implements PlaneSampleSource {
+        /// The post-CDEF source plane.
+        private final PlaneSampleSource source;
+
+        /// The pre-CDEF boundary source plane.
+        private final PlaneSampleSource boundarySource;
+
+        /// The inclusive processing stripe start Y.
+        private final int stripeStart;
+
+        /// The exclusive processing stripe end Y.
+        private final int stripeEnd;
+
+        /// Whether rows above this stripe use saved boundary lines.
+        private final boolean copyAbove;
+
+        /// Whether rows below this stripe use saved boundary lines.
+        private final boolean copyBelow;
+
+        /// Creates one stripe boundary source.
+        ///
+        /// @param source the post-CDEF source plane
+        /// @param boundarySource the pre-CDEF boundary source plane
+        /// @param stripeStart the inclusive processing stripe start Y
+        /// @param stripeEnd the exclusive processing stripe end Y
+        /// @param copyAbove whether rows above this stripe use saved boundary lines
+        /// @param copyBelow whether rows below this stripe use saved boundary lines
+        private StripeBoundarySource(
+                PlaneSampleSource source,
+                PlaneSampleSource boundarySource,
+                int stripeStart,
+                int stripeEnd,
+                boolean copyAbove,
+                boolean copyBelow
+        ) {
+            this.source = Objects.requireNonNull(source, "source");
+            this.boundarySource = Objects.requireNonNull(boundarySource, "boundarySource");
+            this.stripeStart = stripeStart;
+            this.stripeEnd = stripeEnd;
+            this.copyAbove = copyAbove;
+            this.copyBelow = copyBelow;
+        }
+
+        /// Returns the plane width in samples.
+        ///
+        /// @return the plane width in samples
+        @Override
+        public int width() {
+            return source.width();
+        }
+
+        /// Returns the plane height in samples.
+        ///
+        /// @return the plane height in samples
+        @Override
+        public int height() {
+            return source.height();
+        }
+
+        /// Returns the decoded bit depth.
+        ///
+        /// @return the decoded bit depth
+        @Override
+        public int bitDepth() {
+            return source.bitDepth();
+        }
+
+        /// Returns one sample with internal stripe boundary rows substituted.
+        ///
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @return one sample
+        @Override
+        public int sample(int x, int y) {
+            if (copyAbove && y >= stripeStart - RESTORATION_STRIPE_BORDER && y < stripeStart) {
+                int boundaryY = y <= stripeStart - 2 ? stripeStart - 2 : stripeStart - 1;
+                return boundarySource.sample(x, boundaryY);
+            }
+            if (copyBelow && y >= stripeEnd && y < stripeEnd + RESTORATION_STRIPE_BORDER) {
+                int boundaryY = y == stripeEnd ? stripeEnd : stripeEnd + 1;
+                return boundarySource.sample(x, boundaryY);
+            }
+            return source.sample(x, y);
+        }
+    }
+
     /// Mutable plane storage used by restoration filtering.
     @NotNullByDefault
-    private static final class PlaneBuffer {
+    private static final class PlaneBuffer implements PlaneSampleSource {
         /// The plane width in samples.
         private final int width;
 
@@ -670,6 +984,7 @@ public final class RestorationApplier {
         /// Returns the plane width in samples.
         ///
         /// @return the plane width in samples
+        @Override
         public int width() {
             return width;
         }
@@ -677,6 +992,7 @@ public final class RestorationApplier {
         /// Returns the plane height in samples.
         ///
         /// @return the plane height in samples
+        @Override
         public int height() {
             return height;
         }
@@ -684,6 +1000,7 @@ public final class RestorationApplier {
         /// Returns the decoded bit depth.
         ///
         /// @return the decoded bit depth
+        @Override
         public int bitDepth() {
             return bitDepth;
         }
@@ -693,8 +1010,11 @@ public final class RestorationApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return one sample
+        @Override
         public int sample(int x, int y) {
-            return samples[y * stride + x] & 0xFFFF;
+            int clampedX = clamp(x, 0, width - 1);
+            int clampedY = clamp(y, 0, height - 1);
+            return samples[clampedY * stride + clampedX] & 0xFFFF;
         }
 
         /// Stores one clipped sample.

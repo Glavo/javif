@@ -76,7 +76,7 @@ final class MsacDecoderTest {
         assertArrayEquals(new int[]{4746, 12254, 23516, 12}, hiTokenCdf);
 
         MsacDecoder subexpDecoder = new MsacDecoder(new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18}, 0, 6, false);
-        assertEquals(33, subexpDecoder.decodeSubexp(5, 40, 3));
+        assertEquals(24, subexpDecoder.decodeSubexp(5, 40, 3));
     }
 
     /// Verifies that `TileBitstream` opens a slice-bounded arithmetic decoder without copying unrelated bytes.

@@ -883,8 +883,9 @@ public final class TileSyntaxReader {
     /// @return the decoded partition type
     public PartitionType readPartition(PartitionBlockLevel blockLevel, int context) {
         PartitionBlockLevel nonNullBlockLevel = Objects.requireNonNull(blockLevel, "blockLevel");
+        int[] cdf = cdfContext.mutablePartitionCdf(nonNullBlockLevel.cdfIndex(), context);
         int symbol = msacDecoder.decodeSymbolAdapt(
-                cdfContext.mutablePartitionCdf(nonNullBlockLevel.cdfIndex(), context),
+                cdf,
                 nonNullBlockLevel.symbolLimit()
         );
         return PartitionType.fromSymbolIndex(symbol);

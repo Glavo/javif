@@ -938,13 +938,13 @@ public final class CdfContext {
     private static final int @Unmodifiable [] DEFAULT_INTRABC_CDF = inverse(30531);
 
     /// The transformed default Wiener restoration enable CDF.
-    private static final int @Unmodifiable [] DEFAULT_RESTORATION_WIENER_CDF = inverse(9984);
+    private static final int @Unmodifiable [] DEFAULT_RESTORATION_WIENER_CDF = inverse(11570);
 
     /// The transformed default self-guided restoration enable CDF.
-    private static final int @Unmodifiable [] DEFAULT_RESTORATION_SELF_GUIDED_CDF = inverse(14199);
+    private static final int @Unmodifiable [] DEFAULT_RESTORATION_SELF_GUIDED_CDF = inverse(16855);
 
     /// The transformed default switchable restoration CDF.
-    private static final int @Unmodifiable [] DEFAULT_RESTORATION_SWITCHABLE_CDF = inverse(13158, 22885);
+    private static final int @Unmodifiable [] DEFAULT_RESTORATION_SWITCHABLE_CDF = inverse(9413, 22581);
 
     /// The transformed default luma intra-mode CDFs.
     private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_Y_MODE_CDFS = inverse2d(new int[][]{

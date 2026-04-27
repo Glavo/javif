@@ -287,8 +287,8 @@ public final class AvifContainerParser {
         if (flags != 0) {
             throw parseFailed("grid flags must be zero", 1);
         }
-        int columnsMinusOne = input.readU8();
         int rowsMinusOne = input.readU8();
+        int columnsMinusOne = input.readU8();
         int rows = rowsMinusOne + 1;
         int columns = columnsMinusOne + 1;
         if (rows <= 0 || columns <= 0) {

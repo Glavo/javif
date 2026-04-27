@@ -55,6 +55,18 @@ final class InverseTransformer {
     /// The `cospi[56]` constant at inverse-transform precision `12`.
     private static final int COSPI_56 = 799;
 
+    /// The AV1 inverse-transform cosine table at precision `12`.
+    private static final int @Unmodifiable [] COSPI = new int[]{
+            4096, 4095, 4091, 4085, 4076, 4065, 4052, 4036,
+            4017, 3996, 3973, 3948, 3920, 3889, 3857, 3822,
+            3784, 3745, 3703, 3659, 3612, 3564, 3513, 3461,
+            3406, 3349, 3290, 3229, 3166, 3102, 3035, 2967,
+            2896, 2824, 2751, 2675, 2598, 2520, 2440, 2359,
+            2276, 2191, 2106, 2019, 1931, 1842, 1751, 1660,
+            1567, 1474, 1380, 1285, 1189, 1092, 995, 897,
+            799, 700, 601, 501, 401, 301, 201, 101,
+    };
+
     /// The `dav1d` literal used by the `TX_16X16` odd stages.
     private static final int COSPI_LITERAL_401 = 401;
 
@@ -214,14 +226,14 @@ final class InverseTransformer {
             case RTX_16X4 -> reconstructRectangularDctDct(coefficients, 16, 4, 1);
             case RTX_8X16 -> reconstructRectangularDctDct(coefficients, 8, 16, 1);
             case RTX_16X8 -> reconstructRectangularDctDct(coefficients, 16, 8, 1);
-            case TX_32X32 -> reconstructGenericLargeDctDct(coefficients, 32, 32, 2);
+            case TX_32X32 -> reconstructRectangularDctDct(coefficients, 32, 32, 2);
             case TX_64X64 -> reconstructGenericLargeDctDct(coefficients, 64, 64, 2);
-            case RTX_16X32 -> reconstructGenericLargeDctDct(coefficients, 16, 32, 1);
-            case RTX_32X16 -> reconstructGenericLargeDctDct(coefficients, 32, 16, 1);
+            case RTX_16X32 -> reconstructRectangularDctDct(coefficients, 16, 32, 1);
+            case RTX_32X16 -> reconstructRectangularDctDct(coefficients, 32, 16, 1);
             case RTX_32X64 -> reconstructGenericLargeDctDct(coefficients, 32, 64, 1);
             case RTX_64X32 -> reconstructGenericLargeDctDct(coefficients, 64, 32, 1);
-            case RTX_8X32 -> reconstructGenericLargeDctDct(coefficients, 8, 32, 2);
-            case RTX_32X8 -> reconstructGenericLargeDctDct(coefficients, 32, 8, 2);
+            case RTX_8X32 -> reconstructRectangularDctDct(coefficients, 8, 32, 2);
+            case RTX_32X8 -> reconstructRectangularDctDct(coefficients, 32, 8, 2);
             case RTX_16X64 -> reconstructGenericLargeDctDct(coefficients, 16, 64, 2);
             case RTX_64X16 -> reconstructGenericLargeDctDct(coefficients, 64, 16, 2);
         };
@@ -644,7 +656,8 @@ final class InverseTransformer {
             case 4 -> inverseDct4(input, output);
             case 8 -> inverseDct8(input, output);
             case 16 -> inverseDct16(input, output);
-            case 32, 64 -> inverseDctLarge(input, output, length);
+            case 32 -> inverseDct32Dav1d(input, output);
+            case 64 -> inverseDctLarge(input, output, length);
             default -> throw new IllegalStateException("Unsupported inverse DCT length: " + length);
         }
     }
@@ -828,6 +841,452 @@ final class InverseTransformer {
         output[13] = clip((long) evenOutput[2] - t13a);
         output[14] = clip((long) evenOutput[1] - t14);
         output[15] = clip((long) evenOutput[0] - t15a2);
+    }
+
+    /// Reconstructs one one-dimensional `DCT_32` vector.
+    ///
+    /// This follows the libaom staged integer `av1_idct32` schedule and keeps the same
+    /// half-butterfly rounding points. Stage-range checks from libaom are omitted because
+    /// conforming streams already keep these intermediates within range.
+    ///
+    /// @param input the dequantized `DCT_32` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseDct32(int[] input, int[] output) {
+        int[] step = new int[32];
+
+        output[0] = input[0];
+        output[1] = input[16];
+        output[2] = input[8];
+        output[3] = input[24];
+        output[4] = input[4];
+        output[5] = input[20];
+        output[6] = input[12];
+        output[7] = input[28];
+        output[8] = input[2];
+        output[9] = input[18];
+        output[10] = input[10];
+        output[11] = input[26];
+        output[12] = input[6];
+        output[13] = input[22];
+        output[14] = input[14];
+        output[15] = input[30];
+        output[16] = input[1];
+        output[17] = input[17];
+        output[18] = input[9];
+        output[19] = input[25];
+        output[20] = input[5];
+        output[21] = input[21];
+        output[22] = input[13];
+        output[23] = input[29];
+        output[24] = input[3];
+        output[25] = input[19];
+        output[26] = input[11];
+        output[27] = input[27];
+        output[28] = input[7];
+        output[29] = input[23];
+        output[30] = input[15];
+        output[31] = input[31];
+
+        System.arraycopy(output, 0, step, 0, 16);
+        step[16] = halfBtf(COSPI[62], output[16], -COSPI[2], output[31]);
+        step[17] = halfBtf(COSPI[30], output[17], -COSPI[34], output[30]);
+        step[18] = halfBtf(COSPI[46], output[18], -COSPI[18], output[29]);
+        step[19] = halfBtf(COSPI[14], output[19], -COSPI[50], output[28]);
+        step[20] = halfBtf(COSPI[54], output[20], -COSPI[10], output[27]);
+        step[21] = halfBtf(COSPI[22], output[21], -COSPI[42], output[26]);
+        step[22] = halfBtf(COSPI[38], output[22], -COSPI[26], output[25]);
+        step[23] = halfBtf(COSPI[6], output[23], -COSPI[58], output[24]);
+        step[24] = halfBtf(COSPI[58], output[23], COSPI[6], output[24]);
+        step[25] = halfBtf(COSPI[26], output[22], COSPI[38], output[25]);
+        step[26] = halfBtf(COSPI[42], output[21], COSPI[22], output[26]);
+        step[27] = halfBtf(COSPI[10], output[20], COSPI[54], output[27]);
+        step[28] = halfBtf(COSPI[50], output[19], COSPI[14], output[28]);
+        step[29] = halfBtf(COSPI[18], output[18], COSPI[46], output[29]);
+        step[30] = halfBtf(COSPI[34], output[17], COSPI[30], output[30]);
+        step[31] = halfBtf(COSPI[2], output[16], COSPI[62], output[31]);
+
+        System.arraycopy(step, 0, output, 0, 8);
+        output[8] = halfBtf(COSPI[60], step[8], -COSPI[4], step[15]);
+        output[9] = halfBtf(COSPI[28], step[9], -COSPI[36], step[14]);
+        output[10] = halfBtf(COSPI[44], step[10], -COSPI[20], step[13]);
+        output[11] = halfBtf(COSPI[12], step[11], -COSPI[52], step[12]);
+        output[12] = halfBtf(COSPI[52], step[11], COSPI[12], step[12]);
+        output[13] = halfBtf(COSPI[20], step[10], COSPI[44], step[13]);
+        output[14] = halfBtf(COSPI[36], step[9], COSPI[28], step[14]);
+        output[15] = halfBtf(COSPI[4], step[8], COSPI[60], step[15]);
+        output[16] = clip((long) step[16] + step[17]);
+        output[17] = clip((long) step[16] - step[17]);
+        output[18] = clip(-(long) step[18] + step[19]);
+        output[19] = clip((long) step[18] + step[19]);
+        output[20] = clip((long) step[20] + step[21]);
+        output[21] = clip((long) step[20] - step[21]);
+        output[22] = clip(-(long) step[22] + step[23]);
+        output[23] = clip((long) step[22] + step[23]);
+        output[24] = clip((long) step[24] + step[25]);
+        output[25] = clip((long) step[24] - step[25]);
+        output[26] = clip(-(long) step[26] + step[27]);
+        output[27] = clip((long) step[26] + step[27]);
+        output[28] = clip((long) step[28] + step[29]);
+        output[29] = clip((long) step[28] - step[29]);
+        output[30] = clip(-(long) step[30] + step[31]);
+        output[31] = clip((long) step[30] + step[31]);
+
+        System.arraycopy(output, 0, step, 0, 4);
+        step[4] = halfBtf(COSPI[56], output[4], -COSPI[8], output[7]);
+        step[5] = halfBtf(COSPI[24], output[5], -COSPI[40], output[6]);
+        step[6] = halfBtf(COSPI[40], output[5], COSPI[24], output[6]);
+        step[7] = halfBtf(COSPI[8], output[4], COSPI[56], output[7]);
+        step[8] = clip((long) output[8] + output[9]);
+        step[9] = clip((long) output[8] - output[9]);
+        step[10] = clip(-(long) output[10] + output[11]);
+        step[11] = clip((long) output[10] + output[11]);
+        step[12] = clip((long) output[12] + output[13]);
+        step[13] = clip((long) output[12] - output[13]);
+        step[14] = clip(-(long) output[14] + output[15]);
+        step[15] = clip((long) output[14] + output[15]);
+        step[16] = output[16];
+        step[17] = halfBtf(-COSPI[8], output[17], COSPI[56], output[30]);
+        step[18] = halfBtf(-COSPI[56], output[18], -COSPI[8], output[29]);
+        step[19] = output[19];
+        step[20] = output[20];
+        step[21] = halfBtf(-COSPI[40], output[21], COSPI[24], output[26]);
+        step[22] = halfBtf(-COSPI[24], output[22], -COSPI[40], output[25]);
+        step[23] = output[23];
+        step[24] = output[24];
+        step[25] = halfBtf(-COSPI[40], output[22], COSPI[24], output[25]);
+        step[26] = halfBtf(COSPI[24], output[21], COSPI[40], output[26]);
+        step[27] = output[27];
+        step[28] = output[28];
+        step[29] = halfBtf(-COSPI[8], output[18], COSPI[56], output[29]);
+        step[30] = halfBtf(COSPI[56], output[17], COSPI[8], output[30]);
+        step[31] = output[31];
+
+        output[0] = halfBtf(COSPI[32], step[0], COSPI[32], step[1]);
+        output[1] = halfBtf(COSPI[32], step[0], -COSPI[32], step[1]);
+        output[2] = halfBtf(COSPI[48], step[2], -COSPI[16], step[3]);
+        output[3] = halfBtf(COSPI[16], step[2], COSPI[48], step[3]);
+        output[4] = clip((long) step[4] + step[5]);
+        output[5] = clip((long) step[4] - step[5]);
+        output[6] = clip(-(long) step[6] + step[7]);
+        output[7] = clip((long) step[6] + step[7]);
+        output[8] = step[8];
+        output[9] = halfBtf(-COSPI[16], step[9], COSPI[48], step[14]);
+        output[10] = halfBtf(-COSPI[48], step[10], -COSPI[16], step[13]);
+        output[11] = step[11];
+        output[12] = step[12];
+        output[13] = halfBtf(-COSPI[16], step[10], COSPI[48], step[13]);
+        output[14] = halfBtf(COSPI[48], step[9], COSPI[16], step[14]);
+        output[15] = step[15];
+        output[16] = clip((long) step[16] + step[19]);
+        output[17] = clip((long) step[17] + step[18]);
+        output[18] = clip((long) step[17] - step[18]);
+        output[19] = clip((long) step[16] - step[19]);
+        output[20] = clip(-(long) step[20] + step[23]);
+        output[21] = clip(-(long) step[21] + step[22]);
+        output[22] = clip((long) step[21] + step[22]);
+        output[23] = clip((long) step[20] + step[23]);
+        output[24] = clip((long) step[24] + step[27]);
+        output[25] = clip((long) step[25] + step[26]);
+        output[26] = clip((long) step[25] - step[26]);
+        output[27] = clip((long) step[24] - step[27]);
+        output[28] = clip(-(long) step[28] + step[31]);
+        output[29] = clip(-(long) step[29] + step[30]);
+        output[30] = clip((long) step[29] + step[30]);
+        output[31] = clip((long) step[28] + step[31]);
+
+        step[0] = clip((long) output[0] + output[3]);
+        step[1] = clip((long) output[1] + output[2]);
+        step[2] = clip((long) output[1] - output[2]);
+        step[3] = clip((long) output[0] - output[3]);
+        step[4] = output[4];
+        step[5] = halfBtf(-COSPI[32], output[5], COSPI[32], output[6]);
+        step[6] = halfBtf(COSPI[32], output[5], COSPI[32], output[6]);
+        step[7] = output[7];
+        step[8] = clip((long) output[8] + output[11]);
+        step[9] = clip((long) output[9] + output[10]);
+        step[10] = clip((long) output[9] - output[10]);
+        step[11] = clip((long) output[8] - output[11]);
+        step[12] = clip(-(long) output[12] + output[15]);
+        step[13] = clip(-(long) output[13] + output[14]);
+        step[14] = clip((long) output[13] + output[14]);
+        step[15] = clip((long) output[12] + output[15]);
+        step[16] = output[16];
+        step[17] = output[17];
+        step[18] = halfBtf(-COSPI[16], output[18], COSPI[48], output[29]);
+        step[19] = halfBtf(-COSPI[16], output[19], COSPI[48], output[28]);
+        step[20] = halfBtf(-COSPI[48], output[20], -COSPI[16], output[27]);
+        step[21] = halfBtf(-COSPI[48], output[21], -COSPI[16], output[26]);
+        step[22] = output[22];
+        step[23] = output[23];
+        step[24] = output[24];
+        step[25] = output[25];
+        step[26] = halfBtf(-COSPI[16], output[21], COSPI[48], output[26]);
+        step[27] = halfBtf(-COSPI[16], output[20], COSPI[48], output[27]);
+        step[28] = halfBtf(COSPI[48], output[19], COSPI[16], output[28]);
+        step[29] = halfBtf(COSPI[48], output[18], COSPI[16], output[29]);
+        step[30] = output[30];
+        step[31] = output[31];
+
+        output[0] = clip((long) step[0] + step[7]);
+        output[1] = clip((long) step[1] + step[6]);
+        output[2] = clip((long) step[2] + step[5]);
+        output[3] = clip((long) step[3] + step[4]);
+        output[4] = clip((long) step[3] - step[4]);
+        output[5] = clip((long) step[2] - step[5]);
+        output[6] = clip((long) step[1] - step[6]);
+        output[7] = clip((long) step[0] - step[7]);
+        output[8] = step[8];
+        output[9] = step[9];
+        output[10] = halfBtf(-COSPI[32], step[10], COSPI[32], step[13]);
+        output[11] = halfBtf(-COSPI[32], step[11], COSPI[32], step[12]);
+        output[12] = halfBtf(COSPI[32], step[11], COSPI[32], step[12]);
+        output[13] = halfBtf(COSPI[32], step[10], COSPI[32], step[13]);
+        output[14] = step[14];
+        output[15] = step[15];
+        output[16] = clip((long) step[16] + step[23]);
+        output[17] = clip((long) step[17] + step[22]);
+        output[18] = clip((long) step[18] + step[21]);
+        output[19] = clip((long) step[19] + step[20]);
+        output[20] = clip((long) step[19] - step[20]);
+        output[21] = clip((long) step[18] - step[21]);
+        output[22] = clip((long) step[17] - step[22]);
+        output[23] = clip((long) step[16] - step[23]);
+        output[24] = clip(-(long) step[24] + step[31]);
+        output[25] = clip(-(long) step[25] + step[30]);
+        output[26] = clip(-(long) step[26] + step[29]);
+        output[27] = clip(-(long) step[27] + step[28]);
+        output[28] = clip((long) step[27] + step[28]);
+        output[29] = clip((long) step[26] + step[29]);
+        output[30] = clip((long) step[25] + step[30]);
+        output[31] = clip((long) step[24] + step[31]);
+
+        step[0] = clip((long) output[0] + output[15]);
+        step[1] = clip((long) output[1] + output[14]);
+        step[2] = clip((long) output[2] + output[13]);
+        step[3] = clip((long) output[3] + output[12]);
+        step[4] = clip((long) output[4] + output[11]);
+        step[5] = clip((long) output[5] + output[10]);
+        step[6] = clip((long) output[6] + output[9]);
+        step[7] = clip((long) output[7] + output[8]);
+        step[8] = clip((long) output[7] - output[8]);
+        step[9] = clip((long) output[6] - output[9]);
+        step[10] = clip((long) output[5] - output[10]);
+        step[11] = clip((long) output[4] - output[11]);
+        step[12] = clip((long) output[3] - output[12]);
+        step[13] = clip((long) output[2] - output[13]);
+        step[14] = clip((long) output[1] - output[14]);
+        step[15] = clip((long) output[0] - output[15]);
+        step[16] = output[16];
+        step[17] = output[17];
+        step[18] = output[18];
+        step[19] = output[19];
+        step[20] = halfBtf(-COSPI[32], output[20], COSPI[32], output[27]);
+        step[21] = halfBtf(-COSPI[32], output[21], COSPI[32], output[26]);
+        step[22] = halfBtf(-COSPI[32], output[22], COSPI[32], output[25]);
+        step[23] = halfBtf(-COSPI[32], output[23], COSPI[32], output[24]);
+        step[24] = halfBtf(COSPI[32], output[23], COSPI[32], output[24]);
+        step[25] = halfBtf(COSPI[32], output[22], COSPI[32], output[25]);
+        step[26] = halfBtf(COSPI[32], output[21], COSPI[32], output[26]);
+        step[27] = halfBtf(COSPI[32], output[20], COSPI[32], output[27]);
+        step[28] = output[28];
+        step[29] = output[29];
+        step[30] = output[30];
+        step[31] = output[31];
+
+        output[0] = clip((long) step[0] + step[31]);
+        output[1] = clip((long) step[1] + step[30]);
+        output[2] = clip((long) step[2] + step[29]);
+        output[3] = clip((long) step[3] + step[28]);
+        output[4] = clip((long) step[4] + step[27]);
+        output[5] = clip((long) step[5] + step[26]);
+        output[6] = clip((long) step[6] + step[25]);
+        output[7] = clip((long) step[7] + step[24]);
+        output[8] = clip((long) step[8] + step[23]);
+        output[9] = clip((long) step[9] + step[22]);
+        output[10] = clip((long) step[10] + step[21]);
+        output[11] = clip((long) step[11] + step[20]);
+        output[12] = clip((long) step[12] + step[19]);
+        output[13] = clip((long) step[13] + step[18]);
+        output[14] = clip((long) step[14] + step[17]);
+        output[15] = clip((long) step[15] + step[16]);
+        output[16] = clip((long) step[15] - step[16]);
+        output[17] = clip((long) step[14] - step[17]);
+        output[18] = clip((long) step[13] - step[18]);
+        output[19] = clip((long) step[12] - step[19]);
+        output[20] = clip((long) step[11] - step[20]);
+        output[21] = clip((long) step[10] - step[21]);
+        output[22] = clip((long) step[9] - step[22]);
+        output[23] = clip((long) step[8] - step[23]);
+        output[24] = clip((long) step[7] - step[24]);
+        output[25] = clip((long) step[6] - step[25]);
+        output[26] = clip((long) step[5] - step[26]);
+        output[27] = clip((long) step[4] - step[27]);
+        output[28] = clip((long) step[3] - step[28]);
+        output[29] = clip((long) step[2] - step[29]);
+        output[30] = clip((long) step[1] - step[30]);
+        output[31] = clip((long) step[0] - step[31]);
+    }
+
+    /// Reconstructs one one-dimensional `DCT_32` vector using the scalar `dav1d` schedule.
+    ///
+    /// This keeps the same even/odd split and rounding points as `inv_dct32_1d_internal_c` for the
+    /// non-`tx64` case. Matching that path avoids coefficient-dependent drift in large `DCT_DCT`
+    /// residuals.
+    ///
+    /// @param input the dequantized `DCT_32` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseDct32Dav1d(int[] input, int[] output) {
+        int[] evenInput = new int[16];
+        int[] evenOutput = new int[16];
+        for (int i = 0; i < 16; i++) {
+            evenInput[i] = input[i << 1];
+        }
+        inverseDct16(evenInput, evenOutput);
+
+        int in1 = input[1];
+        int in3 = input[3];
+        int in5 = input[5];
+        int in7 = input[7];
+        int in9 = input[9];
+        int in11 = input[11];
+        int in13 = input[13];
+        int in15 = input[15];
+        int in17 = input[17];
+        int in19 = input[19];
+        int in21 = input[21];
+        int in23 = input[23];
+        int in25 = input[25];
+        int in27 = input[27];
+        int in29 = input[29];
+        int in31 = input[31];
+
+        int t16a = positiveRoundShift((long) in1 * 201 - (long) in31 * (4091 - 4096), 12) - in31;
+        int t17a = positiveRoundShift((long) in17 * (3035 - 4096) - (long) in15 * 2751, 12) + in17;
+        int t18a = positiveRoundShift((long) in9 * 1751 - (long) in23 * (3703 - 4096), 12) - in23;
+        int t19a = positiveRoundShift((long) in25 * (3857 - 4096) - (long) in7 * 1380, 12) + in25;
+        int t20a = positiveRoundShift((long) in5 * 995 - (long) in27 * (3973 - 4096), 12) - in27;
+        int t21a = positiveRoundShift((long) in21 * (3513 - 4096) - (long) in11 * 2106, 12) + in21;
+        int t22a = positiveRoundShift((long) in13 * 1220 - (long) in19 * 1645, 11);
+        int t23a = positiveRoundShift((long) in29 * (4052 - 4096) - (long) in3 * 601, 12) + in29;
+        int t24a = positiveRoundShift((long) in29 * 601 + (long) in3 * (4052 - 4096), 12) + in3;
+        int t25a = positiveRoundShift((long) in13 * 1645 + (long) in19 * 1220, 11);
+        int t26a = positiveRoundShift((long) in21 * 2106 + (long) in11 * (3513 - 4096), 12) + in11;
+        int t27a = positiveRoundShift((long) in5 * (3973 - 4096) + (long) in27 * 995, 12) + in5;
+        int t28a = positiveRoundShift((long) in25 * 1380 + (long) in7 * (3857 - 4096), 12) + in7;
+        int t29a = positiveRoundShift((long) in9 * (3703 - 4096) + (long) in23 * 1751, 12) + in9;
+        int t30a = positiveRoundShift((long) in17 * 2751 + (long) in15 * (3035 - 4096), 12) + in15;
+        int t31a = positiveRoundShift((long) in1 * (4091 - 4096) + (long) in31 * 201, 12) + in1;
+
+        int t16 = clip((long) t16a + t17a);
+        int t17 = clip((long) t16a - t17a);
+        int t18 = clip((long) t19a - t18a);
+        int t19 = clip((long) t19a + t18a);
+        int t20 = clip((long) t20a + t21a);
+        int t21 = clip((long) t20a - t21a);
+        int t22 = clip((long) t23a - t22a);
+        int t23 = clip((long) t23a + t22a);
+        int t24 = clip((long) t24a + t25a);
+        int t25 = clip((long) t24a - t25a);
+        int t26 = clip((long) t27a - t26a);
+        int t27 = clip((long) t27a + t26a);
+        int t28 = clip((long) t28a + t29a);
+        int t29 = clip((long) t28a - t29a);
+        int t30 = clip((long) t31a - t30a);
+        int t31 = clip((long) t31a + t30a);
+
+        t17a = positiveRoundShift((long) t30 * 799 - (long) t17 * (4017 - 4096), 12) - t17;
+        t30a = positiveRoundShift((long) t30 * (4017 - 4096) + (long) t17 * 799, 12) + t30;
+        t18a = positiveRoundShift(-((long) t29 * (4017 - 4096) + (long) t18 * 799), 12) - t29;
+        t29a = positiveRoundShift((long) t29 * 799 - (long) t18 * (4017 - 4096), 12) - t18;
+        t21a = positiveRoundShift((long) t26 * 1703 - (long) t21 * 1138, 11);
+        t26a = positiveRoundShift((long) t26 * 1138 + (long) t21 * 1703, 11);
+        t22a = positiveRoundShift(-((long) t25 * 1138 + (long) t22 * 1703), 11);
+        t25a = positiveRoundShift((long) t25 * 1703 - (long) t22 * 1138, 11);
+
+        t16a = clip((long) t16 + t19);
+        t17 = clip((long) t17a + t18a);
+        t18 = clip((long) t17a - t18a);
+        t19a = clip((long) t16 - t19);
+        t20a = clip((long) t23 - t20);
+        t21 = clip((long) t22a - t21a);
+        t22 = clip((long) t22a + t21a);
+        t23a = clip((long) t23 + t20);
+        t24a = clip((long) t24 + t27);
+        t25 = clip((long) t25a + t26a);
+        t26 = clip((long) t25a - t26a);
+        t27a = clip((long) t24 - t27);
+        t28a = clip((long) t31 - t28);
+        t29 = clip((long) t30a - t29a);
+        t30 = clip((long) t30a + t29a);
+        t31a = clip((long) t31 + t28);
+
+        t18a = positiveRoundShift((long) t29 * 1567 - (long) t18 * (3784 - 4096), 12) - t18;
+        t29a = positiveRoundShift((long) t29 * (3784 - 4096) + (long) t18 * 1567, 12) + t29;
+        t19 = positiveRoundShift((long) t28a * 1567 - (long) t19a * (3784 - 4096), 12) - t19a;
+        t28 = positiveRoundShift((long) t28a * (3784 - 4096) + (long) t19a * 1567, 12) + t28a;
+        t20 = positiveRoundShift(-((long) t27a * (3784 - 4096) + (long) t20a * 1567), 12) - t27a;
+        t27 = positiveRoundShift((long) t27a * 1567 - (long) t20a * (3784 - 4096), 12) - t20a;
+        t21a = positiveRoundShift(-((long) t26 * (3784 - 4096) + (long) t21 * 1567), 12) - t26;
+        t26a = positiveRoundShift((long) t26 * 1567 - (long) t21 * (3784 - 4096), 12) - t21;
+
+        t16 = clip((long) t16a + t23a);
+        t17a = clip((long) t17 + t22);
+        t18 = clip((long) t18a + t21a);
+        t19a = clip((long) t19 + t20);
+        t20a = clip((long) t19 - t20);
+        t21 = clip((long) t18a - t21a);
+        t22a = clip((long) t17 - t22);
+        t23 = clip((long) t16a - t23a);
+        t24 = clip((long) t31a - t24a);
+        t25a = clip((long) t30 - t25);
+        t26 = clip((long) t29a - t26a);
+        t27a = clip((long) t28 - t27);
+        t28a = clip((long) t28 + t27);
+        t29 = clip((long) t29a + t26a);
+        t30a = clip((long) t30 + t25);
+        t31 = clip((long) t31a + t24a);
+
+        t20 = positiveRoundShift((long) (t27a - t20a) * 181, 8);
+        t27 = positiveRoundShift((long) (t27a + t20a) * 181, 8);
+        t21a = positiveRoundShift((long) (t26 - t21) * 181, 8);
+        t26a = positiveRoundShift((long) (t26 + t21) * 181, 8);
+        t22 = positiveRoundShift((long) (t25a - t22a) * 181, 8);
+        t25 = positiveRoundShift((long) (t25a + t22a) * 181, 8);
+        t23a = positiveRoundShift((long) (t24 - t23) * 181, 8);
+        t24a = positiveRoundShift((long) (t24 + t23) * 181, 8);
+
+        output[0] = clip((long) evenOutput[0] + t31);
+        output[1] = clip((long) evenOutput[1] + t30a);
+        output[2] = clip((long) evenOutput[2] + t29);
+        output[3] = clip((long) evenOutput[3] + t28a);
+        output[4] = clip((long) evenOutput[4] + t27);
+        output[5] = clip((long) evenOutput[5] + t26a);
+        output[6] = clip((long) evenOutput[6] + t25);
+        output[7] = clip((long) evenOutput[7] + t24a);
+        output[8] = clip((long) evenOutput[8] + t23a);
+        output[9] = clip((long) evenOutput[9] + t22);
+        output[10] = clip((long) evenOutput[10] + t21a);
+        output[11] = clip((long) evenOutput[11] + t20);
+        output[12] = clip((long) evenOutput[12] + t19a);
+        output[13] = clip((long) evenOutput[13] + t18);
+        output[14] = clip((long) evenOutput[14] + t17a);
+        output[15] = clip((long) evenOutput[15] + t16);
+        output[16] = clip((long) evenOutput[15] - t16);
+        output[17] = clip((long) evenOutput[14] - t17a);
+        output[18] = clip((long) evenOutput[13] - t18);
+        output[19] = clip((long) evenOutput[12] - t19a);
+        output[20] = clip((long) evenOutput[11] - t20);
+        output[21] = clip((long) evenOutput[10] - t21a);
+        output[22] = clip((long) evenOutput[9] - t22);
+        output[23] = clip((long) evenOutput[8] - t23a);
+        output[24] = clip((long) evenOutput[7] - t24a);
+        output[25] = clip((long) evenOutput[6] - t25);
+        output[26] = clip((long) evenOutput[5] - t26a);
+        output[27] = clip((long) evenOutput[4] - t27);
+        output[28] = clip((long) evenOutput[3] - t28a);
+        output[29] = clip((long) evenOutput[2] - t29);
+        output[30] = clip((long) evenOutput[1] - t30a);
+        output[31] = clip((long) evenOutput[0] - t31);
     }
 
     /// Reconstructs one one-dimensional larger `DCT_N` vector through cached orthonormal cosine
