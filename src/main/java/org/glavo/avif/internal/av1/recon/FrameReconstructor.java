@@ -4020,7 +4020,8 @@ public final class FrameReconstructor {
         int[] residualSamples = InverseTransformer.reconstructResidualBlock(
                 dequantizedCoefficients,
                 residualUnit.size(),
-                residualUnit.transformType()
+                residualUnit.transformType(),
+                lumaPlane.bitDepth()
         );
         InverseTransformer.addResidualBlock(
                 lumaPlane,
@@ -4392,7 +4393,8 @@ public final class FrameReconstructor {
         int[] residualSamples = InverseTransformer.reconstructResidualBlock(
                 dequantizedCoefficients,
                 residualUnit.size(),
-                residualUnit.transformType()
+                residualUnit.transformType(),
+                chromaPlane.bitDepth()
         );
         InverseTransformer.addResidualBlock(
                 chromaPlane,
