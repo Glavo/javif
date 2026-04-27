@@ -699,30 +699,11 @@ public final class FFmpegAvifReferenceDecoder {
             if (stream == null || stream.isNull()) {
                 throw new IOException("FFmpeg tile-grid references a missing stream for " + label);
             }
-            if (!tileStreamFormatsMatch(group, stream.codecpar().format())) {
-                return null;
-            }
             streamIndices[tile] = stream.index();
             horizontalOffsets[tile] = tileGrid.offsets_horizontal(tile) - tileGrid.horizontal_offset();
             verticalOffsets[tile] = tileGrid.offsets_vertical(tile) - tileGrid.vertical_offset();
         }
         return new TileGridReference(width, height, streamIndices, horizontalOffsets, verticalOffsets);
-    }
-
-    /// Returns whether every stream in one tile-grid group exposes the same source pixel format.
-    ///
-    /// @param group the FFmpeg stream group
-    /// @param pixelFormat the expected FFmpeg pixel format id
-    /// @return whether every stream has the expected format
-    private static boolean tileStreamFormatsMatch(AVStreamGroup group, int pixelFormat) {
-        int streamCount = group.nb_streams();
-        for (int i = 0; i < streamCount; i++) {
-            AVStream stream = group.streams(i);
-            if (stream == null || stream.isNull() || stream.codecpar().format() != pixelFormat) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /// Decodes and composes a FFmpeg tile-grid stream group into one ARGB image.
@@ -738,7 +719,7 @@ public final class FFmpegAvifReferenceDecoder {
         @Nullable FrameMetadata sourceMetadata = null;
         for (int tile = 0; tile < tileGrid.tileCount(); tile++) {
             ArgbImage tileImage = decodeFirstFrameArgb(path, tileGrid.streamIndex(tile), label + " tile " + tile);
-            sourceMetadata = matchingMetadata(sourceMetadata, tileImage.sourceMetadata(), label);
+            sourceMetadata = compatibleTileGridMetadata(sourceMetadata, tileImage.sourceMetadata(), label);
             copyArgbTile(
                     tileImage,
                     pixels,
@@ -776,7 +757,7 @@ public final class FFmpegAvifReferenceDecoder {
                     tileGrid.streamIndex(tile),
                     label + " tile " + tile
             );
-            sourceMetadata = matchingMetadata(sourceMetadata, tilePlanes.sourceMetadata(), label);
+            sourceMetadata = compatibleTileGridMetadata(sourceMetadata, tilePlanes.sourceMetadata(), label);
             copyPlaneTile(
                     tilePlanes.luma,
                     tilePlanes.width,
@@ -795,8 +776,8 @@ public final class FFmpegAvifReferenceDecoder {
                     chromaU = new byte[chromaSize];
                     chromaV = new byte[chromaSize];
                 }
-                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaU, true);
-                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaV, false);
+                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaU, sourceMetadata.pixelFormat(), true);
+                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaV, sourceMetadata.pixelFormat(), false);
             }
         }
 
@@ -810,14 +791,14 @@ public final class FFmpegAvifReferenceDecoder {
         );
     }
 
-    /// Returns matching tile metadata, or throws when a tile differs from earlier tiles.
+    /// Returns compatible tile-grid metadata, or throws when a tile differs incompatibly.
     ///
     /// @param expected the existing metadata, or `null` for the first tile
     /// @param actual the current tile metadata
     /// @param label the diagnostic label
     /// @return the metadata to use for the composed grid
-    /// @throws IOException if tile metadata differs
-    private static FrameMetadata matchingMetadata(
+    /// @throws IOException if tile metadata is incompatible
+    private static FrameMetadata compatibleTileGridMetadata(
             @Nullable FrameMetadata expected,
             FrameMetadata actual,
             String label
@@ -825,10 +806,18 @@ public final class FFmpegAvifReferenceDecoder {
         if (expected == null) {
             return actual;
         }
-        if (!expected.equals(actual)) {
-            throw new IOException("FFmpeg tile-grid source metadata mismatch: " + label);
+        if (expected.equals(actual)) {
+            return expected;
         }
-        return expected;
+        if (expected.bitDepth() == actual.bitDepth()) {
+            if (expected.pixelFormat() == AvifPixelFormat.I400 && actual.pixelFormat() != AvifPixelFormat.I400) {
+                return actual;
+            }
+            if (expected.pixelFormat() != AvifPixelFormat.I400 && actual.pixelFormat() == AvifPixelFormat.I400) {
+                return expected;
+            }
+        }
+        throw new IOException("FFmpeg tile-grid source metadata mismatch: " + label);
     }
 
     /// Copies one ARGB tile into a composed grid canvas.
@@ -873,23 +862,28 @@ public final class FFmpegAvifReferenceDecoder {
     /// @param tileGrid the tile-grid metadata
     /// @param tile the tile index
     /// @param destination the destination chroma plane
+    /// @param pixelFormat the composed grid pixel format
     /// @param chromaU whether to copy chroma U instead of chroma V
     private static void copyChromaPlaneTile(
             SourcePlanes tilePlanes,
             TileGridReference tileGrid,
             int tile,
             byte[] destination,
+            AvifPixelFormat pixelFormat,
             boolean chromaU
     ) {
-        AvifPixelFormat pixelFormat = tilePlanes.sourceMetadata().pixelFormat();
         int destWidth = chromaWidth(tileGrid.width, pixelFormat);
         int destHeight = chromaHeight(tileGrid.height, pixelFormat);
-        int sourceWidth = tilePlanes.chromaWidth();
-        int sourceHeight = tilePlanes.chromaHeight();
+        int sourceWidth = chromaWidth(tilePlanes.width, pixelFormat);
+        int sourceHeight = chromaHeight(tilePlanes.height, pixelFormat);
         int offsetX = chromaHorizontalOffset(tileGrid.horizontalOffset(tile), pixelFormat);
         int offsetY = chromaVerticalOffset(tileGrid.verticalOffset(tile), pixelFormat);
-        byte[] source = Objects.requireNonNull(chromaU ? tilePlanes.chromaU : tilePlanes.chromaV);
-        copyPlaneTile(source, sourceWidth, sourceHeight, destination, destWidth, destHeight, offsetX, offsetY);
+        byte @Nullable [] source = chromaU ? tilePlanes.chromaU : tilePlanes.chromaV;
+        if (source == null) {
+            fillPlaneTile((byte) 128, sourceWidth, sourceHeight, destination, destWidth, destHeight, offsetX, offsetY);
+        } else {
+            copyPlaneTile(source, sourceWidth, sourceHeight, destination, destWidth, destHeight, offsetX, offsetY);
+        }
     }
 
     /// Copies one planar tile into a composed grid plane.
@@ -928,6 +922,43 @@ public final class FFmpegAvifReferenceDecoder {
                     destination,
                     (destY + y) * destinationWidth + destX,
                     copy
+            );
+        }
+    }
+
+    /// Fills one clipped planar tile in a composed grid plane.
+    ///
+    /// @param value the unsigned byte value to fill
+    /// @param sourceWidth the source tile plane width
+    /// @param sourceHeight the source tile plane height
+    /// @param destination the destination composed plane
+    /// @param destinationWidth the destination plane width
+    /// @param destinationHeight the destination plane height
+    /// @param offsetX the tile X offset
+    /// @param offsetY the tile Y offset
+    private static void fillPlaneTile(
+            byte value,
+            int sourceWidth,
+            int sourceHeight,
+            byte[] destination,
+            int destinationWidth,
+            int destinationHeight,
+            int offsetX,
+            int offsetY
+    ) {
+        int copy = clippedCopyWidth(sourceWidth, destinationWidth, offsetX);
+        int rows = clippedCopyHeight(sourceHeight, destinationHeight, offsetY);
+        if (copy <= 0 || rows <= 0) {
+            return;
+        }
+        int destX = Math.max(0, offsetX);
+        int destY = Math.max(0, offsetY);
+        for (int y = 0; y < rows; y++) {
+            Arrays.fill(
+                    destination,
+                    (destY + y) * destinationWidth + destX,
+                    (destY + y) * destinationWidth + destX + copy,
+                    value
             );
         }
     }

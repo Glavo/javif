@@ -97,6 +97,10 @@ final class AvifImageReaderTest {
     private static final String LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE =
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif";
 
+    /// A grid image fixture copied from libavif's test data with a dimg tile shared between grids.
+    private static final String LIBAVIF_COLOR_GRID_ALPHA_GRID_TILE_SHARED_FIXTURE =
+            "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif";
+
     /// A progressive still-image fixture copied from libavif's test data using idat.
     private static final String LIBAVIF_PROGRESSIVE_FIXTURE =
             "libavif-test-data/draw_points_idat_progressive.avif";
@@ -1670,6 +1674,34 @@ final class AvifImageReaderTest {
             assertEquals(385, chromaU.height());
             assertEquals(512, chromaV.width());
             assertEquals(385, chromaV.height());
+        }
+    }
+
+    /// Verifies that raw color grid composition can represent monochrome cells in a chroma grid.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readRawColorPlanesComposesGridWithSharedMonochromeCell() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_COLOR_GRID_ALPHA_GRID_TILE_SHARED_FIXTURE)
+        )) {
+            AvifPlanes planes = reader.readRawColorPlanes(0);
+
+            assertEquals(AvifBitDepth.EIGHT_BITS, planes.bitDepth());
+            assertEquals(AvifPixelFormat.I444, planes.pixelFormat());
+            assertEquals(80, planes.codedWidth());
+            assertEquals(80, planes.codedHeight());
+
+            AvifPlane chromaU = planes.chromaUPlane();
+            AvifPlane chromaV = planes.chromaVPlane();
+            assertNotNull(chromaU);
+            assertNotNull(chromaV);
+            assertEquals(80, chromaU.width());
+            assertEquals(80, chromaU.height());
+            assertEquals(80, chromaV.width());
+            assertEquals(80, chromaV.height());
+            assertEquals(128, chromaU.sample(68, 68));
+            assertEquals(128, chromaV.sample(68, 68));
         }
     }
 

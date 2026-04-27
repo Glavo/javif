@@ -38,6 +38,7 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -913,7 +914,7 @@ public final class AvifImageReader implements AutoCloseable {
         }
         AvifPlanes firstCell = cellPlanes[0];
         AvifBitDepth bitDepth = firstCell.bitDepth();
-        AvifPixelFormat pixelFormat = firstCell.pixelFormat();
+        AvifPixelFormat pixelFormat = gridRawPlanePixelFormat(cellPlanes);
         validateGridRawPlaneCells(cellPlanes, bitDepth, pixelFormat);
 
         AvifPlane lumaPlane = composeGridPlane(lumaPlanes(cellPlanes), rows, columns, outputWidth, outputHeight);
@@ -924,17 +925,49 @@ public final class AvifImageReader implements AutoCloseable {
 
         int chromaWidth = expectedChromaWidth(pixelFormat, outputWidth);
         int chromaHeight = expectedChromaHeight(pixelFormat, outputHeight);
-        AvifPlane chromaUPlane = composeGridPlane(chromaUPlanes(cellPlanes), rows, columns, chromaWidth, chromaHeight);
-        AvifPlane chromaVPlane = composeGridPlane(chromaVPlanes(cellPlanes), rows, columns, chromaWidth, chromaHeight);
+        AvifPlane chromaUPlane = composeGridPlane(
+                chromaPlanes(cellPlanes, pixelFormat, bitDepth, true),
+                rows,
+                columns,
+                chromaWidth,
+                chromaHeight
+        );
+        AvifPlane chromaVPlane = composeGridPlane(
+                chromaPlanes(cellPlanes, pixelFormat, bitDepth, false),
+                rows,
+                columns,
+                chromaWidth,
+                chromaHeight
+        );
         return new AvifPlanes(bitDepth, pixelFormat, outputWidth, outputHeight, outputWidth, outputHeight,
                 lumaPlane, chromaUPlane, chromaVPlane);
+    }
+
+    /// Returns the common raw grid pixel format, allowing monochrome cells in a chroma grid.
+    ///
+    /// @param cellPlanes the decoded cell planes
+    /// @return the grid pixel format
+    private static AvifPixelFormat gridRawPlanePixelFormat(AvifPlanes[] cellPlanes) {
+        AvifPixelFormat pixelFormat = AvifPixelFormat.I400;
+        for (AvifPlanes cellPlane : cellPlanes) {
+            AvifPixelFormat cellPixelFormat = cellPlane.pixelFormat();
+            if (cellPixelFormat == AvifPixelFormat.I400) {
+                continue;
+            }
+            if (pixelFormat == AvifPixelFormat.I400) {
+                pixelFormat = cellPixelFormat;
+            } else if (cellPixelFormat != pixelFormat) {
+                throw new IllegalArgumentException("grid cell pixel format mismatch");
+            }
+        }
+        return pixelFormat;
     }
 
     /// Validates that all grid cells share the same raw-plane format.
     ///
     /// @param cellPlanes the decoded cell planes
     /// @param bitDepth the expected bit depth
-    /// @param pixelFormat the expected pixel format
+    /// @param pixelFormat the expected output pixel format
     private static void validateGridRawPlaneCells(
             AvifPlanes[] cellPlanes,
             AvifBitDepth bitDepth,
@@ -944,7 +977,8 @@ public final class AvifImageReader implements AutoCloseable {
             if (cellPlane.bitDepth() != bitDepth) {
                 throw new IllegalArgumentException("grid cell bit depth mismatch");
             }
-            if (cellPlane.pixelFormat() != pixelFormat) {
+            AvifPixelFormat cellPixelFormat = cellPlane.pixelFormat();
+            if (cellPixelFormat != pixelFormat && cellPixelFormat != AvifPixelFormat.I400) {
                 throw new IllegalArgumentException("grid cell pixel format mismatch");
             }
         }
@@ -1002,36 +1036,44 @@ public final class AvifImageReader implements AutoCloseable {
         return result;
     }
 
-    /// Returns chroma U planes for all grid cells.
+    /// Returns one chroma plane for all grid cells.
     ///
     /// @param cellPlanes the decoded cell planes
-    /// @return chroma U planes in row-major order
-    private static AvifPlane[] chromaUPlanes(AvifPlanes[] cellPlanes) {
+    /// @param pixelFormat the output pixel format
+    /// @param bitDepth the output bit depth
+    /// @param chromaU whether to return U instead of V
+    /// @return chroma planes in row-major order
+    private static AvifPlane[] chromaPlanes(
+            AvifPlanes[] cellPlanes,
+            AvifPixelFormat pixelFormat,
+            AvifBitDepth bitDepth,
+            boolean chromaU
+    ) {
         AvifPlane[] result = new AvifPlane[cellPlanes.length];
         for (int i = 0; i < cellPlanes.length; i++) {
-            AvifPlane plane = cellPlanes[i].chromaUPlane();
-            if (plane == null) {
-                throw new IllegalArgumentException("grid cell chroma U plane is missing");
-            }
-            result[i] = plane;
+            AvifPlanes cellPlane = cellPlanes[i];
+            AvifPlane plane = chromaU ? cellPlane.chromaUPlane() : cellPlane.chromaVPlane();
+            result[i] = plane != null ? plane : neutralChromaPlane(cellPlane, pixelFormat, bitDepth);
         }
         return result;
     }
 
-    /// Returns chroma V planes for all grid cells.
+    /// Creates a neutral chroma plane for a monochrome grid cell.
     ///
-    /// @param cellPlanes the decoded cell planes
-    /// @return chroma V planes in row-major order
-    private static AvifPlane[] chromaVPlanes(AvifPlanes[] cellPlanes) {
-        AvifPlane[] result = new AvifPlane[cellPlanes.length];
-        for (int i = 0; i < cellPlanes.length; i++) {
-            AvifPlane plane = cellPlanes[i].chromaVPlane();
-            if (plane == null) {
-                throw new IllegalArgumentException("grid cell chroma V plane is missing");
-            }
-            result[i] = plane;
-        }
-        return result;
+    /// @param cellPlane the monochrome cell planes
+    /// @param pixelFormat the output pixel format
+    /// @param bitDepth the output bit depth
+    /// @return a neutral chroma plane matching the cell's target chroma dimensions
+    private static AvifPlane neutralChromaPlane(
+            AvifPlanes cellPlane,
+            AvifPixelFormat pixelFormat,
+            AvifBitDepth bitDepth
+    ) {
+        int width = expectedChromaWidth(pixelFormat, cellPlane.codedWidth());
+        int height = expectedChromaHeight(pixelFormat, cellPlane.codedHeight());
+        short[] samples = new short[width * height];
+        Arrays.fill(samples, (short) (1 << (bitDepth.bits() - 1)));
+        return new AvifPlane(width, height, width, samples);
     }
 
     /// Composes one plane from row-major grid cell planes.
