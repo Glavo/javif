@@ -528,6 +528,35 @@ public final class FFmpegAvifReferenceDecoder {
             return sourceMetadata;
         }
 
+        /// Returns a copy with AVIF rotation and mirror transforms applied to the packed pixels.
+        ///
+        /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
+        /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
+        /// @return the transformed image, or this image when no transforms are present
+        public ArgbImage transformed(int rotationCode, int mirrorAxis) {
+            if (rotationCode <= 0 && mirrorAxis < 0) {
+                return this;
+            }
+
+            int transformedWidth = width;
+            int transformedHeight = height;
+            int[] transformedPixels = Arrays.copyOf(pixels, pixels.length);
+
+            if (rotationCode > 0) {
+                transformedPixels = rotate(transformedPixels, transformedWidth, transformedHeight, rotationCode);
+                if (rotationCode == 1 || rotationCode == 3) {
+                    int oldWidth = transformedWidth;
+                    transformedWidth = transformedHeight;
+                    transformedHeight = oldWidth;
+                }
+            }
+            if (mirrorAxis >= 0) {
+                transformedPixels = mirror(transformedPixels, transformedWidth, transformedHeight, mirrorAxis);
+            }
+
+            return new ArgbImage(transformedWidth, transformedHeight, sourceMetadata, transformedPixels);
+        }
+
         /// Returns one packed `0xAARRGGBB` pixel.
         ///
         /// @param x the pixel X coordinate
@@ -535,6 +564,77 @@ public final class FFmpegAvifReferenceDecoder {
         /// @return the packed pixel
         public int pixel(int x, int y) {
             return pixels[y * width + x];
+        }
+
+        /// Applies an AVIF `irot` transform to packed pixels.
+        ///
+        /// @param sourcePixels the source pixels
+        /// @param sourceWidth the source width
+        /// @param sourceHeight the source height
+        /// @param rotationCode the AVIF `irot` rotation code
+        /// @return the rotated pixels
+        private static int[] rotate(int @Unmodifiable [] sourcePixels, int sourceWidth, int sourceHeight, int rotationCode) {
+            return switch (rotationCode) {
+                case 1 -> {
+                    int newWidth = sourceHeight;
+                    int newHeight = sourceWidth;
+                    int[] result = new int[newWidth * newHeight];
+                    for (int y = 0; y < newHeight; y++) {
+                        for (int x = 0; x < newWidth; x++) {
+                            result[y * newWidth + x] = sourcePixels[x * sourceWidth + (sourceWidth - 1 - y)];
+                        }
+                    }
+                    yield result;
+                }
+                case 2 -> {
+                    int[] result = new int[sourceWidth * sourceHeight];
+                    for (int y = 0; y < sourceHeight; y++) {
+                        for (int x = 0; x < sourceWidth; x++) {
+                            result[y * sourceWidth + x] =
+                                    sourcePixels[(sourceHeight - 1 - y) * sourceWidth + (sourceWidth - 1 - x)];
+                        }
+                    }
+                    yield result;
+                }
+                case 3 -> {
+                    int newWidth = sourceHeight;
+                    int newHeight = sourceWidth;
+                    int[] result = new int[newWidth * newHeight];
+                    for (int y = 0; y < newHeight; y++) {
+                        for (int x = 0; x < newWidth; x++) {
+                            result[y * newWidth + x] = sourcePixels[(sourceHeight - 1 - x) * sourceWidth + y];
+                        }
+                    }
+                    yield result;
+                }
+                default -> Arrays.copyOf(sourcePixels, sourcePixels.length);
+            };
+        }
+
+        /// Applies an AVIF `imir` transform to packed pixels.
+        ///
+        /// @param sourcePixels the source pixels
+        /// @param width the image width
+        /// @param height the image height
+        /// @param mirrorAxis the AVIF `imir` mirror axis
+        /// @return the mirrored pixels
+        private static int[] mirror(int @Unmodifiable [] sourcePixels, int width, int height, int mirrorAxis) {
+            int[] result = new int[width * height];
+            if (mirrorAxis == 0) {
+                for (int y = 0; y < height; y++) {
+                    int srcRow = (height - 1 - y) * width;
+                    int destRow = y * width;
+                    System.arraycopy(sourcePixels, srcRow, result, destRow, width);
+                }
+            } else {
+                for (int y = 0; y < height; y++) {
+                    int rowBase = y * width;
+                    for (int x = 0; x < width; x++) {
+                        result[rowBase + x] = sourcePixels[rowBase + (width - 1 - x)];
+                    }
+                }
+            }
+            return result;
         }
     }
 

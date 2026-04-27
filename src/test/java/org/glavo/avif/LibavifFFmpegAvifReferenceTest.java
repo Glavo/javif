@@ -50,6 +50,52 @@ final class LibavifFFmpegAvifReferenceTest {
     private static final String @Unmodifiable [] ENABLED_REFERENCE_RESOURCES = new String[]{
             "libavif-test-data/white_1x1.avif",
     };
+    /// AVIF resources whose source metadata comparison against FFmpeg currently passes.
+    private static final String @Unmodifiable [] ENABLED_METADATA_REFERENCE_RESOURCES = new String[]{
+            "libavif-test-data/abc_color_irot_alpha_NOirot.avif",
+            "libavif-test-data/abc_color_irot_alpha_irot.avif",
+            "libavif-test-data/alpha_noispe.avif",
+            "libavif-test-data/circle_custom_properties.avif",
+            "libavif-test-data/clop_irot_imor.avif",
+            "libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif",
+            "libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif",
+            "libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif",
+            "libavif-test-data/colors-animated-8bpc-audio.avif",
+            "libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif",
+            "libavif-test-data/colors-animated-8bpc.avif",
+            "libavif-test-data/colors_hdr_p3.avif",
+            "libavif-test-data/colors_hdr_rec2020.avif",
+            "libavif-test-data/colors_hdr_srgb.avif",
+            "libavif-test-data/colors_sdr_srgb.avif",
+            "libavif-test-data/colors_text_hdr_p3.avif",
+            "libavif-test-data/colors_text_hdr_rec2020.avif",
+            "libavif-test-data/colors_text_hdr_srgb.avif",
+            "libavif-test-data/colors_text_sdr_srgb.avif",
+            "libavif-test-data/colors_text_wcg_hdr_rec2020.avif",
+            "libavif-test-data/colors_text_wcg_sdr_rec2020.avif",
+            "libavif-test-data/colors_wcg_hdr_rec2020.avif",
+            "libavif-test-data/draw_points_idat.avif",
+            "libavif-test-data/draw_points_idat_metasize0.avif",
+            "libavif-test-data/extended_pixi.avif",
+            "libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif",
+            "libavif-test-data/io/kodim03_yuv420_8bpc.avif",
+            "libavif-test-data/io/kodim23_yuv420_8bpc.avif",
+            "libavif-test-data/paris_icc_exif_xmp.avif",
+            "libavif-test-data/seine_hdr_gainmap_small_srgb.avif",
+            "libavif-test-data/seine_hdr_gainmap_srgb.avif",
+            "libavif-test-data/seine_hdr_gainmap_wrongaltr.avif",
+            "libavif-test-data/seine_hdr_rec2020.avif",
+            "libavif-test-data/seine_hdr_srgb.avif",
+            "libavif-test-data/seine_sdr_gainmap_big_srgb.avif",
+            "libavif-test-data/seine_sdr_gainmap_notmapbrand.avif",
+            "libavif-test-data/seine_sdr_gainmap_srgb.avif",
+            "libavif-test-data/seine_sdr_gainmap_srgb_icc.avif",
+            "libavif-test-data/unsupported_gainmap_minimum_version.avif",
+            "libavif-test-data/unsupported_gainmap_version.avif",
+            "libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif",
+            "libavif-test-data/weld_sato_12B_8B_q0.avif",
+            "libavif-test-data/white_1x1.avif",
+    };
 
     /// FFmpeg reference expectations for every copied libavif AVIF resource.
     private static final FFmpegReferenceCase @Unmodifiable [] AVIF_REFERENCES = new FFmpegReferenceCase[]{
@@ -151,6 +197,18 @@ final class LibavifFFmpegAvifReferenceTest {
                 ));
     }
 
+    /// Verifies enabled libavif AVIF fixtures against FFmpeg source metadata.
+    ///
+    /// @return the dynamic FFmpeg metadata reference tests
+    @TestFactory
+    Stream<DynamicTest> libavifAvifResourcesMatchFFmpegSourceMetadata() {
+        return Arrays.stream(AVIF_REFERENCES)
+                .map(reference -> DynamicTest.dynamicTest(
+                        reference.resourceName(),
+                        () -> assertFFmpegMetadataReferenceCase(reference)
+                ));
+    }
+
     /// Asserts one FFmpeg reference case.
     ///
     /// @param reference the reference case
@@ -167,6 +225,22 @@ final class LibavifFFmpegAvifReferenceTest {
         assertFirstFrameMatchesFFmpegReferenceExactly(reference);
     }
 
+    /// Asserts one FFmpeg source metadata reference case.
+    ///
+    /// @param reference the reference case
+    /// @throws IOException if a resource cannot be read or decoded
+    /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
+    private static void assertFFmpegMetadataReferenceCase(FFmpegReferenceCase reference)
+            throws IOException, URISyntaxException {
+        if (reference.disabledReason() != null) {
+            Assumptions.assumeTrue(false, reference.disabledReason());
+        }
+        if (!isEnabledMetadataReference(reference.resourceName())) {
+            Assumptions.assumeTrue(false, "Pending FFmpeg source metadata parity for this fixture.");
+        }
+        assertFirstFrameMetadataMatchesFFmpegReference(reference);
+    }
+
     /// Asserts that javif and FFmpeg render the first frame of one AVIF resource identically.
     ///
     /// @param reference the FFmpeg reference case
@@ -175,8 +249,9 @@ final class LibavifFFmpegAvifReferenceTest {
     private static void assertFirstFrameMatchesFFmpegReferenceExactly(FFmpegReferenceCase reference)
             throws IOException, URISyntaxException {
         String resourceName = reference.resourceName();
-        ArgbImage expected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
+        ArgbImage rawExpected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
+            ArgbImage expected = rawExpected.transformed(reader.info().rotationCode(), reader.info().mirrorAxis());
             assertImageInfoMatchesFFmpegMetadata(reader.info(), expected);
             AvifFrame actual = reader.readFrame();
             assertNotNull(actual);
@@ -184,6 +259,30 @@ final class LibavifFFmpegAvifReferenceTest {
             assertEquals(expected.width(), actual.width());
             assertEquals(expected.height(), actual.height());
             assertPixelsMatch(resourceName, expected, actual.intPixelBuffer());
+        }
+    }
+
+    /// Asserts that javif and FFmpeg agree on source metadata for the first frame of one AVIF resource.
+    ///
+    /// @param reference the FFmpeg reference case
+    /// @throws IOException if a resource cannot be read or decoded
+    /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
+    private static void assertFirstFrameMetadataMatchesFFmpegReference(FFmpegReferenceCase reference)
+            throws IOException, URISyntaxException {
+        String resourceName = reference.resourceName();
+        ArgbImage rawExpected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
+            assertEquals(rawExpected.width(), reader.info().width());
+            assertEquals(rawExpected.height(), reader.info().height());
+            assertImageInfoMatchesFFmpegMetadata(reader.info(), rawExpected);
+
+            AvifFrame actual = reader.readFrame();
+            assertNotNull(actual);
+            ArgbImage transformedExpected =
+                    rawExpected.transformed(reader.info().rotationCode(), reader.info().mirrorAxis());
+            assertFrameMetadataMatchesFFmpegMetadata(actual, transformedExpected);
+            assertEquals(transformedExpected.width(), actual.width());
+            assertEquals(transformedExpected.height(), actual.height());
         }
     }
 
@@ -268,6 +367,14 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @return whether exact FFmpeg first-frame comparison currently passes
     private static boolean isEnabledReference(String resourceName) {
         return Arrays.asList(ENABLED_REFERENCE_RESOURCES).contains(resourceName);
+    }
+
+    /// Returns whether one FFmpeg source metadata reference case is currently enabled.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @return whether FFmpeg source metadata comparison currently passes
+    private static boolean isEnabledMetadataReference(String resourceName) {
+        return Arrays.asList(ENABLED_METADATA_REFERENCE_RESOURCES).contains(resourceName);
     }
 
     /// Creates an FFmpeg reference case.
