@@ -60,7 +60,7 @@ final class LibavifTestDataCorpusTest {
             ),
             decode("libavif-test-data/clop_irot_imor.avif", 12, 34, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
-            parseFailure("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", AvifErrorCode.UNSUPPORTED_FEATURE),
+            decode("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_gainmap_different_grid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", 128, 200, 10, AvifPixelFormat.I444, true, false, 1),

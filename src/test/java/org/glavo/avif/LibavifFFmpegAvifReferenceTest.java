@@ -66,6 +66,7 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/circle_custom_properties.avif",
             "libavif-test-data/clop_irot_imor.avif",
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
+            "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",
             "libavif-test-data/color_grid_alpha_nogrid.avif",
             "libavif-test-data/color_grid_gainmap_different_grid.avif",
             "libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif",
@@ -112,6 +113,7 @@ final class LibavifFFmpegAvifReferenceTest {
     /// AVIF resources where FFmpeg exposes a derived tile or source image instead of javif's composed output size.
     private static final String @Unmodifiable [] FFMPEG_DERIVED_DIMENSION_REFERENCE_RESOURCES = new String[]{
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
+            "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",
             "libavif-test-data/color_grid_alpha_nogrid.avif",
             "libavif-test-data/color_grid_gainmap_different_grid.avif",
             "libavif-test-data/sofa_grid1x5_420.avif",
@@ -131,10 +133,7 @@ final class LibavifFFmpegAvifReferenceTest {
             ),
             reference("libavif-test-data/clop_irot_imor.avif"),
             reference("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif"),
-            disabledReference(
-                    "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",
-                    "javif currently rejects the shared alpha-grid tile dependency as unsupported."
-            ),
+            reference("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif"),
             reference("libavif-test-data/color_grid_alpha_nogrid.avif"),
             reference("libavif-test-data/color_grid_gainmap_different_grid.avif"),
             reference("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif"),

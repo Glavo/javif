@@ -330,9 +330,6 @@ public final class AvifContainerParser {
             if (cellItem == null) {
                 throw parseFailed("grid dimg cell item not found: " + cellId, 0);
             }
-            if (cellItem.sharedDerivedImageReference) {
-                throw unsupported("Grid cell item is shared by multiple derived images: " + cellId, null);
-            }
             if (!"av01".equals(cellItem.type)) {
                 throw unsupported("Unsupported grid cell item type: " + cellItem.type, null);
             }
@@ -2350,9 +2347,6 @@ public final class AvifContainerParser {
                     fromItem.premultipliedById = toItem.id;
                 }
                 if ("dimg".equals(reference.type())) {
-                    if (toItem.dimgForId != 0 && toItem.dimgForId != fromItem.id) {
-                        toItem.sharedDerivedImageReference = true;
-                    }
                     toItem.dimgForId = fromItem.id;
                     fromItem.dimgCellIds.add(toItem.id);
                 }
@@ -3507,8 +3501,6 @@ public final class AvifContainerParser {
         private int dimgForId;
         /// The dimg cell item ids for a grid item, in row-major order.
         private final List<Integer> dimgCellIds = new ArrayList<>();
-        /// Whether this cell item is referenced by multiple derived-image items.
-        private boolean sharedDerivedImageReference;
         /// The progressive dependency item ids from `prog` references.
         private final List<Integer> progDeps = new ArrayList<>();
 
