@@ -860,15 +860,15 @@ public final class CdfContext {
     });
 
     /// The transformed default delta-q CDF.
-    private static final int @Unmodifiable [] DEFAULT_DELTA_Q_CDF = inverse(608, 648, 91);
+    private static final int @Unmodifiable [] DEFAULT_DELTA_Q_CDF = inverse(28160, 32120, 32677);
 
     /// The transformed default delta-lf CDFs.
     private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_DELTA_LF_CDFS = inverse2d(new int[][]{
-            {608, 648, 91},
-            {608, 648, 91},
-            {608, 648, 91},
-            {608, 648, 91},
-            {608, 648, 91}
+            {28160, 32120, 32677},
+            {28160, 32120, 32677},
+            {28160, 32120, 32677},
+            {28160, 32120, 32677},
+            {28160, 32120, 32677}
     });
 
     /// The transformed default motion-vector joint CDF.

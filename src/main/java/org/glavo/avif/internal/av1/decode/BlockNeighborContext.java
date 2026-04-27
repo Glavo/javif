@@ -1391,8 +1391,11 @@ public final class BlockNeighborContext {
         int x4 = nonNullPosition.x4();
         int y4 = nonNullPosition.y4();
         if (haveLeft && haveTop) {
-            int left = storedSegmentIdOrZero(x4 - 1, y4);
-            int above = storedSegmentIdOrZero(x4, y4 - 1);
+            // Left/above predictions follow the rolling edge state. Only the top-left sample needs
+            // the stored block map because the above-edge row may already reflect the current row's
+            // immediate left block.
+            int left = leftSegmentId[y4] & 0xFF;
+            int above = aboveSegmentId[x4] & 0xFF;
             int aboveLeft = storedSegmentIdOrZero(x4 - 1, y4 - 1);
             int context;
             if (left == above && aboveLeft == left) {

@@ -82,8 +82,8 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{18470, 12050, 8594, 0}, context.mutableDcHighTokenCdf(0, false));
         assertArrayEquals(new int[]{18376, 12817, 10012, 0}, context.mutableHighTokenCdf(0, false, 7));
         assertArrayEquals(new int[]{29734, 26908, 24306, 0}, context.mutableHighTokenCdf(0, false, 20));
-        assertArrayEquals(new int[]{32160, 32120, 32677, 0}, context.mutableDeltaQCdf());
-        assertArrayEquals(new int[]{32160, 32120, 32677, 0}, context.mutableDeltaLfCdf(4));
+        assertArrayEquals(new int[]{4608, 648, 91, 0}, context.mutableDeltaQCdf());
+        assertArrayEquals(new int[]{4608, 648, 91, 0}, context.mutableDeltaLfCdf(4));
         assertArrayEquals(new int[]{28672, 21504, 13440, 0}, context.mutableMotionVectorJointCdf());
         assertArrayEquals(new int[]{4096, 1792, 910, 448, 217, 112, 28, 11, 6, 1, 0}, context.mutableMotionVectorClassCdf(0));
         assertArrayEquals(new int[]{16384, 0}, context.mutableMotionVectorSignCdf(0));
@@ -287,8 +287,8 @@ final class CdfContextTest {
         assertEquals(18470, original.mutableDcHighTokenCdf(0, false)[0]);
         assertEquals(18376, original.mutableHighTokenCdf(0, false, 7)[0]);
         assertEquals(29734, original.mutableHighTokenCdf(0, false, 20)[0]);
-        assertEquals(32160, original.mutableDeltaQCdf()[0]);
-        assertEquals(32160, original.mutableDeltaLfCdf(0)[0]);
+        assertEquals(4608, original.mutableDeltaQCdf()[0]);
+        assertEquals(4608, original.mutableDeltaLfCdf(0)[0]);
         assertEquals(28672, original.mutableMotionVectorJointCdf()[0]);
         assertEquals(4096, original.mutableMotionVectorClassCdf(0)[0]);
         assertEquals(16384, original.mutableMotionVectorSignCdf(0)[0]);

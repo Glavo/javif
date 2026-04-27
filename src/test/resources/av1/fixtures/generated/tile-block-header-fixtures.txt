@@ -16,4 +16,4 @@ inter-no-skip-no-intra = 0000000000
 single-inter-mode = 002474000000
 compound-inter-mode = 0296b1000000
 palette = 248b123456789abc
-cdef-delta = 3f66456789abcdef
+cdef-delta = 767b456789abcdef
