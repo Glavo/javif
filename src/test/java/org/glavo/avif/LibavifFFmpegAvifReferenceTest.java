@@ -58,10 +58,13 @@ final class LibavifFFmpegAvifReferenceTest {
     private static final String @Unmodifiable [] ENABLED_SOURCE_PLANE_REFERENCE_RESOURCES = new String[]{
             "libavif-test-data/abc_color_irot_alpha_NOirot.avif",
             "libavif-test-data/abc_color_irot_alpha_irot.avif",
+            "libavif-test-data/clop_irot_imor.avif",
+            "libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif",
             "libavif-test-data/colors-animated-8bpc-audio.avif",
             "libavif-test-data/colors-animated-8bpc.avif",
             "libavif-test-data/colors_sdr_srgb.avif",
             "libavif-test-data/colors_text_sdr_srgb.avif",
+            "libavif-test-data/colors_text_wcg_sdr_rec2020.avif",
             "libavif-test-data/draw_points_idat.avif",
             "libavif-test-data/draw_points_idat_metasize0.avif",
             "libavif-test-data/extended_pixi.avif",

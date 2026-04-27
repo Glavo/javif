@@ -389,7 +389,7 @@ public final class FFmpegAvifReferenceDecoder {
         throw ffmpegException(result, "receive frame: " + label);
     }
 
-    /// Copies one decoded FFmpeg 8-bit planar source frame.
+    /// Copies one decoded FFmpeg planar source frame.
     ///
     /// @param sourceFrame the decoded source frame
     /// @param label the diagnostic label
@@ -403,40 +403,52 @@ public final class FFmpegAvifReferenceDecoder {
         }
 
         FrameMetadata sourceMetadata = frameMetadata(sourceFrame.format());
-        if (!sourceMetadata.bitDepth().isEightBit()) {
-            throw new IOException("Only 8-bit FFmpeg source-plane copies are supported: " + sourceMetadata.pixelFormatName());
-        }
-
-        byte[] luma = copyPlane(sourceFrame.data(0), sourceFrame.linesize(0), width, height);
-        byte @Nullable [] chromaU = null;
-        byte @Nullable [] chromaV = null;
+        short[] luma = copyPlane(sourceFrame.data(0), sourceFrame.linesize(0), width, height, sourceMetadata);
+        short @Nullable [] chromaU = null;
+        short @Nullable [] chromaV = null;
         if (sourceMetadata.pixelFormat() != AvifPixelFormat.I400) {
             int chromaWidth = chromaWidth(width, sourceMetadata.pixelFormat());
             int chromaHeight = chromaHeight(height, sourceMetadata.pixelFormat());
-            chromaU = copyPlane(sourceFrame.data(1), sourceFrame.linesize(1), chromaWidth, chromaHeight);
-            chromaV = copyPlane(sourceFrame.data(2), sourceFrame.linesize(2), chromaWidth, chromaHeight);
+            chromaU = copyPlane(sourceFrame.data(1), sourceFrame.linesize(1), chromaWidth, chromaHeight, sourceMetadata);
+            chromaV = copyPlane(sourceFrame.data(2), sourceFrame.linesize(2), chromaWidth, chromaHeight, sourceMetadata);
         }
         return new SourcePlanes(width, height, sourceMetadata, luma, chromaU, chromaV);
     }
 
-    /// Copies one byte-addressed FFmpeg plane into tightly packed row-major storage.
+    /// Copies one byte-addressed FFmpeg plane into tightly packed row-major sample storage.
     ///
     /// @param data the source plane pointer
     /// @param lineSize the source plane line size in bytes
     /// @param width the visible plane width in samples
     /// @param height the visible plane height in samples
+    /// @param sourceMetadata the normalized source frame metadata
     /// @return a tightly packed copy of the plane
     /// @throws IOException if the source plane is unavailable
-    private static byte[] copyPlane(BytePointer data, int lineSize, int width, int height) throws IOException {
+    private static short[] copyPlane(
+            BytePointer data,
+            int lineSize,
+            int width,
+            int height,
+            FrameMetadata sourceMetadata
+    ) throws IOException {
         if (data == null) {
             throw new IOException("FFmpeg returned a null source plane");
         }
-        byte[] copy = new byte[width * height];
+        int bytesPerSample = sourceMetadata.bitDepth().isEightBit() ? 1 : 2;
+        boolean bigEndian = sourceMetadata.pixelFormatName().endsWith("be");
+        short[] copy = new short[width * height];
         for (int y = 0; y < height; y++) {
             long sourceRow = (long) y * lineSize;
             int destinationRow = y * width;
             for (int x = 0; x < width; x++) {
-                copy[destinationRow + x] = data.get(sourceRow + x);
+                long sourceOffset = sourceRow + (long) x * bytesPerSample;
+                if (bytesPerSample == 1) {
+                    copy[destinationRow + x] = (short) (data.get(sourceOffset) & 0xFF);
+                } else {
+                    int first = data.get(sourceOffset) & 0xFF;
+                    int second = data.get(sourceOffset + 1) & 0xFF;
+                    copy[destinationRow + x] = (short) (bigEndian ? (first << 8) | second : first | (second << 8));
+                }
             }
         }
         return copy;
@@ -746,9 +758,9 @@ public final class FFmpegAvifReferenceDecoder {
     /// @throws IOException if one tile cannot be decoded or composed
     private static SourcePlanes decodeTileGridSourcePlanes(Path path, TileGridReference tileGrid, String label)
             throws IOException {
-        byte[] luma = new byte[tileGrid.width * tileGrid.height];
-        @Nullable byte[] chromaU = null;
-        @Nullable byte[] chromaV = null;
+        short[] luma = new short[tileGrid.width * tileGrid.height];
+        short @Nullable [] chromaU = null;
+        short @Nullable [] chromaV = null;
         @Nullable FrameMetadata sourceMetadata = null;
 
         for (int tile = 0; tile < tileGrid.tileCount(); tile++) {
@@ -773,8 +785,8 @@ public final class FFmpegAvifReferenceDecoder {
                 if (chromaU == null || chromaV == null) {
                     int chromaSize = chromaWidth(tileGrid.width, sourceMetadata.pixelFormat())
                             * chromaHeight(tileGrid.height, sourceMetadata.pixelFormat());
-                    chromaU = new byte[chromaSize];
-                    chromaV = new byte[chromaSize];
+                    chromaU = new short[chromaSize];
+                    chromaV = new short[chromaSize];
                 }
                 copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaU, sourceMetadata.pixelFormat(), true);
                 copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaV, sourceMetadata.pixelFormat(), false);
@@ -868,7 +880,7 @@ public final class FFmpegAvifReferenceDecoder {
             SourcePlanes tilePlanes,
             TileGridReference tileGrid,
             int tile,
-            byte[] destination,
+            short[] destination,
             AvifPixelFormat pixelFormat,
             boolean chromaU
     ) {
@@ -878,9 +890,18 @@ public final class FFmpegAvifReferenceDecoder {
         int sourceHeight = chromaHeight(tilePlanes.height, pixelFormat);
         int offsetX = chromaHorizontalOffset(tileGrid.horizontalOffset(tile), pixelFormat);
         int offsetY = chromaVerticalOffset(tileGrid.verticalOffset(tile), pixelFormat);
-        byte @Nullable [] source = chromaU ? tilePlanes.chromaU : tilePlanes.chromaV;
+        short @Nullable [] source = chromaU ? tilePlanes.chromaU : tilePlanes.chromaV;
         if (source == null) {
-            fillPlaneTile((byte) 128, sourceWidth, sourceHeight, destination, destWidth, destHeight, offsetX, offsetY);
+            fillPlaneTile(
+                    1 << (tilePlanes.sourceMetadata().bitDepth().bits() - 1),
+                    sourceWidth,
+                    sourceHeight,
+                    destination,
+                    destWidth,
+                    destHeight,
+                    offsetX,
+                    offsetY
+            );
         } else {
             copyPlaneTile(source, sourceWidth, sourceHeight, destination, destWidth, destHeight, offsetX, offsetY);
         }
@@ -897,10 +918,10 @@ public final class FFmpegAvifReferenceDecoder {
     /// @param offsetX the tile X offset
     /// @param offsetY the tile Y offset
     private static void copyPlaneTile(
-            byte[] source,
+            short[] source,
             int sourceWidth,
             int sourceHeight,
-            byte[] destination,
+            short[] destination,
             int destinationWidth,
             int destinationHeight,
             int offsetX,
@@ -928,7 +949,7 @@ public final class FFmpegAvifReferenceDecoder {
 
     /// Fills one clipped planar tile in a composed grid plane.
     ///
-    /// @param value the unsigned byte value to fill
+    /// @param value the unsigned sample value to fill
     /// @param sourceWidth the source tile plane width
     /// @param sourceHeight the source tile plane height
     /// @param destination the destination composed plane
@@ -937,10 +958,10 @@ public final class FFmpegAvifReferenceDecoder {
     /// @param offsetX the tile X offset
     /// @param offsetY the tile Y offset
     private static void fillPlaneTile(
-            byte value,
+            int value,
             int sourceWidth,
             int sourceHeight,
-            byte[] destination,
+            short[] destination,
             int destinationWidth,
             int destinationHeight,
             int offsetX,
@@ -958,7 +979,7 @@ public final class FFmpegAvifReferenceDecoder {
                     destination,
                     (destY + y) * destinationWidth + destX,
                     (destY + y) * destinationWidth + destX + copy,
-                    value
+                    (short) value
             );
         }
     }
@@ -1339,11 +1360,11 @@ public final class FFmpegAvifReferenceDecoder {
         /// The normalized source FFmpeg frame metadata.
         private final FrameMetadata sourceMetadata;
         /// The tightly packed luma plane.
-        private final byte[] luma;
+        private final short[] luma;
         /// The tightly packed chroma U plane, or `null` for monochrome frames.
-        private final byte @Nullable [] chromaU;
+        private final short @Nullable [] chromaU;
         /// The tightly packed chroma V plane, or `null` for monochrome frames.
-        private final byte @Nullable [] chromaV;
+        private final short @Nullable [] chromaV;
 
         /// Creates copied source planes.
         ///
@@ -1357,9 +1378,9 @@ public final class FFmpegAvifReferenceDecoder {
                 int width,
                 int height,
                 FrameMetadata sourceMetadata,
-                byte[] luma,
-                byte @Nullable [] chromaU,
-                byte @Nullable [] chromaV
+                short[] luma,
+                short @Nullable [] chromaU,
+                short @Nullable [] chromaV
         ) {
             if (width <= 0 || height <= 0) {
                 throw new IllegalArgumentException("Plane dimensions must be positive");
@@ -1402,7 +1423,7 @@ public final class FFmpegAvifReferenceDecoder {
         /// @param y the zero-based luma Y coordinate
         /// @return the unsigned luma sample
         public int lumaSample(int x, int y) {
-            return luma[y * width + x] & 0xFF;
+            return luma[y * width + x] & 0xFFFF;
         }
 
         /// Returns one chroma U sample.
@@ -1411,8 +1432,8 @@ public final class FFmpegAvifReferenceDecoder {
         /// @param y the zero-based chroma Y coordinate
         /// @return the unsigned chroma U sample
         public int chromaUSample(int x, int y) {
-            byte[] plane = Objects.requireNonNull(chromaU, "chromaU");
-            return plane[y * chromaWidth() + x] & 0xFF;
+            short[] plane = Objects.requireNonNull(chromaU, "chromaU");
+            return plane[y * chromaWidth() + x] & 0xFFFF;
         }
 
         /// Returns one chroma V sample.
@@ -1421,8 +1442,8 @@ public final class FFmpegAvifReferenceDecoder {
         /// @param y the zero-based chroma Y coordinate
         /// @return the unsigned chroma V sample
         public int chromaVSample(int x, int y) {
-            byte[] plane = Objects.requireNonNull(chromaV, "chromaV");
-            return plane[y * chromaWidth() + x] & 0xFF;
+            short[] plane = Objects.requireNonNull(chromaV, "chromaV");
+            return plane[y * chromaWidth() + x] & 0xFFFF;
         }
 
         /// Returns the chroma plane width.
