@@ -695,6 +695,27 @@ final class IntraPredictorTest {
         assertBlockEquals(plane, x, y, expected);
     }
 
+    /// Verifies that AV1 zone-2 directional prediction applies the corner filter before
+    /// interpolation when edge filtering is enabled.
+    @Test
+    void directionalZoneTwoPredictionAppliesCornerFiltering() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(24, 24, 10);
+        int x = 4;
+        int y = 4;
+        seedDirectionalReferences(
+                plane,
+                x,
+                y,
+                287,
+                new int[]{291, 296, 297, 303, 305, 307, 310, 313},
+                new int[]{287, 287, 287, 287, 280, 287, 287, 287, 286, 287, 287, 287, 286, 287, 287, 287}
+        );
+
+        IntraPredictor.predictLuma(plane, x, y, 8, 16, LumaIntraPredictionMode.VERTICAL, 1, true, false);
+
+        assertEquals(291, plane.sample(x, y + 2));
+    }
+
     /// Seeds the top-left, top-row, and left-column references used by one directional prediction test.
     ///
     /// @param plane the mutable plane to populate

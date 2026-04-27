@@ -50,6 +50,7 @@ final class LibavifFFmpegAvifReferenceTest {
     private static final String TEST_DATA_ROOT = "libavif-test-data";
     /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
     private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
+            pixelReference("libavif-test-data/colors_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_sdr_srgb.avif", PixelTolerance.bounded(1, 0.003, 0.004, 0.06)),
             pixelReference("libavif-test-data/paris_icc_exif_xmp.avif", PixelTolerance.bounded(9, 0.0, 0.8, 1.0)),
             pixelReference("libavif-test-data/white_1x1.avif", PixelTolerance.perPixelDelta(0)),
@@ -59,6 +60,7 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/abc_color_irot_alpha_NOirot.avif",
             "libavif-test-data/abc_color_irot_alpha_irot.avif",
             "libavif-test-data/alpha_noispe.avif",
+            "libavif-test-data/circle_custom_properties.avif",
             "libavif-test-data/clop_irot_imor.avif",
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
             "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",

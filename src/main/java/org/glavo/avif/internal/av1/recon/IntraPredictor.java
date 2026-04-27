@@ -1010,12 +1010,15 @@ final class IntraPredictor {
         int dy = directionalDerivative((angle - 90) >> 1);
         int dx = directionalDerivative((180 - angle) >> 1);
         int referenceSpan = width + height;
+        if (intraEdgeFilterEnabled && x > 0 && y > 0 && referenceSpan >= 24) {
+            topLeft = filterDirectionalEdgeCorner(topLeft, topReferences[0], leftReferences[0]);
+        }
         boolean upsampleTop = intraEdgeFilterEnabled
                 && useDirectionalEdgeUpsample(referenceSpan, angle - 90, smoothEdgeReferences);
         boolean upsampleLeft = intraEdgeFilterEnabled
                 && useDirectionalEdgeUpsample(referenceSpan, 180 - angle, smoothEdgeReferences);
         int[] topEdge;
-        int topBaseIncrement;
+        int topBaseOffset;
         if (upsampleTop) {
             topEdge = upsampleDirectionalEdge(
                     topReferences,
@@ -1026,8 +1029,7 @@ final class IntraPredictor {
                     plane.bitDepth(),
                     true
             );
-            dx <<= 1;
-            topBaseIncrement = 2;
+            topBaseOffset = 2;
         } else {
             int filterStrength = intraEdgeFilterEnabled
                     ? directionalEdgeFilterStrength(referenceSpan, angle - 90, smoothEdgeReferences)
@@ -1035,10 +1037,10 @@ final class IntraPredictor {
             topEdge = edgeWithTopLeft(filterStrength != 0
                     ? filterDirectionalEdge(topReferences, topLeft, width, 0, width, -1, width, filterStrength)
                     : topReferences, topLeft);
-            topBaseIncrement = 1;
+            topBaseOffset = 1;
         }
         int[] leftEdge;
-        int leftBaseOffset = 1;
+        int leftBaseOffset;
         if (upsampleLeft) {
             leftEdge = upsampleDirectionalEdge(
                     leftReferences,
@@ -1049,7 +1051,6 @@ final class IntraPredictor {
                     plane.bitDepth(),
                     true
             );
-            dy <<= 1;
             leftBaseOffset = 2;
         } else {
             int filterStrength = intraEdgeFilterEnabled
@@ -1058,41 +1059,40 @@ final class IntraPredictor {
             leftEdge = edgeWithTopLeft(filterStrength != 0
                     ? filterDirectionalEdge(leftReferences, topLeft, height, 0, height, -1, height, filterStrength)
                     : leftReferences, topLeft);
+            leftBaseOffset = 1;
         }
-        for (int row = 0, topPosition = ((1 + (upsampleTop ? 1 : 0)) << 6) - dx;
-             row < height;
-             row++, topPosition -= dx) {
-            int baseX = topPosition >> 6;
-            int topFraction = topPosition & 0x3E;
-            int leftPosition = (row << (6 + (upsampleLeft ? 1 : 0))) - dy;
+        int topMinimumBase = -topBaseOffset;
+        int topFractionBits = 6 - (upsampleTop ? 1 : 0);
+        int leftFractionBits = 6 - (upsampleLeft ? 1 : 0);
+        for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
-                if (baseX >= 0) {
+                int topPosition = (column << 6) - (row + 1) * dx;
+                int baseX = topPosition >> topFractionBits;
+                if (baseX >= topMinimumBase) {
                     setSampleIfInside(
                             plane,
                             x + column,
                             y + row,
                             interpolate(
-                                    edgeSample(topEdge, baseX),
-                                    edgeSample(topEdge, baseX + 1),
-                                    topFraction
+                                    edgeSample(topEdge, baseX + topBaseOffset),
+                                    edgeSample(topEdge, baseX + topBaseOffset + 1),
+                                    directionalFraction(topPosition, upsampleTop)
                             )
                     );
                 } else {
-                    int baseY = leftPosition >> 6;
-                    int leftIndex = leftBaseOffset + baseY;
+                    int leftPosition = (row << 6) - (column + 1) * dy;
+                    int baseY = leftPosition >> leftFractionBits;
                     setSampleIfInside(
                             plane,
                             x + column,
                             y + row,
                             interpolate(
-                                    edgeSample(leftEdge, leftIndex),
-                                    edgeSample(leftEdge, leftIndex + 1),
-                                    leftPosition & 0x3E
+                                    edgeSample(leftEdge, baseY + leftBaseOffset),
+                                    edgeSample(leftEdge, baseY + leftBaseOffset + 1),
+                                    directionalFraction(leftPosition, upsampleLeft)
                             )
                     );
                 }
-                baseX += topBaseIncrement;
-                leftPosition -= dy;
             }
         }
     }
@@ -1744,6 +1744,16 @@ final class IntraPredictor {
             }
         }
         return 0;
+    }
+
+    /// Returns the filtered top-left corner sample used by AV1 zone-2 directional prediction.
+    ///
+    /// @param topLeft the original shared top-left reference sample
+    /// @param topReference the first top-edge reference sample
+    /// @param leftReference the first left-edge reference sample
+    /// @return the filtered shared top-left corner sample
+    private static int filterDirectionalEdgeCorner(int topLeft, int topReference, int leftReference) {
+        return (leftReference * 5 + topLeft * 6 + topReference * 5 + 8) >> 4;
     }
 
     /// Returns a filtered directional reference edge.
