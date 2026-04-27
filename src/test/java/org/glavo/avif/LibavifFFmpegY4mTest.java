@@ -48,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests that use JavaCPP FFmpeg bindings to read libavif Y4M video resources.
 @NotNullByDefault
-final class LibavifFfmpegY4mTest {
+final class LibavifFFmpegY4mTest {
     /// Y4M resources copied from libavif's test data and their expected stream metadata.
     private static final Y4mResource @Unmodifiable [] Y4M_RESOURCES = new Y4mResource[]{
             new Y4mResource("libavif-test-data/cosmos1650_yuv444_10bpc_p3pq.y4m", 1024, 428, "yuv444p10le", 1),
@@ -145,7 +145,7 @@ final class LibavifFfmpegY4mTest {
     /// @throws IOException if the resource is not found
     /// @throws URISyntaxException if the resource URL cannot be converted to a path
     private static Path resourcePath(String resourceName) throws IOException, URISyntaxException {
-        URL resource = LibavifFfmpegY4mTest.class.getClassLoader().getResource(resourceName);
+        URL resource = LibavifFFmpegY4mTest.class.getClassLoader().getResource(resourceName);
         if (resource == null) {
             throw new AssertionError("Missing test resource: " + resourceName);
         }
