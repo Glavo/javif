@@ -17,6 +17,7 @@ package org.glavo.avif;
 
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder.ArgbImage;
+import org.glavo.avif.testutil.ImagePixelAssertions.PixelTolerance;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -46,9 +47,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 final class LibavifFFmpegAvifReferenceTest {
     /// The copied libavif test data resource root.
     private static final String TEST_DATA_ROOT = "libavif-test-data";
-    /// AVIF resources whose exact FFmpeg first-frame comparison currently passes.
-    private static final String @Unmodifiable [] ENABLED_REFERENCE_RESOURCES = new String[]{
-            "libavif-test-data/white_1x1.avif",
+    /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
+    private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
+            pixelReference("libavif-test-data/paris_icc_exif_xmp.avif", PixelTolerance.bounded(9, 0.0, 0.8, 1.0)),
+            pixelReference("libavif-test-data/white_1x1.avif", PixelTolerance.perPixelDelta(0)),
     };
     /// AVIF resources whose source metadata comparison against FFmpeg currently passes.
     private static final String @Unmodifiable [] ENABLED_METADATA_REFERENCE_RESOURCES = new String[]{
@@ -232,10 +234,11 @@ final class LibavifFFmpegAvifReferenceTest {
         if (reference.disabledReason() != null) {
             Assumptions.assumeTrue(false, reference.disabledReason());
         }
-        if (!isEnabledReference(reference.resourceName())) {
-            Assumptions.assumeTrue(false, "Pending exact FFmpeg first-frame parity for this fixture.");
+        @Nullable PixelTolerance tolerance = pixelTolerance(reference.resourceName());
+        if (tolerance == null) {
+            Assumptions.assumeTrue(false, "Pending FFmpeg first-frame pixel parity for this fixture.");
         }
-        assertFirstFrameMatchesFFmpegReferenceExactly(reference);
+        assertFirstFrameMatchesFFmpegReference(reference, tolerance);
     }
 
     /// Asserts one FFmpeg source metadata reference case.
@@ -254,12 +257,16 @@ final class LibavifFFmpegAvifReferenceTest {
         assertFirstFrameMetadataMatchesFFmpegReference(reference);
     }
 
-    /// Asserts that javif and FFmpeg render the first frame of one AVIF resource identically.
+    /// Asserts that javif and FFmpeg render the first frame of one AVIF resource within tolerance.
     ///
     /// @param reference the FFmpeg reference case
+    /// @param tolerance the accepted FFmpeg pixel tolerance
     /// @throws IOException if a resource cannot be read or decoded
     /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
-    private static void assertFirstFrameMatchesFFmpegReferenceExactly(FFmpegReferenceCase reference)
+    private static void assertFirstFrameMatchesFFmpegReference(
+            FFmpegReferenceCase reference,
+            PixelTolerance tolerance
+    )
             throws IOException, URISyntaxException {
         String resourceName = reference.resourceName();
         ArgbImage rawExpected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
@@ -271,7 +278,7 @@ final class LibavifFFmpegAvifReferenceTest {
             assertFrameMetadataMatchesFFmpegMetadata(actual, expected);
             assertEquals(expected.width(), actual.width());
             assertEquals(expected.height(), actual.height());
-            assertPixelsMatch(resourceName, expected, actual.intPixelBuffer());
+            assertPixelsMatch(resourceName, expected, actual.intPixelBuffer(), tolerance);
         }
     }
 
@@ -352,23 +359,89 @@ final class LibavifFFmpegAvifReferenceTest {
         }
     }
 
-    /// Asserts that packed ARGB pixels match an FFmpeg reference image exactly.
+    /// Asserts that packed ARGB pixels match an FFmpeg reference image within tolerance.
     ///
     /// @param label the diagnostic label
     /// @param expected the expected FFmpeg image
     /// @param actualPixels the actual packed ARGB pixels
-    private static void assertPixelsMatch(String label, ArgbImage expected, IntBuffer actualPixels) {
+    /// @param tolerance the accepted pixel tolerance
+    private static void assertPixelsMatch(
+            String label,
+            ArgbImage expected,
+            IntBuffer actualPixels,
+            PixelTolerance tolerance
+    ) {
         assertEquals(expected.width() * expected.height(), actualPixels.remaining());
+        int largestChannelDelta = 0;
+        int failingPixels = 0;
+        long sumDelta = 0L;
+        long sumSquaredDelta = 0L;
+        @Nullable String firstMismatch = null;
         for (int y = 0; y < expected.height(); y++) {
             for (int x = 0; x < expected.width(); x++) {
                 int expectedArgb = expected.pixel(x, y);
                 int actualArgb = actualPixels.get(y * expected.width() + x);
-                if (expectedArgb != actualArgb) {
-                    throw new AssertionError(label + " pixel mismatch at (" + x + "," + y + "): expected "
-                            + argbText(expectedArgb) + ", actual " + argbText(actualArgb));
+                int delta = displayRelevantChannelDelta(expectedArgb, actualArgb);
+                largestChannelDelta = Math.max(largestChannelDelta, delta);
+                sumDelta += delta;
+                sumSquaredDelta += (long) delta * delta;
+                if (delta > tolerance.maxChannelDelta()) {
+                    failingPixels++;
+                    if (firstMismatch == null) {
+                        firstMismatch = "first mismatch at (" + x + "," + y + "): expected "
+                                + argbText(expectedArgb) + ", actual " + argbText(actualArgb)
+                                + ", max channel delta " + delta;
+                    }
                 }
             }
         }
+
+        int pixelCount = expected.width() * expected.height();
+        double failingRatio = (double) failingPixels / pixelCount;
+        double meanDelta = (double) sumDelta / pixelCount;
+        double rootMeanSquareDelta = Math.sqrt((double) sumSquaredDelta / pixelCount);
+        if (failingRatio > tolerance.maxFailingPixelRatio()
+                || meanDelta > tolerance.maxMeanChannelDelta()
+                || rootMeanSquareDelta > tolerance.maxRootMeanSquareChannelDelta()) {
+            throw new AssertionError(label + " pixel comparison failed: " + firstMismatch
+                    + "; compared=" + pixelCount
+                    + ", failing=" + failingPixels
+                    + String.format(Locale.ROOT, " (%.6f)", failingRatio)
+                    + ", largestDelta=" + largestChannelDelta
+                    + String.format(Locale.ROOT, ", meanDelta=%.3f", meanDelta)
+                    + String.format(Locale.ROOT, ", rmsDelta=%.3f", rootMeanSquareDelta)
+                    + ", tolerance=maxDelta " + tolerance.maxChannelDelta()
+                    + String.format(Locale.ROOT, ", maxFailingRatio %.6f", tolerance.maxFailingPixelRatio())
+                    + String.format(Locale.ROOT, ", maxMean %.3f", tolerance.maxMeanChannelDelta())
+                    + String.format(Locale.ROOT, ", maxRms %.3f", tolerance.maxRootMeanSquareChannelDelta()));
+        }
+    }
+
+    /// Returns the largest display-relevant unsigned 8-bit channel delta between two packed ARGB pixels.
+    ///
+    /// @param expectedArgb the expected packed ARGB pixel
+    /// @param actualArgb the actual packed ARGB pixel
+    /// @return the largest display-relevant channel delta
+    private static int displayRelevantChannelDelta(int expectedArgb, int actualArgb) {
+        int alphaDelta = channelDelta(expectedArgb, actualArgb, 24);
+        if (((expectedArgb >>> 24) & 0xFF) == 0 && ((actualArgb >>> 24) & 0xFF) == 0) {
+            return alphaDelta;
+        }
+
+        return Math.max(
+                Math.max(alphaDelta, channelDelta(expectedArgb, actualArgb, 16)),
+                Math.max(channelDelta(expectedArgb, actualArgb, 8), channelDelta(expectedArgb, actualArgb, 0))
+        );
+    }
+
+    /// Returns one unsigned 8-bit channel delta between two packed ARGB pixels.
+    ///
+    /// @param expectedArgb the expected packed ARGB pixel
+    /// @param actualArgb the actual packed ARGB pixel
+    /// @param shift the channel bit shift
+    /// @return the unsigned 8-bit channel delta
+    private static int channelDelta(int expectedArgb, int actualArgb, int shift) {
+        return Math.abs(((expectedArgb >>> shift) & 0xFF) - ((actualArgb >>> shift) & 0xFF));
     }
 
     /// Formats one packed ARGB pixel.
@@ -379,12 +452,17 @@ final class LibavifFFmpegAvifReferenceTest {
         return String.format(Locale.ROOT, "0x%08X", argb);
     }
 
-    /// Returns whether one FFmpeg reference case is currently enabled.
+    /// Returns the configured FFmpeg pixel tolerance for one reference case.
     ///
     /// @param resourceName the AVIF resource name
-    /// @return whether exact FFmpeg first-frame comparison currently passes
-    private static boolean isEnabledReference(String resourceName) {
-        return Arrays.asList(ENABLED_REFERENCE_RESOURCES).contains(resourceName);
+    /// @return the accepted pixel tolerance, or `null` when the fixture is not enabled for pixel comparison
+    private static @Nullable PixelTolerance pixelTolerance(String resourceName) {
+        for (FFmpegPixelReference reference : ENABLED_PIXEL_REFERENCE_RESOURCES) {
+            if (reference.resourceName().equals(resourceName)) {
+                return reference.tolerance();
+            }
+        }
+        return null;
     }
 
     /// Returns whether one FFmpeg source metadata reference case is currently enabled.
@@ -418,6 +496,23 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @return the reference case
     private static FFmpegReferenceCase disabledReference(String resourceName, String disabledReason) {
         return new FFmpegReferenceCase(resourceName, disabledReason);
+    }
+
+    /// Creates an enabled FFmpeg pixel reference case.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @param tolerance the accepted FFmpeg pixel tolerance
+    /// @return the pixel reference case
+    private static FFmpegPixelReference pixelReference(String resourceName, PixelTolerance tolerance) {
+        return new FFmpegPixelReference(resourceName, tolerance);
+    }
+
+    /// Enabled FFmpeg pixel comparison settings for one fixture.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @param tolerance the accepted FFmpeg pixel tolerance
+    @NotNullByDefault
+    private record FFmpegPixelReference(String resourceName, PixelTolerance tolerance) {
     }
 
     /// FFmpeg reference expectation for one libavif AVIF fixture.
