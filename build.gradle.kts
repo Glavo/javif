@@ -176,7 +176,7 @@ publishing.publications.create<MavenPublication>("maven") {
     pom {
         name.set(project.name)
         description.set(project.description)
-        url.set("https://github.com/Glavo/jwebp")
+        url.set("https://github.com/Glavo/javif")
 
         licenses {
             license {
@@ -194,7 +194,7 @@ publishing.publications.create<MavenPublication>("maven") {
         }
 
         scm {
-            url.set("https://github.com/Glavo/jwebp")
+            url.set("https://github.com/Glavo/javif")
         }
     }
 }
