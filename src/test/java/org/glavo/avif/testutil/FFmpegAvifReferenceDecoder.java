@@ -23,6 +23,8 @@ import org.bytedeco.ffmpeg.avcodec.AVCodecParameters;
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
 import org.bytedeco.ffmpeg.avformat.AVFormatContext;
 import org.bytedeco.ffmpeg.avformat.AVStream;
+import org.bytedeco.ffmpeg.avformat.AVStreamGroup;
+import org.bytedeco.ffmpeg.avformat.AVStreamGroupTileGrid;
 import org.bytedeco.ffmpeg.avutil.AVFrame;
 import org.bytedeco.ffmpeg.swscale.SwsContext;
 import org.bytedeco.javacpp.BytePointer;
@@ -50,6 +52,8 @@ import static org.bytedeco.ffmpeg.global.avcodec.avcodec_open2;
 import static org.bytedeco.ffmpeg.global.avcodec.avcodec_parameters_to_context;
 import static org.bytedeco.ffmpeg.global.avcodec.avcodec_receive_frame;
 import static org.bytedeco.ffmpeg.global.avcodec.avcodec_send_packet;
+import static org.bytedeco.ffmpeg.global.avformat.AV_DISPOSITION_DEFAULT;
+import static org.bytedeco.ffmpeg.global.avformat.AV_STREAM_GROUP_PARAMS_TILE_GRID;
 import static org.bytedeco.ffmpeg.global.avformat.av_read_frame;
 import static org.bytedeco.ffmpeg.global.avformat.avformat_alloc_context;
 import static org.bytedeco.ffmpeg.global.avformat.avformat_close_input;
@@ -118,6 +122,11 @@ public final class FFmpegAvifReferenceDecoder {
             check(avformat_open_input(formatContext, path.toString(), null, null), "open input: " + resourceName);
             check(avformat_find_stream_info(formatContext, (PointerPointer<?>) null), "find stream info: " + resourceName);
 
+            @Nullable TileGridReference tileGrid = firstTileGridReference(formatContext, resourceName);
+            if (tileGrid != null) {
+                return decodeTileGridArgb(path, tileGrid, resourceName);
+            }
+
             int videoStreamIndex = findVideoStream(formatContext);
             if (videoStreamIndex < 0) {
                 throw new IOException("FFmpeg found no video stream: " + resourceName);
@@ -145,6 +154,11 @@ public final class FFmpegAvifReferenceDecoder {
             Path path = resourcePath(resourceName);
             check(avformat_open_input(formatContext, path.toString(), null, null), "open input: " + resourceName);
             check(avformat_find_stream_info(formatContext, (PointerPointer<?>) null), "find stream info: " + resourceName);
+
+            @Nullable TileGridReference tileGrid = firstTileGridReference(formatContext, resourceName);
+            if (tileGrid != null) {
+                return decodeTileGridSourcePlanes(path, tileGrid, resourceName);
+            }
 
             int videoStreamIndex = findVideoStream(formatContext);
             if (videoStreamIndex < 0) {
@@ -219,6 +233,28 @@ public final class FFmpegAvifReferenceDecoder {
         }
     }
 
+    /// Decodes one selected video stream from a fresh FFmpeg context.
+    ///
+    /// @param path the AVIF file path
+    /// @param videoStreamIndex the selected video stream index
+    /// @param label the diagnostic label
+    /// @return the decoded first-frame pixels
+    /// @throws IOException if FFmpeg decoding fails
+    private static ArgbImage decodeFirstFrameArgb(Path path, int videoStreamIndex, String label) throws IOException {
+        AVFormatContext formatContext = avformat_alloc_context();
+        if (formatContext == null) {
+            throw new IOException("Failed to allocate FFmpeg format context");
+        }
+
+        try {
+            check(avformat_open_input(formatContext, path.toString(), null, null), "open input: " + label);
+            check(avformat_find_stream_info(formatContext, (PointerPointer<?>) null), "find stream info: " + label);
+            return decodeFirstFrameArgb(formatContext, videoStreamIndex, label);
+        } finally {
+            avformat_close_input(formatContext);
+        }
+    }
+
     /// Decodes the first frame from one selected FFmpeg stream and copies source planes.
     ///
     /// @param formatContext the opened format context
@@ -279,6 +315,29 @@ public final class FFmpegAvifReferenceDecoder {
             av_packet_free(packet);
             av_frame_free(frame);
             avcodec_free_context(codecContext);
+        }
+    }
+
+    /// Decodes one selected video stream from a fresh FFmpeg context and copies source planes.
+    ///
+    /// @param path the AVIF file path
+    /// @param videoStreamIndex the selected video stream index
+    /// @param label the diagnostic label
+    /// @return the decoded first-frame source planes
+    /// @throws IOException if FFmpeg decoding fails
+    private static SourcePlanes decodeFirstFrameSourcePlanes(Path path, int videoStreamIndex, String label)
+            throws IOException {
+        AVFormatContext formatContext = avformat_alloc_context();
+        if (formatContext == null) {
+            throw new IOException("Failed to allocate FFmpeg format context");
+        }
+
+        try {
+            check(avformat_open_input(formatContext, path.toString(), null, null), "open input: " + label);
+            check(avformat_find_stream_info(formatContext, (PointerPointer<?>) null), "find stream info: " + label);
+            return decodeFirstFrameSourcePlanes(formatContext, videoStreamIndex, label);
+        } finally {
+            avformat_close_input(formatContext);
         }
     }
 
@@ -583,6 +642,344 @@ public final class FFmpegAvifReferenceDecoder {
         return SWS_CS_DEFAULT;
     }
 
+    /// Returns the first tile-grid stream group exposed by FFmpeg, if present.
+    ///
+    /// @param formatContext the opened format context
+    /// @param label the diagnostic label
+    /// @return the tile-grid reference, or `null`
+    /// @throws IOException if FFmpeg exposes malformed tile-grid metadata
+    private static @Nullable TileGridReference firstTileGridReference(AVFormatContext formatContext, String label)
+            throws IOException {
+        int streamGroupCount = formatContext.nb_stream_groups();
+        for (int i = 0; i < streamGroupCount; i++) {
+            AVStreamGroup group = formatContext.stream_groups(i);
+            if (group == null
+                    || group.isNull()
+                    || group.type() != AV_STREAM_GROUP_PARAMS_TILE_GRID
+                    || (group.disposition() & AV_DISPOSITION_DEFAULT) == 0) {
+                continue;
+            }
+            AVStreamGroupTileGrid tileGrid = group.params_tile_grid();
+            if (tileGrid == null || tileGrid.isNull()) {
+                throw new IOException("FFmpeg tile-grid group has no parameters: " + label);
+            }
+            return tileGridReference(group, tileGrid, label);
+        }
+        return null;
+    }
+
+    /// Copies FFmpeg tile-grid metadata into Java arrays.
+    ///
+    /// @param group the FFmpeg stream group
+    /// @param tileGrid the FFmpeg tile-grid parameters
+    /// @param label the diagnostic label
+    /// @return the copied tile-grid reference
+    /// @throws IOException if the tile-grid metadata is malformed
+    private static @Nullable TileGridReference tileGridReference(
+            AVStreamGroup group,
+            AVStreamGroupTileGrid tileGrid,
+            String label
+    ) throws IOException {
+        int tileCount = tileGrid.nb_tiles();
+        int width = tileGrid.width();
+        int height = tileGrid.height();
+        if (tileCount <= 0 || width <= 0 || height <= 0) {
+            throw new IOException("FFmpeg returned invalid tile-grid dimensions for " + label);
+        }
+
+        int[] streamIndices = new int[tileCount];
+        int[] horizontalOffsets = new int[tileCount];
+        int[] verticalOffsets = new int[tileCount];
+        for (int tile = 0; tile < tileCount; tile++) {
+            int groupStreamIndex = tileGrid.offsets_idx(tile);
+            if (groupStreamIndex < 0 || groupStreamIndex >= group.nb_streams()) {
+                throw new IOException("FFmpeg tile-grid references invalid stream index for " + label);
+            }
+            AVStream stream = group.streams(groupStreamIndex);
+            if (stream == null || stream.isNull()) {
+                throw new IOException("FFmpeg tile-grid references a missing stream for " + label);
+            }
+            if (!tileStreamFormatsMatch(group, stream.codecpar().format())) {
+                return null;
+            }
+            streamIndices[tile] = stream.index();
+            horizontalOffsets[tile] = tileGrid.offsets_horizontal(tile) - tileGrid.horizontal_offset();
+            verticalOffsets[tile] = tileGrid.offsets_vertical(tile) - tileGrid.vertical_offset();
+        }
+        return new TileGridReference(width, height, streamIndices, horizontalOffsets, verticalOffsets);
+    }
+
+    /// Returns whether every stream in one tile-grid group exposes the same source pixel format.
+    ///
+    /// @param group the FFmpeg stream group
+    /// @param pixelFormat the expected FFmpeg pixel format id
+    /// @return whether every stream has the expected format
+    private static boolean tileStreamFormatsMatch(AVStreamGroup group, int pixelFormat) {
+        int streamCount = group.nb_streams();
+        for (int i = 0; i < streamCount; i++) {
+            AVStream stream = group.streams(i);
+            if (stream == null || stream.isNull() || stream.codecpar().format() != pixelFormat) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Decodes and composes a FFmpeg tile-grid stream group into one ARGB image.
+    ///
+    /// @param path the AVIF file path
+    /// @param tileGrid the tile-grid metadata
+    /// @param label the diagnostic label
+    /// @return the composed tile-grid ARGB image
+    /// @throws IOException if one tile cannot be decoded or composed
+    private static ArgbImage decodeTileGridArgb(Path path, TileGridReference tileGrid, String label)
+            throws IOException {
+        int[] pixels = new int[tileGrid.width * tileGrid.height];
+        @Nullable FrameMetadata sourceMetadata = null;
+        for (int tile = 0; tile < tileGrid.tileCount(); tile++) {
+            ArgbImage tileImage = decodeFirstFrameArgb(path, tileGrid.streamIndex(tile), label + " tile " + tile);
+            sourceMetadata = matchingMetadata(sourceMetadata, tileImage.sourceMetadata(), label);
+            copyArgbTile(
+                    tileImage,
+                    pixels,
+                    tileGrid.width,
+                    tileGrid.height,
+                    tileGrid.horizontalOffset(tile),
+                    tileGrid.verticalOffset(tile)
+            );
+        }
+        return new ArgbImage(
+                tileGrid.width,
+                tileGrid.height,
+                Objects.requireNonNull(sourceMetadata, "sourceMetadata"),
+                pixels
+        );
+    }
+
+    /// Decodes and composes a FFmpeg tile-grid stream group into one source-plane image.
+    ///
+    /// @param path the AVIF file path
+    /// @param tileGrid the tile-grid metadata
+    /// @param label the diagnostic label
+    /// @return the composed tile-grid source planes
+    /// @throws IOException if one tile cannot be decoded or composed
+    private static SourcePlanes decodeTileGridSourcePlanes(Path path, TileGridReference tileGrid, String label)
+            throws IOException {
+        byte[] luma = new byte[tileGrid.width * tileGrid.height];
+        @Nullable byte[] chromaU = null;
+        @Nullable byte[] chromaV = null;
+        @Nullable FrameMetadata sourceMetadata = null;
+
+        for (int tile = 0; tile < tileGrid.tileCount(); tile++) {
+            SourcePlanes tilePlanes = decodeFirstFrameSourcePlanes(
+                    path,
+                    tileGrid.streamIndex(tile),
+                    label + " tile " + tile
+            );
+            sourceMetadata = matchingMetadata(sourceMetadata, tilePlanes.sourceMetadata(), label);
+            copyPlaneTile(
+                    tilePlanes.luma,
+                    tilePlanes.width,
+                    tilePlanes.height,
+                    luma,
+                    tileGrid.width,
+                    tileGrid.height,
+                    tileGrid.horizontalOffset(tile),
+                    tileGrid.verticalOffset(tile)
+            );
+
+            if (sourceMetadata.pixelFormat() != AvifPixelFormat.I400) {
+                if (chromaU == null || chromaV == null) {
+                    int chromaSize = chromaWidth(tileGrid.width, sourceMetadata.pixelFormat())
+                            * chromaHeight(tileGrid.height, sourceMetadata.pixelFormat());
+                    chromaU = new byte[chromaSize];
+                    chromaV = new byte[chromaSize];
+                }
+                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaU, true);
+                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaV, false);
+            }
+        }
+
+        return new SourcePlanes(
+                tileGrid.width,
+                tileGrid.height,
+                Objects.requireNonNull(sourceMetadata, "sourceMetadata"),
+                luma,
+                chromaU,
+                chromaV
+        );
+    }
+
+    /// Returns matching tile metadata, or throws when a tile differs from earlier tiles.
+    ///
+    /// @param expected the existing metadata, or `null` for the first tile
+    /// @param actual the current tile metadata
+    /// @param label the diagnostic label
+    /// @return the metadata to use for the composed grid
+    /// @throws IOException if tile metadata differs
+    private static FrameMetadata matchingMetadata(
+            @Nullable FrameMetadata expected,
+            FrameMetadata actual,
+            String label
+    ) throws IOException {
+        if (expected == null) {
+            return actual;
+        }
+        if (!expected.equals(actual)) {
+            throw new IOException("FFmpeg tile-grid source metadata mismatch: " + label);
+        }
+        return expected;
+    }
+
+    /// Copies one ARGB tile into a composed grid canvas.
+    ///
+    /// @param tile the decoded tile image
+    /// @param pixels the destination packed pixel canvas
+    /// @param width the destination width
+    /// @param height the destination height
+    /// @param offsetX the tile X offset
+    /// @param offsetY the tile Y offset
+    private static void copyArgbTile(
+            ArgbImage tile,
+            int[] pixels,
+            int width,
+            int height,
+            int offsetX,
+            int offsetY
+    ) {
+        int copy = clippedCopyWidth(tile.width, width, offsetX);
+        int rows = clippedCopyHeight(tile.height, height, offsetY);
+        if (copy <= 0 || rows <= 0) {
+            return;
+        }
+        int srcX = Math.max(0, -offsetX);
+        int srcY = Math.max(0, -offsetY);
+        int destX = Math.max(0, offsetX);
+        int destY = Math.max(0, offsetY);
+        for (int y = 0; y < rows; y++) {
+            System.arraycopy(
+                    tile.pixels,
+                    (srcY + y) * tile.width + srcX,
+                    pixels,
+                    (destY + y) * width + destX,
+                    copy
+            );
+        }
+    }
+
+    /// Copies one chroma tile plane into a composed grid canvas.
+    ///
+    /// @param tilePlanes the decoded tile source planes
+    /// @param tileGrid the tile-grid metadata
+    /// @param tile the tile index
+    /// @param destination the destination chroma plane
+    /// @param chromaU whether to copy chroma U instead of chroma V
+    private static void copyChromaPlaneTile(
+            SourcePlanes tilePlanes,
+            TileGridReference tileGrid,
+            int tile,
+            byte[] destination,
+            boolean chromaU
+    ) {
+        AvifPixelFormat pixelFormat = tilePlanes.sourceMetadata().pixelFormat();
+        int destWidth = chromaWidth(tileGrid.width, pixelFormat);
+        int destHeight = chromaHeight(tileGrid.height, pixelFormat);
+        int sourceWidth = tilePlanes.chromaWidth();
+        int sourceHeight = tilePlanes.chromaHeight();
+        int offsetX = chromaHorizontalOffset(tileGrid.horizontalOffset(tile), pixelFormat);
+        int offsetY = chromaVerticalOffset(tileGrid.verticalOffset(tile), pixelFormat);
+        byte[] source = Objects.requireNonNull(chromaU ? tilePlanes.chromaU : tilePlanes.chromaV);
+        copyPlaneTile(source, sourceWidth, sourceHeight, destination, destWidth, destHeight, offsetX, offsetY);
+    }
+
+    /// Copies one planar tile into a composed grid plane.
+    ///
+    /// @param source the source tile plane
+    /// @param sourceWidth the source tile plane width
+    /// @param sourceHeight the source tile plane height
+    /// @param destination the destination composed plane
+    /// @param destinationWidth the destination plane width
+    /// @param destinationHeight the destination plane height
+    /// @param offsetX the tile X offset
+    /// @param offsetY the tile Y offset
+    private static void copyPlaneTile(
+            byte[] source,
+            int sourceWidth,
+            int sourceHeight,
+            byte[] destination,
+            int destinationWidth,
+            int destinationHeight,
+            int offsetX,
+            int offsetY
+    ) {
+        int copy = clippedCopyWidth(sourceWidth, destinationWidth, offsetX);
+        int rows = clippedCopyHeight(sourceHeight, destinationHeight, offsetY);
+        if (copy <= 0 || rows <= 0) {
+            return;
+        }
+        int srcX = Math.max(0, -offsetX);
+        int srcY = Math.max(0, -offsetY);
+        int destX = Math.max(0, offsetX);
+        int destY = Math.max(0, offsetY);
+        for (int y = 0; y < rows; y++) {
+            System.arraycopy(
+                    source,
+                    (srcY + y) * sourceWidth + srcX,
+                    destination,
+                    (destY + y) * destinationWidth + destX,
+                    copy
+            );
+        }
+    }
+
+    /// Returns the clipped horizontal copy length for one tile.
+    ///
+    /// @param sourceWidth the source tile width
+    /// @param destinationWidth the destination plane width
+    /// @param offsetX the tile X offset
+    /// @return the clipped copy width
+    private static int clippedCopyWidth(int sourceWidth, int destinationWidth, int offsetX) {
+        int srcX = Math.max(0, -offsetX);
+        int destX = Math.max(0, offsetX);
+        return Math.min(sourceWidth - srcX, destinationWidth - destX);
+    }
+
+    /// Returns the clipped vertical copy length for one tile.
+    ///
+    /// @param sourceHeight the source tile height
+    /// @param destinationHeight the destination plane height
+    /// @param offsetY the tile Y offset
+    /// @return the clipped copy height
+    private static int clippedCopyHeight(int sourceHeight, int destinationHeight, int offsetY) {
+        int srcY = Math.max(0, -offsetY);
+        int destY = Math.max(0, offsetY);
+        return Math.min(sourceHeight - srcY, destinationHeight - destY);
+    }
+
+    /// Returns a chroma-plane X offset for one luma-plane tile offset.
+    ///
+    /// @param lumaOffset the luma-plane X offset
+    /// @param pixelFormat the source pixel format
+    /// @return the chroma-plane X offset
+    private static int chromaHorizontalOffset(int lumaOffset, AvifPixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I444 -> lumaOffset;
+            case I420, I422 -> Math.floorDiv(lumaOffset, 2);
+        };
+    }
+
+    /// Returns a chroma-plane Y offset for one luma-plane tile offset.
+    ///
+    /// @param lumaOffset the luma-plane Y offset
+    /// @param pixelFormat the source pixel format
+    /// @return the chroma-plane Y offset
+    private static int chromaVerticalOffset(int lumaOffset, AvifPixelFormat pixelFormat) {
+        return switch (pixelFormat) {
+            case I400, I422, I444 -> lumaOffset;
+            case I420 -> Math.floorDiv(lumaOffset, 2);
+        };
+    }
+
     /// Finds the first video stream index in an opened FFmpeg format context.
     ///
     /// @param formatContext the opened format context
@@ -669,6 +1066,74 @@ public final class FFmpegAvifReferenceDecoder {
             length++;
         }
         return new String(buffer, 0, length, StandardCharsets.UTF_8);
+    }
+
+    /// Copied FFmpeg tile-grid stream-group metadata.
+    ///
+    /// @param width the composed grid width
+    /// @param height the composed grid height
+    /// @param streamIndices the tile stream indices
+    /// @param horizontalOffsets the tile horizontal offsets
+    /// @param verticalOffsets the tile vertical offsets
+    @NotNullByDefault
+    private record TileGridReference(
+            int width,
+            int height,
+            int @Unmodifiable [] streamIndices,
+            int @Unmodifiable [] horizontalOffsets,
+            int @Unmodifiable [] verticalOffsets
+    ) {
+        /// Creates copied tile-grid metadata.
+        ///
+        /// @param width the composed grid width
+        /// @param height the composed grid height
+        /// @param streamIndices the tile stream indices
+        /// @param horizontalOffsets the tile horizontal offsets
+        /// @param verticalOffsets the tile vertical offsets
+        private TileGridReference {
+            if (width <= 0 || height <= 0) {
+                throw new IllegalArgumentException("Tile-grid dimensions must be positive");
+            }
+            if (streamIndices.length == 0
+                    || horizontalOffsets.length != streamIndices.length
+                    || verticalOffsets.length != streamIndices.length) {
+                throw new IllegalArgumentException("Tile-grid arrays must have matching non-empty lengths");
+            }
+            streamIndices = Arrays.copyOf(streamIndices, streamIndices.length);
+            horizontalOffsets = Arrays.copyOf(horizontalOffsets, horizontalOffsets.length);
+            verticalOffsets = Arrays.copyOf(verticalOffsets, verticalOffsets.length);
+        }
+
+        /// Returns the number of tiles.
+        ///
+        /// @return the tile count
+        private int tileCount() {
+            return streamIndices.length;
+        }
+
+        /// Returns one tile stream index.
+        ///
+        /// @param tile the tile index
+        /// @return the stream index
+        private int streamIndex(int tile) {
+            return streamIndices[tile];
+        }
+
+        /// Returns one tile horizontal offset.
+        ///
+        /// @param tile the tile index
+        /// @return the horizontal offset
+        private int horizontalOffset(int tile) {
+            return horizontalOffsets[tile];
+        }
+
+        /// Returns one tile vertical offset.
+        ///
+        /// @param tile the tile index
+        /// @return the vertical offset
+        private int verticalOffset(int tile) {
+            return verticalOffsets[tile];
+        }
     }
 
     /// Packed ARGB image decoded by FFmpeg.

@@ -114,7 +114,6 @@ final class LibavifFFmpegAvifReferenceTest {
     private static final String @Unmodifiable [] FFMPEG_DERIVED_DIMENSION_REFERENCE_RESOURCES = new String[]{
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
             "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",
-            "libavif-test-data/color_grid_alpha_nogrid.avif",
             "libavif-test-data/color_grid_gainmap_different_grid.avif",
             "libavif-test-data/sofa_grid1x5_420.avif",
             "libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif",
