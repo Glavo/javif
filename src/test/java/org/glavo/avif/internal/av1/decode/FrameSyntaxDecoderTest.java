@@ -52,7 +52,7 @@ final class FrameSyntaxDecoderTest {
 
     /// One fixed payload whose leading loop-restoration unit decodes as active Wiener syntax.
     private static final byte @Unmodifiable [] RESTORATION_WIENER_PAYLOAD = new byte[]{
-            0x4E, 0, 0, 0, 0, 0, 0, 0
+            (byte) 0xCE, 0, 0, 0, 0, 0, 0, 0
     };
 
     /// Verifies that structural frame decoding expands tile syntax and produces a temporal motion field.
@@ -121,8 +121,8 @@ final class FrameSyntaxDecoderTest {
         assertEquals(0, restorationUnitMap.rows(1));
         assertNotNull(unit);
         assertEquals(FrameHeader.RestorationType.WIENER, unit.type());
-        assertArrayEquals(new int[]{3, -7, 15}, unit.wienerCoefficients()[0]);
-        assertArrayEquals(new int[]{3, -6, 31}, unit.wienerCoefficients()[1]);
+        assertArrayEquals(new int[]{1, -10, 13}, unit.wienerCoefficients()[0]);
+        assertArrayEquals(new int[]{4, -7, 7}, unit.wienerCoefficients()[1]);
         assertEquals(BlockSize.SIZE_64X64, result.tileRoots(0)[0].size());
     }
 

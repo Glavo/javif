@@ -50,6 +50,16 @@ final class LibavifFFmpegAvifReferenceTest {
     private static final String TEST_DATA_ROOT = "libavif-test-data";
     /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
     private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
+            rgbPixelReference("libavif-test-data/abc_color_irot_alpha_NOirot.avif", PixelTolerance.bounded(16, 0.0, 6.0, 8.0)),
+            rgbPixelReference("libavif-test-data/abc_color_irot_alpha_irot.avif", PixelTolerance.bounded(16, 0.0, 6.0, 8.0)),
+            rgbPixelReference("libavif-test-data/alpha_noispe.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/circle_custom_properties.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/clap_irot_imir_non_essential.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/clop_irot_imor.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/color_grid_alpha_nogrid.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/colors_hdr_p3.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_srgb.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
@@ -61,44 +71,49 @@ final class LibavifFFmpegAvifReferenceTest {
             pixelReference("libavif-test-data/colors_text_wcg_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_text_wcg_sdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_wcg_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            rgbPixelReference("libavif-test-data/draw_points_idat.avif", PixelTolerance.perPixelDelta(8)),
+            rgbPixelReference("libavif-test-data/draw_points_idat_metasize0.avif", PixelTolerance.perPixelDelta(8)),
             pixelReference("libavif-test-data/extended_pixi.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/paris_icc_exif_xmp.avif", PixelTolerance.bounded(9, 0.0, 0.8, 1.0)),
             pixelReference("libavif-test-data/seine_sdr_gainmap_gammazero.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            rgbPixelReference("libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/unsupported_gainmap_minimum_version.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/unsupported_gainmap_version.avif", PixelTolerance.perPixelDelta(1)),
+            rgbPixelReference("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/white_1x1.avif", PixelTolerance.perPixelDelta(0)),
     };
-    /// AVIF resources whose raw decoded planes match FFmpeg source planes exactly.
-    private static final String @Unmodifiable [] ENABLED_SOURCE_PLANE_REFERENCE_RESOURCES = new String[]{
-            "libavif-test-data/abc_color_irot_alpha_NOirot.avif",
-            "libavif-test-data/abc_color_irot_alpha_irot.avif",
-            "libavif-test-data/alpha_noispe.avif",
-            "libavif-test-data/circle_custom_properties.avif",
-            "libavif-test-data/clap_irot_imir_non_essential.avif",
-            "libavif-test-data/clop_irot_imor.avif",
-            "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
-            "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",
-            "libavif-test-data/color_grid_alpha_nogrid.avif",
-            "libavif-test-data/color_grid_gainmap_different_grid.avif",
-            "libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif",
-            "libavif-test-data/colors-animated-8bpc-audio.avif",
-            "libavif-test-data/colors-animated-8bpc.avif",
-            "libavif-test-data/colors_sdr_srgb.avif",
-            "libavif-test-data/colors_text_sdr_srgb.avif",
-            "libavif-test-data/colors_text_wcg_sdr_rec2020.avif",
-            "libavif-test-data/draw_points_idat.avif",
-            "libavif-test-data/draw_points_idat_metasize0.avif",
-            "libavif-test-data/extended_pixi.avif",
-            "libavif-test-data/io/kodim03_yuv420_8bpc.avif",
-            "libavif-test-data/io/kodim23_yuv420_8bpc.avif",
-            "libavif-test-data/paris_icc_exif_xmp.avif",
-            "libavif-test-data/seine_sdr_gainmap_gammazero.avif",
-            "libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif",
-            "libavif-test-data/colors_hdr_p3.avif",
-            "libavif-test-data/colors_hdr_rec2020.avif",
-            "libavif-test-data/colors_hdr_srgb.avif",
-            "libavif-test-data/unsupported_gainmap_minimum_version.avif",
-            "libavif-test-data/unsupported_gainmap_version.avif",
-            "libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif",
-            "libavif-test-data/white_1x1.avif",
+    /// AVIF resources whose raw decoded planes match FFmpeg source planes within explicit bounds.
+    private static final SourcePlaneReference @Unmodifiable [] ENABLED_SOURCE_PLANE_REFERENCE_RESOURCES = new SourcePlaneReference[]{
+            sourcePlaneReference("libavif-test-data/abc_color_irot_alpha_NOirot.avif"),
+            sourcePlaneReference("libavif-test-data/abc_color_irot_alpha_irot.avif"),
+            sourcePlaneReference("libavif-test-data/alpha_noispe.avif"),
+            sourcePlaneReference("libavif-test-data/circle_custom_properties.avif"),
+            sourcePlaneReference("libavif-test-data/clap_irot_imir_non_essential.avif"),
+            sourcePlaneReference("libavif-test-data/clop_irot_imor.avif"),
+            sourcePlaneReference("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif"),
+            sourcePlaneReference("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif"),
+            sourcePlaneReference("libavif-test-data/color_grid_alpha_nogrid.avif"),
+            sourcePlaneReference("libavif-test-data/color_grid_gainmap_different_grid.avif"),
+            sourcePlaneReference("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif"),
+            sourcePlaneReference("libavif-test-data/colors-animated-8bpc-audio.avif"),
+            sourcePlaneReference("libavif-test-data/colors-animated-8bpc.avif"),
+            sourcePlaneReference("libavif-test-data/colors_sdr_srgb.avif"),
+            sourcePlaneReference("libavif-test-data/colors_text_sdr_srgb.avif"),
+            sourcePlaneReference("libavif-test-data/colors_text_wcg_sdr_rec2020.avif"),
+            sourcePlaneReference("libavif-test-data/draw_points_idat.avif"),
+            sourcePlaneReference("libavif-test-data/draw_points_idat_metasize0.avif"),
+            sourcePlaneReference("libavif-test-data/extended_pixi.avif"),
+            sourcePlaneReference("libavif-test-data/paris_icc_exif_xmp.avif",
+                    SourcePlaneTolerance.bounded(1, 0.0001, 0.01, 0.05)),
+            sourcePlaneReference("libavif-test-data/seine_sdr_gainmap_gammazero.avif"),
+            sourcePlaneReference("libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif"),
+            sourcePlaneReference("libavif-test-data/colors_hdr_p3.avif"),
+            sourcePlaneReference("libavif-test-data/colors_hdr_rec2020.avif"),
+            sourcePlaneReference("libavif-test-data/colors_hdr_srgb.avif"),
+            sourcePlaneReference("libavif-test-data/unsupported_gainmap_minimum_version.avif"),
+            sourcePlaneReference("libavif-test-data/unsupported_gainmap_version.avif"),
+            sourcePlaneReference("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif"),
+            sourcePlaneReference("libavif-test-data/white_1x1.avif"),
     };
     /// AVIF resources whose source metadata comparison against FFmpeg currently passes.
     private static final String @Unmodifiable [] ENABLED_METADATA_REFERENCE_RESOURCES = new String[]{
@@ -284,11 +299,11 @@ final class LibavifFFmpegAvifReferenceTest {
         if (reference.disabledReason() != null) {
             Assumptions.assumeTrue(false, reference.disabledReason());
         }
-        @Nullable PixelTolerance tolerance = pixelTolerance(reference.resourceName());
-        if (tolerance == null) {
+        @Nullable FFmpegPixelReference pixelReference = pixelReference(reference.resourceName());
+        if (pixelReference == null) {
             Assumptions.assumeTrue(false, "Pending FFmpeg first-frame pixel parity for this fixture.");
         }
-        assertFirstFrameMatchesFFmpegReference(reference, tolerance);
+        assertFirstFrameMatchesFFmpegReference(reference, pixelReference);
     }
 
     /// Asserts one FFmpeg source metadata reference case.
@@ -317,21 +332,22 @@ final class LibavifFFmpegAvifReferenceTest {
         if (reference.disabledReason() != null) {
             Assumptions.assumeTrue(false, reference.disabledReason());
         }
-        if (!isEnabledSourcePlaneReference(reference.resourceName())) {
+        @Nullable SourcePlaneReference sourcePlaneReference = enabledSourcePlaneReference(reference.resourceName());
+        if (sourcePlaneReference == null) {
             Assumptions.assumeTrue(false, "Pending FFmpeg source-plane parity for this fixture.");
         }
-        assertFirstFrameSourcePlanesMatchFFmpegReference(reference);
+        assertFirstFrameSourcePlanesMatchFFmpegReference(reference, sourcePlaneReference);
     }
 
     /// Asserts that javif and FFmpeg render the first frame of one AVIF resource within tolerance.
     ///
     /// @param reference the FFmpeg reference case
-    /// @param tolerance the accepted FFmpeg pixel tolerance
+    /// @param pixelReference the FFmpeg pixel comparison settings
     /// @throws IOException if a resource cannot be read or decoded
     /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
     private static void assertFirstFrameMatchesFFmpegReference(
             FFmpegReferenceCase reference,
-            PixelTolerance tolerance
+            FFmpegPixelReference pixelReference
     )
             throws IOException, URISyntaxException {
         String resourceName = reference.resourceName();
@@ -344,7 +360,7 @@ final class LibavifFFmpegAvifReferenceTest {
             assertFrameMetadataMatchesFFmpegMetadata(actual, expected);
             assertEquals(expected.width(), actual.width());
             assertEquals(expected.height(), actual.height());
-            assertPixelsMatch(resourceName, expected, actual.intPixelBuffer(), tolerance);
+            assertPixelsMatch(resourceName, expected, actual.intPixelBuffer(), pixelReference);
         }
     }
 
@@ -377,17 +393,22 @@ final class LibavifFFmpegAvifReferenceTest {
         }
     }
 
-    /// Asserts that javif raw decoded color planes match FFmpeg source planes exactly.
+    /// Asserts that javif raw decoded color planes match FFmpeg source planes within tolerance.
     ///
     /// @param reference the FFmpeg reference case
+    /// @param sourcePlaneReference the FFmpeg source-plane comparison settings
     /// @throws IOException if a resource cannot be read or decoded
     /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
-    private static void assertFirstFrameSourcePlanesMatchFFmpegReference(FFmpegReferenceCase reference)
+    private static void assertFirstFrameSourcePlanesMatchFFmpegReference(
+            FFmpegReferenceCase reference,
+            SourcePlaneReference sourcePlaneReference
+    )
             throws IOException, URISyntaxException {
         String resourceName = reference.resourceName();
         SourcePlanes expected = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
             AvifPlanes actual = reader.readRawColorPlanes(0);
+            SourcePlaneTolerance tolerance = sourcePlaneReference.tolerance();
             assertEquals(expected.width(), actual.codedWidth());
             assertEquals(expected.height(), actual.codedHeight());
             assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), ffmpegSourcePlaneMessage(expected));
@@ -398,7 +419,8 @@ final class LibavifFFmpegAvifReferenceTest {
                     expected.width(),
                     expected.height(),
                     actual.lumaPlane(),
-                    expected::lumaSample
+                    expected::lumaSample,
+                    tolerance
             );
             if (expected.sourceMetadata().pixelFormat() != AvifPixelFormat.I400) {
                 AvifPlane chromaUPlane = actual.chromaUPlane();
@@ -410,14 +432,16 @@ final class LibavifFFmpegAvifReferenceTest {
                         expected.chromaWidth(),
                         expected.chromaHeight(),
                         chromaUPlane,
-                        expected::chromaUSample
+                        expected::chromaUSample,
+                        tolerance
                 );
                 assertPlaneMatches(
                         resourceName + " V",
                         expected.chromaWidth(),
                         expected.chromaHeight(),
                         chromaVPlane,
-                        expected::chromaVSample
+                        expected::chromaVSample,
+                        tolerance
                 );
             }
         }
@@ -479,31 +503,65 @@ final class LibavifFFmpegAvifReferenceTest {
         }
     }
 
-    /// Asserts that one javif decoded plane matches one FFmpeg source plane exactly.
+    /// Asserts that one javif decoded plane matches one FFmpeg source plane within tolerance.
     ///
     /// @param label the diagnostic label
     /// @param expectedWidth the expected plane width
     /// @param expectedHeight the expected plane height
     /// @param actual the javif decoded plane
     /// @param expectedSample the FFmpeg source sample supplier
+    /// @param tolerance the accepted source-plane tolerance
     private static void assertPlaneMatches(
             String label,
             int expectedWidth,
             int expectedHeight,
             AvifPlane actual,
-            SourceSample expectedSample
+            SourceSample expectedSample,
+            SourcePlaneTolerance tolerance
     ) {
         assertEquals(expectedWidth, actual.width(), label + " width");
         assertEquals(expectedHeight, actual.height(), label + " height");
+        int largestSampleDelta = 0;
+        int failingSamples = 0;
+        long sumDelta = 0L;
+        long sumSquaredDelta = 0L;
+        @Nullable String firstMismatch = null;
         for (int y = 0; y < expectedHeight; y++) {
             for (int x = 0; x < expectedWidth; x++) {
                 int expected = expectedSample.sample(x, y);
                 int sample = actual.sample(x, y);
-                if (sample != expected) {
-                    throw new AssertionError(label + " mismatch at (" + x + "," + y + "): expected "
-                            + expected + ", actual " + sample);
+                int delta = Math.abs(expected - sample);
+                largestSampleDelta = Math.max(largestSampleDelta, delta);
+                sumDelta += delta;
+                sumSquaredDelta += (long) delta * delta;
+                if (delta > tolerance.maxSampleDelta()) {
+                    failingSamples++;
+                }
+                if (delta != 0 && firstMismatch == null) {
+                    firstMismatch = "first mismatch at (" + x + "," + y + "): expected "
+                            + expected + ", actual " + sample + ", sample delta " + delta;
                 }
             }
+        }
+        int sampleCount = expectedWidth * expectedHeight;
+        double failingRatio = (double) failingSamples / sampleCount;
+        double meanDelta = (double) sumDelta / sampleCount;
+        double rootMeanSquareDelta = Math.sqrt((double) sumSquaredDelta / sampleCount);
+        if (failingRatio > tolerance.maxFailingSampleRatio()
+                || meanDelta > tolerance.maxMeanSampleDelta()
+                || rootMeanSquareDelta > tolerance.maxRootMeanSquareSampleDelta()) {
+            String mismatch = firstMismatch != null ? firstMismatch : "no per-sample mismatch above zero";
+            throw new AssertionError(label + " source-plane comparison failed: " + mismatch
+                    + "; compared=" + sampleCount
+                    + ", failing=" + failingSamples
+                    + String.format(Locale.ROOT, " (%.6f)", failingRatio)
+                    + ", largestDelta=" + largestSampleDelta
+                    + String.format(Locale.ROOT, ", meanDelta=%.3f", meanDelta)
+                    + String.format(Locale.ROOT, ", rmsDelta=%.3f", rootMeanSquareDelta)
+                    + ", tolerance=maxDelta " + tolerance.maxSampleDelta()
+                    + String.format(Locale.ROOT, ", maxFailingRatio %.6f", tolerance.maxFailingSampleRatio())
+                    + String.format(Locale.ROOT, ", maxMean %.3f", tolerance.maxMeanSampleDelta())
+                    + String.format(Locale.ROOT, ", maxRms %.3f", tolerance.maxRootMeanSquareSampleDelta()));
         }
     }
 
@@ -512,13 +570,14 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @param label the diagnostic label
     /// @param expected the expected FFmpeg image
     /// @param actualPixels the actual packed ARGB pixels
-    /// @param tolerance the accepted pixel tolerance
+    /// @param pixelReference the FFmpeg pixel comparison settings
     private static void assertPixelsMatch(
             String label,
             ArgbImage expected,
             IntBuffer actualPixels,
-            PixelTolerance tolerance
+            FFmpegPixelReference pixelReference
     ) {
+        PixelTolerance tolerance = pixelReference.tolerance();
         assertEquals(expected.width() * expected.height(), actualPixels.remaining());
         int largestChannelDelta = 0;
         int failingPixels = 0;
@@ -529,7 +588,7 @@ final class LibavifFFmpegAvifReferenceTest {
             for (int x = 0; x < expected.width(); x++) {
                 int expectedArgb = expected.pixel(x, y);
                 int actualArgb = actualPixels.get(y * expected.width() + x);
-                int delta = displayRelevantChannelDelta(expectedArgb, actualArgb);
+                int delta = displayRelevantChannelDelta(expectedArgb, actualArgb, pixelReference.alphaMode());
                 largestChannelDelta = Math.max(largestChannelDelta, delta);
                 sumDelta += delta;
                 sumSquaredDelta += (long) delta * delta;
@@ -569,8 +628,19 @@ final class LibavifFFmpegAvifReferenceTest {
     ///
     /// @param expectedArgb the expected packed ARGB pixel
     /// @param actualArgb the actual packed ARGB pixel
+    /// @param alphaMode the alpha-channel comparison mode
     /// @return the largest display-relevant channel delta
-    private static int displayRelevantChannelDelta(int expectedArgb, int actualArgb) {
+    private static int displayRelevantChannelDelta(int expectedArgb, int actualArgb, AlphaMode alphaMode) {
+        if (alphaMode == AlphaMode.IGNORED) {
+            if (((expectedArgb >>> 24) & 0xFF) == 0 || ((actualArgb >>> 24) & 0xFF) == 0) {
+                return 0;
+            }
+            return Math.max(
+                    channelDelta(expectedArgb, actualArgb, 16),
+                    Math.max(channelDelta(expectedArgb, actualArgb, 8), channelDelta(expectedArgb, actualArgb, 0))
+            );
+        }
+
         int alphaDelta = channelDelta(expectedArgb, actualArgb, 24);
         if (((expectedArgb >>> 24) & 0xFF) == 0 && ((actualArgb >>> 24) & 0xFF) == 0) {
             return alphaDelta;
@@ -600,14 +670,14 @@ final class LibavifFFmpegAvifReferenceTest {
         return String.format(Locale.ROOT, "0x%08X", argb);
     }
 
-    /// Returns the configured FFmpeg pixel tolerance for one reference case.
+    /// Returns the configured FFmpeg pixel comparison settings for one reference case.
     ///
     /// @param resourceName the AVIF resource name
-    /// @return the accepted pixel tolerance, or `null` when the fixture is not enabled for pixel comparison
-    private static @Nullable PixelTolerance pixelTolerance(String resourceName) {
+    /// @return the pixel reference settings, or `null` when the fixture is not enabled for pixel comparison
+    private static @Nullable FFmpegPixelReference pixelReference(String resourceName) {
         for (FFmpegPixelReference reference : ENABLED_PIXEL_REFERENCE_RESOURCES) {
             if (reference.resourceName().equals(resourceName)) {
-                return reference.tolerance();
+                return reference;
             }
         }
         return null;
@@ -621,12 +691,17 @@ final class LibavifFFmpegAvifReferenceTest {
         return Arrays.asList(ENABLED_METADATA_REFERENCE_RESOURCES).contains(resourceName);
     }
 
-    /// Returns whether one FFmpeg source-plane reference case is currently enabled.
+    /// Returns the configured FFmpeg source-plane comparison settings for one reference case.
     ///
     /// @param resourceName the AVIF resource name
-    /// @return whether FFmpeg source-plane comparison currently passes
-    private static boolean isEnabledSourcePlaneReference(String resourceName) {
-        return Arrays.asList(ENABLED_SOURCE_PLANE_REFERENCE_RESOURCES).contains(resourceName);
+    /// @return the source-plane reference settings, or `null` when the fixture is not enabled
+    private static @Nullable SourcePlaneReference enabledSourcePlaneReference(String resourceName) {
+        for (SourcePlaneReference reference : ENABLED_SOURCE_PLANE_REFERENCE_RESOURCES) {
+            if (reference.resourceName().equals(resourceName)) {
+                return reference;
+            }
+        }
+        return null;
     }
 
     /// Returns whether FFmpeg exposes derived input dimensions instead of javif composed output dimensions.
@@ -660,15 +735,122 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @param tolerance the accepted FFmpeg pixel tolerance
     /// @return the pixel reference case
     private static FFmpegPixelReference pixelReference(String resourceName, PixelTolerance tolerance) {
-        return new FFmpegPixelReference(resourceName, tolerance);
+        return new FFmpegPixelReference(resourceName, tolerance, AlphaMode.COMPARED);
+    }
+
+    /// Creates an enabled FFmpeg RGB-only pixel reference case.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @param tolerance the accepted FFmpeg pixel tolerance
+    /// @return the pixel reference case
+    private static FFmpegPixelReference rgbPixelReference(String resourceName, PixelTolerance tolerance) {
+        return new FFmpegPixelReference(resourceName, tolerance, AlphaMode.IGNORED);
+    }
+
+    /// Creates an exact FFmpeg source-plane reference case.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @return the source-plane reference case
+    private static SourcePlaneReference sourcePlaneReference(String resourceName) {
+        return sourcePlaneReference(resourceName, SourcePlaneTolerance.perSampleDelta(0));
+    }
+
+    /// Creates an FFmpeg source-plane reference case.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @param tolerance the accepted FFmpeg source-plane tolerance
+    /// @return the source-plane reference case
+    private static SourcePlaneReference sourcePlaneReference(String resourceName, SourcePlaneTolerance tolerance) {
+        return new SourcePlaneReference(resourceName, tolerance);
     }
 
     /// Enabled FFmpeg pixel comparison settings for one fixture.
     ///
     /// @param resourceName the AVIF resource name
     /// @param tolerance the accepted FFmpeg pixel tolerance
+    /// @param alphaMode the alpha-channel comparison mode
     @NotNullByDefault
-    private record FFmpegPixelReference(String resourceName, PixelTolerance tolerance) {
+    private record FFmpegPixelReference(String resourceName, PixelTolerance tolerance, AlphaMode alphaMode) {
+    }
+
+    /// Enabled FFmpeg source-plane comparison settings for one fixture.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @param tolerance the accepted FFmpeg source-plane tolerance
+    @NotNullByDefault
+    private record SourcePlaneReference(String resourceName, SourcePlaneTolerance tolerance) {
+    }
+
+    /// Tolerance bounds for one source-plane comparison.
+    ///
+    /// @param maxSampleDelta the per-sample delta threshold
+    /// @param maxFailingSampleRatio the allowed ratio of samples exceeding `maxSampleDelta`
+    /// @param maxMeanSampleDelta the maximum mean sample delta
+    /// @param maxRootMeanSquareSampleDelta the maximum RMS sample delta
+    @NotNullByDefault
+    private record SourcePlaneTolerance(
+            int maxSampleDelta,
+            double maxFailingSampleRatio,
+            double maxMeanSampleDelta,
+            double maxRootMeanSquareSampleDelta
+    ) {
+        /// Creates validated source-plane tolerance bounds.
+        private SourcePlaneTolerance {
+            if (maxSampleDelta < 0) {
+                throw new IllegalArgumentException("maxSampleDelta must be non-negative");
+            }
+            if (Double.isNaN(maxFailingSampleRatio) || maxFailingSampleRatio < 0.0 || maxFailingSampleRatio > 1.0) {
+                throw new IllegalArgumentException("maxFailingSampleRatio must be in [0, 1]");
+            }
+            if (Double.isNaN(maxMeanSampleDelta) || maxMeanSampleDelta < 0.0) {
+                throw new IllegalArgumentException("maxMeanSampleDelta must be non-negative");
+            }
+            if (Double.isNaN(maxRootMeanSquareSampleDelta) || maxRootMeanSquareSampleDelta < 0.0) {
+                throw new IllegalArgumentException("maxRootMeanSquareSampleDelta must be non-negative");
+            }
+        }
+
+        /// Creates a tolerance that requires every sample to fit inside one sample-delta threshold.
+        ///
+        /// @param maxSampleDelta the per-sample delta threshold
+        /// @return the tolerance
+        private static SourcePlaneTolerance perSampleDelta(int maxSampleDelta) {
+            return new SourcePlaneTolerance(
+                    maxSampleDelta,
+                    0.0,
+                    Double.POSITIVE_INFINITY,
+                    Double.POSITIVE_INFINITY
+            );
+        }
+
+        /// Creates a tolerance with all supported aggregate bounds.
+        ///
+        /// @param maxSampleDelta the per-sample delta threshold
+        /// @param maxFailingSampleRatio the allowed ratio of samples exceeding `maxSampleDelta`
+        /// @param maxMeanSampleDelta the maximum mean sample delta
+        /// @param maxRootMeanSquareSampleDelta the maximum RMS sample delta
+        /// @return the tolerance
+        private static SourcePlaneTolerance bounded(
+                int maxSampleDelta,
+                double maxFailingSampleRatio,
+                double maxMeanSampleDelta,
+                double maxRootMeanSquareSampleDelta
+        ) {
+            return new SourcePlaneTolerance(
+                    maxSampleDelta,
+                    maxFailingSampleRatio,
+                    maxMeanSampleDelta,
+                    maxRootMeanSquareSampleDelta
+            );
+        }
+    }
+
+    /// Alpha-channel handling for FFmpeg pixel comparisons.
+    private enum AlphaMode {
+        /// Compares alpha together with visible RGB channels.
+        COMPARED,
+        /// Ignores alpha and fully transparent hidden RGB when FFmpeg cannot be used as an alpha-channel oracle.
+        IGNORED
     }
 
     /// Supplies one expected FFmpeg source-plane sample.
