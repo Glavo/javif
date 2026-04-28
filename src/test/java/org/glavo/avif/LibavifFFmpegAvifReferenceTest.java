@@ -42,6 +42,8 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests that compare javif decoded AVIF frames against FFmpeg-decoded reference pixels.
 @NotNullByDefault
@@ -199,6 +201,12 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/weld_sato_12B_8B_q0.avif",
             "libavif-test-data/white_1x1.avif",
     };
+    /// AVIF resources that javif can parse but FFmpeg cannot currently expose as an oracle.
+    private static final String @Unmodifiable [] UNSUPPORTED_FFMPEG_REFERENCE_RESOURCES = new String[]{
+            "libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif",
+            "libavif-test-data/draw_points_idat_progressive.avif",
+            "libavif-test-data/draw_points_idat_progressive_metasize0.avif",
+    };
     /// AVIF resources where FFmpeg exposes a derived tile or source image instead of javif's composed output size.
     private static final String @Unmodifiable [] FFMPEG_DERIVED_DIMENSION_REFERENCE_RESOURCES = new String[]{
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
@@ -281,7 +289,7 @@ final class LibavifFFmpegAvifReferenceTest {
         assertEquals(expected, avifResourceNames());
     }
 
-    /// Verifies enabled libavif AVIF fixtures against FFmpeg first-frame output.
+    /// Verifies libavif AVIF fixtures against FFmpeg first-frame output or an explicit FFmpeg limitation.
     ///
     /// @return the dynamic FFmpeg reference tests
     @TestFactory
@@ -293,7 +301,7 @@ final class LibavifFFmpegAvifReferenceTest {
                 ));
     }
 
-    /// Verifies enabled libavif AVIF fixtures against FFmpeg source metadata.
+    /// Verifies libavif AVIF fixtures against FFmpeg source metadata or an explicit FFmpeg limitation.
     ///
     /// @return the dynamic FFmpeg metadata reference tests
     @TestFactory
@@ -305,7 +313,7 @@ final class LibavifFFmpegAvifReferenceTest {
                 ));
     }
 
-    /// Verifies enabled libavif AVIF fixtures against FFmpeg decoded source planes.
+    /// Verifies libavif AVIF fixtures against FFmpeg decoded source planes or an explicit FFmpeg limitation.
     ///
     /// @return the dynamic FFmpeg source-plane reference tests
     @TestFactory
@@ -327,6 +335,10 @@ final class LibavifFFmpegAvifReferenceTest {
         if (reference.disabledReason() != null) {
             Assumptions.assumeTrue(false, reference.disabledReason());
         }
+        if (isUnsupportedFFmpegReference(reference.resourceName())) {
+            assertFFmpegArgbReferenceUnsupported(reference.resourceName());
+            return;
+        }
         @Nullable FFmpegPixelReference pixelReference = pixelReference(reference.resourceName());
         if (pixelReference == null) {
             Assumptions.assumeTrue(false, "Pending FFmpeg first-frame pixel parity for this fixture.");
@@ -344,6 +356,10 @@ final class LibavifFFmpegAvifReferenceTest {
         if (reference.disabledReason() != null) {
             Assumptions.assumeTrue(false, reference.disabledReason());
         }
+        if (isUnsupportedFFmpegReference(reference.resourceName())) {
+            assertFFmpegArgbReferenceUnsupported(reference.resourceName());
+            return;
+        }
         if (!isEnabledMetadataReference(reference.resourceName())) {
             Assumptions.assumeTrue(false, "Pending FFmpeg source metadata parity for this fixture.");
         }
@@ -360,11 +376,37 @@ final class LibavifFFmpegAvifReferenceTest {
         if (reference.disabledReason() != null) {
             Assumptions.assumeTrue(false, reference.disabledReason());
         }
+        if (isUnsupportedFFmpegReference(reference.resourceName())) {
+            assertFFmpegSourcePlaneReferenceUnsupported(reference.resourceName());
+            return;
+        }
         @Nullable SourcePlaneReference sourcePlaneReference = enabledSourcePlaneReference(reference.resourceName());
         if (sourcePlaneReference == null) {
             Assumptions.assumeTrue(false, "Pending FFmpeg source-plane parity for this fixture.");
         }
         assertFirstFrameSourcePlanesMatchFFmpegReference(reference, sourcePlaneReference);
+    }
+
+    /// Asserts that FFmpeg cannot expose a first-frame ARGB reference for one known-unsupported resource.
+    ///
+    /// @param resourceName the AVIF resource name
+    private static void assertFFmpegArgbReferenceUnsupported(String resourceName) {
+        IOException exception = assertThrows(
+                IOException.class,
+                () -> FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName)
+        );
+        assertTrue(exception.getMessage().contains(resourceName));
+    }
+
+    /// Asserts that FFmpeg cannot expose source planes for one known-unsupported resource.
+    ///
+    /// @param resourceName the AVIF resource name
+    private static void assertFFmpegSourcePlaneReferenceUnsupported(String resourceName) {
+        IOException exception = assertThrows(
+                IOException.class,
+                () -> FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName)
+        );
+        assertTrue(exception.getMessage().contains(resourceName));
     }
 
     /// Asserts that javif and FFmpeg render the first frame of one AVIF resource within tolerance.
@@ -717,6 +759,14 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @return whether FFmpeg source metadata comparison currently passes
     private static boolean isEnabledMetadataReference(String resourceName) {
         return Arrays.asList(ENABLED_METADATA_REFERENCE_RESOURCES).contains(resourceName);
+    }
+
+    /// Returns whether FFmpeg cannot currently expose one resource as a reference oracle.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @return whether the resource has a known FFmpeg reference limitation
+    private static boolean isUnsupportedFFmpegReference(String resourceName) {
+        return Arrays.asList(UNSUPPORTED_FFMPEG_REFERENCE_RESOURCES).contains(resourceName);
     }
 
     /// Returns the configured FFmpeg source-plane comparison settings for one reference case.
