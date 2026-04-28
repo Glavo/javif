@@ -51,6 +51,8 @@ final class LibavifImageIoReferenceTest {
     private static final PixelTolerance NEAR_LOSSLESS_TOLERANCE = PixelTolerance.perPixelDelta(8);
     /// Aggregate tolerance accepted for the lossy custom-property circle fixture.
     private static final PixelTolerance CIRCLE_CUSTOM_PROPERTIES_TOLERANCE = PixelTolerance.bounded(39, 0.0, 1.0, 3.0);
+    /// Aggregate tolerance accepted for the cHRM ArcTriomphe fixture while cHRM remains metadata-only.
+    private static final PixelTolerance ARC_TRIOMPHE_CHRM_TOLERANCE = PixelTolerance.bounded(43, 0.0, 8.0, 9.0);
     /// Aggregate tolerance accepted for the current lossy Paris still-image fixture.
     private static final PixelTolerance PARIS_LOSSY_TOLERANCE = PixelTolerance.bounded(24, 0.001, 4.0, 5.0);
     /// Aggregate tolerance placeholder for lossy still-image fixtures once decode coverage catches up.
@@ -149,13 +151,12 @@ final class LibavifImageIoReferenceTest {
                     PixelTransform.ROTATE_90_COUNTER_CLOCKWISE,
                     ABC_TOLERANCE
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/ArcTriomphe-cHRM-orig.png",
                     "libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
-                    NEAR_LOSSLESS_TOLERANCE,
-                    "Pending AV1 reconstruction and cHRM/color metadata validation."
+                    ARC_TRIOMPHE_CHRM_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/circle-trns-after-plte.png",
