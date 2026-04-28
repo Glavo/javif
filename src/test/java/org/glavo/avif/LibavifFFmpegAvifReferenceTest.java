@@ -50,9 +50,20 @@ final class LibavifFFmpegAvifReferenceTest {
     private static final String TEST_DATA_ROOT = "libavif-test-data";
     /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
     private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
+            pixelReference("libavif-test-data/colors_hdr_p3.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/colors_hdr_srgb.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_sdr_srgb.avif", PixelTolerance.bounded(1, 0.003, 0.004, 0.06)),
+            pixelReference("libavif-test-data/colors_text_hdr_p3.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/colors_text_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/colors_text_hdr_srgb.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/colors_text_sdr_srgb.avif", PixelTolerance.bounded(1, 0.003, 0.004, 0.06)),
+            pixelReference("libavif-test-data/colors_text_wcg_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/colors_text_wcg_sdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/colors_wcg_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/extended_pixi.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/paris_icc_exif_xmp.avif", PixelTolerance.bounded(9, 0.0, 0.8, 1.0)),
+            pixelReference("libavif-test-data/seine_sdr_gainmap_gammazero.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/white_1x1.avif", PixelTolerance.perPixelDelta(0)),
     };
     /// AVIF resources whose raw decoded planes match FFmpeg source planes exactly.
