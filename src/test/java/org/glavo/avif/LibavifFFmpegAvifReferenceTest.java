@@ -61,6 +61,7 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/abc_color_irot_alpha_irot.avif",
             "libavif-test-data/alpha_noispe.avif",
             "libavif-test-data/circle_custom_properties.avif",
+            "libavif-test-data/clap_irot_imir_non_essential.avif",
             "libavif-test-data/clop_irot_imor.avif",
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
             "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",
@@ -78,6 +79,8 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/io/kodim03_yuv420_8bpc.avif",
             "libavif-test-data/io/kodim23_yuv420_8bpc.avif",
             "libavif-test-data/paris_icc_exif_xmp.avif",
+            "libavif-test-data/seine_sdr_gainmap_gammazero.avif",
+            "libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif",
             "libavif-test-data/colors_hdr_p3.avif",
             "libavif-test-data/colors_hdr_rec2020.avif",
             "libavif-test-data/colors_hdr_srgb.avif",
@@ -92,6 +95,7 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/abc_color_irot_alpha_irot.avif",
             "libavif-test-data/alpha_noispe.avif",
             "libavif-test-data/circle_custom_properties.avif",
+            "libavif-test-data/clap_irot_imir_non_essential.avif",
             "libavif-test-data/clop_irot_imor.avif",
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
             "libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif",
@@ -127,11 +131,14 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/seine_hdr_rec2020.avif",
             "libavif-test-data/seine_hdr_srgb.avif",
             "libavif-test-data/seine_sdr_gainmap_big_srgb.avif",
+            "libavif-test-data/seine_sdr_gainmap_gammazero.avif",
             "libavif-test-data/seine_sdr_gainmap_notmapbrand.avif",
             "libavif-test-data/seine_sdr_gainmap_srgb.avif",
             "libavif-test-data/seine_sdr_gainmap_srgb_icc.avif",
             "libavif-test-data/sofa_grid1x5_420.avif",
+            "libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif",
             "libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif",
+            "libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif",
             "libavif-test-data/unsupported_gainmap_minimum_version.avif",
             "libavif-test-data/unsupported_gainmap_version.avif",
             "libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif",
@@ -143,6 +150,7 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif",
             "libavif-test-data/color_grid_gainmap_different_grid.avif",
             "libavif-test-data/sofa_grid1x5_420.avif",
+            "libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif",
             "libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif",
     };
 
@@ -153,10 +161,7 @@ final class LibavifFFmpegAvifReferenceTest {
             reference("libavif-test-data/alpha_noispe.avif"),
             reference("libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif"),
             reference("libavif-test-data/circle_custom_properties.avif"),
-            disabledReference(
-                    "libavif-test-data/clap_irot_imir_non_essential.avif",
-                    "javif intentionally rejects the non-essential clap association before frame decode."
-            ),
+            reference("libavif-test-data/clap_irot_imir_non_essential.avif"),
             reference("libavif-test-data/clop_irot_imor.avif"),
             reference("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif"),
             reference("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif"),
@@ -194,23 +199,14 @@ final class LibavifFFmpegAvifReferenceTest {
             reference("libavif-test-data/seine_hdr_rec2020.avif"),
             reference("libavif-test-data/seine_hdr_srgb.avif"),
             reference("libavif-test-data/seine_sdr_gainmap_big_srgb.avif"),
-            disabledReference(
-                    "libavif-test-data/seine_sdr_gainmap_gammazero.avif",
-                    "javif currently rejects the invalid gain-map gamma metadata before frame decode."
-            ),
+            reference("libavif-test-data/seine_sdr_gainmap_gammazero.avif"),
             reference("libavif-test-data/seine_sdr_gainmap_notmapbrand.avif"),
             reference("libavif-test-data/seine_sdr_gainmap_srgb.avif"),
             reference("libavif-test-data/seine_sdr_gainmap_srgb_icc.avif"),
             reference("libavif-test-data/sofa_grid1x5_420.avif"),
-            disabledReference(
-                    "libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif",
-                    "javif currently rejects the repeated dimg grid dependency before frame decode."
-            ),
+            reference("libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif"),
             reference("libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif"),
-            disabledReference(
-                    "libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif",
-                    "javif currently rejects the gain-map metadata with trailing bytes before frame decode."
-            ),
+            reference("libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif"),
             reference("libavif-test-data/unsupported_gainmap_minimum_version.avif"),
             reference("libavif-test-data/unsupported_gainmap_version.avif"),
             reference("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif"),

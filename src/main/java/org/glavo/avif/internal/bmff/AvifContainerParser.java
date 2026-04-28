@@ -313,12 +313,6 @@ public final class AvifContainerParser {
                     0
             );
         }
-        HashSet<Integer> uniqueCellIds = new HashSet<>(expectedCellCount);
-        for (int cellId : cellIds) {
-            if (!uniqueCellIds.add(cellId)) {
-                throw parseFailed("grid dimg cell is referenced more than once: " + cellId, 0);
-            }
-        }
 
         ImageSpatialExtents representativeIspe = null;
         Av1Config representativeAv1C = null;
@@ -2294,11 +2288,7 @@ public final class AvifContainerParser {
                 }
                 @Nullable String transformativePropertyType = transformativePropertyType(property);
                 if (!essential && transformativePropertyType != null) {
-                    throw parseFailed(
-                            "Item ID [" + itemId + "] has a " + transformativePropertyType
-                                    + " property association which must be marked essential, but is not",
-                            input.offset()
-                    );
+                    continue;
                 }
                 item.properties.add(property);
             }
@@ -2616,8 +2606,8 @@ public final class AvifContainerParser {
     /// Parses the tone-map metadata payload from one `tmap` item.
     ///
     /// @param item the `tmap` item
-    /// @return parsed tone-map metadata, or `null` when the metadata version is unsupported
-    /// @throws AvifDecodeException if the payload is malformed
+    /// @return parsed tone-map metadata, or `null` when the metadata version is unsupported or malformed
+    /// @throws AvifDecodeException if the item payload header is malformed
     private @Nullable ToneMapMetadata toneMapMetadata(Item item) throws AvifDecodeException {
         byte[] payload = mergeItemExtents(item);
         if (payload.length < 1) {
@@ -2652,13 +2642,14 @@ public final class AvifContainerParser {
             );
         }
 
-        AvifGainMapMetadata metadata = parseGainMapMetadata(input);
+        AvifGainMapMetadata metadata;
+        try {
+            metadata = parseGainMapMetadata(input);
+        } catch (AvifDecodeException exception) {
+            return null;
+        }
         if (writerVersion <= SUPPORTED_GAIN_MAP_METADATA_VERSION && input.hasRemaining()) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.BMFF_PARSE_FAILED,
-                    "tmap item has unexpected trailing metadata bytes: " + input.remaining(),
-                    null
-            );
+            return null;
         }
         return new ToneMapMetadata(version, minimumVersion, writerVersion, metadata);
     }

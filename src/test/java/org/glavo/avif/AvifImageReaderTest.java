@@ -93,6 +93,10 @@ final class AvifImageReaderTest {
     /// A 1x5 grid image fixture copied from libavif's test data.
     private static final String LIBAVIF_SOFA_GRID_1X5_FIXTURE = "libavif-test-data/sofa_grid1x5_420.avif";
 
+    /// A 1x5 grid image fixture copied from libavif's test data with a repeated `dimg` reference.
+    private static final String LIBAVIF_SOFA_GRID_1X5_DIMG_REPEAT_FIXTURE =
+            "libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif";
+
     /// A grid image fixture copied from libavif's test data with an alpha grid.
     private static final String LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE =
             "libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif";
@@ -956,24 +960,28 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that supported writer metadata rejects unexpected trailing bytes.
+    /// Verifies that supported writer metadata with unexpected trailing bytes is ignored.
+    ///
+    /// @throws IOException if the fixture cannot be read
     @Test
-    void openRejectsSupportedGainMapWriterVersionWithExtraBytes() {
-        AvifDecodeException exception = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.open(testResourceBytes(LIBAVIF_SUPPORTED_GAINMAP_WRITER_EXTRA_BYTES_FIXTURE))
-        );
-        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    void openIgnoresSupportedGainMapWriterVersionWithExtraBytes() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_SUPPORTED_GAINMAP_WRITER_EXTRA_BYTES_FIXTURE)
+        )) {
+            assertNull(reader.info().gainMapInfo());
+            assertNull(reader.readRawGainMapPlanes(0));
+        }
     }
 
-    /// Verifies that invalid gain-map gamma metadata is rejected.
+    /// Verifies that invalid gain-map gamma metadata is ignored.
+    ///
+    /// @throws IOException if the fixture cannot be read
     @Test
-    void openRejectsGainMapZeroGamma() {
-        AvifDecodeException exception = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_ZERO_GAMMA_FIXTURE))
-        );
-        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    void openIgnoresGainMapZeroGamma() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_GAINMAP_ZERO_GAMMA_FIXTURE))) {
+            assertNull(reader.info().gainMapInfo());
+            assertNull(reader.readRawGainMapPlanes(0));
+        }
     }
 
     /// Verifies that a progressive idat fixture parses and decodes through the reader.
@@ -1540,6 +1548,27 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that a non-essential transformative property is ignored instead of rejected.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameIgnoresNonEssentialCleanApertureTransform() throws IOException {
+        byte[] bytes = minimalAvifWithNonEssentialProperty("clap", cleanAperturePropertyPayload(32, 16, 8, 4));
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            AvifImageInfo info = reader.info();
+            assertFalse(info.hasCleanApertureCrop());
+            assertEquals(-1, info.rotationCode());
+            assertEquals(-1, info.mirrorAxis());
+            assertNull(info.transformInfo());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(64, frame.width());
+            assertEquals(64, frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Builds a minimal AVIF with a transform property on the primary item.
     ///
     /// @param transformType the transform property type
@@ -1563,6 +1592,33 @@ final class AvifImageReaderTest {
                 fullBox("ipma", 0, 0,
                         u32(1), u16(1),
                         new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, (byte) 0x84}
+                )
+        );
+        byte[] metaFull = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), ilocPlaceholder(), itemInfoBox(), iprpBox
+        );
+        int itemPayloadOffset = ftyp.length + metaFull.length + 8;
+        byte[] iloc = itemLocationBox(itemPayloadOffset, av1Payload.length);
+        byte[] meta = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), iloc, itemInfoBox(), iprpBox
+        );
+        return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
+    /// Builds a minimal AVIF with one non-essential property on the primary item.
+    ///
+    /// @param propertyType the property box type
+    /// @param propertyPayload the property payload bytes
+    /// @return the AVIF container bytes
+    private static byte[] minimalAvifWithNonEssentialProperty(String propertyType, byte[] propertyPayload) {
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] transform = box(propertyType, propertyPayload);
+        byte[] iprpBox = box("iprp",
+                box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty(), transform),
+                fullBox("ipma", 0, 0,
+                        u32(1), u16(1),
+                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, 0x04}
                 )
         );
         byte[] metaFull = fullBox("meta", 0, 0,
@@ -1644,6 +1700,28 @@ final class AvifImageReaderTest {
             assertNotNull(frame);
             assertTrue(frame.width() > 0);
             assertTrue(frame.height() > 0);
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that repeated `dimg` references are ignored when resolving grid cells.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readFrameIgnoresRepeatedGridDimgReferences() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_SOFA_GRID_1X5_DIMG_REPEAT_FIXTURE)
+        )) {
+            AvifImageInfo info = reader.info();
+            assertEquals(1024, info.width());
+            assertEquals(770, info.height());
+            assertFalse(info.animated());
+            assertEquals(1, info.frameCount());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(1024, frame.width());
+            assertEquals(770, frame.height());
             assertNull(reader.readFrame());
         }
     }
