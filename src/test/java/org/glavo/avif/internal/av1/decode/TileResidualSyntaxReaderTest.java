@@ -113,7 +113,7 @@ final class TileResidualSyntaxReaderTest {
         assertTrue(residualUnit.allZero());
         assertEquals(-1, residualUnit.endOfBlockIndex());
         assertArrayEquals(new int[16], residualUnit.coefficients());
-        assertEquals(0, residualUnit.coefficientContextByte());
+        assertEquals(0x40, residualUnit.coefficientContextByte());
     }
 
     /// Verifies that a supported non-zero transform block decodes a real DC coefficient.
@@ -207,6 +207,21 @@ final class TileResidualSyntaxReaderTest {
         assertTrue(coefficients[expectedOutputIndex(residualUnit.size(), residualUnit.endOfBlockIndex())] != 0);
         assertTrue(countNonZeroCoefficients(coefficients) >= 2);
         assertEquals(expectedCoefficientContextByte(coefficients), residualUnit.coefficientContextByte());
+    }
+
+    /// Verifies that larger two-dimensional token contexts use the `dav1d` scratch-layout scan
+    /// instead of the row-major storage scan.
+    @Test
+    void largerTwoDimensionalContextsFollowDav1dScratchScan() {
+        assertEquals(1, genericLevelX(TransformSize.TX_32X32, TransformType.DCT_DCT, 1));
+        assertEquals(0, genericLevelY(TransformSize.TX_32X32, TransformType.DCT_DCT, 1));
+        assertEquals(0, genericLevelX(TransformSize.TX_32X32, TransformType.DCT_DCT, 2));
+        assertEquals(1, genericLevelY(TransformSize.TX_32X32, TransformType.DCT_DCT, 2));
+
+        assertEquals(expectedContextX(TransformSize.TX_64X64, 6), genericLevelX(TransformSize.TX_64X64, TransformType.DCT_DCT, 6));
+        assertEquals(expectedContextY(TransformSize.TX_64X64, 6), genericLevelY(TransformSize.TX_64X64, TransformType.DCT_DCT, 6));
+        assertEquals(expectedContextX(TransformSize.RTX_16X32, 15), genericLevelX(TransformSize.RTX_16X32, TransformType.DCT_DCT, 15));
+        assertEquals(expectedContextY(TransformSize.RTX_16X32, 15), genericLevelY(TransformSize.RTX_16X32, TransformType.DCT_DCT, 15));
     }
 
     /// Verifies that a minimal `I420` block produces stable all-zero chroma residual units.
@@ -594,7 +609,7 @@ final class TileResidualSyntaxReaderTest {
         assertTrue(residualUnits[0].endOfBlockIndex() >= 0);
         assertEquals(expectedCoefficientContextByte(residualUnits[0].coefficients()), residualUnits[0].coefficientContextByte());
         assertTrue(residualUnits[1].allZero());
-        assertEquals(0, residualUnits[1].coefficientContextByte());
+        assertEquals(0x40, residualUnits[1].coefficientContextByte());
 
         BlockNeighborContext oracleNeighborContext = BlockNeighborContext.create(tileContext);
         TileBlockHeaderReader.BlockHeader oracleHeader =
@@ -912,7 +927,7 @@ final class TileResidualSyntaxReaderTest {
     private static int expectedNonZeroCoefficientContextByte(int signedDcCoefficient) {
         int magnitude = Math.min(Math.abs(signedDcCoefficient), 63);
         if (signedDcCoefficient < 0) {
-            return magnitude | 0x40;
+            return magnitude;
         }
         return magnitude | 0x80;
     }
@@ -929,12 +944,12 @@ final class TileResidualSyntaxReaderTest {
         int magnitude = Math.min(cumulativeLevel, 63);
         int dcCoefficient = coefficients[0];
         if (dcCoefficient < 0) {
-            return magnitude | 0x40;
+            return magnitude;
         }
         if (dcCoefficient > 0) {
             return magnitude | 0x80;
         }
-        return magnitude;
+        return magnitude | 0x40;
     }
 
     /// Returns the expected natural-raster index of the first scanned AC coefficient.
@@ -951,6 +966,15 @@ final class TileResidualSyntaxReaderTest {
     /// @return the natural-raster output index for the supplied `TX_4X4` scan position
     private static int expectedFourByFourOutputIndex(int scanIndex) {
         int[] scan = {0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15};
+        return scan[scanIndex];
+    }
+
+    /// Returns the `dav1d` scratch-layout context index for one `TX_4X4` scan position.
+    ///
+    /// @param scanIndex the zero-based `TX_4X4` scan index
+    /// @return the scratch-layout context index for the supplied `TX_4X4` scan position
+    private static int expectedFourByFourContextIndex(int scanIndex) {
+        int[] scan = {0, 4, 1, 2, 5, 8, 12, 9, 6, 3, 7, 10, 13, 14, 11, 15};
         return scan[scanIndex];
     }
 
@@ -971,6 +995,23 @@ final class TileResidualSyntaxReaderTest {
     /// @param transformSize the active transform size
     /// @return the `dav1d`-compatible scan for the supplied transform size
     private static int[] expectedScan(TransformSize transformSize) {
+        return expectedScan(transformSize, false);
+    }
+
+    /// Builds the `dav1d` scratch-layout scan used by coefficient-token contexts.
+    ///
+    /// @param transformSize the active transform size
+    /// @return the `dav1d` scratch-layout scan for the supplied transform size
+    private static int[] expectedContextScan(TransformSize transformSize) {
+        return expectedScan(transformSize, true);
+    }
+
+    /// Builds one expected two-dimensional scan with either storage or context indexing.
+    ///
+    /// @param transformSize the active transform size
+    /// @param contextLayout whether to emit raw `dav1d` scratch-layout indices
+    /// @return the requested expected scan
+    private static int[] expectedScan(TransformSize transformSize, boolean contextLayout) {
         int codedWidth = clippedCoefficientWidth(transformSize);
         int codedHeight = clippedCoefficientHeight(transformSize);
         int outputWidth = transformSize.widthPixels();
@@ -981,19 +1022,21 @@ final class TileResidualSyntaxReaderTest {
             int rowEnd = Math.min(codedHeight - 1, diagonal);
             boolean descendingRows;
             if (codedWidth == codedHeight) {
-                descendingRows = (diagonal & 1) == 1;
+                descendingRows = contextLayout
+                        ? (diagonal & 1) == 0
+                        : (diagonal & 1) == 1;
             } else {
                 descendingRows = codedWidth > codedHeight;
             }
             if (descendingRows) {
                 for (int row = rowEnd; row >= rowStart; row--) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = expectedScanIndex(transformSize, row, column, outputWidth);
+                    scan[nextIndex++] = expectedScanIndex(transformSize, row, column, outputWidth, codedHeight, contextLayout);
                 }
             } else {
                 for (int row = rowStart; row <= rowEnd; row++) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = expectedScanIndex(transformSize, row, column, outputWidth);
+                    scan[nextIndex++] = expectedScanIndex(transformSize, row, column, outputWidth, codedHeight, contextLayout);
                 }
             }
         }
@@ -1006,8 +1049,20 @@ final class TileResidualSyntaxReaderTest {
     /// @param row the generated diagonal row coordinate
     /// @param column the generated diagonal column coordinate
     /// @param outputWidth the row-major coefficient row stride
+    /// @param codedHeight the entropy-coded coefficient height used as the scratch stride
+    /// @param contextLayout whether to emit raw `dav1d` scratch-layout indices
     /// @return the expected row-major coefficient index
-    private static int expectedScanIndex(TransformSize transformSize, int row, int column, int outputWidth) {
+    private static int expectedScanIndex(
+            TransformSize transformSize,
+            int row,
+            int column,
+            int outputWidth,
+            int codedHeight,
+            boolean contextLayout
+    ) {
+        if (contextLayout) {
+            return column * codedHeight + row;
+        }
         if (transformSize.widthPixels() == transformSize.heightPixels()) {
             return column * outputWidth + row;
         }
@@ -1043,7 +1098,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return the coefficient-context grid X coordinate
     private static int genericLevelX(TransformSize transformSize, TransformType transformType, int scanIndex) {
         if (!transformType.oneDimensional()) {
-            return expectedOutputIndex(transformSize, scanIndex) & (transformSize.widthPixels() - 1);
+            return expectedContextX(transformSize, scanIndex);
         }
         int log2Primary = verticalOneDimensional(transformType)
                 ? Math.min(transformSize.log2Width4(), 3)
@@ -1059,12 +1114,33 @@ final class TileResidualSyntaxReaderTest {
     /// @return the coefficient-context grid Y coordinate
     private static int genericLevelY(TransformSize transformSize, TransformType transformType, int scanIndex) {
         if (!transformType.oneDimensional()) {
-            return expectedOutputIndex(transformSize, scanIndex) >> (transformSize.log2Width4() + 2);
+            return expectedContextY(transformSize, scanIndex);
         }
         int log2Primary = verticalOneDimensional(transformType)
                 ? Math.min(transformSize.log2Width4(), 3)
                 : Math.min(transformSize.log2Height4(), 3);
         return scanIndex >> (log2Primary + 2);
+    }
+
+    /// Returns the coefficient-context grid X coordinate for one larger-transform scratch-scan position.
+    ///
+    /// @param transformSize the active transform size
+    /// @param scanIndex the zero-based scan index
+    /// @return the coefficient-context grid X coordinate
+    private static int expectedContextX(TransformSize transformSize, int scanIndex) {
+        int contextIndex = expectedContextScan(transformSize)[scanIndex];
+        int contextHeight = clippedCoefficientHeight(transformSize);
+        return contextIndex >> Integer.numberOfTrailingZeros(contextHeight);
+    }
+
+    /// Returns the coefficient-context grid Y coordinate for one larger-transform scratch-scan position.
+    ///
+    /// @param transformSize the active transform size
+    /// @param scanIndex the zero-based scan index
+    /// @return the coefficient-context grid Y coordinate
+    private static int expectedContextY(TransformSize transformSize, int scanIndex) {
+        int contextIndex = expectedContextScan(transformSize)[scanIndex];
+        return contextIndex & (clippedCoefficientHeight(transformSize) - 1);
     }
 
     /// Returns the base-token context for one larger-transform coefficient.
@@ -1545,9 +1621,9 @@ final class TileResidualSyntaxReaderTest {
         int[][] levelBytes = new int[FOUR_BY_FOUR_LEVEL_GRID_SIZE][FOUR_BY_FOUR_LEVEL_GRID_SIZE];
 
         if (endOfBlockIndex > 0) {
-            int lastCoefficientIndex = expectedFourByFourOutputIndex(endOfBlockIndex);
-            int lastX = lastCoefficientIndex & 3;
-            int lastY = lastCoefficientIndex >> 2;
+            int lastContextIndex = expectedFourByFourContextIndex(endOfBlockIndex);
+            int lastX = lastContextIndex >> 2;
+            int lastY = lastContextIndex & 3;
             int lastToken = syntaxReader.readEndOfBlockBaseToken(
                     TransformSize.TX_4X4,
                     true,
@@ -1564,9 +1640,9 @@ final class TileResidualSyntaxReaderTest {
             levelBytes[lastX][lastY] = coefficientLevelByte(lastToken);
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
-                int coefficientIndex = expectedFourByFourOutputIndex(scanIndex);
-                int x = coefficientIndex & 3;
-                int y = coefficientIndex >> 2;
+                int contextIndex = expectedFourByFourContextIndex(scanIndex);
+                int x = contextIndex >> 2;
+                int y = contextIndex & 3;
                 int token = syntaxReader.readBaseToken(
                         TransformSize.TX_4X4,
                         true,
@@ -1824,7 +1900,7 @@ final class TileResidualSyntaxReaderTest {
                 new int[transformSize.widthPixels() * transformSize.heightPixels()],
                 visibleWidthPixels,
                 visibleHeightPixels,
-                0
+                0x40
         );
     }
 

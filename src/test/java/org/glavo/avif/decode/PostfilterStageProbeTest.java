@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
+import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.postfilter.CdefApplier;
 import org.glavo.avif.internal.av1.postfilter.LoopFilterApplier;
 import org.glavo.avif.internal.av1.postfilter.RestorationApplier;
@@ -142,6 +143,11 @@ final class PostfilterStageProbeTest {
             System.out.println("loopFilterLevels="
                     + levelY[0] + ","
                     + levelY[1]
+                    + " yDcDelta=" + quantization.yDcDelta()
+                    + " uDcDelta=" + quantization.uDcDelta()
+                    + " uAcDelta=" + quantization.uAcDelta()
+                    + " vDcDelta=" + quantization.vDcDelta()
+                    + " vAcDelta=" + quantization.vAcDelta()
                     + " useQM=" + quantization.useQuantizationMatrices()
                     + " qmY=" + quantization.quantizationMatrixY()
                     + " qmU=" + quantization.quantizationMatrixU()
@@ -1114,20 +1120,65 @@ final class PostfilterStageProbeTest {
         int width = unit.size().widthPixels();
         int height = unit.size().heightPixels();
         int sampleIndex = relativeY * width + relativeX;
+        int[] currentResidual = reconstructResidual(unit, dequantized);
+        String swappedTransformSummary = swappedTransformSummary(unit, dequantized, sampleIndex);
         if (width != height) {
             int[] reorderedCoefficients = reinterpretColumnMajorAsRowMajor(dequantized, width, height);
             int[] reorderedResidual = reconstructResidual(unit, reorderedCoefficients);
-            System.out.println("ALT currentResidual=" + reconstructResidual(unit, dequantized)[sampleIndex]
-                    + " columnMajorCoeffResidual=" + reorderedResidual[sampleIndex]);
+            System.out.println("ALT currentResidual=" + currentResidual[sampleIndex]
+                    + " columnMajorCoeffResidual=" + reorderedResidual[sampleIndex]
+                    + swappedTransformSummary);
             return;
         }
         int[] transposedCoefficients = transposeSquare(dequantized, width);
         int[] transposedResidual = reconstructResidual(unit, transposedCoefficients);
-        int[] currentResidual = reconstructResidual(unit, dequantized);
         int[] transposedOutput = transposeSquare(currentResidual, width);
         System.out.println("ALT currentResidual=" + currentResidual[sampleIndex]
                 + " transposedCoeffResidual=" + transposedResidual[sampleIndex]
-                + " transposedOutputResidual=" + transposedOutput[sampleIndex]);
+                + " transposedOutputResidual=" + transposedOutput[sampleIndex]
+                + swappedTransformSummary);
+    }
+
+    /// Returns one debug summary for the same coefficients reconstructed under the axis-swapped
+    /// transform type, when the active type is a two-dimensional hybrid transform.
+    ///
+    /// @param unit the covering residual unit
+    /// @param dequantized the dequantized coefficients in the production layout
+    /// @param sampleIndex the flattened sample index inside the reconstructed block
+    /// @return the formatted debug suffix, or an empty string when no swap applies
+    private static String swappedTransformSummary(
+            TransformResidualUnit unit,
+            int[] dequantized,
+            int sampleIndex
+    ) throws ReflectiveOperationException {
+        TransformType swappedType = swappedTransformType(unit.transformType());
+        if (swappedType == unit.transformType()) {
+            return "";
+        }
+        int[] swappedResidual = reconstructResidual(unit.size(), swappedType, dequantized);
+        return " swappedType=" + swappedType + " swappedResidual=" + swappedResidual[sampleIndex];
+    }
+
+    /// Returns the axis-swapped counterpart for one hybrid transform type.
+    ///
+    /// @param transformType the decoded transform type
+    /// @return the transform type with horizontal and vertical kernels exchanged
+    private static TransformType swappedTransformType(TransformType transformType) {
+        return switch (transformType) {
+            case ADST_DCT -> TransformType.DCT_ADST;
+            case DCT_ADST -> TransformType.ADST_DCT;
+            case FLIPADST_DCT -> TransformType.DCT_FLIPADST;
+            case DCT_FLIPADST -> TransformType.FLIPADST_DCT;
+            case ADST_FLIPADST -> TransformType.FLIPADST_ADST;
+            case FLIPADST_ADST -> TransformType.ADST_FLIPADST;
+            case V_DCT -> TransformType.H_DCT;
+            case H_DCT -> TransformType.V_DCT;
+            case V_ADST -> TransformType.H_ADST;
+            case H_ADST -> TransformType.V_ADST;
+            case V_FLIPADST -> TransformType.H_FLIPADST;
+            case H_FLIPADST -> TransformType.V_FLIPADST;
+            default -> transformType;
+        };
     }
 
     /// Returns one transposed square raster block.
@@ -1817,6 +1868,21 @@ final class PostfilterStageProbeTest {
     /// @return the reconstructed residual block
     private static int[] reconstructResidual(TransformResidualUnit unit, int[] dequantized)
             throws ReflectiveOperationException {
+        return reconstructResidual(unit.size(), unit.transformType(), dequantized);
+    }
+
+    /// Reconstructs one residual block via the production inverse transformer using reflection and
+    /// an explicit transform type.
+    ///
+    /// @param transformSize the coded transform size
+    /// @param transformType the transform type to apply
+    /// @param dequantized the dequantized coefficients
+    /// @return the reconstructed residual block
+    private static int[] reconstructResidual(
+            TransformSize transformSize,
+            TransformType transformType,
+            int[] dequantized
+    ) throws ReflectiveOperationException {
         Class<?> transformerClass = Class.forName("org.glavo.avif.internal.av1.recon.InverseTransformer");
         Method method = transformerClass.getDeclaredMethod(
                 "reconstructResidualBlock",
@@ -1825,7 +1891,7 @@ final class PostfilterStageProbeTest {
                 org.glavo.avif.internal.av1.model.TransformType.class
         );
         method.setAccessible(true);
-        return (int[]) method.invoke(null, dequantized, unit.size(), unit.transformType());
+        return (int[]) method.invoke(null, dequantized, transformSize, transformType);
     }
 
     /// Reconstructs one residual block via the production inverse transformer using reflection and

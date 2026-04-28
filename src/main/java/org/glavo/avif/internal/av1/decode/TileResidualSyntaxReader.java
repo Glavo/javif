@@ -41,7 +41,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class TileResidualSyntaxReader {
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
-    private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0;
+    private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
 
     /// The chroma-U plane index used by chroma coefficient-context helpers.
     private static final int CHROMA_PLANE_U = 0;
@@ -50,15 +50,26 @@ public final class TileResidualSyntaxReader {
     private static final int CHROMA_PLANE_V = 1;
 
     /// The `dav1d` two-dimensional `TX_4X4` scan converted into row-major coefficient storage.
-    private static final int @Unmodifiable [] FOUR_BY_FOUR_SCAN = {
+    private static final int @Unmodifiable [] FOUR_BY_FOUR_STORAGE_SCAN = {
             0, 1, 4, 8,
             5, 2, 3, 6,
             9, 12, 13, 10,
             7, 11, 14, 15
     };
 
-    /// The `dav1d`-compatible two-dimensional scan tables for every modeled transform size.
-    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_SCANS = createDefaultScans();
+    /// The `dav1d` scratch-layout `TX_4X4` scan used by coefficient-token contexts.
+    private static final int @Unmodifiable [] FOUR_BY_FOUR_CONTEXT_SCAN = {
+            0, 4, 1, 2,
+            5, 8, 12, 9,
+            6, 3, 7, 10,
+            13, 14, 11, 15
+    };
+
+    /// The `dav1d`-compatible two-dimensional storage scan tables for every modeled transform size.
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_STORAGE_SCANS = createDefaultScans(false);
+
+    /// The `dav1d` scratch-layout two-dimensional context scan tables for every modeled transform size.
+    private static final int @Unmodifiable [] @Unmodifiable [] DEFAULT_CONTEXT_SCANS = createDefaultScans(true);
 
     /// The `dav1d` transform types inferred from chroma intra prediction modes.
     private static final TransformType @Unmodifiable [] UV_INTRA_TRANSFORM_TYPES = {
@@ -880,7 +891,7 @@ public final class TileResidualSyntaxReader {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         if (!nonNullTransformType.oneDimensional()) {
-            return DEFAULT_SCANS[nonNullTransformSize.ordinal()][scanIndex];
+            return DEFAULT_STORAGE_SCANS[nonNullTransformSize.ordinal()][scanIndex];
         }
         if (verticalOneDimensional(nonNullTransformType)) {
             return scanIndex;
@@ -923,8 +934,9 @@ public final class TileResidualSyntaxReader {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         if (!nonNullTransformType.oneDimensional()) {
-            return coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex)
-                    & (nonNullTransformSize.widthPixels() - 1);
+            int contextIndex = DEFAULT_CONTEXT_SCANS[nonNullTransformSize.ordinal()][scanIndex];
+            int contextHeight = clippedCoefficientHeight(nonNullTransformSize);
+            return contextIndex >> Integer.numberOfTrailingZeros(contextHeight);
         }
         int log2Primary = verticalOneDimensional(nonNullTransformType)
                 ? Math.min(nonNullTransformSize.log2Width4(), 3)
@@ -942,8 +954,8 @@ public final class TileResidualSyntaxReader {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         if (!nonNullTransformType.oneDimensional()) {
-            return coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex)
-                    >> (nonNullTransformSize.log2Width4() + 2);
+            int contextIndex = DEFAULT_CONTEXT_SCANS[nonNullTransformSize.ordinal()][scanIndex];
+            return contextIndex & (clippedCoefficientHeight(nonNullTransformSize) - 1);
         }
         int log2Primary = verticalOneDimensional(nonNullTransformType)
                 ? Math.min(nonNullTransformSize.log2Width4(), 3)
@@ -1070,7 +1082,7 @@ public final class TileResidualSyntaxReader {
     private static int fourByFourCoefficientIndex(TransformType transformType, int scanIndex) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         if (!nonNullTransformType.oneDimensional()) {
-            return FOUR_BY_FOUR_SCAN[scanIndex];
+            return FOUR_BY_FOUR_STORAGE_SCAN[scanIndex];
         }
         if (!verticalOneDimensional(nonNullTransformType)) {
             int x = scanIndex & 3;
@@ -1090,7 +1102,7 @@ public final class TileResidualSyntaxReader {
         if (nonNullTransformType.oneDimensional()) {
             return scanIndex & 3;
         }
-        return FOUR_BY_FOUR_SCAN[scanIndex] & 3;
+        return FOUR_BY_FOUR_CONTEXT_SCAN[scanIndex] >> 2;
     }
 
     /// Returns the `levels` grid Y coordinate for one `TX_4X4` scan index.
@@ -1103,7 +1115,7 @@ public final class TileResidualSyntaxReader {
         if (nonNullTransformType.oneDimensional()) {
             return scanIndex >> 2;
         }
-        return FOUR_BY_FOUR_SCAN[scanIndex] >> 2;
+        return FOUR_BY_FOUR_CONTEXT_SCAN[scanIndex] & 3;
     }
 
     /// Returns whether a transform type belongs to the vertical one-dimensional class.
@@ -1235,12 +1247,12 @@ public final class TileResidualSyntaxReader {
     private static int createNonZeroCoefficientContextByte(int cumulativeLevel, int signedDcLevel) {
         int magnitude = Math.min(cumulativeLevel, 63);
         if (signedDcLevel < 0) {
-            return magnitude | 0x40;
+            return magnitude;
         }
         if (signedDcLevel > 0) {
             return magnitude | 0x80;
         }
-        return magnitude;
+        return magnitude | 0x40;
     }
 
     /// Returns the entropy-coded coefficient width for the supplied transform size.
@@ -1270,11 +1282,11 @@ public final class TileResidualSyntaxReader {
     /// Creates the `dav1d`-compatible two-dimensional scan table for every modeled transform size.
     ///
     /// @return the `dav1d`-compatible two-dimensional scan table for every modeled transform size
-    private static int[][] createDefaultScans() {
+    private static int[][] createDefaultScans(boolean contextLayout) {
         TransformSize[] transformSizes = TransformSize.values();
         int[][] scans = new int[transformSizes.length][];
         for (TransformSize transformSize : transformSizes) {
-            scans[transformSize.ordinal()] = createDefaultScan(transformSize);
+            scans[transformSize.ordinal()] = createDefaultScan(transformSize, contextLayout);
         }
         return scans;
     }
@@ -1282,15 +1294,14 @@ public final class TileResidualSyntaxReader {
     /// Creates the `dav1d`-compatible two-dimensional scan table for one modeled transform size.
     ///
     /// `dav1d` stores two-dimensional coefficient scan entries in the transform scratch layout
-    /// addressed as `coeff[y + x * sh]`. This method emits the same scan order converted into this
-    /// project's row-major natural coefficient layout. Rectangular scan generation already visits
-    /// row-major coordinates in dav1d order; square scans need an explicit axis swap because the
-    /// dav1d scratch stride equals the row-major width and would otherwise look valid while still
-    /// transposing horizontal and vertical AC coefficients.
+    /// addressed as `coeff[y + x * sh]`. This method can emit either those raw scratch indices for
+    /// coefficient-token contexts or the same scan converted into this decoder's row-major natural
+    /// coefficient layout for residual storage.
     ///
     /// @param transformSize the modeled transform size whose scan should be created
+    /// @param contextLayout whether to emit the raw `dav1d` scratch-layout scan indices
     /// @return the `dav1d`-compatible two-dimensional scan table for the supplied transform size
-    private static int[] createDefaultScan(TransformSize transformSize) {
+    private static int[] createDefaultScan(TransformSize transformSize, boolean contextLayout) {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         int codedWidth = clippedCoefficientWidth(nonNullTransformSize);
         int codedHeight = clippedCoefficientHeight(nonNullTransformSize);
@@ -1302,19 +1313,21 @@ public final class TileResidualSyntaxReader {
             int rowEnd = Math.min(codedHeight - 1, diagonal);
             boolean descendingRows;
             if (codedWidth == codedHeight) {
-                descendingRows = (diagonal & 1) == 1;
+                descendingRows = contextLayout
+                        ? (diagonal & 1) == 0
+                        : (diagonal & 1) == 1;
             } else {
                 descendingRows = codedWidth > codedHeight;
             }
             if (descendingRows) {
                 for (int row = rowEnd; row >= rowStart; row--) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth);
+                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth, codedHeight, contextLayout);
                 }
             } else {
                 for (int row = rowStart; row <= rowEnd; row++) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth);
+                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth, codedHeight, contextLayout);
                 }
             }
         }
@@ -1327,10 +1340,22 @@ public final class TileResidualSyntaxReader {
     /// @param row the generated diagonal row coordinate
     /// @param column the generated diagonal column coordinate
     /// @param outputWidth the row-major coefficient row stride
+    /// @param codedHeight the entropy-coded coefficient height used as the scratch stride
+    /// @param contextLayout whether to emit the raw `dav1d` scratch-layout scan index
     /// @return the row-major coefficient index
-    private static int scanIndex(TransformSize transformSize, int row, int column, int outputWidth) {
-        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
-        if (nonNullTransformSize.widthPixels() == nonNullTransformSize.heightPixels()) {
+    private static int scanIndex(
+            TransformSize transformSize,
+            int row,
+            int column,
+            int outputWidth,
+            int codedHeight,
+            boolean contextLayout
+    ) {
+        Objects.requireNonNull(transformSize, "transformSize");
+        if (contextLayout) {
+            return column * codedHeight + row;
+        }
+        if (transformSize.widthPixels() == transformSize.heightPixels()) {
             return column * outputWidth + row;
         }
         return row * outputWidth + column;

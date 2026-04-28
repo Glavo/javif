@@ -4437,4 +4437,5 @@ public final class FrameReconstructor {
     private static int chromaDimension(int lumaDimension, int subsamplingShift) {
         return (lumaDimension + (1 << subsamplingShift) - 1) >> subsamplingShift;
     }
+
 }
