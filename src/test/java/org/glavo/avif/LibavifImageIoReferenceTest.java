@@ -49,6 +49,8 @@ final class LibavifImageIoReferenceTest {
     private static final PixelTolerance DRAW_POINTS_TOLERANCE = PixelTolerance.perPixelDelta(8);
     /// Per-pixel tolerance accepted for palette/metadata-focused fixtures that should be near-lossless.
     private static final PixelTolerance NEAR_LOSSLESS_TOLERANCE = PixelTolerance.perPixelDelta(8);
+    /// Aggregate tolerance accepted for the lossy custom-property circle fixture.
+    private static final PixelTolerance CIRCLE_CUSTOM_PROPERTIES_TOLERANCE = PixelTolerance.bounded(39, 0.0, 1.0, 3.0);
     /// Aggregate tolerance accepted for the current lossy Paris still-image fixture.
     private static final PixelTolerance PARIS_LOSSY_TOLERANCE = PixelTolerance.bounded(24, 0.001, 4.0, 5.0);
     /// Aggregate tolerance placeholder for lossy still-image fixtures once decode coverage catches up.
@@ -155,13 +157,12 @@ final class LibavifImageIoReferenceTest {
                     NEAR_LOSSLESS_TOLERANCE,
                     "Pending AV1 reconstruction and cHRM/color metadata validation."
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/circle-trns-after-plte.png",
                     "libavif-test-data/circle_custom_properties.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
-                    NEAR_LOSSLESS_TOLERANCE,
-                    "Pending lossy alpha-edge and RGB-under-alpha reference policy."
+                    CIRCLE_CUSTOM_PROPERTIES_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/paris_icc_exif_xmp.png",
@@ -218,6 +219,10 @@ final class LibavifImageIoReferenceTest {
 
     /// Alpha-plane references for AVIF fixtures whose source images contain ImageIO-readable alpha.
     private static final AlphaPlaneReference @Unmodifiable [] ALPHA_PLANE_REFERENCES = new AlphaPlaneReference[]{
+            new AlphaPlaneReference(
+                    "libavif-test-data/circle-trns-after-plte.png",
+                    "libavif-test-data/circle_custom_properties.avif"
+            ),
             new AlphaPlaneReference("libavif-test-data/draw_points.png", "libavif-test-data/draw_points_idat.avif"),
             new AlphaPlaneReference("libavif-test-data/draw_points.png", "libavif-test-data/draw_points_idat_metasize0.avif"),
             new AlphaPlaneReference("libavif-test-data/draw_points.png", "libavif-test-data/draw_points_idat_progressive.avif"),
