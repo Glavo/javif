@@ -24,7 +24,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
@@ -106,37 +105,33 @@ final class LibavifImageIoReferenceTest {
 
     /// Full-image pixel references migrated from libavif source-image relationships.
     private static final PixelImageReference @Unmodifiable [] PIXEL_IMAGE_REFERENCES = new PixelImageReference[]{
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
-                    DRAW_POINTS_TOLERANCE,
-                    "Pending full-image AV1 color reconstruction accuracy; the alpha auxiliary sample test remains enabled."
+                    DRAW_POINTS_TOLERANCE
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_metasize0.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
-                    DRAW_POINTS_TOLERANCE,
-                    "Pending full-image AV1 reconstruction accuracy; the bottom-row region test remains enabled."
+                    DRAW_POINTS_TOLERANCE
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_progressive.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
-                    DRAW_POINTS_TOLERANCE,
-                    "Pending progressive full-image AV1 reconstruction accuracy; the bottom-row region test remains enabled."
+                    DRAW_POINTS_TOLERANCE
             ),
-            disabledPixelImage(
+            enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_progressive_metasize0.avif",
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
-                    DRAW_POINTS_TOLERANCE,
-                    "Pending progressive full-image AV1 reconstruction accuracy; the bottom-row region test remains enabled."
+                    DRAW_POINTS_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/abc.png",

@@ -329,23 +329,23 @@ public final class CdefApplier {
             int bitDepthShift,
             boolean hasChroma
     ) {
-        if (hasSelectedPrimary(cdef.yStrengths(), cdefIndex, bitDepthShift)) {
+        if (hasSelectedStrength(cdef.yStrengths(), cdefIndex, bitDepthShift)) {
             return true;
         }
-        return hasChroma && hasSelectedPrimary(cdef.uvStrengths(), cdefIndex, bitDepthShift);
+        return hasChroma && hasSelectedStrength(cdef.uvStrengths(), cdefIndex, bitDepthShift);
     }
 
-    /// Returns whether one selected encoded strength has an active primary component.
+    /// Returns whether one selected encoded strength has an active primary or secondary component.
     ///
     /// @param strengths the encoded CDEF strength table
     /// @param cdefIndex the selected CDEF index
     /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
-    /// @return whether the selected encoded strength has an active primary component
-    private static boolean hasSelectedPrimary(int[] strengths, int cdefIndex, int bitDepthShift) {
+    /// @return whether the selected encoded strength has an active primary or secondary component
+    private static boolean hasSelectedStrength(int[] strengths, int cdefIndex, int bitDepthShift) {
         if (strengths.length == 0) {
             return false;
         }
-        return decodeStrength(strengthForIndex(strengths, cdefIndex), bitDepthShift).primary() != 0;
+        return decodeStrength(strengthForIndex(strengths, cdefIndex), bitDepthShift).active();
     }
 
     /// Applies CDEF to one plane.
@@ -406,16 +406,13 @@ public final class CdefApplier {
                 if (!decodedStrength.active()) {
                     continue;
                 }
-                int direction = 0;
-                if (decodedStrength.primary() != 0) {
-                    direction = directionMap.direction(unitIndex);
-                    if (luma) {
-                        decodedStrength = decodedStrength.withPrimary(
-                                adjustStrength(decodedStrength.primary(), directionMap.variance(unitIndex))
-                        );
-                    } else if (i422Chroma) {
-                        direction = I422_UV_DIRECTIONS[direction];
-                    }
+                int direction = directionMap.direction(unitIndex);
+                if (luma && decodedStrength.primary() != 0) {
+                    decodedStrength = decodedStrength.withPrimary(
+                            adjustStrength(decodedStrength.primary(), directionMap.variance(unitIndex))
+                    );
+                } else if (!luma && i422Chroma) {
+                    direction = I422_UV_DIRECTIONS[direction];
                 }
                 if (!decodedStrength.active()) {
                     continue;
@@ -504,7 +501,7 @@ public final class CdefApplier {
         int secondaryDamping = strength.secondary() > 0
                 ? Math.max(0, damping - floorLog2(strength.secondary()))
                 : 0;
-        boolean clipToNeighborRange = strength.primary() > 0 && strength.secondary() > 0;
+        boolean clipToNeighborRange = strength.active();
 
         for (int y = startY; y < endY; y++) {
             int rowOffset = y * plane.stride();

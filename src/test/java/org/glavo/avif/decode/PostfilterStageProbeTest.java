@@ -66,6 +66,7 @@ final class PostfilterStageProbeTest {
         probe(new SampleProbe("libavif-test-data/io/kodim03_yuv420_8bpc.avif", Plane.Y, 11, 11));
         probe(new SampleProbe("libavif-test-data/io/kodim23_yuv420_8bpc.avif", Plane.Y, 0, 0));
         probe(new SampleProbe("libavif-test-data/io/kodim23_yuv420_8bpc.avif", Plane.Y, 1, 0));
+        probe(new SampleProbe("libavif-test-data/io/kodim23_yuv420_8bpc.avif", Plane.Y, 50, 64));
         probe(new SampleProbe("libavif-test-data/io/kodim23_yuv420_8bpc.avif", Plane.Y, 559, 119));
         probe(new SampleProbe("libavif-test-data/io/kodim23_yuv420_8bpc.avif", Plane.Y, 560, 119));
         probe(new SampleProbe("libavif-test-data/io/kodim23_yuv420_8bpc.avif", Plane.Y, 559, 120));
@@ -879,15 +880,6 @@ final class PostfilterStageProbeTest {
             int unitHeight = unit.size().heightPixels();
             int relativeX = sampleProbe.x() - unitX;
             int relativeY = sampleProbe.y() - unitY;
-            int residualSample = residual[relativeY * unitWidth + relativeX];
-            int reconstructedSample = sample(reconstructed, sampleProbe);
-            int predictorSample = reconstructedSample - residualSample;
-            System.out.println("BREAKDOWN unitPosition=(" + unitX + "," + unitY + ")"
-                    + " unitSize=" + unit.size()
-                    + " residualSample=" + residualSample
-                    + " predictorSample=" + predictorSample
-                    + " reconstructedSample=" + reconstructedSample);
-            printAlternativeResidualHypotheses(unit, dequantized, relativeX, relativeY);
             int[] predictor = predictorBlock(
                     reconstructed,
                     sampleProbe.plane(),
@@ -896,6 +888,25 @@ final class PostfilterStageProbeTest {
                     unitWidth,
                     unitHeight,
                     residual
+            );
+            int residualSample = residual[relativeY * unitWidth + relativeX];
+            int reconstructedSample = sample(reconstructed, sampleProbe);
+            int predictorSample = reconstructedSample - residualSample;
+            System.out.println("BREAKDOWN unitPosition=(" + unitX + "," + unitY + ")"
+                    + " unitSize=" + unit.size()
+                    + " residualSample=" + residualSample
+                    + " predictorSample=" + predictorSample
+                    + " reconstructedSample=" + reconstructedSample);
+            printAlternativeResidualHypotheses(
+                    expectedPlanes,
+                    sampleProbe,
+                    unit,
+                    dequantized,
+                    predictor,
+                    unitX,
+                    unitY,
+                    relativeX,
+                    relativeY
             );
             printSingleCoefficientAdjustmentSearch(
                     expectedPlanes,
@@ -1107,13 +1118,23 @@ final class PostfilterStageProbeTest {
 
     /// Prints a small set of alternative residual interpretations for square units.
     ///
+    /// @param expectedPlanes the FFmpeg source planes
+    /// @param sampleProbe the requested sample
     /// @param unit the covering residual unit
     /// @param dequantized the dequantized coefficients in the production layout
+    /// @param predictor the current predictor block
+    /// @param unitX the plane-domain unit X origin
+    /// @param unitY the plane-domain unit Y origin
     /// @param relativeX the sample X coordinate within the transform unit
     /// @param relativeY the sample Y coordinate within the transform unit
     private static void printAlternativeResidualHypotheses(
+            SourcePlanes expectedPlanes,
+            SampleProbe sampleProbe,
             TransformResidualUnit unit,
             int[] dequantized,
+            int[] predictor,
+            int unitX,
+            int unitY,
             int relativeX,
             int relativeY
     ) throws ReflectiveOperationException {
@@ -1121,34 +1142,121 @@ final class PostfilterStageProbeTest {
         int height = unit.size().heightPixels();
         int sampleIndex = relativeY * width + relativeX;
         int[] currentResidual = reconstructResidual(unit, dequantized);
-        String swappedTransformSummary = swappedTransformSummary(unit, dequantized, sampleIndex);
+        int currentScore = localWindowScore(
+                expectedPlanes,
+                sampleProbe.plane(),
+                predictor,
+                currentResidual,
+                unitX,
+                unitY,
+                width,
+                height,
+                sampleProbe,
+                1
+        );
+        String swappedTransformSummary = swappedTransformSummary(
+                expectedPlanes,
+                sampleProbe,
+                unit,
+                dequantized,
+                predictor,
+                unitX,
+                unitY,
+                sampleIndex
+        );
         if (width != height) {
             int[] reorderedCoefficients = reinterpretColumnMajorAsRowMajor(dequantized, width, height);
             int[] reorderedResidual = reconstructResidual(unit, reorderedCoefficients);
+            int reorderedScore = localWindowScore(
+                    expectedPlanes,
+                    sampleProbe.plane(),
+                    predictor,
+                    reorderedResidual,
+                    unitX,
+                    unitY,
+                    width,
+                    height,
+                    sampleProbe,
+                    1
+            );
             System.out.println("ALT currentResidual=" + currentResidual[sampleIndex]
+                    + " currentScore=" + currentScore
                     + " columnMajorCoeffResidual=" + reorderedResidual[sampleIndex]
+                    + " columnMajorCoeffScore=" + reorderedScore
                     + swappedTransformSummary);
             return;
         }
         int[] transposedCoefficients = transposeSquare(dequantized, width);
         int[] transposedResidual = reconstructResidual(unit, transposedCoefficients);
         int[] transposedOutput = transposeSquare(currentResidual, width);
+        int[] columnFirstResidual = transposeSquare(transposedResidual, width);
+        int transposedCoeffScore = localWindowScore(
+                expectedPlanes,
+                sampleProbe.plane(),
+                predictor,
+                transposedResidual,
+                unitX,
+                unitY,
+                width,
+                height,
+                sampleProbe,
+                1
+        );
+        int columnFirstScore = localWindowScore(
+                expectedPlanes,
+                sampleProbe.plane(),
+                predictor,
+                columnFirstResidual,
+                unitX,
+                unitY,
+                width,
+                height,
+                sampleProbe,
+                1
+        );
+        int transposedOutputScore = localWindowScore(
+                expectedPlanes,
+                sampleProbe.plane(),
+                predictor,
+                transposedOutput,
+                unitX,
+                unitY,
+                width,
+                height,
+                sampleProbe,
+                1
+        );
         System.out.println("ALT currentResidual=" + currentResidual[sampleIndex]
+                + " currentScore=" + currentScore
                 + " transposedCoeffResidual=" + transposedResidual[sampleIndex]
+                + " transposedCoeffScore=" + transposedCoeffScore
+                + " columnFirstResidual=" + columnFirstResidual[sampleIndex]
+                + " columnFirstScore=" + columnFirstScore
                 + " transposedOutputResidual=" + transposedOutput[sampleIndex]
+                + " transposedOutputScore=" + transposedOutputScore
                 + swappedTransformSummary);
     }
 
     /// Returns one debug summary for the same coefficients reconstructed under the axis-swapped
     /// transform type, when the active type is a two-dimensional hybrid transform.
     ///
+    /// @param expectedPlanes the FFmpeg source planes
+    /// @param sampleProbe the requested sample
     /// @param unit the covering residual unit
     /// @param dequantized the dequantized coefficients in the production layout
+    /// @param predictor the current predictor block
+    /// @param unitX the plane-domain unit X origin
+    /// @param unitY the plane-domain unit Y origin
     /// @param sampleIndex the flattened sample index inside the reconstructed block
     /// @return the formatted debug suffix, or an empty string when no swap applies
     private static String swappedTransformSummary(
+            SourcePlanes expectedPlanes,
+            SampleProbe sampleProbe,
             TransformResidualUnit unit,
             int[] dequantized,
+            int[] predictor,
+            int unitX,
+            int unitY,
             int sampleIndex
     ) throws ReflectiveOperationException {
         TransformType swappedType = swappedTransformType(unit.transformType());
@@ -1156,7 +1264,21 @@ final class PostfilterStageProbeTest {
             return "";
         }
         int[] swappedResidual = reconstructResidual(unit.size(), swappedType, dequantized);
-        return " swappedType=" + swappedType + " swappedResidual=" + swappedResidual[sampleIndex];
+        int swappedScore = localWindowScore(
+                expectedPlanes,
+                sampleProbe.plane(),
+                predictor,
+                swappedResidual,
+                unitX,
+                unitY,
+                unit.size().widthPixels(),
+                unit.size().heightPixels(),
+                sampleProbe,
+                1
+        );
+        return " swappedType=" + swappedType
+                + " swappedResidual=" + swappedResidual[sampleIndex]
+                + " swappedScore=" + swappedScore;
     }
 
     /// Returns the axis-swapped counterpart for one hybrid transform type.
