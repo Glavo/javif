@@ -50,6 +50,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class LibavifFFmpegAvifReferenceTest {
     /// The copied libavif test data resource root.
     private static final String TEST_DATA_ROOT = "libavif-test-data";
+    /// Aggregate tolerance accepted for sparse FFmpeg RGB edge outliers in animated 8-bit fixtures.
+    private static final PixelTolerance ANIMATED_RGB_EDGE_TOLERANCE =
+            PixelTolerance.bounded(255, 0.0, 0.1, 4.3);
     /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
     private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
             rgbPixelReference("libavif-test-data/abc_color_irot_alpha_NOirot.avif", PixelTolerance.bounded(16, 0.0, 6.0, 8.0)),
@@ -64,6 +67,11 @@ final class LibavifFFmpegAvifReferenceTest {
             rgbPixelReference("libavif-test-data/color_grid_gainmap_different_grid.avif", PixelTolerance.perPixelDelta(1)),
             rgbPixelReference("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", PixelTolerance.bounded(3, 0.0, 3.0, 3.0)),
+            rgbPixelReference("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif",
+                    ANIMATED_RGB_EDGE_TOLERANCE),
+            rgbPixelReference("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif",
+                    ANIMATED_RGB_EDGE_TOLERANCE),
+            rgbPixelReference("libavif-test-data/colors-animated-8bpc.avif", ANIMATED_RGB_EDGE_TOLERANCE),
             pixelReference("libavif-test-data/colors_hdr_p3.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_srgb.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
