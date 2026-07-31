@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.decode.TileDecodeContext;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -150,6 +151,57 @@ final class FilterIntraLumaReconstructionPathTest {
         );
     }
 
+    /// Verifies that filter-intra prediction is applied per transform unit before that unit's residual.
+    @Test
+    void reconstructsFilterIntraPerTransformUnit() {
+        BlockPosition origin = new BlockPosition(0, 0);
+        TransformResidualUnit leftResidual = createDcResidualUnit(origin, TransformSize.TX_4X4, 64);
+        TransformResidualUnit rightResidual = createAllZeroResidualUnit(origin.offset(1, 0), TransformSize.TX_4X4);
+        TilePartitionTreeReader.LeafNode splitLeaf = createFilterIntraLeaf(
+                origin,
+                BlockSize.SIZE_8X4,
+                new TransformLayout(
+                        origin,
+                        BlockSize.SIZE_8X4,
+                        BlockSize.SIZE_8X4.width4(),
+                        BlockSize.SIZE_8X4.height4(),
+                        BlockSize.SIZE_8X4.maxLumaTransformSize(),
+                        null,
+                        false,
+                        new TransformUnit[]{
+                                new TransformUnit(origin, TransformSize.TX_4X4),
+                                new TransformUnit(origin.offset(1, 0), TransformSize.TX_4X4)
+                        }
+                ),
+                new ResidualLayout(
+                        origin,
+                        BlockSize.SIZE_8X4,
+                        new TransformResidualUnit[]{leftResidual, rightResidual}
+                )
+        );
+        TilePartitionTreeReader.LeafNode leftLeaf = createFilterIntraLeaf(
+                origin,
+                BlockSize.SIZE_4X4,
+                createTransformLayout(origin, BlockSize.SIZE_4X4),
+                new ResidualLayout(origin, BlockSize.SIZE_4X4, new TransformResidualUnit[]{leftResidual})
+        );
+        TilePartitionTreeReader.LeafNode rightLeaf = createFilterIntraLeaf(
+                origin.offset(1, 0),
+                BlockSize.SIZE_4X4,
+                createTransformLayout(origin.offset(1, 0), BlockSize.SIZE_4X4),
+                new ResidualLayout(origin.offset(1, 0), BlockSize.SIZE_4X4, new TransformResidualUnit[]{rightResidual})
+        );
+
+        DecodedPlane splitPlane = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(8, 4, splitLeaf)
+        ).lumaPlane();
+        DecodedPlane separatePlane = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(8, 4, leftLeaf, rightLeaf)
+        ).lumaPlane();
+
+        assertDecodedPlaneEquals(separatePlane, splitPlane);
+    }
+
     /// Creates one synthetic monochrome intra leaf with one signed-DC luma residual.
     ///
     /// @param position the leaf origin in 4x4 units
@@ -174,6 +226,53 @@ final class FilterIntraLumaReconstructionPathTest {
             LumaIntraPredictionMode mode
     ) {
         return createLumaLeaf(position, mode, createAllZeroResidualLayout(position, BlockSize.SIZE_4X4));
+    }
+
+    /// Creates one synthetic monochrome filter-intra leaf.
+    ///
+    /// @param position the leaf origin in 4x4 units
+    /// @param size the coded leaf size
+    /// @param transformLayout the luma transform layout
+    /// @param residualLayout the luma residual layout
+    /// @return one synthetic monochrome filter-intra leaf
+    private static TilePartitionTreeReader.LeafNode createFilterIntraLeaf(
+            BlockPosition position,
+            BlockSize size,
+            TransformLayout transformLayout,
+            ResidualLayout residualLayout
+    ) {
+        return new TilePartitionTreeReader.LeafNode(
+                new TileBlockHeaderReader.BlockHeader(
+                        position,
+                        size,
+                        false,
+                        false,
+                        false,
+                        true,
+                        false,
+                        false,
+                        -1,
+                        -1,
+                        false,
+                        0,
+                        LumaIntraPredictionMode.DC,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        new int[0],
+                        new int[0],
+                        new byte[0],
+                        new byte[0],
+                        FilterIntraMode.DC,
+                        0,
+                        0,
+                        0,
+                        0
+                ),
+                transformLayout,
+                residualLayout
+        );
     }
 
     /// Creates one synthetic monochrome intra leaf with the supplied luma residual layout.
@@ -417,15 +516,7 @@ final class FilterIntraLumaReconstructionPathTest {
         return new ResidualLayout(
                 position,
                 size,
-                new TransformResidualUnit[]{
-                        new TransformResidualUnit(
-                                position,
-                                transformSize,
-                                -1,
-                                new int[transformSize.widthPixels() * transformSize.heightPixels()],
-                                0
-                        )
-                }
+                new TransformResidualUnit[]{createAllZeroResidualUnit(position, transformSize)}
         );
     }
 
@@ -437,20 +528,47 @@ final class FilterIntraLumaReconstructionPathTest {
     /// @return one signed-DC-only luma residual layout
     private static ResidualLayout createDcResidualLayout(BlockPosition position, BlockSize size, int dcCoefficient) {
         TransformSize transformSize = size.maxLumaTransformSize();
-        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
-        coefficients[0] = dcCoefficient;
         return new ResidualLayout(
                 position,
                 size,
-                new TransformResidualUnit[]{
-                        new TransformResidualUnit(
-                                position,
-                                transformSize,
-                                0,
-                                coefficients,
-                                expectedNonZeroCoefficientContextByte(dcCoefficient)
-                        )
-                }
+                new TransformResidualUnit[]{createDcResidualUnit(position, transformSize, dcCoefficient)}
+        );
+    }
+
+    /// Creates one all-zero luma residual unit.
+    ///
+    /// @param position the residual-unit origin in 4x4 units
+    /// @param transformSize the transform size used by this unit
+    /// @return one all-zero luma residual unit
+    private static TransformResidualUnit createAllZeroResidualUnit(BlockPosition position, TransformSize transformSize) {
+        return new TransformResidualUnit(
+                position,
+                transformSize,
+                -1,
+                new int[transformSize.widthPixels() * transformSize.heightPixels()],
+                0
+        );
+    }
+
+    /// Creates one signed-DC-only luma residual unit.
+    ///
+    /// @param position the residual-unit origin in 4x4 units
+    /// @param transformSize the transform size used by this unit
+    /// @param dcCoefficient the signed luma DC coefficient to store
+    /// @return one signed-DC-only luma residual unit
+    private static TransformResidualUnit createDcResidualUnit(
+            BlockPosition position,
+            TransformSize transformSize,
+            int dcCoefficient
+    ) {
+        int[] coefficients = new int[transformSize.widthPixels() * transformSize.heightPixels()];
+        coefficients[0] = dcCoefficient;
+        return new TransformResidualUnit(
+                position,
+                transformSize,
+                0,
+                coefficients,
+                expectedNonZeroCoefficientContextByte(dcCoefficient)
         );
     }
 
@@ -510,6 +628,20 @@ final class FilterIntraLumaReconstructionPathTest {
         for (int row = 0; row < expected.length; row++) {
             for (int column = 0; column < expected[row].length; column++) {
                 assertEquals(expected[row][column], plane.sample(x + column, y + row));
+            }
+        }
+    }
+
+    /// Asserts that two decoded luma planes are identical.
+    ///
+    /// @param expected the expected decoded plane
+    /// @param actual the actual decoded plane
+    private static void assertDecodedPlaneEquals(DecodedPlane expected, DecodedPlane actual) {
+        assertEquals(expected.width(), actual.width());
+        assertEquals(expected.height(), actual.height());
+        for (int row = 0; row < expected.height(); row++) {
+            for (int column = 0; column < expected.width(); column++) {
+                assertEquals(expected.sample(column, row), actual.sample(column, row));
             }
         }
     }

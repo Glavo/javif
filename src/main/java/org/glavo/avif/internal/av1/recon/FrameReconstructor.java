@@ -23,6 +23,7 @@ import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundPredictionType;
+import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
@@ -121,6 +122,28 @@ public final class FrameReconstructor {
 
     /// The maximum number of causal motion-vector samples used for one local warped model.
     private static final int LOCAL_WARP_SAMPLE_CAPACITY = 8;
+
+    /// Tile-local sample boundaries for luma and chroma prediction references.
+    ///
+    /// @param lumaStartX the first luma sample column available to this tile
+    /// @param lumaStartY the first luma sample row available to this tile
+    /// @param lumaEndX the exclusive luma sample column available to this tile
+    /// @param lumaEndY the exclusive luma sample row available to this tile
+    /// @param chromaStartX the first chroma sample column available to this tile
+    /// @param chromaStartY the first chroma sample row available to this tile
+    /// @param chromaEndX the exclusive chroma sample column available to this tile
+    /// @param chromaEndY the exclusive chroma sample row available to this tile
+    private record TileSampleBounds(
+            int lumaStartX,
+            int lumaStartY,
+            int lumaEndX,
+            int lumaEndY,
+            int chromaStartX,
+            int chromaStartY,
+            int chromaEndX,
+            int chromaEndY
+    ) {
+    }
 
     /// The default AV1 regular 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
     private static final int @Unmodifiable [] @Unmodifiable [] REGULAR_SUBPEL_FILTERS = {
@@ -341,7 +364,15 @@ public final class FrameReconstructor {
                 checkedSyntaxDecodeResult.tileRoots()
         );
         DecodedBlockMap decodedBlockMap = DecodedBlockMap.create(tileRootsByTile, alignedLumaWidth, alignedLumaHeight);
-        for (TilePartitionTreeReader.Node[] tileRoots : tileRootsByTile) {
+        for (int tileIndex = 0; tileIndex < tileRootsByTile.length; tileIndex++) {
+            TileSampleBounds tileBounds = tileSampleBounds(
+                    assembly,
+                    tileIndex,
+                    pixelFormat,
+                    alignedLumaWidth,
+                    alignedLumaHeight
+            );
+            TilePartitionTreeReader.Node[] tileRoots = tileRootsByTile[tileIndex];
             for (TilePartitionTreeReader.Node root : tileRoots) {
                 reconstructNode(
                         root,
@@ -353,7 +384,8 @@ public final class FrameReconstructor {
                         sequenceHeader.features().orderHintBits(),
                         sequenceHeader.features().intraEdgeFilter(),
                         checkedReferenceSurfaceSnapshots,
-                        decodedBlockMap
+                        decodedBlockMap,
+                        tileBounds
                 );
             }
         }
@@ -387,6 +419,63 @@ public final class FrameReconstructor {
                 decodedLumaPlane,
                 decodedChromaUPlane,
                 decodedChromaVPlane
+        );
+    }
+
+    /// Returns the sample boundaries for one frame tile.
+    ///
+    /// @param assembly the frame assembly that owns tile geometry
+    /// @param tileIndex the zero-based tile index in frame order
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param lumaWidth the internal luma plane width
+    /// @param lumaHeight the internal luma plane height
+    /// @return the sample boundaries for one frame tile
+    private static TileSampleBounds tileSampleBounds(
+            FrameAssembly assembly,
+            int tileIndex,
+            AvifPixelFormat pixelFormat,
+            int lumaWidth,
+            int lumaHeight
+    ) {
+        FrameHeader.TilingInfo tiling = assembly.frameHeader().tiling();
+        int columns = tiling.columns();
+        int tileColumn = tileIndex % columns;
+        int tileRow = tileIndex / columns;
+        int superblockSize = assembly.sequenceHeader().features().use128x128Superblocks() ? 128 : 64;
+        int[] columnStartSuperblocks = tiling.columnStartSuperblocks();
+        int[] rowStartSuperblocks = tiling.rowStartSuperblocks();
+        int lumaStartX = Math.min(lumaWidth, columnStartSuperblocks[tileColumn] * superblockSize);
+        int lumaStartY = Math.min(lumaHeight, rowStartSuperblocks[tileRow] * superblockSize);
+        int lumaEndX = Math.min(lumaWidth, columnStartSuperblocks[tileColumn + 1] * superblockSize);
+        int lumaEndY = Math.min(lumaHeight, rowStartSuperblocks[tileRow + 1] * superblockSize);
+        return new TileSampleBounds(
+                lumaStartX,
+                lumaStartY,
+                lumaEndX,
+                lumaEndY,
+                chromaWidth(pixelFormat, lumaStartX),
+                chromaHeight(pixelFormat, lumaStartY),
+                chromaWidth(pixelFormat, lumaEndX),
+                chromaHeight(pixelFormat, lumaEndY)
+        );
+    }
+
+    /// Returns full-frame sample boundaries for callers that reconstruct a standalone tree.
+    ///
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param lumaWidth the internal luma plane width
+    /// @param lumaHeight the internal luma plane height
+    /// @return full-frame sample boundaries for callers that reconstruct a standalone tree
+    private static TileSampleBounds fullFrameSampleBounds(AvifPixelFormat pixelFormat, int lumaWidth, int lumaHeight) {
+        return new TileSampleBounds(
+                0,
+                0,
+                lumaWidth,
+                lumaHeight,
+                0,
+                0,
+                chromaWidth(pixelFormat, lumaWidth),
+                chromaHeight(pixelFormat, lumaHeight)
         );
     }
 
@@ -882,7 +971,8 @@ public final class FrameReconstructor {
                 orderHintBits,
                 intraEdgeFilterEnabled,
                 referenceSurfaceSnapshots,
-                DecodedBlockMap.create(new TilePartitionTreeReader.Node[][]{{node}}, lumaPlane.width(), lumaPlane.height())
+                DecodedBlockMap.create(new TilePartitionTreeReader.Node[][]{{node}}, lumaPlane.width(), lumaPlane.height()),
+                fullFrameSampleBounds(pixelFormat, lumaPlane.width(), lumaPlane.height())
         );
     }
 
@@ -898,6 +988,7 @@ public final class FrameReconstructor {
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private static void reconstructNode(
             TilePartitionTreeReader.Node node,
             MutablePlaneBuffer lumaPlane,
@@ -908,7 +999,8 @@ public final class FrameReconstructor {
             int orderHintBits,
             boolean intraEdgeFilterEnabled,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
             reconstructLeaf(
@@ -921,7 +1013,8 @@ public final class FrameReconstructor {
                     orderHintBits,
                     intraEdgeFilterEnabled,
                     referenceSurfaceSnapshots,
-                    decodedBlockMap
+                    decodedBlockMap,
+                    tileBounds
             );
             return;
         }
@@ -938,7 +1031,8 @@ public final class FrameReconstructor {
                     orderHintBits,
                     intraEdgeFilterEnabled,
                     referenceSurfaceSnapshots,
-                    decodedBlockMap
+                    decodedBlockMap,
+                    tileBounds
             );
         }
     }
@@ -953,6 +1047,7 @@ public final class FrameReconstructor {
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private static void reconstructLeaf(
             TilePartitionTreeReader.LeafNode leafNode,
             MutablePlaneBuffer lumaPlane,
@@ -963,7 +1058,8 @@ public final class FrameReconstructor {
             int orderHintBits,
             boolean intraEdgeFilterEnabled,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         TileBlockHeaderReader.BlockHeader header = leafNode.header();
         TransformLayout transformLayout = leafNode.transformLayout();
@@ -982,8 +1078,6 @@ public final class FrameReconstructor {
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
-        int codedLumaWidth = header.size().widthPixels();
-        int codedLumaHeight = header.size().heightPixels();
         boolean lumaResidualsApplied = false;
 
         if (header.useIntrabc()) {
@@ -1006,23 +1100,25 @@ public final class FrameReconstructor {
                         visibleLumaHeight
                 );
             } else if (header.filterIntraMode() != null) {
-                IntraPredictor.predictFilterIntraLuma(
+                reconstructFilterIntraLuma(
                         lumaPlane,
-                        lumaX,
-                        lumaY,
-                        codedLumaWidth,
-                        codedLumaHeight,
-                        header.filterIntraMode()
+                        residualLayout,
+                        header,
+                        frameHeader,
+                        header.filterIntraMode(),
+                        tileBounds
                 );
+                lumaResidualsApplied = true;
             } else {
-                boolean smoothEdgeReferences = lumaSmoothEdgeReferences(header, decodedBlockMap);
+                boolean smoothEdgeReferences = lumaSmoothEdgeReferences(header, decodedBlockMap, tileBounds);
                 reconstructIntraLuma(
                         lumaPlane,
                         residualLayout,
                         header,
                         frameHeader,
                         intraEdgeFilterEnabled,
-                        smoothEdgeReferences
+                        smoothEdgeReferences,
+                        tileBounds
                 );
                 lumaResidualsApplied = true;
             }
@@ -1037,7 +1133,8 @@ public final class FrameReconstructor {
                     frameHeader,
                     orderHintBits,
                     referenceSurfaceSnapshots,
-                    decodedBlockMap
+                    decodedBlockMap,
+                    tileBounds
             );
         }
 
@@ -1048,12 +1145,14 @@ public final class FrameReconstructor {
         if (header.hasChroma() && chromaUPlane != null && chromaVPlane != null) {
             int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
             int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-            int chromaX = lumaX >> chromaSubsamplingX;
-            int chromaY = lumaY >> chromaSubsamplingY;
-            int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
-            int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
-            int codedChromaWidth = chromaDimension(codedLumaWidth, chromaSubsamplingX);
-            int codedChromaHeight = chromaDimension(codedLumaHeight, chromaSubsamplingY);
+            int chromaX = chromaBlockX(header, chromaSubsamplingX);
+            int chromaY = chromaBlockY(header, chromaSubsamplingY);
+            int chromaLumaX = chromaLumaBlockX(header, chromaSubsamplingX);
+            int chromaLumaY = chromaLumaBlockY(header, chromaSubsamplingY);
+            int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+            int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
+            int codedChromaWidth = codedChromaBlockWidth(header, chromaSubsamplingX);
+            int codedChromaHeight = codedChromaBlockHeight(header, chromaSubsamplingY);
             boolean chromaResidualsApplied = false;
             if (header.intra()) {
                 if (header.uvPaletteSize() != 0) {
@@ -1071,26 +1170,34 @@ public final class FrameReconstructor {
                             lumaPlane,
                             chromaX,
                             chromaY,
-                            lumaX,
-                            lumaY,
+                            chromaLumaX,
+                            chromaLumaY,
                             codedChromaWidth,
                             codedChromaHeight,
                             header.cflAlphaU(),
                             chromaSubsamplingX,
-                            chromaSubsamplingY
+                            chromaSubsamplingY,
+                            tileBounds.chromaStartX(),
+                            tileBounds.chromaStartY(),
+                            tileBounds.chromaEndX(),
+                            tileBounds.chromaEndY()
                     );
                     IntraPredictor.predictChromaCfl(
                             chromaVPlane,
                             lumaPlane,
                             chromaX,
                             chromaY,
-                            lumaX,
-                            lumaY,
+                            chromaLumaX,
+                            chromaLumaY,
                             codedChromaWidth,
                             codedChromaHeight,
                             header.cflAlphaV(),
                             chromaSubsamplingX,
-                            chromaSubsamplingY
+                            chromaSubsamplingY,
+                            tileBounds.chromaStartX(),
+                            tileBounds.chromaStartY(),
+                            tileBounds.chromaEndX(),
+                            tileBounds.chromaEndY()
                     );
                 } else {
                     reconstructIntraChroma(
@@ -1102,7 +1209,8 @@ public final class FrameReconstructor {
                             frameHeader,
                             pixelFormat,
                             intraEdgeFilterEnabled,
-                            chromaSmoothEdgeReferences(header, decodedBlockMap)
+                            chromaSmoothEdgeReferences(header, decodedBlockMap, pixelFormat, tileBounds),
+                            tileBounds
                     );
                     chromaResidualsApplied = true;
                 }
@@ -1125,30 +1233,40 @@ public final class FrameReconstructor {
     ///
     /// @param header the current decoded block header
     /// @param decodedBlockMap the decoded leaf map used for causal neighbor lookup
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     /// @return whether an adjacent top or left luma edge comes from a smooth intra predictor
     private static boolean lumaSmoothEdgeReferences(
             TileBlockHeaderReader.BlockHeader header,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         int x4 = header.position().x4();
         int y4 = header.position().y4();
-        return hasSmoothLumaMode(decodedBlockMap.leafAt(x4, y4 - 1))
-                || hasSmoothLumaMode(decodedBlockMap.leafAt(x4 - 1, y4));
+        int lumaX = x4 << 2;
+        int lumaY = y4 << 2;
+        return (lumaY > tileBounds.lumaStartY() && hasSmoothLumaMode(decodedBlockMap.leafAt(x4, y4 - 1)))
+                || (lumaX > tileBounds.lumaStartX() && hasSmoothLumaMode(decodedBlockMap.leafAt(x4 - 1, y4)));
     }
 
     /// Returns whether the chroma intra-edge references adjacent to one block are marked smooth.
     ///
     /// @param header the current decoded block header
     /// @param decodedBlockMap the decoded leaf map used for causal neighbor lookup
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     /// @return whether an adjacent top or left chroma edge comes from a smooth intra predictor
     private static boolean chromaSmoothEdgeReferences(
             TileBlockHeaderReader.BlockHeader header,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            AvifPixelFormat pixelFormat,
+            TileSampleBounds tileBounds
     ) {
         int x4 = header.position().x4();
         int y4 = header.position().y4();
-        return hasSmoothChromaMode(decodedBlockMap.leafAt(x4, y4 - 1))
-                || hasSmoothChromaMode(decodedBlockMap.leafAt(x4 - 1, y4));
+        int chromaX = chromaBlockX(header, chromaSubsamplingX(pixelFormat));
+        int chromaY = chromaBlockY(header, chromaSubsamplingY(pixelFormat));
+        return (chromaY > tileBounds.chromaStartY() && hasSmoothChromaMode(decodedBlockMap.leafAt(x4, y4 - 1)))
+                || (chromaX > tileBounds.chromaStartX() && hasSmoothChromaMode(decodedBlockMap.leafAt(x4 - 1, y4)));
     }
 
     /// Returns whether one decoded leaf used a smooth luma intra mode.
@@ -1307,6 +1425,7 @@ public final class FrameReconstructor {
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private static void reconstructInterPrediction(
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
@@ -1317,7 +1436,8 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         int frameLumaWidth = frameHeader.frameSize().codedWidth();
         int frameLumaHeight = frameHeader.frameSize().height();
@@ -1365,7 +1485,15 @@ public final class FrameReconstructor {
                 );
             }
             if (header.interIntra()) {
-                applyInterIntraPrediction(lumaPlane, chromaUPlane, chromaVPlane, header, transformLayout, pixelFormat);
+                applyInterIntraPrediction(
+                        lumaPlane,
+                        chromaUPlane,
+                        chromaVPlane,
+                        header,
+                        transformLayout,
+                        pixelFormat,
+                        tileBounds
+                );
             }
             if (header.motionMode() == MotionMode.OBMC) {
                 applyObmcPrediction(
@@ -1454,10 +1582,10 @@ public final class FrameReconstructor {
 
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = lumaX >> chromaSubsamplingX;
-        int chromaY = lumaY >> chromaSubsamplingY;
-        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
-        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
         int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         applyObmcAboveNeighbors(
@@ -1871,10 +1999,10 @@ public final class FrameReconstructor {
 
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = lumaX >> chromaSubsamplingX;
-        int chromaY = lumaY >> chromaSubsamplingY;
-        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
-        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int chromaDenominatorX = 4 << chromaSubsamplingX;
         int chromaDenominatorY = 4 << chromaSubsamplingY;
         DecodedPlane chromaUSnapshot = chromaUPlane.toDecodedPlane();
@@ -1980,10 +2108,10 @@ public final class FrameReconstructor {
 
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = lumaX >> chromaSubsamplingX;
-        int chromaY = lumaY >> chromaSubsamplingY;
-        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
-        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
         int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         int chromaDenominatorX = 4 << chromaSubsamplingX;
@@ -2093,10 +2221,10 @@ public final class FrameReconstructor {
 
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = lumaX >> chromaSubsamplingX;
-        int chromaY = lumaY >> chromaSubsamplingY;
-        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
-        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
         int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         int chromaDenominatorX = 4 << chromaSubsamplingX;
@@ -2451,13 +2579,15 @@ public final class FrameReconstructor {
     /// @param header the decoded block header that owns the inter-intra state
     /// @param transformLayout the decoded transform layout for the block
     /// @param pixelFormat the active decoded chroma layout
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private static void applyInterIntraPrediction(
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat
+            AvifPixelFormat pixelFormat,
+            TileSampleBounds tileBounds
     ) {
         InterIntraPredictionMode mode = Objects.requireNonNull(header.interIntraMode(), "header.interIntraMode()");
         int lumaX = header.position().x4() << 2;
@@ -2473,7 +2603,15 @@ public final class FrameReconstructor {
                 visibleLumaWidth,
                 visibleLumaHeight,
                 mode.toLumaPredictionMode(),
-                0
+                0,
+                false,
+                false,
+                -1,
+                -1,
+                tileBounds.lumaStartX(),
+                tileBounds.lumaStartY(),
+                tileBounds.lumaEndX(),
+                tileBounds.lumaEndY()
         );
         blendInterIntraPlane(
                 lumaPlane,
@@ -2494,10 +2632,10 @@ public final class FrameReconstructor {
 
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = lumaX >> chromaSubsamplingX;
-        int chromaY = lumaY >> chromaSubsamplingY;
-        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
-        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
 
         MutablePlaneBuffer chromaUIntraPlane = chromaUPlane.copy();
         IntraPredictor.predictChroma(
@@ -2507,7 +2645,15 @@ public final class FrameReconstructor {
                 visibleChromaWidth,
                 visibleChromaHeight,
                 mode.toUvPredictionMode(),
-                0
+                0,
+                false,
+                false,
+                -1,
+                -1,
+                tileBounds.chromaStartX(),
+                tileBounds.chromaStartY(),
+                tileBounds.chromaEndX(),
+                tileBounds.chromaEndY()
         );
         blendInterIntraPlane(
                 chromaUPlane,
@@ -2530,7 +2676,15 @@ public final class FrameReconstructor {
                 visibleChromaWidth,
                 visibleChromaHeight,
                 mode.toUvPredictionMode(),
-                0
+                0,
+                false,
+                false,
+                -1,
+                -1,
+                tileBounds.chromaStartX(),
+                tileBounds.chromaStartY(),
+                tileBounds.chromaEndX(),
+                tileBounds.chromaEndY()
         );
         blendInterIntraPlane(
                 chromaVPlane,
@@ -2698,10 +2852,10 @@ public final class FrameReconstructor {
 
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = lumaX >> chromaSubsamplingX;
-        int chromaY = lumaY >> chromaSubsamplingY;
-        int visibleChromaWidth = chromaDimension(visibleLumaWidth, chromaSubsamplingX);
-        int visibleChromaHeight = chromaDimension(visibleLumaHeight, chromaSubsamplingY);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
         int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         int chromaDenominatorX = 4 << chromaSubsamplingX;
@@ -3823,13 +3977,9 @@ public final class FrameReconstructor {
     ) {
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = header.position().x4() << (2 - chromaSubsamplingX);
-        int chromaY = header.position().y4() << (2 - chromaSubsamplingY);
-        int fullChromaWidth = chromaSpan4(
-                header.position().x4(),
-                header.size().width4(),
-                chromaSubsamplingX
-        ) << 2;
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int fullChromaWidth = codedChromaBlockWidth(header, chromaSubsamplingX);
         reconstructPalettePlane(
                 chromaUPlane,
                 chromaX,
@@ -3921,18 +4071,6 @@ public final class FrameReconstructor {
         return Math.max(minimum, Math.min(maximum, value));
     }
 
-    /// Returns the covered chroma span in 4x4 units for one luma-aligned block span.
-    ///
-    /// @param start4 the luma start coordinate in 4x4 units
-    /// @param span4 the luma span in 4x4 units
-    /// @param subsampling the chroma subsampling shift for the axis
-    /// @return the covered chroma span in 4x4 units
-    private static int chromaSpan4(int start4, int span4, int subsampling) {
-        int chromaStart = start4 >> subsampling;
-        int chromaEnd = (start4 + span4 + (1 << subsampling) - 1) >> subsampling;
-        return Math.max(1, chromaEnd - chromaStart);
-    }
-
     /// Reconstructs decoded luma residuals into the destination plane.
     ///
     /// @param lumaPlane the mutable luma destination plane
@@ -3959,13 +4097,15 @@ public final class FrameReconstructor {
     /// @param frameHeader the frame header that owns the active quantization state
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private static void reconstructIntraLuma(
             MutablePlaneBuffer lumaPlane,
             ResidualLayout residualLayout,
             TileBlockHeaderReader.BlockHeader header,
             FrameHeader frameHeader,
             boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences
+            boolean smoothEdgeReferences,
+            TileSampleBounds tileBounds
     ) {
         LumaIntraPredictionMode yMode = Objects.requireNonNull(header.yMode(), "header.yMode()");
         LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
@@ -3989,15 +4129,55 @@ public final class FrameReconstructor {
                             predictionX,
                             predictionY,
                             predictionWidth,
-                            predictionHeight
+                            predictionHeight,
+                            tileBounds.lumaEndX()
                     ),
                     availableDirectionalLeftReferenceLength(
                             lumaPlane,
                             predictionX,
                             predictionY,
                             predictionWidth,
-                            predictionHeight
-                    )
+                            predictionHeight,
+                            tileBounds.lumaEndY()
+                    ),
+                    tileBounds.lumaStartX(),
+                    tileBounds.lumaStartY(),
+                    tileBounds.lumaEndX(),
+                    tileBounds.lumaEndY()
+            );
+            reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext);
+        }
+    }
+
+    /// Reconstructs filter-intra luma by predicting and applying residuals per transform unit.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param residualLayout the decoded luma residual layout
+    /// @param header the decoded block header that owns the residuals
+    /// @param frameHeader the frame header that owns the active quantization state
+    /// @param filterIntraMode the decoded filter-intra mode
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
+    private static void reconstructFilterIntraLuma(
+            MutablePlaneBuffer lumaPlane,
+            ResidualLayout residualLayout,
+            TileBlockHeaderReader.BlockHeader header,
+            FrameHeader frameHeader,
+            FilterIntraMode filterIntraMode,
+            TileSampleBounds tileBounds
+    ) {
+        LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
+        for (TransformResidualUnit residualUnit : residualLayout.lumaUnits()) {
+            IntraPredictor.predictFilterIntraLuma(
+                    lumaPlane,
+                    residualUnit.position().x4() << 2,
+                    residualUnit.position().y4() << 2,
+                    residualUnit.size().widthPixels(),
+                    residualUnit.size().heightPixels(),
+                    filterIntraMode,
+                    tileBounds.lumaStartX(),
+                    tileBounds.lumaStartY(),
+                    tileBounds.lumaEndX(),
+                    tileBounds.lumaEndY()
             );
             reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext);
         }
@@ -4078,17 +4258,22 @@ public final class FrameReconstructor {
     /// @param y the plane-local transform Y coordinate
     /// @param width the transform width in plane samples
     /// @param height the transform height in plane samples
+    /// @param rightBoundary the exclusive sample column available to this tile
     /// @return the available top-edge directional reference length
     private static int availableDirectionalTopReferenceLength(
             MutablePlaneBuffer plane,
             int x,
             int y,
             int width,
-            int height
+            int height,
+            int rightBoundary
     ) {
         int availableLength = width;
         int maximumExtraLength = Math.min(width, height);
         for (int extra = 0; extra < maximumExtraLength; extra++) {
+            if (x + width + extra >= rightBoundary) {
+                break;
+            }
             if (!isDirectionalReferenceSampleDecoded(
                     plane,
                     x + width + extra,
@@ -4108,17 +4293,22 @@ public final class FrameReconstructor {
     /// @param y the plane-local transform Y coordinate
     /// @param width the transform width in plane samples
     /// @param height the transform height in plane samples
+    /// @param bottomBoundary the exclusive sample row available to this tile
     /// @return the available left-edge directional reference length
     private static int availableDirectionalLeftReferenceLength(
             MutablePlaneBuffer plane,
             int x,
             int y,
             int width,
-            int height
+            int height,
+            int bottomBoundary
     ) {
         int availableLength = height;
         int maximumExtraLength = Math.min(width, height);
         for (int extra = 0; extra < maximumExtraLength; extra++) {
+            if (y + height + extra >= bottomBoundary) {
+                break;
+            }
             if (!isDirectionalReferenceSampleDecoded(
                     plane,
                     x - 1,
@@ -4155,6 +4345,7 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private static void reconstructIntraChroma(
             MutablePlaneBuffer chromaUPlane,
             MutablePlaneBuffer chromaVPlane,
@@ -4164,7 +4355,8 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
             boolean intraEdgeFilterEnabled,
-            boolean smoothEdgeReferences
+            boolean smoothEdgeReferences,
+            TileSampleBounds tileBounds
     ) {
         UvIntraPredictionMode uvMode = Objects.requireNonNull(header.uvMode(), "header.uvMode()");
         FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
@@ -4186,7 +4378,8 @@ public final class FrameReconstructor {
                         quantization.quantizationMatrixU()
                 ),
                 pixelFormat,
-                chromaUPlane
+                chromaUPlane,
+                tileBounds
         );
         reconstructIntraChromaPlane(
                 chromaVPlane,
@@ -4205,7 +4398,8 @@ public final class FrameReconstructor {
                         quantization.quantizationMatrixV()
                 ),
                 pixelFormat,
-                chromaVPlane
+                chromaVPlane,
+                tileBounds
         );
     }
 
@@ -4221,6 +4415,7 @@ public final class FrameReconstructor {
     /// @param dequantizationContext the plane-local chroma dequantization context
     /// @param pixelFormat the active decoded chroma layout
     /// @param referencePlane the mutable plane whose written samples are tracked
+    /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private static void reconstructIntraChromaPlane(
             MutablePlaneBuffer chromaPlane,
             TransformUnit[] transformUnits,
@@ -4231,7 +4426,8 @@ public final class FrameReconstructor {
             boolean smoothEdgeReferences,
             ChromaDequantizer.Context dequantizationContext,
             AvifPixelFormat pixelFormat,
-            MutablePlaneBuffer referencePlane
+            MutablePlaneBuffer referencePlane,
+            TileSampleBounds tileBounds
     ) {
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
@@ -4256,15 +4452,21 @@ public final class FrameReconstructor {
                             predictionX,
                             predictionY,
                             predictionWidth,
-                            predictionHeight
+                            predictionHeight,
+                            tileBounds.chromaEndX()
                     ),
                     availableDirectionalLeftReferenceLength(
                             referencePlane,
                             predictionX,
                             predictionY,
                             predictionWidth,
-                            predictionHeight
-                    )
+                            predictionHeight,
+                            tileBounds.chromaEndY()
+                    ),
+                    tileBounds.chromaStartX(),
+                    tileBounds.chromaStartY(),
+                    tileBounds.chromaEndX(),
+                    tileBounds.chromaEndY()
             );
             for (int i = 0; i < residualUnits.length; i++) {
                 if (!appliedResiduals[i] && sameTransformUnit(transformUnit, residualUnits[i])) {
@@ -4436,6 +4638,110 @@ public final class FrameReconstructor {
     /// @return the corresponding chroma-plane dimension
     private static int chromaDimension(int lumaDimension, int subsamplingShift) {
         return (lumaDimension + (1 << subsamplingShift) - 1) >> subsamplingShift;
+    }
+
+    /// Returns the luma-grid origin for one chroma block span.
+    ///
+    /// @param position4 the luma-grid coordinate of the syntax block
+    /// @param size4 the luma-grid span of the syntax block
+    /// @param subsamplingShift the chroma subsampling shift for the axis
+    /// @return the luma-grid origin for the shared chroma footprint
+    private static int chromaOrigin4(int position4, int size4, int subsamplingShift) {
+        if (subsamplingShift == 0 || size4 > subsamplingShift) {
+            return position4;
+        }
+        int mask = (1 << subsamplingShift) - 1;
+        return position4 & ~mask;
+    }
+
+    /// Returns the chroma-plane X coordinate for one block.
+    ///
+    /// @param header the decoded block header
+    /// @param subsamplingShift the horizontal chroma subsampling shift
+    /// @return the chroma-plane X coordinate for the shared chroma footprint
+    private static int chromaBlockX(TileBlockHeaderReader.BlockHeader header, int subsamplingShift) {
+        return chromaOrigin4(header.position().x4(), header.size().width4(), subsamplingShift) << (2 - subsamplingShift);
+    }
+
+    /// Returns the chroma-plane Y coordinate for one block.
+    ///
+    /// @param header the decoded block header
+    /// @param subsamplingShift the vertical chroma subsampling shift
+    /// @return the chroma-plane Y coordinate for the shared chroma footprint
+    private static int chromaBlockY(TileBlockHeaderReader.BlockHeader header, int subsamplingShift) {
+        return chromaOrigin4(header.position().y4(), header.size().height4(), subsamplingShift) << (2 - subsamplingShift);
+    }
+
+    /// Returns the luma-plane X coordinate that backs one chroma block.
+    ///
+    /// @param header the decoded block header
+    /// @param subsamplingShift the horizontal chroma subsampling shift
+    /// @return the luma-plane X coordinate for the shared chroma footprint
+    private static int chromaLumaBlockX(TileBlockHeaderReader.BlockHeader header, int subsamplingShift) {
+        return chromaOrigin4(header.position().x4(), header.size().width4(), subsamplingShift) << 2;
+    }
+
+    /// Returns the luma-plane Y coordinate that backs one chroma block.
+    ///
+    /// @param header the decoded block header
+    /// @param subsamplingShift the vertical chroma subsampling shift
+    /// @return the luma-plane Y coordinate for the shared chroma footprint
+    private static int chromaLumaBlockY(TileBlockHeaderReader.BlockHeader header, int subsamplingShift) {
+        return chromaOrigin4(header.position().y4(), header.size().height4(), subsamplingShift) << 2;
+    }
+
+    /// Returns the visible chroma width for one decoded block.
+    ///
+    /// @param header the decoded block header
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param subsamplingShift the horizontal chroma subsampling shift
+    /// @return the visible chroma width for the shared chroma footprint
+    private static int visibleChromaBlockWidth(
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            int subsamplingShift
+    ) {
+        int originX4 = chromaOrigin4(header.position().x4(), header.size().width4(), subsamplingShift);
+        int visibleLumaEndX = (header.position().x4() << 2) + transformLayout.visibleWidthPixels();
+        return chromaDimension(visibleLumaEndX - (originX4 << 2), subsamplingShift);
+    }
+
+    /// Returns the visible chroma height for one decoded block.
+    ///
+    /// @param header the decoded block header
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param subsamplingShift the vertical chroma subsampling shift
+    /// @return the visible chroma height for the shared chroma footprint
+    private static int visibleChromaBlockHeight(
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            int subsamplingShift
+    ) {
+        int originY4 = chromaOrigin4(header.position().y4(), header.size().height4(), subsamplingShift);
+        int visibleLumaEndY = (header.position().y4() << 2) + transformLayout.visibleHeightPixels();
+        return chromaDimension(visibleLumaEndY - (originY4 << 2), subsamplingShift);
+    }
+
+    /// Returns the coded chroma width for one decoded block.
+    ///
+    /// @param header the decoded block header
+    /// @param subsamplingShift the horizontal chroma subsampling shift
+    /// @return the coded chroma width for the shared chroma footprint
+    private static int codedChromaBlockWidth(TileBlockHeaderReader.BlockHeader header, int subsamplingShift) {
+        int originX4 = chromaOrigin4(header.position().x4(), header.size().width4(), subsamplingShift);
+        int codedLumaEndX = (header.position().x4() + header.size().width4()) << 2;
+        return chromaDimension(codedLumaEndX - (originX4 << 2), subsamplingShift);
+    }
+
+    /// Returns the coded chroma height for one decoded block.
+    ///
+    /// @param header the decoded block header
+    /// @param subsamplingShift the vertical chroma subsampling shift
+    /// @return the coded chroma height for the shared chroma footprint
+    private static int codedChromaBlockHeight(TileBlockHeaderReader.BlockHeader header, int subsamplingShift) {
+        int originY4 = chromaOrigin4(header.position().y4(), header.size().height4(), subsamplingShift);
+        int codedLumaEndY = (header.position().y4() + header.size().height4()) << 2;
+        return chromaDimension(codedLumaEndY - (originY4 << 2), subsamplingShift);
     }
 
 }

@@ -2382,17 +2382,28 @@ final class FrameReconstructorTest {
     }
 
     /// Verifies that the current minimal `intrabc` subset also copies chroma samples in the
-    /// current `I420` path when the motion vector stays integer-aligned for both luma and chroma.
+    /// current `I420` path from one chroma-carrying sub-8 footprint to another.
     @Test
     void reconstructsIntrabcI420BlockFromPreviouslyDecodedSamples() {
         BlockSize size = BlockSize.SIZE_4X4;
+        BlockPosition sourcePosition = new BlockPosition(1, 1);
+        BlockPosition intrabcPosition = new BlockPosition(3, 1);
+        MotionVector motionVector = new MotionVector(0, -32);
+        int[][] lumaPaletteIndices = new int[][]{
+                {0, 0, 0, 0},
+                {0, 0, 0, 0},
+                {0, 0, 0, 0},
+                {0, 0, 0, 0}
+        };
         int[][] chromaPaletteIndices = new int[][]{
-                {0, 1, 1, 1},
-                {1, 0, 0, 0}
+                {0, 1, 1, 0},
+                {1, 0, 0, 1},
+                {1, 1, 0, 0},
+                {0, 0, 1, 1}
         };
         TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(
-                        new BlockPosition(0, 0),
+                        sourcePosition,
                         size,
                         true,
                         LumaIntraPredictionMode.DC,
@@ -2400,42 +2411,36 @@ final class FrameReconstructorTest {
                         null,
                         0,
                         0,
-                        new int[0],
+                        new int[]{128},
                         new int[]{40, 180},
                         new int[]{200, 60},
-                        new byte[0],
+                        packPaletteIndices(lumaPaletteIndices),
                         packPaletteIndices(chromaPaletteIndices),
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I420),
-                createResidualLayout(new BlockPosition(0, 0), size, true)
+                createTransformLayout(sourcePosition, size, AvifPixelFormat.I420),
+                createResidualLayout(sourcePosition, size, true)
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
-                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I420),
-                createResidualLayout(new BlockPosition(1, 0), size, true)
+                createIntrabcBlockHeader(intrabcPosition, size, true, motionVector),
+                createTransformLayout(intrabcPosition, size, AvifPixelFormat.I420),
+                createResidualLayout(intrabcPosition, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I420, 16, 8, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
-        assertPlaneBlockFilled(planes.lumaPlane(), 0, 0, 4, 4, 128);
-        assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 4, 128);
-        int[][] expectedChromaU = expandPaletteRaster(new int[]{40, 180}, new int[][]{
-                {0, 1},
-                {1, 0}
-        });
-        int[][] expectedChromaV = expandPaletteRaster(new int[]{200, 60}, new int[][]{
-                {0, 1},
-                {1, 0}
-        });
+        assertPlaneBlockFilled(planes.lumaPlane(), 4, 4, 4, 4, 128);
+        assertPlaneBlockFilled(planes.lumaPlane(), 12, 4, 4, 4, 128);
+        int[][] expectedChromaU = expandPaletteRaster(new int[]{40, 180}, chromaPaletteIndices);
+        int[][] expectedChromaV = expandPaletteRaster(new int[]{200, 60}, chromaPaletteIndices);
         assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 0, 0, expectedChromaU);
-        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 2, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 4, 0, expectedChromaU);
         assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 0, 0, expectedChromaV);
-        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 2, 0, expectedChromaV);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 4, 0, expectedChromaV);
     }
 
     /// Verifies that the current minimal `intrabc` subset also copies full-resolution chroma
@@ -2492,10 +2497,19 @@ final class FrameReconstructorTest {
     }
 
     /// Verifies that the current minimal `intrabc` subset also copies half-width full-height
-    /// chroma samples in the current `I422` path when the motion vector stays integer-aligned.
+    /// chroma samples in the current `I422` path from one chroma-carrying sub-8 footprint to another.
     @Test
     void reconstructsIntrabcI422BlockFromPreviouslyDecodedSamples() {
         BlockSize size = BlockSize.SIZE_4X4;
+        BlockPosition sourcePosition = new BlockPosition(1, 0);
+        BlockPosition intrabcPosition = new BlockPosition(3, 0);
+        MotionVector motionVector = new MotionVector(0, -32);
+        int[][] lumaPaletteIndices = new int[][]{
+                {0, 0, 0, 0},
+                {0, 0, 0, 0},
+                {0, 0, 0, 0},
+                {0, 0, 0, 0}
+        };
         int[][] chromaPaletteIndices = new int[][]{
                 {0, 1, 1, 1},
                 {1, 0, 0, 0},
@@ -2504,7 +2518,7 @@ final class FrameReconstructorTest {
         };
         TilePartitionTreeReader.LeafNode sourceLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(
-                        new BlockPosition(0, 0),
+                        sourcePosition,
                         size,
                         true,
                         LumaIntraPredictionMode.DC,
@@ -2512,46 +2526,36 @@ final class FrameReconstructorTest {
                         null,
                         0,
                         0,
-                        new int[0],
+                        new int[]{128},
                         new int[]{36, 180},
                         new int[]{208, 72},
-                        new byte[0],
+                        packPaletteIndices(lumaPaletteIndices),
                         packPaletteIndices(chromaPaletteIndices),
                         0,
                         0
                 ),
-                createTransformLayout(new BlockPosition(0, 0), size, AvifPixelFormat.I422),
-                createResidualLayout(new BlockPosition(0, 0), size, true)
+                createTransformLayout(sourcePosition, size, AvifPixelFormat.I422),
+                createResidualLayout(sourcePosition, size, true)
         );
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
-                createIntrabcBlockHeader(new BlockPosition(1, 0), size, true, new MotionVector(0, -16)),
-                createTransformLayout(new BlockPosition(1, 0), size, AvifPixelFormat.I422),
-                createResidualLayout(new BlockPosition(1, 0), size, true)
+                createIntrabcBlockHeader(intrabcPosition, size, true, motionVector),
+                createTransformLayout(intrabcPosition, size, AvifPixelFormat.I422),
+                createResidualLayout(intrabcPosition, size, true)
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I422, 8, 4, 0, sourceLeaf, intrabcLeaf),
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I422, 16, 4, 0, sourceLeaf, intrabcLeaf),
                 new ReferenceSurfaceSnapshot[0]
         );
 
-        assertPlaneBlockFilled(planes.lumaPlane(), 0, 0, 4, 4, 128);
         assertPlaneBlockFilled(planes.lumaPlane(), 4, 0, 4, 4, 128);
-        int[][] expectedChromaU = expandPaletteRaster(new int[]{36, 180}, new int[][]{
-                {0, 1},
-                {1, 0},
-                {0, 0},
-                {1, 1}
-        });
-        int[][] expectedChromaV = expandPaletteRaster(new int[]{208, 72}, new int[][]{
-                {0, 1},
-                {1, 0},
-                {0, 0},
-                {1, 1}
-        });
+        assertPlaneBlockFilled(planes.lumaPlane(), 12, 0, 4, 4, 128);
+        int[][] expectedChromaU = expandPaletteRaster(new int[]{36, 180}, chromaPaletteIndices);
+        int[][] expectedChromaV = expandPaletteRaster(new int[]{208, 72}, chromaPaletteIndices);
         assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 0, 0, expectedChromaU);
-        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 2, 0, expectedChromaU);
+        assertPlaneBlockEquals(requirePlane(planes.chromaUPlane()), 4, 0, expectedChromaU);
         assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 0, 0, expectedChromaV);
-        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 2, 0, expectedChromaV);
+        assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 4, 0, expectedChromaV);
     }
 
     /// Verifies that the current `intrabc` subset now bilinearly samples previously reconstructed

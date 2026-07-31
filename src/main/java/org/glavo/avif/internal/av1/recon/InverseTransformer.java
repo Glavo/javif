@@ -699,9 +699,9 @@ final class InverseTransformer {
     /// @param length the vector length in samples
     private static void inverseDct(int[] input, int[] output, int length) {
         switch (length) {
-            case 4 -> inverseDct4(input, output);
-            case 8 -> inverseDct8(input, output);
-            case 16 -> inverseDct16(input, output);
+            case 4 -> inverseDct4Dav1d(input, output);
+            case 8 -> inverseDct8Dav1d(input, output);
+            case 16 -> inverseDct16Dav1d(input, output);
             case 32 -> inverseDct32Dav1d(input, output);
             case 64 -> inverseDct64Aom(input, output);
             default -> throw new IllegalStateException("Unsupported inverse DCT length: " + length);
@@ -1248,7 +1248,7 @@ final class InverseTransformer {
         for (int i = 0; i < 16; i++) {
             evenInput[i] = input[i << 1];
         }
-        inverseDct16(evenInput, evenOutput);
+        inverseDct16Dav1d(evenInput, evenOutput);
 
         int in1 = input[1];
         int in3 = input[3];
@@ -1394,6 +1394,146 @@ final class InverseTransformer {
         output[29] = clip((long) evenOutput[2] - t29);
         output[30] = clip((long) evenOutput[1] - t30a);
         output[31] = clip((long) evenOutput[0] - t31);
+    }
+
+    /// Reconstructs one non-`tx64` one-dimensional `DCT_4` vector using the scalar `dav1d`
+    /// schedule.
+    ///
+    /// @param input the dequantized `DCT_4` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseDct4Dav1d(int[] input, int[] output) {
+        int in0 = input[0];
+        int in1 = input[1];
+        int in2 = input[2];
+        int in3 = input[3];
+
+        int t0 = positiveRoundShift((long) (in0 + in2) * 181, 8);
+        int t1 = positiveRoundShift((long) (in0 - in2) * 181, 8);
+        int t2 = positiveRoundShift((long) in1 * 1567 - (long) in3 * (3784 - 4096), 12) - in3;
+        int t3 = positiveRoundShift((long) in1 * (3784 - 4096) + (long) in3 * 1567, 12) + in1;
+
+        output[0] = clip((long) t0 + t3);
+        output[1] = clip((long) t1 + t2);
+        output[2] = clip((long) t1 - t2);
+        output[3] = clip((long) t0 - t3);
+    }
+
+    /// Reconstructs one non-`tx64` one-dimensional `DCT_8` vector using the scalar `dav1d`
+    /// schedule.
+    ///
+    /// @param input the dequantized `DCT_8` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseDct8Dav1d(int[] input, int[] output) {
+        int[] evenInput = new int[4];
+        int[] evenOutput = new int[4];
+        for (int i = 0; i < 4; i++) {
+            evenInput[i] = input[i << 1];
+        }
+        inverseDct4Dav1d(evenInput, evenOutput);
+
+        int in1 = input[1];
+        int in3 = input[3];
+        int in5 = input[5];
+        int in7 = input[7];
+
+        int t4a = positiveRoundShift((long) in1 * 799 - (long) in7 * (4017 - 4096), 12) - in7;
+        int t5a = positiveRoundShift((long) in5 * 1703 - (long) in3 * 1138, 11);
+        int t6a = positiveRoundShift((long) in5 * 1138 + (long) in3 * 1703, 11);
+        int t7a = positiveRoundShift((long) in1 * (4017 - 4096) + (long) in7 * 799, 12) + in1;
+
+        int t4 = clip((long) t4a + t5a);
+        t5a = clip((long) t4a - t5a);
+        int t7 = clip((long) t7a + t6a);
+        t6a = clip((long) t7a - t6a);
+
+        int t5 = positiveRoundShift((long) (t6a - t5a) * 181, 8);
+        int t6 = positiveRoundShift((long) (t6a + t5a) * 181, 8);
+
+        output[0] = clip((long) evenOutput[0] + t7);
+        output[1] = clip((long) evenOutput[1] + t6);
+        output[2] = clip((long) evenOutput[2] + t5);
+        output[3] = clip((long) evenOutput[3] + t4);
+        output[4] = clip((long) evenOutput[3] - t4);
+        output[5] = clip((long) evenOutput[2] - t5);
+        output[6] = clip((long) evenOutput[1] - t6);
+        output[7] = clip((long) evenOutput[0] - t7);
+    }
+
+    /// Reconstructs one non-`tx64` one-dimensional `DCT_16` vector using the scalar `dav1d`
+    /// schedule.
+    ///
+    /// @param input the dequantized `DCT_16` input vector
+    /// @param output the reconstructed output vector
+    private static void inverseDct16Dav1d(int[] input, int[] output) {
+        int[] evenInput = new int[8];
+        int[] evenOutput = new int[8];
+        for (int i = 0; i < 8; i++) {
+            evenInput[i] = input[i << 1];
+        }
+        inverseDct8Dav1d(evenInput, evenOutput);
+
+        int in1 = input[1];
+        int in3 = input[3];
+        int in5 = input[5];
+        int in7 = input[7];
+        int in9 = input[9];
+        int in11 = input[11];
+        int in13 = input[13];
+        int in15 = input[15];
+
+        int t8a = positiveRoundShift((long) in1 * 401 - (long) in15 * (4076 - 4096), 12) - in15;
+        int t9a = positiveRoundShift((long) in9 * 1583 - (long) in7 * 1299, 11);
+        int t10a = positiveRoundShift((long) in5 * 1931 - (long) in11 * (3612 - 4096), 12) - in11;
+        int t11a = positiveRoundShift((long) in13 * (3920 - 4096) - (long) in3 * 1189, 12) + in13;
+        int t12a = positiveRoundShift((long) in13 * 1189 + (long) in3 * (3920 - 4096), 12) + in3;
+        int t13a = positiveRoundShift((long) in5 * (3612 - 4096) + (long) in11 * 1931, 12) + in5;
+        int t14a = positiveRoundShift((long) in9 * 1299 + (long) in7 * 1583, 11);
+        int t15a = positiveRoundShift((long) in1 * (4076 - 4096) + (long) in15 * 401, 12) + in1;
+
+        int t8 = clip((long) t8a + t9a);
+        int t9 = clip((long) t8a - t9a);
+        int t10 = clip((long) t11a - t10a);
+        int t11 = clip((long) t11a + t10a);
+        int t12 = clip((long) t12a + t13a);
+        int t13 = clip((long) t12a - t13a);
+        int t14 = clip((long) t15a - t14a);
+        int t15 = clip((long) t15a + t14a);
+
+        t9a = positiveRoundShift((long) t14 * 1567 - (long) t9 * (3784 - 4096), 12) - t9;
+        t14a = positiveRoundShift((long) t14 * (3784 - 4096) + (long) t9 * 1567, 12) + t14;
+        t10a = positiveRoundShift(-((long) t13 * (3784 - 4096) + (long) t10 * 1567), 12) - t13;
+        t13a = positiveRoundShift((long) t13 * 1567 - (long) t10 * (3784 - 4096), 12) - t10;
+
+        t8a = clip((long) t8 + t11);
+        t9 = clip((long) t9a + t10a);
+        t10 = clip((long) t9a - t10a);
+        int t11b = clip((long) t8 - t11);
+        int t12b = clip((long) t15 - t12);
+        t13 = clip((long) t14a - t13a);
+        t14 = clip((long) t14a + t13a);
+        int t15b = clip((long) t15 + t12);
+
+        t10a = positiveRoundShift((long) (t13 - t10) * 181, 8);
+        t13a = positiveRoundShift((long) (t13 + t10) * 181, 8);
+        t11 = positiveRoundShift((long) (t12b - t11b) * 181, 8);
+        t12 = positiveRoundShift((long) (t12b + t11b) * 181, 8);
+
+        output[0] = clip((long) evenOutput[0] + t15b);
+        output[1] = clip((long) evenOutput[1] + t14);
+        output[2] = clip((long) evenOutput[2] + t13a);
+        output[3] = clip((long) evenOutput[3] + t12);
+        output[4] = clip((long) evenOutput[4] + t11);
+        output[5] = clip((long) evenOutput[5] + t10a);
+        output[6] = clip((long) evenOutput[6] + t9);
+        output[7] = clip((long) evenOutput[7] + t8a);
+        output[8] = clip((long) evenOutput[7] - t8a);
+        output[9] = clip((long) evenOutput[6] - t9);
+        output[10] = clip((long) evenOutput[5] - t10a);
+        output[11] = clip((long) evenOutput[4] - t11);
+        output[12] = clip((long) evenOutput[3] - t12);
+        output[13] = clip((long) evenOutput[2] - t13a);
+        output[14] = clip((long) evenOutput[1] - t14);
+        output[15] = clip((long) evenOutput[0] - t15b);
     }
 
     /// Reconstructs one one-dimensional `DCT_64` vector using the scalar `dav1d` `tx64` schedule.

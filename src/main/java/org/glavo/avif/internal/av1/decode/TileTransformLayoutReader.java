@@ -88,6 +88,7 @@ public final class TileTransformLayoutReader {
         TransformUnit[] chromaUnits = chromaTransformSize != null
                 ? tileChromaUnits(
                         position,
+                        size,
                         visibleWidthPixels,
                         visibleHeightPixels,
                         chromaTransformSize,
@@ -342,6 +343,7 @@ public final class TileTransformLayoutReader {
     /// coordinate space so downstream contexts and reconstruction can keep using one position type.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
+    /// @param blockSize the coded block size that owns the chroma units
     /// @param visibleWidthPixels the exact visible luma width in pixels
     /// @param visibleHeightPixels the exact visible luma height in pixels
     /// @param transformSize the repeated chroma transform size
@@ -349,27 +351,52 @@ public final class TileTransformLayoutReader {
     /// @return the repeated chroma transform units covering the visible chroma span
     private static TransformUnit[] tileChromaUnits(
             BlockPosition position,
+            BlockSize blockSize,
             int visibleWidthPixels,
             int visibleHeightPixels,
             TransformSize transformSize,
             AvifPixelFormat pixelFormat
     ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         int subsamplingX = chromaSubsamplingX(pixelFormat);
         int subsamplingY = chromaSubsamplingY(pixelFormat);
-        int visibleChromaWidthPixels = chromaDimension(visibleWidthPixels, subsamplingX);
-        int visibleChromaHeightPixels = chromaDimension(visibleHeightPixels, subsamplingY);
+        int originX4 = chromaOrigin4(nonNullPosition.x4(), nonNullBlockSize.width4(), subsamplingX);
+        int originY4 = chromaOrigin4(nonNullPosition.y4(), nonNullBlockSize.height4(), subsamplingY);
+        BlockPosition chromaOrigin = new BlockPosition(originX4, originY4);
+        int visibleChromaWidthPixels = chromaDimension(
+                ((nonNullPosition.x4() << 2) + visibleWidthPixels) - (originX4 << 2),
+                subsamplingX
+        );
+        int visibleChromaHeightPixels = chromaDimension(
+                ((nonNullPosition.y4() << 2) + visibleHeightPixels) - (originY4 << 2),
+                subsamplingY
+        );
         List<TransformUnit> units = new ArrayList<>();
         for (int y = 0; y < visibleChromaHeightPixels; y += nonNullTransformSize.heightPixels()) {
             for (int x = 0; x < visibleChromaWidthPixels; x += nonNullTransformSize.widthPixels()) {
                 units.add(new TransformUnit(
-                        nonNullPosition.offset((x >> 2) << subsamplingX, (y >> 2) << subsamplingY),
+                        chromaOrigin.offset((x >> 2) << subsamplingX, (y >> 2) << subsamplingY),
                         nonNullTransformSize
                 ));
             }
         }
         return units.toArray(new TransformUnit[0]);
+    }
+
+    /// Returns the luma-grid origin for one chroma block span.
+    ///
+    /// @param position4 the luma-grid coordinate of the syntax block
+    /// @param size4 the luma-grid span of the syntax block
+    /// @param subsamplingShift the chroma subsampling shift for the axis
+    /// @return the luma-grid origin for the shared chroma footprint
+    private static int chromaOrigin4(int position4, int size4, int subsamplingShift) {
+        if (subsamplingShift == 0 || size4 > subsamplingShift) {
+            return position4;
+        }
+        int mask = (1 << subsamplingShift) - 1;
+        return position4 & ~mask;
     }
 
     /// Returns the chroma-plane dimension corresponding to one visible luma span.

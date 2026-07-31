@@ -21,6 +21,7 @@ import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -48,6 +49,103 @@ final class IntraPredictorTest {
                         {25, 25}
                 }
         );
+    }
+
+    /// Verifies that DC prediction does not read a left neighbor across a tile boundary.
+    @Test
+    void dcPredictionTreatsTileLeftBoundaryAsUnavailable() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(6, 4, 8);
+        plane.setSample(1, 1, 5);
+        plane.setSample(2, 0, 50);
+        plane.setSample(3, 0, 70);
+
+        IntraPredictor.predictLuma(
+                plane,
+                2,
+                1,
+                2,
+                2,
+                LumaIntraPredictionMode.DC,
+                0,
+                false,
+                false,
+                -1,
+                -1,
+                2,
+                0,
+                6,
+                4
+        );
+
+        assertBlockEquals(
+                plane,
+                2,
+                1,
+                new int[][]{
+                        {60, 60},
+                        {60, 60}
+                }
+        );
+    }
+
+    /// Verifies that DC prediction does not read a top neighbor across a tile boundary.
+    @Test
+    void dcPredictionTreatsTileTopBoundaryAsUnavailable() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 6, 8);
+        plane.setSample(1, 1, 5);
+        plane.setSample(0, 2, 80);
+        plane.setSample(0, 3, 100);
+
+        IntraPredictor.predictLuma(
+                plane,
+                1,
+                2,
+                2,
+                2,
+                LumaIntraPredictionMode.DC,
+                0,
+                false,
+                false,
+                -1,
+                -1,
+                0,
+                2,
+                4,
+                6
+        );
+
+        assertBlockEquals(
+                plane,
+                1,
+                2,
+                new int[][]{
+                        {90, 90},
+                        {90, 90}
+                }
+        );
+    }
+
+    /// Verifies that filter-intra recursion edge-extends references for clipped right-edge blocks.
+    @Test
+    void filterIntraPredictionClampsRecursiveReferencesAtRightEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(6, 4, 8);
+        plane.setSample(2, 0, 64);
+        plane.setSample(3, 0, 96);
+        plane.setSample(4, 0, 128);
+        plane.setSample(5, 0, 160);
+
+        assertDoesNotThrow(() -> IntraPredictor.predictFilterIntraLuma(
+                plane,
+                3,
+                1,
+                5,
+                2,
+                FilterIntraMode.VERTICAL,
+                0,
+                0,
+                6,
+                4
+        ));
     }
 
     /// Verifies that vertical prediction copies the top edge into every output row.

@@ -705,8 +705,16 @@ public final class TileResidualSyntaxReader {
         TransformLayout nonNullTransformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
         TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
         int shift = chromaSubsamplingX();
-        int visibleBlockWidthPixels = (nonNullTransformLayout.visibleWidthPixels() + (1 << shift) - 1) >> shift;
-        int relativeLumaX = (nonNullTransformUnit.position().x4() - nonNullTransformLayout.position().x4()) << 2;
+        int originX4 = chromaOrigin4(
+                nonNullTransformLayout.position().x4(),
+                nonNullTransformLayout.blockSize().width4(),
+                shift
+        );
+        int visibleBlockWidthPixels = chromaDimension(
+                ((nonNullTransformLayout.position().x4() << 2) + nonNullTransformLayout.visibleWidthPixels()) - (originX4 << 2),
+                shift
+        );
+        int relativeLumaX = (nonNullTransformUnit.position().x4() - originX4) << 2;
         int relativeChromaX = relativeLumaX >> shift;
         return Math.min(
                 nonNullTransformUnit.size().widthPixels(),
@@ -723,13 +731,44 @@ public final class TileResidualSyntaxReader {
         TransformLayout nonNullTransformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
         TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
         int shift = chromaSubsamplingY();
-        int visibleBlockHeightPixels = (nonNullTransformLayout.visibleHeightPixels() + (1 << shift) - 1) >> shift;
-        int relativeLumaY = (nonNullTransformUnit.position().y4() - nonNullTransformLayout.position().y4()) << 2;
+        int originY4 = chromaOrigin4(
+                nonNullTransformLayout.position().y4(),
+                nonNullTransformLayout.blockSize().height4(),
+                shift
+        );
+        int visibleBlockHeightPixels = chromaDimension(
+                ((nonNullTransformLayout.position().y4() << 2) + nonNullTransformLayout.visibleHeightPixels()) - (originY4 << 2),
+                shift
+        );
+        int relativeLumaY = (nonNullTransformUnit.position().y4() - originY4) << 2;
         int relativeChromaY = relativeLumaY >> shift;
         return Math.min(
                 nonNullTransformUnit.size().heightPixels(),
                 Math.max(0, visibleBlockHeightPixels - relativeChromaY)
         );
+    }
+
+    /// Returns the luma-grid origin for one chroma block span.
+    ///
+    /// @param position4 the luma-grid coordinate of the syntax block
+    /// @param size4 the luma-grid span of the syntax block
+    /// @param subsamplingShift the chroma subsampling shift for the axis
+    /// @return the luma-grid origin for the shared chroma footprint
+    private static int chromaOrigin4(int position4, int size4, int subsamplingShift) {
+        if (subsamplingShift == 0 || size4 > subsamplingShift) {
+            return position4;
+        }
+        int mask = (1 << subsamplingShift) - 1;
+        return position4 & ~mask;
+    }
+
+    /// Returns the chroma-plane dimension corresponding to one visible luma span.
+    ///
+    /// @param lumaDimension the visible luma span in pixels
+    /// @param subsamplingShift the chroma subsampling shift for the axis
+    /// @return the corresponding chroma-plane dimension
+    private static int chromaDimension(int lumaDimension, int subsamplingShift) {
+        return (lumaDimension + (1 << subsamplingShift) - 1) >> subsamplingShift;
     }
 
     /// Selects the luma transform type for one non-skipped luma residual unit.
