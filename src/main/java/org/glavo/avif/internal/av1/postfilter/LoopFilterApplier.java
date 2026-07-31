@@ -152,8 +152,8 @@ public final class LoopFilterApplier {
     ) {
         int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(pixelFormat);
         int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(pixelFormat);
-        int rowStep = planeIndex == 0 ? Math.max(1, 1 << subY) : 1;
-        int colStep = planeIndex == 0 ? Math.max(1, 1 << subX) : 1;
+        int rowStep = Math.max(1, 1 << subY);
+        int colStep = Math.max(1, 1 << subX);
         if (pass == 0) {
             for (int row4 = 0; row4 < blockMap.height4(); row4 += rowStep) {
                 for (int col4 = colStep; col4 < blockMap.width4(); col4 += colStep) {
@@ -193,14 +193,14 @@ public final class LoopFilterApplier {
     ) {
         int prevCol4 = col4 - (pass == 0 ? Math.max(1, 1 << subX) : 0);
         int prevRow4 = row4 - (pass == 1 ? Math.max(1, 1 << subY) : 0);
-        @Nullable LoopFilterCell current = blockMap.cellAt(col4, row4);
-        @Nullable LoopFilterCell previous = blockMap.cellAt(prevCol4, prevRow4);
+        @Nullable LoopFilterCell current = blockMap.cellAt(col4, row4, planeIndex);
+        @Nullable LoopFilterCell previous = blockMap.cellAt(prevCol4, prevRow4, planeIndex);
         if (current == null || previous == null) {
             return;
         }
 
         boolean blockEdge = current.header() != previous.header();
-        boolean transformEdge = current.transformCell(planeIndex).unit() != previous.transformCell(planeIndex).unit();
+        boolean transformEdge = current.transformCell().unit() != previous.transformCell().unit();
         if (!blockEdge && !transformEdge) {
             return;
         }
@@ -220,8 +220,8 @@ public final class LoopFilterApplier {
         int dx = pass == 0 ? 1 : 0;
         int dy = pass == 0 ? 0 : 1;
         int filterSize = filterSize(
-                current.transformCell(planeIndex).size(),
-                previous.transformCell(planeIndex).size(),
+                current.transformCell().size(),
+                previous.transformCell().size(),
                 planeIndex,
                 pass
         );
@@ -234,7 +234,7 @@ public final class LoopFilterApplier {
             return;
         }
 
-        int samples = Math.min(MI_SIZE >> (pass == 0 ? subY : subX), pass == 0 ? plane.height() - y : plane.width() - x);
+        int samples = Math.min(MI_SIZE, pass == 0 ? plane.height() - y : plane.width() - x);
         for (int i = 0; i < samples; i++) {
             int sampleX = x + (pass == 0 ? 0 : i);
             int sampleY = y + (pass == 0 ? i : 0);
@@ -260,74 +260,19 @@ public final class LoopFilterApplier {
             int filterSize,
             FilterStrength strength
     ) {
-        int boundedFilterSize = boundedFilterSize(plane, x, y, dx, dy, filterSize);
-        if (boundedFilterSize < 4) {
-            return;
-        }
-        FilterMask mask = filterMask(plane, x, y, dx, dy, boundedFilterSize, strength);
+        FilterMask mask = filterMask(plane, x, y, dx, dy, filterSize, strength);
         if (!mask.filter()) {
             return;
         }
-        if (boundedFilterSize == 4 || !mask.flat()) {
+        if (filterSize == 4 || !mask.flat()) {
             narrowFilter(plane, x, y, dx, dy, mask.highEdgeVariance());
-        } else if (boundedFilterSize == 6) {
+        } else if (filterSize == 6) {
             wideFilterSix(plane, x, y, dx, dy);
-        } else if (boundedFilterSize == 8 || !mask.flat2()) {
+        } else if (filterSize == 8 || !mask.flat2()) {
             wideFilterEight(plane, x, y, dx, dy);
         } else {
             wideFilterSixteen(plane, x, y, dx, dy);
         }
-    }
-
-    /// Returns a filter size that has all samples required around one boundary.
-    ///
-    /// @param plane the mutable plane buffer
-    /// @param x the first sample on the right or lower side of the boundary
-    /// @param y the first sample on the right or lower side of the boundary
-    /// @param dx the horizontal offset across the boundary
-    /// @param dy the vertical offset across the boundary
-    /// @param requestedFilterSize the requested maximum filter size
-    /// @return a filter size that has all samples required around one boundary
-    private static int boundedFilterSize(PlaneBuffer plane, int x, int y, int dx, int dy, int requestedFilterSize) {
-        int size = requestedFilterSize;
-        while (size >= 4) {
-            int required = switch (size) {
-                case 16 -> 7;
-                case 8 -> 4;
-                case 6 -> 3;
-                default -> 2;
-            };
-            if (hasSamplesAroundEdge(plane, x, y, dx, dy, required)) {
-                return size;
-            }
-            size = switch (size) {
-                case 16 -> 8;
-                case 8, 6 -> 4;
-                default -> 0;
-            };
-        }
-        return 0;
-    }
-
-    /// Returns whether all samples required by one filter are inside the plane.
-    ///
-    /// @param plane the mutable plane buffer
-    /// @param x the first sample on the right or lower side of the boundary
-    /// @param y the first sample on the right or lower side of the boundary
-    /// @param dx the horizontal offset across the boundary
-    /// @param dy the vertical offset across the boundary
-    /// @param requiredSamples the number of samples required on each side of the edge
-    /// @return whether all samples required by one filter are inside the plane
-    private static boolean hasSamplesAroundEdge(
-            PlaneBuffer plane,
-            int x,
-            int y,
-            int dx,
-            int dy,
-            int requiredSamples
-    ) {
-        return plane.contains(x - dx * requiredSamples, y - dy * requiredSamples)
-                && plane.contains(x + dx * (requiredSamples - 1), y + dy * (requiredSamples - 1));
     }
 
     /// Computes the filter masks for one boundary sample.
@@ -679,7 +624,7 @@ public final class LoopFilterApplier {
     /// @param offset the signed boundary-relative sample offset
     /// @return one sample at a boundary-relative offset
     private static int sampleRelative(PlaneBuffer plane, int x, int y, int dx, int dy, int offset) {
-        return plane.sample(x + dx * offset, y + dy * offset);
+        return plane.sampleClamped(x + dx * offset, y + dy * offset);
     }
 
     /// Stores one sample at a boundary-relative offset.
@@ -692,7 +637,11 @@ public final class LoopFilterApplier {
     /// @param offset the signed boundary-relative sample offset
     /// @param value the replacement sample value
     private static void setSampleRelative(PlaneBuffer plane, int x, int y, int dx, int dy, int offset, int value) {
-        plane.setSample(x + dx * offset, y + dy * offset, value);
+        int sampleX = x + dx * offset;
+        int sampleY = y + dy * offset;
+        if (plane.contains(sampleX, sampleY)) {
+            plane.setSample(sampleX, sampleY, value);
+        }
     }
 
     /// Returns the chroma horizontal subsampling shift for one pixel format.
@@ -827,6 +776,15 @@ public final class LoopFilterApplier {
             return samples[y * width + x] & 0xFFFF;
         }
 
+        /// Returns one sample after extending the nearest frame-edge sample beyond the plane.
+        ///
+        /// @param x the sample X coordinate, which may be outside the plane
+        /// @param y the sample Y coordinate, which may be outside the plane
+        /// @return the nearest in-plane sample
+        public int sampleClamped(int x, int y) {
+            return sample(clamp(x, 0, width - 1), clamp(y, 0, height - 1));
+        }
+
         /// Stores one sample after clipping it to this plane bit depth.
         ///
         /// @param x the sample X coordinate
@@ -853,17 +811,31 @@ public final class LoopFilterApplier {
         /// The frame height rounded up to 4x4 units.
         private final int height4;
 
-        /// The per-4x4 decoded block and transform cells.
-        private final @Nullable LoopFilterCell[] cells;
+        /// The per-4x4 decoded luma block and transform cells.
+        private final @Nullable LoopFilterCell[] lumaCells;
+
+        /// The per-4x4 decoded chroma-reference block and transform cells.
+        private final @Nullable LoopFilterCell[] chromaCells;
+
+        /// The chroma horizontal subsampling shift.
+        private final int chromaSubsamplingX;
+
+        /// The chroma vertical subsampling shift.
+        private final int chromaSubsamplingY;
 
         /// Creates one decoded block and transform lookup map.
         ///
         /// @param width4 the frame width rounded up to 4x4 units
         /// @param height4 the frame height rounded up to 4x4 units
-        private LoopFilterBlockMap(int width4, int height4) {
+        /// @param chromaSubsamplingX the chroma horizontal subsampling shift
+        /// @param chromaSubsamplingY the chroma vertical subsampling shift
+        private LoopFilterBlockMap(int width4, int height4, int chromaSubsamplingX, int chromaSubsamplingY) {
             this.width4 = width4;
             this.height4 = height4;
-            this.cells = new LoopFilterCell[width4 * height4];
+            this.lumaCells = new LoopFilterCell[width4 * height4];
+            this.chromaCells = new LoopFilterCell[width4 * height4];
+            this.chromaSubsamplingX = chromaSubsamplingX;
+            this.chromaSubsamplingY = chromaSubsamplingY;
         }
 
         /// Creates one decoded block and transform lookup map.
@@ -877,7 +849,9 @@ public final class LoopFilterApplier {
         ) {
             LoopFilterBlockMap map = new LoopFilterBlockMap(
                     (decodedPlanes.codedWidth() + MI_SIZE - 1) / MI_SIZE,
-                    (decodedPlanes.codedHeight() + MI_SIZE - 1) / MI_SIZE
+                    (decodedPlanes.codedHeight() + MI_SIZE - 1) / MI_SIZE,
+                    chromaSubsamplingX(decodedPlanes.pixelFormat()),
+                    chromaSubsamplingY(decodedPlanes.pixelFormat())
             );
             TilePartitionTreeReader.Node[][] frameLocalTileRoots = FrameLocalPartitionTrees.create(
                     syntaxDecodeResult.assembly(),
@@ -905,16 +879,17 @@ public final class LoopFilterApplier {
             return height4;
         }
 
-        /// Returns the cell at one luma 4x4 coordinate.
+        /// Returns the plane-specific cell at one luma 4x4 coordinate.
         ///
         /// @param x4 the luma 4x4 X coordinate
         /// @param y4 the luma 4x4 Y coordinate
-        /// @return the cell at one luma 4x4 coordinate, or `null`
-        public @Nullable LoopFilterCell cellAt(int x4, int y4) {
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @return the plane-specific cell at one luma 4x4 coordinate, or `null`
+        public @Nullable LoopFilterCell cellAt(int x4, int y4, int planeIndex) {
             if (x4 < 0 || y4 < 0 || x4 >= width4 || y4 >= height4) {
                 return null;
             }
-            return cells[y4 * width4 + x4];
+            return (planeIndex == 0 ? lumaCells : chromaCells)[y4 * width4 + x4];
         }
 
         /// Adds one partition node and all descendant leaves to this map.
@@ -940,7 +915,7 @@ public final class LoopFilterApplier {
             int startY4 = Math.max(0, header.position().y4());
             int endX4 = Math.min(width4, startX4 + leafNode.transformLayout().visibleWidth4());
             int endY4 = Math.min(height4, startY4 + leafNode.transformLayout().visibleHeight4());
-            TransformCell[] lumaCells = transformCells(
+            TransformCell[] lumaTransformCells = transformCells(
                     startX4,
                     startY4,
                     endX4,
@@ -948,24 +923,47 @@ public final class LoopFilterApplier {
                     leafNode.transformLayout().lumaUnits(),
                     leafNode.transformLayout().maxLumaTransformSize()
             );
-            TransformCell[] chromaCells = transformCells(
-                    startX4,
-                    startY4,
-                    endX4,
-                    endY4,
-                    leafNode.transformLayout().chromaUnits(),
-                    leafNode.transformLayout().chromaTransformSize() != null
-                            ? leafNode.transformLayout().chromaTransformSize()
-                            : leafNode.transformLayout().maxLumaTransformSize()
-            );
             for (int y4 = startY4; y4 < endY4; y4++) {
                 for (int x4 = startX4; x4 < endX4; x4++) {
                     int localIndex = (y4 - startY4) * (endX4 - startX4) + (x4 - startX4);
-                    cells[y4 * width4 + x4] = new LoopFilterCell(
+                    lumaCells[y4 * width4 + x4] = new LoopFilterCell(
                             header,
-                            lumaCells[localIndex],
-                            chromaCells[localIndex]
+                            lumaTransformCells[localIndex]
                     );
+                }
+            }
+            if (header.hasChroma()) {
+                for (TransformUnit chromaUnit : leafNode.transformLayout().chromaUnits()) {
+                    fillChromaCells(header, chromaUnit);
+                }
+            }
+        }
+
+        /// Fills the luma-grid coverage of one decoded chroma transform unit.
+        ///
+        /// @param header the chroma-reference block header that owns the transform unit
+        /// @param transformUnit the decoded chroma transform unit
+        private void fillChromaCells(
+                TileBlockHeaderReader.BlockHeader header,
+                TransformUnit transformUnit
+        ) {
+            int unitStartX4 = Math.max(0, transformUnit.position().x4());
+            int unitStartY4 = Math.max(0, transformUnit.position().y4());
+            int unitEndX4 = Math.min(
+                    width4,
+                    transformUnit.position().x4() + (transformUnit.size().width4() << chromaSubsamplingX)
+            );
+            int unitEndY4 = Math.min(
+                    height4,
+                    transformUnit.position().y4() + (transformUnit.size().height4() << chromaSubsamplingY)
+            );
+            LoopFilterCell cell = new LoopFilterCell(
+                    Objects.requireNonNull(header, "header"),
+                    new TransformCell(transformUnit, transformUnit.size())
+            );
+            for (int y4 = unitStartY4; y4 < unitEndY4; y4++) {
+                for (int x4 = unitStartX4; x4 < unitEndX4; x4++) {
+                    chromaCells[y4 * width4 + x4] = cell;
                 }
             }
         }
@@ -1045,25 +1043,19 @@ public final class LoopFilterApplier {
         /// The decoded block header covering this cell.
         private final TileBlockHeaderReader.BlockHeader header;
 
-        /// The decoded luma transform cell covering this cell.
-        private final TransformCell lumaTransformCell;
-
-        /// The decoded chroma transform cell covering this cell.
-        private final TransformCell chromaTransformCell;
+        /// The decoded plane-specific transform cell covering this cell.
+        private final TransformCell transformCell;
 
         /// Creates one decoded block and transform lookup cell.
         ///
         /// @param header the decoded block header covering this cell
-        /// @param lumaTransformCell the decoded luma transform cell covering this cell
-        /// @param chromaTransformCell the decoded chroma transform cell covering this cell
+        /// @param transformCell the decoded plane-specific transform cell covering this cell
         private LoopFilterCell(
                 TileBlockHeaderReader.BlockHeader header,
-                TransformCell lumaTransformCell,
-                TransformCell chromaTransformCell
+                TransformCell transformCell
         ) {
             this.header = Objects.requireNonNull(header, "header");
-            this.lumaTransformCell = Objects.requireNonNull(lumaTransformCell, "lumaTransformCell");
-            this.chromaTransformCell = Objects.requireNonNull(chromaTransformCell, "chromaTransformCell");
+            this.transformCell = Objects.requireNonNull(transformCell, "transformCell");
         }
 
         /// Returns the decoded block header covering this cell.
@@ -1073,12 +1065,11 @@ public final class LoopFilterApplier {
             return header;
         }
 
-        /// Returns the transform cell for one plane.
+        /// Returns the plane-specific transform cell covering this cell.
         ///
-        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
-        /// @return the transform cell for one plane
-        public TransformCell transformCell(int planeIndex) {
-            return planeIndex == 0 ? lumaTransformCell : chromaTransformCell;
+        /// @return the plane-specific transform cell covering this cell
+        public TransformCell transformCell() {
+            return transformCell;
         }
     }
 

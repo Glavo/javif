@@ -329,23 +329,23 @@ public final class CdefApplier {
             int bitDepthShift,
             boolean hasChroma
     ) {
-        if (hasSelectedStrength(cdef.yStrengths(), cdefIndex, bitDepthShift)) {
+        if (hasSelectedPrimaryStrength(cdef.yStrengths(), cdefIndex, bitDepthShift)) {
             return true;
         }
-        return hasChroma && hasSelectedStrength(cdef.uvStrengths(), cdefIndex, bitDepthShift);
+        return hasChroma && hasSelectedPrimaryStrength(cdef.uvStrengths(), cdefIndex, bitDepthShift);
     }
 
-    /// Returns whether one selected encoded strength has an active primary or secondary component.
+    /// Returns whether one selected encoded strength has an active primary component.
     ///
     /// @param strengths the encoded CDEF strength table
     /// @param cdefIndex the selected CDEF index
     /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
-    /// @return whether the selected encoded strength has an active primary or secondary component
-    private static boolean hasSelectedStrength(int[] strengths, int cdefIndex, int bitDepthShift) {
+    /// @return whether the selected encoded strength has an active primary component
+    private static boolean hasSelectedPrimaryStrength(int[] strengths, int cdefIndex, int bitDepthShift) {
         if (strengths.length == 0) {
             return false;
         }
-        return decodeStrength(strengthForIndex(strengths, cdefIndex), bitDepthShift).active();
+        return decodeStrength(strengthForIndex(strengths, cdefIndex), bitDepthShift).primary() != 0;
     }
 
     /// Applies CDEF to one plane.
@@ -406,13 +406,16 @@ public final class CdefApplier {
                 if (!decodedStrength.active()) {
                     continue;
                 }
-                int direction = directionMap.direction(unitIndex);
-                if (luma && decodedStrength.primary() != 0) {
-                    decodedStrength = decodedStrength.withPrimary(
-                            adjustStrength(decodedStrength.primary(), directionMap.variance(unitIndex))
-                    );
-                } else if (!luma && i422Chroma) {
-                    direction = I422_UV_DIRECTIONS[direction];
+                int direction = 0;
+                if (decodedStrength.primary() != 0) {
+                    direction = directionMap.direction(unitIndex);
+                    if (luma) {
+                        decodedStrength = decodedStrength.withPrimary(
+                                adjustStrength(decodedStrength.primary(), directionMap.variance(unitIndex))
+                        );
+                    } else if (i422Chroma) {
+                        direction = I422_UV_DIRECTIONS[direction];
+                    }
                 }
                 if (!decodedStrength.active()) {
                     continue;

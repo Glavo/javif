@@ -54,6 +54,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -134,6 +135,108 @@ final class FrameReconstructorTest {
         assertNotNull(chromaV);
         assertPlaneFilled(chromaU, 2, 2, 128);
         assertPlaneFilled(chromaV, 2, 2, 128);
+    }
+
+    /// Verifies that smooth chroma context is read from the leaf owning an adjacent shared `I420`
+    /// chroma cell rather than from a non-chroma luma leaf inside that cell.
+    @Test
+    void reconstructsSubsampledDirectionalChromaWithSmoothNeighborEdgeFiltering() {
+        BlockSize size = BlockSize.SIZE_4X4;
+        TilePartitionTreeReader.Node[] roots = new TilePartitionTreeReader.Node[16];
+        int rootIndex = 0;
+        for (int y4 = 0; y4 < 4; y4++) {
+            for (int x4 = 0; x4 < 4; x4++) {
+                BlockPosition position = new BlockPosition(x4, y4);
+                boolean hasChroma = (x4 & 1) != 0 && (y4 & 1) != 0;
+                @Nullable UvIntraPredictionMode uvMode = null;
+                int[] uPaletteColors = new int[0];
+                int[] vPaletteColors = new int[0];
+                byte[] uvPaletteIndices = new byte[0];
+                if (hasChroma) {
+                    if (x4 == 3 && y4 == 1) {
+                        uvMode = UvIntraPredictionMode.SMOOTH;
+                    } else if (x4 == 1 && y4 == 3) {
+                        uvMode = UvIntraPredictionMode.DC;
+                        uPaletteColors = new int[]{64, 65};
+                        vPaletteColors = new int[]{64, 65};
+                        uvPaletteIndices = new byte[8];
+                    } else if (x4 == 3 && y4 == 3) {
+                        uvMode = UvIntraPredictionMode.DIAGONAL_DOWN_RIGHT;
+                    } else {
+                        uvMode = UvIntraPredictionMode.DC;
+                    }
+                }
+
+                TileBlockHeaderReader.BlockHeader header = createIntraBlockHeader(
+                        position,
+                        size,
+                        hasChroma,
+                        LumaIntraPredictionMode.DC,
+                        uvMode,
+                        null,
+                        0,
+                        0,
+                        new int[0],
+                        uPaletteColors,
+                        vPaletteColors,
+                        new byte[0],
+                        uvPaletteIndices,
+                        0,
+                        0
+                );
+                TransformSize lumaTransformSize = size.maxLumaTransformSize();
+                @Nullable TransformSize chromaTransformSize = null;
+                TransformUnit[] chromaUnits = new TransformUnit[0];
+                if (hasChroma) {
+                    TransformSize sharedChromaTransformSize = Objects.requireNonNull(
+                            size.maxChromaTransformSize(AvifPixelFormat.I420),
+                            "chromaTransformSize"
+                    );
+                    chromaTransformSize = sharedChromaTransformSize;
+                    chromaUnits = new TransformUnit[]{new TransformUnit(
+                            new BlockPosition(x4 & ~1, y4 & ~1),
+                            sharedChromaTransformSize
+                    )};
+                }
+                TransformLayout transformLayout = new TransformLayout(
+                        position,
+                        size,
+                        size.width4(),
+                        size.height4(),
+                        size.widthPixels(),
+                        size.heightPixels(),
+                        lumaTransformSize,
+                        chromaTransformSize,
+                        false,
+                        new TransformUnit[]{new TransformUnit(position, lumaTransformSize)},
+                        chromaUnits
+                );
+                roots[rootIndex++] = new TilePartitionTreeReader.LeafNode(
+                        header,
+                        transformLayout,
+                        createResidualLayout(position, size, true)
+                );
+            }
+        }
+
+        SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I420, 8, 16, 16, true);
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.INTRA, 16, 16), roots)
+        );
+
+        assertPlaneEquals(
+                requirePlane(planes.chromaUPlane()),
+                new int[][]{
+                        {128, 128, 128, 128, 128, 128, 128, 128},
+                        {128, 128, 128, 128, 128, 128, 128, 128},
+                        {128, 128, 128, 128, 128, 128, 128, 128},
+                        {128, 128, 128, 128, 128, 128, 128, 128},
+                        {64, 64, 64, 64, 128, 128, 128, 128},
+                        {64, 64, 64, 64, 80, 128, 128, 128},
+                        {64, 64, 64, 64, 64, 80, 128, 128},
+                        {64, 64, 64, 64, 64, 64, 80, 128}
+                }
+        );
     }
 
     /// Verifies that a synthetic single-tile 8-bit `I422` intra frame reconstructs luma and full-height
@@ -4338,6 +4441,25 @@ final class FrameReconstructorTest {
     /// @param height the frame height
     /// @return one minimal reduced-still-picture sequence header
     private static SequenceHeader createSequenceHeader(AvifPixelFormat pixelFormat, int bitDepth, int width, int height) {
+        return createSequenceHeader(pixelFormat, bitDepth, width, height, false);
+    }
+
+    /// Creates one minimal reduced-still-picture sequence header for reconstruction tests with an
+    /// explicit decoded bit depth and intra-edge-filter setting.
+    ///
+    /// @param pixelFormat the decoded chroma layout
+    /// @param bitDepth the decoded sample bit depth
+    /// @param width the frame width
+    /// @param height the frame height
+    /// @param intraEdgeFilter whether directional intra-edge filtering is enabled
+    /// @return one minimal reduced-still-picture sequence header
+    private static SequenceHeader createSequenceHeader(
+            AvifPixelFormat pixelFormat,
+            int bitDepth,
+            int width,
+            int height,
+            boolean intraEdgeFilter
+    ) {
         return new SequenceHeader(
                 sequenceProfile(pixelFormat, bitDepth),
                 width,
@@ -4356,7 +4478,7 @@ final class FrameReconstructorTest {
                 new SequenceHeader.FeatureConfig(
                         false,
                         false,
-                        false,
+                        intraEdgeFilter,
                         false,
                         false,
                         false,

@@ -51,9 +51,9 @@ final class CdefApplierTest {
     /// The `kodim23` regression resource that exposes a secondary-only CDEF unit.
     private static final String KODIM23_RESOURCE = "libavif-test-data/io/kodim23_yuv420_8bpc.avif";
 
-    /// Verifies that secondary-only CDEF units still honor the detected direction.
+    /// Verifies that secondary-only CDEF units use direction zero instead of the detected direction.
     @Test
-    void applyUsesDetectedDirectionForSecondaryOnlyStrength() throws IOException, URISyntaxException {
+    void applyUsesZeroDirectionForSecondaryOnlyStrength() throws IOException, URISyntaxException {
         byte[] bytes = TestResources.readBytes(KODIM23_RESOURCE);
         AvifContainer container = AvifContainerParser.parse(bytes);
         ByteBuffer primaryPayload = Objects.requireNonNull(container.primaryItemPayload(), "primaryItemPayload");
@@ -96,10 +96,10 @@ final class CdefApplierTest {
             int targetIndex = 126 * filtered.lumaPlane().stride() + 567;
             assertEquals(3, selectedCdefIndex(syntaxDecodeResult, frameHeader, startX, startY));
             assertNotEquals(0, detectedDirection);
-            assertEquals(112, filtered.lumaPlane().sample(567, 126));
-            assertRegionEquals(filtered.lumaPlane(), expectedDetected, startX, startY, startX + 8, startY + 8);
-            assertFalse(regionEquals(filtered.lumaPlane(), expectedZeroDirection, startX, startY, startX + 8, startY + 8));
-            assertNotEquals(expectedZeroDirection[targetIndex], filtered.lumaPlane().samples()[targetIndex]);
+            assertEquals(111, filtered.lumaPlane().sample(567, 126));
+            assertRegionEquals(filtered.lumaPlane(), expectedZeroDirection, startX, startY, startX + 8, startY + 8);
+            assertFalse(regionEquals(filtered.lumaPlane(), expectedDetected, startX, startY, startX + 8, startY + 8));
+            assertEquals(expectedZeroDirection[targetIndex], filtered.lumaPlane().samples()[targetIndex]);
         }
     }
 

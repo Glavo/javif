@@ -693,11 +693,16 @@ final class PostfilterStageProbeTest {
                     int.class
             );
             filterLevelMethod.setAccessible(true);
-            Method cellAtMethod = blockMapClass.getDeclaredMethod("cellAt", int.class, int.class);
+            Method cellAtMethod = blockMapClass.getDeclaredMethod(
+                    "cellAt",
+                    int.class,
+                    int.class,
+                    int.class
+            );
             cellAtMethod.setAccessible(true);
             Method headerMethod = nestedClass(applierClass, "LoopFilterCell").getDeclaredMethod("header");
             headerMethod.setAccessible(true);
-            Method transformCellMethod = nestedClass(applierClass, "LoopFilterCell").getDeclaredMethod("transformCell", int.class);
+            Method transformCellMethod = nestedClass(applierClass, "LoopFilterCell").getDeclaredMethod("transformCell");
             transformCellMethod.setAccessible(true);
             Method sizeMethod = nestedClass(applierClass, "TransformCell").getDeclaredMethod("size");
             sizeMethod.setAccessible(true);
@@ -725,19 +730,20 @@ final class PostfilterStageProbeTest {
                 int colStart = pass == 0 ? 1 : 0;
                 for (int row4 = rowStart; row4 < height4; row4++) {
                     for (int col4 = colStart; col4 < width4; col4++) {
-                        Object current = cellAtMethod.invoke(blockMap, col4, row4);
+                        Object current = cellAtMethod.invoke(blockMap, col4, row4, 0);
                         Object previous = cellAtMethod.invoke(
                                 blockMap,
                                 col4 - (pass == 0 ? 1 : 0),
-                                row4 - (pass == 1 ? 1 : 0)
+                                row4 - (pass == 1 ? 1 : 0),
+                                0
                         );
                         if (current == null || previous == null) {
                             continue;
                         }
                         Object currentHeader = headerMethod.invoke(current);
                         Object previousHeader = headerMethod.invoke(previous);
-                        Object currentTransformCell = transformCellMethod.invoke(current, 0);
-                        Object previousTransformCell = transformCellMethod.invoke(previous, 0);
+                        Object currentTransformCell = transformCellMethod.invoke(current);
+                        Object previousTransformCell = transformCellMethod.invoke(previous);
                         TransformSize currentSize = (TransformSize) sizeMethod.invoke(currentTransformCell);
                         TransformSize previousSize = (TransformSize) sizeMethod.invoke(previousTransformCell);
                         int level = (int) filterLevelMethod.invoke(

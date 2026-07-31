@@ -734,6 +734,41 @@ public final class FrameReconstructor {
             }
             return leaves[y4 * width4 + x4];
         }
+
+        /// Returns the decoded leaf that owns one chroma-grid position.
+        ///
+        /// Subsampled chroma syntax may be attached to only one of several luma leaves sharing the
+        /// same chroma cell. The search therefore examines the corresponding luma-grid footprint
+        /// from bottom-right to top-left and returns the leaf that actually carries chroma state.
+        ///
+        /// @param chromaX4 the horizontal coordinate in 4x4 chroma units
+        /// @param chromaY4 the vertical coordinate in 4x4 chroma units
+        /// @param chromaSubsamplingX the horizontal chroma subsampling shift
+        /// @param chromaSubsamplingY the vertical chroma subsampling shift
+        /// @return the decoded chroma-owning leaf, or `null`
+        public @Nullable TilePartitionTreeReader.LeafNode chromaLeafAt(
+                int chromaX4,
+                int chromaY4,
+                int chromaSubsamplingX,
+                int chromaSubsamplingY
+        ) {
+            if (chromaX4 < 0 || chromaY4 < 0) {
+                return null;
+            }
+            int startX4 = chromaX4 << chromaSubsamplingX;
+            int startY4 = chromaY4 << chromaSubsamplingY;
+            int endX4 = Math.min(width4, (chromaX4 + 1) << chromaSubsamplingX);
+            int endY4 = Math.min(height4, (chromaY4 + 1) << chromaSubsamplingY);
+            for (int y4 = endY4 - 1; y4 >= startY4; y4--) {
+                for (int x4 = endX4 - 1; x4 >= startX4; x4--) {
+                    @Nullable TilePartitionTreeReader.LeafNode leafNode = leafAt(x4, y4);
+                    if (leafNode != null && leafNode.header().hasChroma()) {
+                        return leafNode;
+                    }
+                }
+            }
+            return null;
+        }
     }
 
     /// One causal neighbor sample used to estimate a local warped affine motion model.
@@ -1261,12 +1296,26 @@ public final class FrameReconstructor {
             AvifPixelFormat pixelFormat,
             TileSampleBounds tileBounds
     ) {
-        int x4 = header.position().x4();
-        int y4 = header.position().y4();
-        int chromaX = chromaBlockX(header, chromaSubsamplingX(pixelFormat));
-        int chromaY = chromaBlockY(header, chromaSubsamplingY(pixelFormat));
-        return (chromaY > tileBounds.chromaStartY() && hasSmoothChromaMode(decodedBlockMap.leafAt(x4, y4 - 1)))
-                || (chromaX > tileBounds.chromaStartX() && hasSmoothChromaMode(decodedBlockMap.leafAt(x4 - 1, y4)));
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int chromaX4 = chromaX >> 2;
+        int chromaY4 = chromaY >> 2;
+        return (chromaY > tileBounds.chromaStartY()
+                && hasSmoothChromaMode(decodedBlockMap.chromaLeafAt(
+                        chromaX4,
+                        chromaY4 - 1,
+                        chromaSubsamplingX,
+                        chromaSubsamplingY
+                )))
+                || (chromaX > tileBounds.chromaStartX()
+                && hasSmoothChromaMode(decodedBlockMap.chromaLeafAt(
+                        chromaX4 - 1,
+                        chromaY4,
+                        chromaSubsamplingX,
+                        chromaSubsamplingY
+                )));
     }
 
     /// Returns whether one decoded leaf used a smooth luma intra mode.

@@ -528,6 +528,56 @@ final class FramePostprocessorTest {
         }
     }
 
+    /// Verifies that loop filtering extends frame-edge samples instead of reducing the filter width.
+    @Test
+    void postprocessExtendsFrameEdgeSamplesForLoopFiltering() {
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                repeatedRows(new int[]{164, 164, 164, 164, 164, 164, 165, 165, 162, 162, 162}, 8),
+                null,
+                null
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{7, 0},
+                        0,
+                        0,
+                        0,
+                        false,
+                        false,
+                        new int[]{0, 0, 0, 0, 0, 0, 0, 0},
+                        new int[]{0, 0}
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(
+                frameHeader,
+                BlockSize.SIZE_8X8,
+                TransformSize.TX_8X8,
+                null
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        int[] expectedRow = new int[]{164, 164, 164, 164, 164, 164, 164, 164, 163, 163, 162};
+        for (int y = 0; y < decodedPlanes.codedHeight(); y++) {
+            for (int x = 0; x < decodedPlanes.codedWidth(); x++) {
+                assertEquals(expectedRow[x], postprocessed.lumaPlane().sample(x, y));
+            }
+        }
+    }
+
     /// Verifies the exact AV1 16-tap luma loop filter on flat 16x16 transform edges.
     @Test
     void postprocessAppliesSixteenTapLumaLoopFilterOnFlatEdges() {

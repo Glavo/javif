@@ -420,7 +420,12 @@ final class PostfilterTestFixtures {
             @Nullable TransformSize chromaTransformSize,
             TransformUnit[] lumaUnits
     ) {
-        TileBlockHeaderReader.BlockHeader blockHeader = createIntraBlockHeader(position, blockSize, cdefIndex);
+        TileBlockHeaderReader.BlockHeader blockHeader = createIntraBlockHeader(
+                position,
+                blockSize,
+                cdefIndex,
+                chromaTransformSize != null
+        );
         TransformLayout transformLayout = new TransformLayout(
                 position,
                 blockSize,
@@ -445,16 +450,18 @@ final class PostfilterTestFixtures {
     /// @param position the block position in luma 4x4 units
     /// @param blockSize the decoded block size
     /// @param cdefIndex the decoded CDEF index
+    /// @param hasChroma whether the synthetic block carries chroma samples
     /// @return one decoded intra block header for postfilter tests
     private static TileBlockHeaderReader.BlockHeader createIntraBlockHeader(
             BlockPosition position,
             BlockSize blockSize,
-            int cdefIndex
+            int cdefIndex,
+            boolean hasChroma
     ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 blockSize,
-                false,
+                hasChroma,
                 false,
                 false,
                 true,
