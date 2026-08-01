@@ -290,19 +290,19 @@ public final class TilePartitionTreeReader {
 
     /// One square block level used by the recursive partition reader.
     @NotNullByDefault
-    private enum SquareBlockLevel {
+    enum SquareBlockLevel {
         /// 128x128 square blocks.
         BLOCK_128X128(0, 32, 16, 4, TileSyntaxReader.PartitionBlockLevel.BLOCK_128X128, BlockSize.SIZE_128X128,
                 BlockSize.SIZE_128X64, BlockSize.SIZE_64X128, BlockSize.SIZE_64X16, BlockSize.SIZE_16X64),
         /// 64x64 square blocks.
         BLOCK_64X64(1, 16, 8, 3, TileSyntaxReader.PartitionBlockLevel.BLOCK_64X64, BlockSize.SIZE_64X64,
-                BlockSize.SIZE_64X32, BlockSize.SIZE_32X64, BlockSize.SIZE_32X8, BlockSize.SIZE_8X32),
+                BlockSize.SIZE_64X32, BlockSize.SIZE_32X64, BlockSize.SIZE_64X16, BlockSize.SIZE_16X64),
         /// 32x32 square blocks.
         BLOCK_32X32(2, 8, 4, 2, TileSyntaxReader.PartitionBlockLevel.BLOCK_32X32, BlockSize.SIZE_32X32,
-                BlockSize.SIZE_32X16, BlockSize.SIZE_16X32, BlockSize.SIZE_16X4, BlockSize.SIZE_4X16),
+                BlockSize.SIZE_32X16, BlockSize.SIZE_16X32, BlockSize.SIZE_32X8, BlockSize.SIZE_8X32),
         /// 16x16 square blocks.
         BLOCK_16X16(3, 4, 2, 1, TileSyntaxReader.PartitionBlockLevel.BLOCK_16X16, BlockSize.SIZE_16X16,
-                BlockSize.SIZE_16X8, BlockSize.SIZE_8X16, BlockSize.SIZE_8X4, BlockSize.SIZE_4X8),
+                BlockSize.SIZE_16X8, BlockSize.SIZE_8X16, BlockSize.SIZE_16X4, BlockSize.SIZE_4X16),
         /// 8x8 square blocks.
         BLOCK_8X8(4, 2, 1, 0, TileSyntaxReader.PartitionBlockLevel.BLOCK_8X8, BlockSize.SIZE_8X8,
                 BlockSize.SIZE_8X4, BlockSize.SIZE_4X8, BlockSize.SIZE_4X4, BlockSize.SIZE_4X4);

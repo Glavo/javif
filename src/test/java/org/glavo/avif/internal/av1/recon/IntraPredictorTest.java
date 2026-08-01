@@ -506,6 +506,27 @@ final class IntraPredictorTest {
         );
     }
 
+    /// Verifies that recursive filter-intra units use the preceding top or left reference instead
+    /// of restarting from the block's original top-left sample.
+    @Test
+    void filterIntraPredictionAdvancesTopLeftReferenceBetweenRecursiveUnits() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(8, 4, 8);
+
+        IntraPredictor.predictFilterIntraLuma(plane, 0, 0, 8, 4, FilterIntraMode.VERTICAL);
+
+        assertBlockEquals(
+                plane,
+                0,
+                0,
+                new int[][]{
+                        {128, 127, 127, 127, 127, 127, 127, 127},
+                        {128, 127, 127, 127, 127, 127, 127, 127},
+                        {128, 127, 127, 127, 127, 127, 127, 127},
+                        {128, 127, 127, 127, 127, 127, 127, 127}
+                }
+        );
+    }
+
     /// Verifies that `I420` CFL prediction derives signed AC from reconstructed luma and applies alpha.
     @Test
     void chromaCflPredictionUsesDownsampledLumaAc() {

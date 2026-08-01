@@ -538,10 +538,33 @@ final class IntraPredictor {
             int rightBoundary,
             int bottomBoundary
     ) {
-        if (topReferenceY >= topBoundary && currentX > leftBoundary) {
-            int maxX = Math.max(0, Math.min(rightBoundary, plane.width()) - 1);
-            int maxY = Math.max(0, Math.min(bottomBoundary, plane.height()) - 1);
-            return plane.sample(Math.min(currentX - 1, maxX), Math.min(topReferenceY, maxY));
+        if (currentX > blockX) {
+            return filterIntraTopReference(
+                    plane,
+                    blockX,
+                    blockY,
+                    currentX - 1,
+                    topReferenceY,
+                    defaultSample,
+                    leftBoundary,
+                    topBoundary,
+                    rightBoundary,
+                    bottomBoundary
+            );
+        }
+        if (currentY > blockY) {
+            return filterIntraLeftReference(
+                    plane,
+                    blockX,
+                    blockY,
+                    currentX - 1,
+                    currentY - 1,
+                    defaultSample,
+                    leftBoundary,
+                    topBoundary,
+                    rightBoundary,
+                    bottomBoundary
+            );
         }
         return defaultTopLeft(plane, blockX, blockY, defaultSample, leftBoundary, topBoundary);
     }

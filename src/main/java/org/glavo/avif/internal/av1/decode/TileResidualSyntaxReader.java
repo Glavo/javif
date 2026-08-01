@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
@@ -161,42 +162,63 @@ public final class TileResidualSyntaxReader {
 
         TransformUnit[] transformUnits = nonNullTransformLayout.lumaUnits();
         TransformResidualUnit[] residualUnits = new TransformResidualUnit[transformUnits.length];
-        for (int i = 0; i < transformUnits.length; i++) {
-            TransformUnit transformUnit = transformUnits[i];
-            int visibleWidthPixels = visibleLumaWidthPixels(nonNullTransformLayout, transformUnit);
-            int visibleHeightPixels = visibleLumaHeightPixels(nonNullTransformLayout, transformUnit);
-            TransformResidualUnit residualUnit = nonNullHeader.skip()
-                    ? createAllZeroUnit(transformUnit.position(), transformUnit.size(), visibleWidthPixels, visibleHeightPixels)
-                    : readLumaResidualUnit(
+        TransformUnit[] chromaUnits = nonNullTransformLayout.chromaUnits();
+        boolean hasChromaResiduals = nonNullHeader.hasChroma() && chromaUnits.length != 0;
+        TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[hasChromaResiduals ? chromaUnits.length : 0];
+        TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[hasChromaResiduals ? chromaUnits.length : 0];
+
+        BlockPosition blockPosition = nonNullTransformLayout.position();
+        int visibleWidth4 = nonNullTransformLayout.visibleWidth4();
+        int visibleHeight4 = nonNullTransformLayout.visibleHeight4();
+        boolean onlyCoefficientRegion = visibleWidth4 <= 16 && visibleHeight4 <= 16;
+        for (int offsetY4 = 0; offsetY4 < visibleHeight4; offsetY4 += 16) {
+            int regionStartY4 = blockPosition.y4() + offsetY4;
+            int regionEndY4 = blockPosition.y4() + Math.min(offsetY4 + 16, visibleHeight4);
+            for (int offsetX4 = 0; offsetX4 < visibleWidth4; offsetX4 += 16) {
+                int regionStartX4 = blockPosition.x4() + offsetX4;
+                int regionEndX4 = blockPosition.x4() + Math.min(offsetX4 + 16, visibleWidth4);
+                readLumaResidualRegion(
+                        nonNullHeader,
+                        nonNullTransformLayout,
+                        transformUnits,
+                        residualUnits,
+                        nonNullNeighborContext,
+                        regionStartX4,
+                        regionStartY4,
+                        regionEndX4,
+                        regionEndY4
+                );
+                if (hasChromaResiduals) {
+                    readChromaResidualRegion(
                             nonNullHeader,
                             nonNullTransformLayout,
-                            transformUnit,
-                            nonNullNeighborContext
+                            chromaUnits,
+                            residualUnits,
+                            chromaUUnits,
+                            CHROMA_PLANE_U,
+                            nonNullNeighborContext,
+                            onlyCoefficientRegion,
+                            regionStartX4,
+                            regionStartY4,
+                            regionEndX4,
+                            regionEndY4
                     );
-            residualUnits[i] = residualUnit;
-            nonNullNeighborContext.updateLumaCoefficientContext(transformUnit, residualUnit.coefficientContextByte());
-        }
-
-        TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[0];
-        TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[0];
-        TransformUnit[] chromaUnits = nonNullTransformLayout.chromaUnits();
-        if (nonNullHeader.hasChroma() && chromaUnits.length != 0) {
-            chromaUUnits = readChromaResidualUnits(
-                    nonNullHeader,
-                    nonNullTransformLayout,
-                    chromaUnits,
-                    residualUnits,
-                    CHROMA_PLANE_U,
-                    nonNullNeighborContext
-            );
-            chromaVUnits = readChromaResidualUnits(
-                    nonNullHeader,
-                    nonNullTransformLayout,
-                    chromaUnits,
-                    residualUnits,
-                    CHROMA_PLANE_V,
-                    nonNullNeighborContext
-            );
+                    readChromaResidualRegion(
+                            nonNullHeader,
+                            nonNullTransformLayout,
+                            chromaUnits,
+                            residualUnits,
+                            chromaVUnits,
+                            CHROMA_PLANE_V,
+                            nonNullNeighborContext,
+                            onlyCoefficientRegion,
+                            regionStartX4,
+                            regionStartY4,
+                            regionEndX4,
+                            regionEndY4
+                    );
+                }
+            }
         }
         return new ResidualLayout(
                 nonNullTransformLayout.position(),
@@ -205,6 +227,50 @@ public final class TileResidualSyntaxReader {
                 chromaUUnits,
                 chromaVUnits
         );
+    }
+
+    /// Decodes the luma transform units whose origins lie in one 64x64 coefficient region.
+    ///
+    /// @param header the owning leaf block header
+    /// @param transformLayout the owning block-level transform layout
+    /// @param transformUnits all luma transform units for the block
+    /// @param residualUnits the destination array parallel to `transformUnits`
+    /// @param neighborContext the mutable neighbor context that supplies entropy contexts
+    /// @param regionStartX4 the inclusive region start on the luma-grid X axis
+    /// @param regionStartY4 the inclusive region start on the luma-grid Y axis
+    /// @param regionEndX4 the exclusive region end on the luma-grid X axis
+    /// @param regionEndY4 the exclusive region end on the luma-grid Y axis
+    private void readLumaResidualRegion(
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            TransformUnit[] transformUnits,
+            TransformResidualUnit[] residualUnits,
+            BlockNeighborContext neighborContext,
+            int regionStartX4,
+            int regionStartY4,
+            int regionEndX4,
+            int regionEndY4
+    ) {
+        for (int i = 0; i < transformUnits.length; i++) {
+            TransformUnit transformUnit = transformUnits[i];
+            if (!isInCoefficientRegion(
+                    transformUnit,
+                    regionStartX4,
+                    regionStartY4,
+                    regionEndX4,
+                    regionEndY4
+            )) {
+                continue;
+            }
+
+            int visibleWidthPixels = visibleLumaWidthPixels(transformLayout, transformUnit);
+            int visibleHeightPixels = visibleLumaHeightPixels(transformLayout, transformUnit);
+            TransformResidualUnit residualUnit = header.skip()
+                    ? createAllZeroUnit(transformUnit.position(), transformUnit.size(), visibleWidthPixels, visibleHeightPixels)
+                    : readLumaResidualUnit(header, transformLayout, transformUnit, neighborContext);
+            residualUnits[i] = residualUnit;
+            neighborContext.updateLumaCoefficientContext(transformUnit, residualUnit.coefficientContextByte());
+        }
     }
 
     /// Returns the horizontal chroma subsampling shift used by the active sequence pixel format.
@@ -271,35 +337,52 @@ public final class TileResidualSyntaxReader {
         );
     }
 
-    /// Decodes the currently modeled chroma transform residual units for one chroma plane.
-    ///
-    /// Each explicit chroma unit follows the same token readers as luma, only switching to the
-    /// shared chroma coefficient CDF tables and per-plane neighbor contexts.
+    /// Decodes the chroma transform units whose origins lie in one 64x64 luma-grid coefficient region.
     ///
     /// @param header the owning leaf block header
     /// @param transformLayout the owning block-level transform layout
-    /// @param transformUnits the decoded chroma transform units in bitstream order
+    /// @param transformUnits all chroma transform units for the block
     /// @param lumaResidualUnits the decoded luma residual units used for inter transform-type inference
+    /// @param residualUnits the destination array parallel to `transformUnits`
     /// @param plane the chroma plane index, where `0` is U and `1` is V
-    /// @param neighborContext the mutable neighbor context that supplies entropy contexts
-    /// @return the decoded chroma transform residual units in bitstream order
-    private TransformResidualUnit[] readChromaResidualUnits(
+    /// @param neighborContext the mutable neighbor context that supplies and stores coefficient contexts
+    /// @param includeAllUnits whether this is the block's only coefficient region
+    /// @param regionStartX4 the inclusive region start on the shared luma-grid X axis
+    /// @param regionStartY4 the inclusive region start on the shared luma-grid Y axis
+    /// @param regionEndX4 the exclusive region end on the shared luma-grid X axis
+    /// @param regionEndY4 the exclusive region end on the shared luma-grid Y axis
+    private void readChromaResidualRegion(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             TransformUnit[] transformUnits,
             TransformResidualUnit[] lumaResidualUnits,
+            TransformResidualUnit[] residualUnits,
             int plane,
-            BlockNeighborContext neighborContext
+            BlockNeighborContext neighborContext,
+            boolean includeAllUnits,
+            int regionStartX4,
+            int regionStartY4,
+            int regionEndX4,
+            int regionEndY4
     ) {
         TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
         TransformLayout nonNullTransformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
         TransformUnit[] nonNullTransformUnits = Objects.requireNonNull(transformUnits, "transformUnits");
         TransformResidualUnit[] nonNullLumaResidualUnits = Objects.requireNonNull(lumaResidualUnits, "lumaResidualUnits");
+        TransformResidualUnit[] nonNullResidualUnits = Objects.requireNonNull(residualUnits, "residualUnits");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
 
-        TransformResidualUnit[] residualUnits = new TransformResidualUnit[nonNullTransformUnits.length];
         for (int i = 0; i < nonNullTransformUnits.length; i++) {
             TransformUnit transformUnit = nonNullTransformUnits[i];
+            if (!includeAllUnits && !isInCoefficientRegion(
+                    transformUnit,
+                    regionStartX4,
+                    regionStartY4,
+                    regionEndX4,
+                    regionEndY4
+            )) {
+                continue;
+            }
             BlockPosition unitPosition = transformUnit.position();
             TransformSize unitSize = transformUnit.size();
             int visibleUnitWidthPixels = visibleChromaUnitWidthPixels(nonNullTransformLayout, transformUnit);
@@ -352,9 +435,30 @@ public final class TileResidualSyntaxReader {
                     unitSize,
                     residualUnit.coefficientContextByte()
             );
-            residualUnits[i] = residualUnit;
+            nonNullResidualUnits[i] = residualUnit;
         }
-        return residualUnits;
+    }
+
+    /// Returns whether a transform-unit origin lies inside one coefficient region.
+    ///
+    /// @param transformUnit the transform unit to test
+    /// @param regionStartX4 the inclusive region start on the shared luma-grid X axis
+    /// @param regionStartY4 the inclusive region start on the shared luma-grid Y axis
+    /// @param regionEndX4 the exclusive region end on the shared luma-grid X axis
+    /// @param regionEndY4 the exclusive region end on the shared luma-grid Y axis
+    /// @return `true` when the unit origin lies inside the region
+    private static boolean isInCoefficientRegion(
+            TransformUnit transformUnit,
+            int regionStartX4,
+            int regionStartY4,
+            int regionEndX4,
+            int regionEndY4
+    ) {
+        BlockPosition position = Objects.requireNonNull(transformUnit, "transformUnit").position();
+        return position.x4() >= regionStartX4
+                && position.x4() < regionEndX4
+                && position.y4() >= regionStartY4
+                && position.y4() < regionEndY4;
     }
 
     /// Decodes one non-skipped transform residual unit using the supplied plane-specific contexts.
@@ -896,9 +1000,12 @@ public final class TileResidualSyntaxReader {
 
     /// Returns the transform type of the luma residual unit colocated with one chroma transform unit.
     ///
-    /// @param lumaResidualUnits the already decoded luma residual units
+    /// Entries outside the current coefficient region may not have been decoded yet and are
+    /// ignored while locating the colocated unit.
+    ///
+    /// @param lumaResidualUnits the partially decoded luma residual-unit array
     /// @param chromaUnit the chroma transform unit whose colocated luma type should be found
-    /// @return the transform type of the colocated luma residual unit
+    /// @return the transform type of the colocated decoded luma unit, or `DCT_DCT` if none exists
     private static TransformType lumaTransformTypeAt(
             TransformResidualUnit[] lumaResidualUnits,
             TransformUnit chromaUnit
@@ -907,7 +1014,10 @@ public final class TileResidualSyntaxReader {
         TransformUnit nonNullChromaUnit = Objects.requireNonNull(chromaUnit, "chromaUnit");
         int x4 = nonNullChromaUnit.position().x4();
         int y4 = nonNullChromaUnit.position().y4();
-        for (TransformResidualUnit lumaResidualUnit : nonNullLumaResidualUnits) {
+        for (@Nullable TransformResidualUnit lumaResidualUnit : nonNullLumaResidualUnits) {
+            if (lumaResidualUnit == null) {
+                continue;
+            }
             BlockPosition lumaPosition = lumaResidualUnit.position();
             TransformSize lumaSize = lumaResidualUnit.size();
             if (x4 >= lumaPosition.x4()
@@ -1340,7 +1450,7 @@ public final class TileResidualSyntaxReader {
     /// @param transformSize the modeled transform size whose scan should be created
     /// @param contextLayout whether to emit the raw `dav1d` scratch-layout scan indices
     /// @return the `dav1d`-compatible two-dimensional scan table for the supplied transform size
-    private static int[] createDefaultScan(TransformSize transformSize, boolean contextLayout) {
+    static int[] createDefaultScan(TransformSize transformSize, boolean contextLayout) {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         int codedWidth = clippedCoefficientWidth(nonNullTransformSize);
         int codedHeight = clippedCoefficientHeight(nonNullTransformSize);
@@ -1350,23 +1460,18 @@ public final class TileResidualSyntaxReader {
         for (int diagonal = 0; diagonal < codedWidth + codedHeight - 1; diagonal++) {
             int rowStart = Math.max(0, diagonal - (codedWidth - 1));
             int rowEnd = Math.min(codedHeight - 1, diagonal);
-            boolean descendingRows;
-            if (codedWidth == codedHeight) {
-                descendingRows = contextLayout
-                        ? (diagonal & 1) == 0
-                        : (diagonal & 1) == 1;
-            } else {
-                descendingRows = codedWidth > codedHeight;
-            }
+            boolean descendingRows = codedWidth == codedHeight
+                    ? (diagonal & 1) == 0
+                    : codedWidth > codedHeight;
             if (descendingRows) {
                 for (int row = rowEnd; row >= rowStart; row--) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth, codedHeight, contextLayout);
+                    scan[nextIndex++] = scanIndex(row, column, outputWidth, codedHeight, contextLayout);
                 }
             } else {
                 for (int row = rowStart; row <= rowEnd; row++) {
                     int column = diagonal - row;
-                    scan[nextIndex++] = scanIndex(nonNullTransformSize, row, column, outputWidth, codedHeight, contextLayout);
+                    scan[nextIndex++] = scanIndex(row, column, outputWidth, codedHeight, contextLayout);
                 }
             }
         }
@@ -1375,27 +1480,21 @@ public final class TileResidualSyntaxReader {
 
     /// Converts one generated scan coordinate into this decoder's row-major coefficient index.
     ///
-    /// @param transformSize the modeled transform size
     /// @param row the generated diagonal row coordinate
     /// @param column the generated diagonal column coordinate
     /// @param outputWidth the row-major coefficient row stride
     /// @param codedHeight the entropy-coded coefficient height used as the scratch stride
     /// @param contextLayout whether to emit the raw `dav1d` scratch-layout scan index
-    /// @return the row-major coefficient index
+    /// @return the selected coefficient index
     private static int scanIndex(
-            TransformSize transformSize,
             int row,
             int column,
             int outputWidth,
             int codedHeight,
             boolean contextLayout
     ) {
-        Objects.requireNonNull(transformSize, "transformSize");
         if (contextLayout) {
             return column * codedHeight + row;
-        }
-        if (transformSize.widthPixels() == transformSize.heightPixels()) {
-            return column * outputWidth + row;
         }
         return row * outputWidth + column;
     }

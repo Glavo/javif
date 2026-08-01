@@ -87,6 +87,36 @@ final class TilePartitionTreeReaderTest {
         assertFalse(hasInvalidLeafOrigin(roots[0], 10, 8));
     }
 
+    /// Verifies that four-way partitions preserve the parent's full axis and divide only the
+    /// stripe axis into quarters.
+    @Test
+    void fourWayPartitionSizesUseFullParentAxis() {
+        assertEquals(
+                BlockSize.SIZE_64X16,
+                TilePartitionTreeReader.SquareBlockLevel.BLOCK_64X64.horizontalFourWaySize()
+        );
+        assertEquals(
+                BlockSize.SIZE_16X64,
+                TilePartitionTreeReader.SquareBlockLevel.BLOCK_64X64.verticalFourWaySize()
+        );
+        assertEquals(
+                BlockSize.SIZE_32X8,
+                TilePartitionTreeReader.SquareBlockLevel.BLOCK_32X32.horizontalFourWaySize()
+        );
+        assertEquals(
+                BlockSize.SIZE_8X32,
+                TilePartitionTreeReader.SquareBlockLevel.BLOCK_32X32.verticalFourWaySize()
+        );
+        assertEquals(
+                BlockSize.SIZE_16X4,
+                TilePartitionTreeReader.SquareBlockLevel.BLOCK_16X16.horizontalFourWaySize()
+        );
+        assertEquals(
+                BlockSize.SIZE_4X16,
+                TilePartitionTreeReader.SquareBlockLevel.BLOCK_16X16.verticalFourWaySize()
+        );
+    }
+
     /// Counts the number of leaf nodes in one partition tree.
     ///
     /// @param node the tree node to count

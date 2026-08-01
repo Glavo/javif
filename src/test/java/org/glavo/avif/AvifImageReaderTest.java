@@ -1520,7 +1520,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameAppliesCleanApertureTransform() throws IOException {
-        byte[] bytes = minimalAvifWithProperty("clap", cleanAperturePropertyPayload(32, 16, 8, 4));
+        byte[] bytes = minimalAvifWithProperty("clap", cleanAperturePropertyPayload(32, 16, -8, -20));
         try (AvifImageReader reader = AvifImageReader.open(bytes)) {
             AvifImageInfo info = reader.info();
             assertTrue(info.hasCleanApertureCrop());
@@ -1553,7 +1553,7 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameIgnoresNonEssentialCleanApertureTransform() throws IOException {
-        byte[] bytes = minimalAvifWithNonEssentialProperty("clap", cleanAperturePropertyPayload(32, 16, 8, 4));
+        byte[] bytes = minimalAvifWithNonEssentialProperty("clap", cleanAperturePropertyPayload(32, 16, -8, -20));
         try (AvifImageReader reader = AvifImageReader.open(bytes)) {
             AvifImageInfo info = reader.info();
             assertFalse(info.hasCleanApertureCrop());
@@ -1662,15 +1662,20 @@ final class AvifImageReaderTest {
     ///
     /// @param width the clean-aperture width
     /// @param height the clean-aperture height
-    /// @param x the clean-aperture x coordinate
-    /// @param y the clean-aperture y coordinate
+    /// @param horizontalOffset the horizontal offset from the uncropped image center
+    /// @param verticalOffset the vertical offset from the uncropped image center
     /// @return the `clap` property payload bytes
-    private static byte[] cleanAperturePropertyPayload(int width, int height, int x, int y) {
+    private static byte[] cleanAperturePropertyPayload(
+            int width,
+            int height,
+            int horizontalOffset,
+            int verticalOffset
+    ) {
         return concat(
                 u32(width), u32(1),
                 u32(height), u32(1),
-                u32(x), u32(1),
-                u32(y), u32(1)
+                u32(horizontalOffset), u32(1),
+                u32(verticalOffset), u32(1)
         );
     }
 

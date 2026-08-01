@@ -104,6 +104,9 @@ tasks.test {
 val dav1dCommit = "c5726277ffa8764665ea08f865e46912a41f2309"
 val libavifCommit = "b54eac58daf563e9150cc6abce7631ac71b999aa"
 val libavifZip = layout.buildDirectory.file("downloads/libavif-$libavifCommit.zip")
+val linkUAvifSampleImagesCommit = "c666a368b73006246694919b5dbcc078317af6cc"
+val linkUAvifSampleImagesZip =
+    layout.buildDirectory.file("downloads/avif-sample-images-$linkUAvifSampleImagesCommit.zip")
 
 val downloadLibavif by tasks.registering(de.undercouch.gradle.tasks.download.Download::class) {
     src("https://github.com/AOMediaCodec/libavif/archive/$libavifCommit.zip")
@@ -111,8 +114,15 @@ val downloadLibavif by tasks.registering(de.undercouch.gradle.tasks.download.Dow
     overwrite(false)
 }
 
+val downloadLinkUAvifSampleImages by tasks.registering(de.undercouch.gradle.tasks.download.Download::class) {
+    src("https://github.com/link-u/avif-sample-images/archive/$linkUAvifSampleImagesCommit.zip")
+    dest(linkUAvifSampleImagesZip)
+    overwrite(false)
+}
+
 tasks.processTestResources {
     dependsOn(downloadLibavif)
+    dependsOn(downloadLinkUAvifSampleImages)
 
     from(zipTree(libavifZip)) {
         includeEmptyDirs = false
@@ -126,6 +136,29 @@ tasks.processTestResources {
                 relativePath = RelativePath(
                     true,
                     *(listOf("libavif-test-data") + pathSegments.subList(3, pathSegments.size)).toTypedArray(),
+                )
+            } else {
+                exclude()
+            }
+        }
+    }
+
+    from(zipTree(linkUAvifSampleImagesZip)) {
+        includeEmptyDirs = false
+
+        val rootDirName = "avif-sample-images-$linkUAvifSampleImagesCommit"
+
+        eachFile {
+            val pathSegments = relativePath.segments.toList()
+            val fileName = pathSegments.lastOrNull()
+            val copiedFile = fileName == "LICENSE.txt"
+                    || fileName == "README.md"
+                    || fileName?.endsWith(".avif") == true
+                    || fileName?.endsWith(".avifs") == true
+            if (pathSegments.size > 1 && pathSegments[0] == rootDirName && copiedFile) {
+                relativePath = RelativePath(
+                    true,
+                    *(listOf("link-u-avif-sample-images") + pathSegments.subList(1, pathSegments.size)).toTypedArray(),
                 )
             } else {
                 exclude()

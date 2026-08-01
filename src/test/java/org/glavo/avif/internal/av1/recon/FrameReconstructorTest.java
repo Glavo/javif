@@ -1828,8 +1828,8 @@ final class FrameReconstructorTest {
                 new int[][]{
                         {128, 128, 128, 127},
                         {129, 128, 128, 128},
-                        {129, 129, 129, 128},
-                        {129, 129, 129, 129}
+                        {129, 128, 128, 128},
+                        {129, 129, 129, 128}
                 }
         );
         assertPlaneEquals(
@@ -1881,14 +1881,14 @@ final class FrameReconstructorTest {
                 new int[][]{
                         {128, 128, 128, 127},
                         {129, 128, 128, 128},
-                        {129, 129, 129, 128},
-                        {129, 129, 129, 129}
+                        {129, 128, 128, 128},
+                        {129, 129, 129, 128}
                 }
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaUPlane()),
                 new int[][]{
-                        {128, 127},
+                        {128, 128},
                         {128, 128},
                         {128, 128},
                         {128, 128}
@@ -1897,7 +1897,7 @@ final class FrameReconstructorTest {
         assertPlaneEquals(
                 requirePlane(planes.chromaVPlane()),
                 new int[][]{
-                        {128, 129},
+                        {128, 128},
                         {128, 128},
                         {128, 128},
                         {128, 128}
@@ -1938,8 +1938,8 @@ final class FrameReconstructorTest {
                 new int[][]{
                         {128, 128, 128, 127},
                         {129, 128, 128, 128},
-                        {129, 129, 129, 128},
-                        {129, 129, 129, 129}
+                        {129, 128, 128, 128},
+                        {129, 129, 129, 128}
                 }
         );
         assertPlaneEquals(

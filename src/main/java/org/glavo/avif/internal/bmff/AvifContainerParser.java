@@ -32,6 +32,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -775,22 +776,33 @@ public final class AvifContainerParser {
 
         CleanAperture clap = item.firstProperty(CleanAperture.class);
         if (clap != null) {
-            clapCropX = clap.horizOffN / clap.horizOffD;
-            clapCropY = clap.vertOffN / clap.vertOffD;
-            clapCropWidth = (clap.cleanApertureWidthN + clap.cleanApertureWidthD - 1) / clap.cleanApertureWidthD;
-            clapCropHeight = (clap.cleanApertureHeightN + clap.cleanApertureHeightD - 1) / clap.cleanApertureHeightD;
-            if (clapCropX < 0 || clapCropY < 0
-                    || clapCropWidth <= 0 || clapCropHeight <= 0
-                    || clapCropX + clapCropWidth > imageWidth
-                    || clapCropY + clapCropHeight > imageHeight) {
+            clapCropWidth = (int) (((long) clap.cleanApertureWidthN
+                    + clap.cleanApertureWidthD - 1L) / clap.cleanApertureWidthD);
+            clapCropHeight = (int) (((long) clap.cleanApertureHeightN
+                    + clap.cleanApertureHeightD - 1L) / clap.cleanApertureHeightD);
+            clapCropX = roundedCleanApertureOrigin(
+                    imageWidth,
+                    clap.cleanApertureWidthN, clap.cleanApertureWidthD,
+                    clap.horizOffN, clap.horizOffD
+            );
+            clapCropY = roundedCleanApertureOrigin(
+                    imageHeight,
+                    clap.cleanApertureHeightN, clap.cleanApertureHeightD,
+                    clap.vertOffN, clap.vertOffD
+            );
+            if (clapCropX >= 0 && clapCropY >= 0
+                    && clapCropWidth > 0 && clapCropHeight > 0
+                    && clapCropX < imageWidth && clapCropY < imageHeight) {
                 clapCropWidth = Math.min(clapCropWidth, imageWidth - clapCropX);
                 clapCropHeight = Math.min(clapCropHeight, imageHeight - clapCropY);
-                if (clapCropWidth <= 0 || clapCropHeight <= 0) {
-                    clapCropX = -1;
-                    clapCropY = -1;
-                    clapCropWidth = -1;
-                    clapCropHeight = -1;
-                }
+            }
+            if (clapCropX < 0 || clapCropY < 0
+                    || clapCropWidth <= 0 || clapCropHeight <= 0
+                    || clapCropX >= imageWidth || clapCropY >= imageHeight) {
+                clapCropX = -1;
+                clapCropY = -1;
+                clapCropWidth = -1;
+                clapCropHeight = -1;
             }
         }
 
@@ -805,6 +817,43 @@ public final class AvifContainerParser {
         }
 
         return new int[]{clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis};
+    }
+
+    /// Converts one clean-aperture center offset to an integer crop origin.
+    ///
+    /// The `clap` offset locates the clean-aperture center relative to the uncropped image center;
+    /// it is not the top-left crop coordinate. Non-integral coordinates are rounded to the nearest
+    /// pixel, with half-pixel ties rounded toward the positive direction.
+    ///
+    /// @param imageDimension the uncropped image dimension
+    /// @param apertureNumerator the clean-aperture dimension numerator
+    /// @param apertureDenominator the clean-aperture dimension denominator
+    /// @param offsetNumerator the signed center-offset numerator
+    /// @param offsetDenominator the center-offset denominator
+    /// @return the normalized crop origin, or -1 if it is negative or exceeds the integer range
+    private static int roundedCleanApertureOrigin(
+            int imageDimension,
+            int apertureNumerator,
+            int apertureDenominator,
+            int offsetNumerator,
+            int offsetDenominator
+    ) {
+        BigInteger apertureDenominatorValue = BigInteger.valueOf(apertureDenominator);
+        BigInteger offsetDenominatorValue = BigInteger.valueOf(offsetDenominator);
+        BigInteger commonDenominator = apertureDenominatorValue
+                .multiply(offsetDenominatorValue)
+                .shiftLeft(1);
+        BigInteger numerator = BigInteger.valueOf(imageDimension)
+                .multiply(apertureDenominatorValue)
+                .multiply(offsetDenominatorValue)
+                .subtract(BigInteger.valueOf(apertureNumerator).multiply(offsetDenominatorValue))
+                .add(BigInteger.valueOf(offsetNumerator).multiply(apertureDenominatorValue).shiftLeft(1));
+        if (numerator.signum() < 0) {
+            return -1;
+        }
+
+        BigInteger rounded = numerator.add(commonDenominator.shiftRight(1)).divide(commonDenominator);
+        return rounded.bitLength() <= 31 ? rounded.intValue() : -1;
     }
 
     /// Validates the operating-point metadata for one renderable image item.

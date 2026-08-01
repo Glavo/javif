@@ -40,6 +40,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -222,6 +223,24 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(expectedContextY(TransformSize.TX_64X64, 6), genericLevelY(TransformSize.TX_64X64, TransformType.DCT_DCT, 6));
         assertEquals(expectedContextX(TransformSize.RTX_16X32, 15), genericLevelX(TransformSize.RTX_16X32, TransformType.DCT_DCT, 15));
         assertEquals(expectedContextY(TransformSize.RTX_16X32, 15), genericLevelY(TransformSize.RTX_16X32, TransformType.DCT_DCT, 15));
+    }
+
+    /// Verifies that clipped 64-point rectangular transforms retain the `dav1d` token order while
+    /// mapping each token into this decoder's full-width row-major coefficient storage.
+    @Test
+    void clippedRectangularScansMapDav1dCoordinatesToNaturalStorage() {
+        assertArrayEquals(
+                new int[]{0, 1, 64, 128, 65, 2},
+                Arrays.copyOf(TileResidualSyntaxReader.createDefaultScan(TransformSize.RTX_64X32, false), 6)
+        );
+        assertArrayEquals(
+                new int[]{0, 1, 32, 64, 33, 2},
+                Arrays.copyOf(TileResidualSyntaxReader.createDefaultScan(TransformSize.RTX_32X64, false), 6)
+        );
+        assertArrayEquals(
+                new int[]{0, 32, 1, 2, 33, 64},
+                Arrays.copyOf(TileResidualSyntaxReader.createDefaultScan(TransformSize.RTX_64X32, true), 6)
+        );
     }
 
     /// Verifies that a minimal `I420` block produces stable all-zero chroma residual units.
@@ -1020,14 +1039,9 @@ final class TileResidualSyntaxReaderTest {
         for (int diagonal = 0; diagonal < codedWidth + codedHeight - 1; diagonal++) {
             int rowStart = Math.max(0, diagonal - (codedWidth - 1));
             int rowEnd = Math.min(codedHeight - 1, diagonal);
-            boolean descendingRows;
-            if (codedWidth == codedHeight) {
-                descendingRows = contextLayout
-                        ? (diagonal & 1) == 0
-                        : (diagonal & 1) == 1;
-            } else {
-                descendingRows = codedWidth > codedHeight;
-            }
+            boolean descendingRows = codedWidth == codedHeight
+                    ? (diagonal & 1) == 0
+                    : codedWidth > codedHeight;
             if (descendingRows) {
                 for (int row = rowEnd; row >= rowStart; row--) {
                     int column = diagonal - row;
@@ -1062,9 +1076,6 @@ final class TileResidualSyntaxReaderTest {
     ) {
         if (contextLayout) {
             return column * codedHeight + row;
-        }
-        if (transformSize.widthPixels() == transformSize.heightPixels()) {
-            return column * outputWidth + row;
         }
         return row * outputWidth + column;
     }

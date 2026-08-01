@@ -25,10 +25,9 @@ import java.util.Objects;
 
 /// Inverse-transform helper for the residual-producing reconstruction path.
 ///
-/// Exact staged integer kernels are used for the most common transform axes, while larger
-/// `DCT_DCT` axes still use cached separable synthesis matrices rescaled to the AV1 integer
-/// transform gain. It exposes one method that reconstructs a residual sample block and one method
-/// that adds that block into an already predicted plane.
+/// Staged integer kernels are used for all modeled transform axes. This class exposes one method
+/// that reconstructs a residual sample block and one method that adds that block into an already
+/// predicted plane.
 @NotNullByDefault
 final class InverseTransformer {
     /// The AV1 inverse-transform cosine precision.
@@ -259,12 +258,12 @@ final class InverseTransformer {
             case TX_64X64 -> reconstructRectangularDctDct(coefficients, 64, 64, 2, rowClipRange, columnClipRange);
             case RTX_16X32 -> reconstructRectangularDctDct(coefficients, 16, 32, 1, rowClipRange, columnClipRange);
             case RTX_32X16 -> reconstructRectangularDctDct(coefficients, 32, 16, 1, rowClipRange, columnClipRange);
-            case RTX_32X64 -> reconstructGenericLargeDctDct(coefficients, 32, 64, 1);
-            case RTX_64X32 -> reconstructGenericLargeDctDct(coefficients, 64, 32, 1);
+            case RTX_32X64 -> reconstructRectangularDctDct(coefficients, 32, 64, 1, rowClipRange, columnClipRange);
+            case RTX_64X32 -> reconstructRectangularDctDct(coefficients, 64, 32, 1, rowClipRange, columnClipRange);
             case RTX_8X32 -> reconstructRectangularDctDct(coefficients, 8, 32, 2, rowClipRange, columnClipRange);
             case RTX_32X8 -> reconstructRectangularDctDct(coefficients, 32, 8, 2, rowClipRange, columnClipRange);
-            case RTX_16X64 -> reconstructGenericLargeDctDct(coefficients, 16, 64, 2);
-            case RTX_64X16 -> reconstructGenericLargeDctDct(coefficients, 64, 16, 2);
+            case RTX_16X64 -> reconstructRectangularDctDct(coefficients, 16, 64, 2, rowClipRange, columnClipRange);
+            case RTX_64X16 -> reconstructRectangularDctDct(coefficients, 64, 16, 2, rowClipRange, columnClipRange);
         };
     }
 
