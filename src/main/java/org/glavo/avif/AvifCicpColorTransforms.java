@@ -21,8 +21,8 @@ import org.jetbrains.annotations.Nullable;
 /// Pure-Java CICP transfer-function and RGB-primary conversion helpers.
 ///
 /// The helper intentionally covers the common AVIF signaling used by libavif fixtures while
-/// keeping ICC handling out of runtime transforms. Unsupported or unspecified primaries fall back
-/// to BT.709/sRGB because the current public RGB frame API does not carry an output color space.
+/// keeping ICC handling out of runtime transforms. Missing or unspecified signaling uses
+/// BT.709/sRGB defaults; unsupported explicit signaling is rejected.
 @NotNullByDefault
 final class AvifCicpColorTransforms {
     /// BT.709/sRGB color primaries.
@@ -89,17 +89,21 @@ final class AvifCicpColorTransforms {
     /// @param value the normalized gamma-encoded value
     /// @param colorInfo the CICP color information, or `null` for sRGB fallback
     /// @return the normalized linear-light value
+    /// @throws UnsupportedOperationException if an explicit transfer characteristic is unsupported
     static double gammaToLinear(double value, @Nullable AvifColorInfo colorInfo) {
         double clamped = clampUnit(value);
-        return switch (transferCharacteristics(colorInfo)) {
+        int transferCharacteristics = transferCharacteristics(colorInfo);
+        return switch (transferCharacteristics) {
             case TRANSFER_LINEAR -> clamped;
             case 1, 6, 14, 15 -> bt709ToLinear(clamped);
             case 4 -> Math.pow(clamped, 2.2);
             case 5 -> Math.pow(clamped, 2.8);
             case TRANSFER_PQ -> pqToLinear(clamped);
             case TRANSFER_HLG -> hlgToLinear(clamped);
-            case TRANSFER_SRGB, TRANSFER_UNSPECIFIED -> srgbToLinear(clamped);
-            default -> srgbToLinear(clamped);
+            case TRANSFER_SRGB -> srgbToLinear(clamped);
+            default -> throw new UnsupportedOperationException(
+                    "Unsupported CICP transfer characteristics: " + transferCharacteristics
+            );
         };
     }
 
@@ -108,17 +112,21 @@ final class AvifCicpColorTransforms {
     /// @param value the normalized linear-light value
     /// @param colorInfo the CICP color information, or `null` for sRGB fallback
     /// @return the normalized gamma-encoded value
+    /// @throws UnsupportedOperationException if an explicit transfer characteristic is unsupported
     static double linearToGamma(double value, @Nullable AvifColorInfo colorInfo) {
         double clamped = clampUnit(value);
-        return switch (transferCharacteristics(colorInfo)) {
+        int transferCharacteristics = transferCharacteristics(colorInfo);
+        return switch (transferCharacteristics) {
             case TRANSFER_LINEAR -> clamped;
             case 1, 6, 14, 15 -> linearToBt709(clamped);
             case 4 -> Math.pow(clamped, 1.0 / 2.2);
             case 5 -> Math.pow(clamped, 1.0 / 2.8);
             case TRANSFER_PQ -> linearToPq(clamped);
             case TRANSFER_HLG -> linearToHlg(clamped);
-            case TRANSFER_SRGB, TRANSFER_UNSPECIFIED -> linearToSrgb(clamped);
-            default -> linearToSrgb(clamped);
+            case TRANSFER_SRGB -> linearToSrgb(clamped);
+            default -> throw new UnsupportedOperationException(
+                    "Unsupported CICP transfer characteristics: " + transferCharacteristics
+            );
         };
     }
 
@@ -127,24 +135,26 @@ final class AvifCicpColorTransforms {
     /// @param sourceInfo the source color information, or `null` for BT.709/sRGB fallback
     /// @param targetInfo the target color information, or `null` for BT.709/sRGB fallback
     /// @return an RGB conversion matrix
+    /// @throws UnsupportedOperationException if either explicit primary set is unsupported
+    /// @throws IllegalStateException if a supported primary definition cannot produce an invertible matrix
     static RgbMatrix conversionMatrix(@Nullable AvifColorInfo sourceInfo, @Nullable AvifColorInfo targetInfo) {
         int sourcePrimaries = colorPrimaries(sourceInfo);
         int targetPrimaries = colorPrimaries(targetInfo);
+        Primaries source = requirePrimaries(sourcePrimaries);
+        Primaries target = requirePrimaries(targetPrimaries);
         if (sourcePrimaries == targetPrimaries) {
-            return IDENTITY;
-        }
-        @Nullable Primaries source = primaries(sourcePrimaries);
-        @Nullable Primaries target = primaries(targetPrimaries);
-        if (source == null || target == null) {
             return IDENTITY;
         }
         @Nullable RgbMatrix sourceToXyz = source.rgbToXyzMatrix();
         @Nullable RgbMatrix targetToXyz = target.rgbToXyzMatrix();
         if (sourceToXyz == null || targetToXyz == null) {
-            return IDENTITY;
+            throw new IllegalStateException("Supported CICP primaries produced a singular RGB conversion matrix");
         }
         @Nullable RgbMatrix xyzToTarget = targetToXyz.inverse();
-        return xyzToTarget != null ? xyzToTarget.multiply(sourceToXyz) : IDENTITY;
+        if (xyzToTarget == null) {
+            throw new IllegalStateException("Supported target CICP primaries produced a singular RGB conversion matrix");
+        }
+        return xyzToTarget.multiply(sourceToXyz);
     }
 
     /// Returns whether two CICP descriptors have the same effective RGB color space.
@@ -194,6 +204,19 @@ final class AvifCicpColorTransforms {
             return TRANSFER_SRGB;
         }
         return colorInfo.transferCharacteristics();
+    }
+
+    /// Returns the primary definition for one supported effective CICP code.
+    ///
+    /// @param colorPrimaries the effective CICP color primaries value
+    /// @return the matching primary definition
+    /// @throws UnsupportedOperationException if the explicit primary set is unsupported
+    private static Primaries requirePrimaries(int colorPrimaries) {
+        @Nullable Primaries result = primaries(colorPrimaries);
+        if (result == null) {
+            throw new UnsupportedOperationException("Unsupported CICP color primaries: " + colorPrimaries);
+        }
+        return result;
     }
 
     /// Returns primaries chromaticities for one CICP code.

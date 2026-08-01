@@ -463,23 +463,11 @@ public final class Av1ImageReader implements AutoCloseable {
     private @Nullable DecodedFrame completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
-        @Nullable FrameSyntaxDecodeResult temporalReferenceResult = selectTemporalReferenceFrameSyntaxResult(frameHeader);
         FrameSyntaxDecodeResult syntaxDecodeResult;
         try {
-            syntaxDecodeResult = new FrameSyntaxDecoder(
-                    cdfReferenceResult,
-                    temporalReferenceResult
-            ).decode(assembly);
-        } catch (IllegalStateException exception) {
-            throw new DecodeException(
-                    DecodeErrorCode.NOT_IMPLEMENTED,
-                    DecodeStage.FRAME_DECODE,
-                    exception.getMessage() != null ? exception.getMessage() : "AV1 frame decoding is not implemented yet",
-                    packet.streamOffset(),
-                    packet.obuIndex(),
-                    null,
-                    exception
-            );
+            syntaxDecodeResult = new FrameSyntaxDecoder(cdfReferenceResult).decode(assembly);
+        } catch (UnsupportedOperationException exception) {
+            throw unsupportedFrameDecode(packet, exception);
         }
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
         FrameSyntaxDecodeResult storedSyntaxDecodeResult =
@@ -490,36 +478,12 @@ public final class Av1ImageReader implements AutoCloseable {
 
         @Nullable DecodedPlanes decodedPlanes = null;
         if (shouldOutput || needsSurfaceSnapshot) {
-            try {
-                decodedPlanes = frameReconstructor.reconstruct(syntaxDecodeResult, currentReferenceSurfaceSnapshots());
-            } catch (IllegalStateException exception) {
-                throw new DecodeException(
-                        DecodeErrorCode.NOT_IMPLEMENTED,
-                        DecodeStage.FRAME_DECODE,
-                        exception.getMessage() != null ? exception.getMessage() : "AV1 frame decoding is not implemented yet",
-                        packet.streamOffset(),
-                        packet.obuIndex(),
-                        null,
-                        exception
-                );
-            }
+            decodedPlanes = frameReconstructor.reconstruct(syntaxDecodeResult, currentReferenceSurfaceSnapshots());
         }
 
         @Nullable DecodedPlanes postprocessedPlanes = null;
         if (decodedPlanes != null) {
-            try {
-                postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
-            } catch (IllegalStateException exception) {
-                throw new DecodeException(
-                        DecodeErrorCode.NOT_IMPLEMENTED,
-                        DecodeStage.FRAME_DECODE,
-                        exception.getMessage() != null ? exception.getMessage() : "AV1 postfiltering is not implemented yet",
-                        packet.streamOffset(),
-                        packet.obuIndex(),
-                        null,
-                        exception
-                );
-            }
+            postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
             refreshReferenceSurfaceState(
                     frameHeader,
                     new ReferenceSurfaceSnapshot(frameHeader, storedSyntaxDecodeResult, postprocessedPlanes)
@@ -533,13 +497,20 @@ public final class Av1ImageReader implements AutoCloseable {
                 frameHeader
         );
         lastPlanes = presentationPlanes;
-        return OutputFrameFactory.createFrame(
-                presentationPlanes,
-                storedSyntaxDecodeResult.assembly().sequenceHeader().colorConfig(),
-                frameHeader,
-                frameHeader.showFrame(),
-                nextPresentationIndex++
-        );
+        DecodedFrame outputFrame;
+        try {
+            outputFrame = OutputFrameFactory.createFrame(
+                    presentationPlanes,
+                    storedSyntaxDecodeResult.assembly().sequenceHeader().colorConfig(),
+                    frameHeader,
+                    frameHeader.showFrame(),
+                    nextPresentationIndex
+            );
+        } catch (UnsupportedOperationException exception) {
+            throw unsupportedOutputConversion(packet, exception);
+        }
+        nextPresentationIndex++;
+        return outputFrame;
     }
 
     /// Parses and appends a standalone tile-group OBU to the current frame assembly.
@@ -702,13 +673,20 @@ public final class Av1ImageReader implements AutoCloseable {
             );
         }
         DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
-        return OutputFrameFactory.createFrame(
-                presentationPlanes,
-                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig(),
-                referencedFrameHeader,
-                true,
-                nextPresentationIndex++
-        );
+        DecodedFrame outputFrame;
+        try {
+            outputFrame = OutputFrameFactory.createFrame(
+                    presentationPlanes,
+                    referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig(),
+                    referencedFrameHeader,
+                    true,
+                    nextPresentationIndex
+            );
+        } catch (UnsupportedOperationException exception) {
+            throw unsupportedOutputConversion(packet, exception);
+        }
+        nextPresentationIndex++;
+        return outputFrame;
     }
 
     /// Applies presentation-only output filters such as film grain.
@@ -742,6 +720,50 @@ public final class Av1ImageReader implements AutoCloseable {
                 packet.streamOffset(),
                 packet.obuIndex(),
                 null
+        );
+    }
+
+    /// Returns a contextual checked failure for an unsupported output color conversion.
+    ///
+    /// @param packet the OBU whose frame reached output conversion
+    /// @param exception the unsupported conversion failure
+    /// @return the contextual unsupported-feature exception
+    private static DecodeException unsupportedOutputConversion(
+            ObuPacket packet,
+            UnsupportedOperationException exception
+    ) {
+        return new DecodeException(
+                DecodeErrorCode.UNSUPPORTED_FEATURE,
+                DecodeStage.OUTPUT_CONVERSION,
+                exception.getMessage() != null
+                        ? exception.getMessage()
+                        : "AV1 output uses an unsupported color conversion",
+                packet.streamOffset(),
+                packet.obuIndex(),
+                null,
+                exception
+        );
+    }
+
+    /// Returns a contextual checked failure for unsupported frame syntax.
+    ///
+    /// @param packet the OBU that completed the frame assembly
+    /// @param exception the unsupported frame-decode failure
+    /// @return the contextual unsupported-feature exception
+    private static DecodeException unsupportedFrameDecode(
+            ObuPacket packet,
+            UnsupportedOperationException exception
+    ) {
+        return new DecodeException(
+                DecodeErrorCode.UNSUPPORTED_FEATURE,
+                DecodeStage.FRAME_DECODE,
+                exception.getMessage() != null
+                        ? exception.getMessage()
+                        : "AV1 frame uses unsupported syntax",
+                packet.streamOffset(),
+                packet.obuIndex(),
+                null,
+                exception
         );
     }
 
@@ -803,35 +825,6 @@ public final class Av1ImageReader implements AutoCloseable {
             return null;
         }
         return referenceSlots[primarySlot].syntaxResult();
-    }
-
-    /// Returns the structural decode result whose temporal motion field should seed the next frame.
-    ///
-    /// The current implementation prefers `primary_ref_frame` when available, then falls back to
-    /// the first populated reference in LAST..ALTREF order.
-    ///
-    /// @param frameHeader the parsed frame header for the next frame
-    /// @return the structural decode result whose temporal motion field should seed the next frame, or `null`
-    private @Nullable FrameSyntaxDecodeResult selectTemporalReferenceFrameSyntaxResult(FrameHeader frameHeader) {
-        if (!frameHeader.useReferenceFrameMotionVectors()) {
-            return null;
-        }
-
-        @Nullable FrameSyntaxDecodeResult primaryResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
-        if (primaryResult != null) {
-            return primaryResult;
-        }
-
-        int[] referenceFrameIndices = frameHeader.referenceFrameIndices();
-        for (int referenceSlot : referenceFrameIndices) {
-            if (referenceSlot >= 0 && referenceSlot < referenceSlots.length) {
-                @Nullable FrameSyntaxDecodeResult candidate = referenceSlots[referenceSlot].syntaxResult();
-                if (candidate != null) {
-                    return candidate;
-                }
-            }
-        }
-        return null;
     }
 
     /// Returns the structural decode result that should be stored in refreshed reference slots.

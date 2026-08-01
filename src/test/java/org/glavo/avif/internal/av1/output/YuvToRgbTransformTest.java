@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /// Tests for AV1 color-configuration driven YUV-to-RGB transform selection.
 @NotNullByDefault
@@ -40,6 +41,35 @@ final class YuvToRgbTransformTest {
     @Test
     void unspecifiedMonochromeTransformPreservesRange() {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(2, false, AvifPixelFormat.I400));
+
+        assertEquals(0xFF00_0000, transform.toOpaqueGrayArgb(16));
+        assertEquals(0xFFFF_FFFF, transform.toOpaqueGrayArgb(235));
+    }
+
+    /// Verifies that unspecified chroma matrix coefficients still preserve limited-range signaling.
+    @Test
+    void unspecifiedChromaTransformPreservesRange() {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(2, false, AvifPixelFormat.I420));
+
+        assertEquals(0xFF00_0000, transform.toOpaqueArgb(16, 128, 128));
+        assertEquals(0xFFFF_FFFF, transform.toOpaqueArgb(235, 128, 128));
+    }
+
+    /// Verifies that unsupported explicit chroma matrices are not silently rendered as `BT.601`.
+    @Test
+    void unsupportedExplicitChromaMatrixIsRejected() {
+        UnsupportedOperationException exception = assertThrows(
+                UnsupportedOperationException.class,
+                () -> YuvToRgbTransform.fromColorConfig(colorConfig(14, true, AvifPixelFormat.I420))
+        );
+
+        assertEquals("Unsupported CICP matrix coefficients: 14", exception.getMessage());
+    }
+
+    /// Verifies that matrix-family support does not affect range conversion for monochrome planes.
+    @Test
+    void unsupportedExplicitMatrixIsIgnoredForMonochromePlanes() {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(14, false, AvifPixelFormat.I400));
 
         assertEquals(0xFF00_0000, transform.toOpaqueGrayArgb(16));
         assertEquals(0xFFFF_FFFF, transform.toOpaqueGrayArgb(235));

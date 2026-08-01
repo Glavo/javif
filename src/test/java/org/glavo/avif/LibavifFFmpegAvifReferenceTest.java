@@ -15,6 +15,9 @@
  */
 package org.glavo.avif;
 
+import org.glavo.avif.decode.DecodeErrorCode;
+import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.decode.DecodeStage;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder.ArgbImage;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder.SourcePlanes;
@@ -50,9 +53,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class LibavifFFmpegAvifReferenceTest {
     /// The copied libavif test data resource root.
     private static final String TEST_DATA_ROOT = "libavif-test-data";
-    /// Aggregate tolerance accepted for sparse FFmpeg RGB edge outliers in animated 8-bit fixtures.
-    private static final PixelTolerance ANIMATED_RGB_EDGE_TOLERANCE =
-            PixelTolerance.bounded(255, 0.0, 2.5, 21.0);
+    /// The fixture whose explicit CICP matrix is not implemented by javif's RGB output path.
+    private static final String UNSUPPORTED_CICP_MATRIX_RESOURCE =
+            "libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif";
     /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
     private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
             rgbPixelReference("libavif-test-data/abc_color_irot_alpha_NOirot.avif", PixelTolerance.bounded(16, 0.0, 6.0, 8.0)),
@@ -67,13 +70,6 @@ final class LibavifFFmpegAvifReferenceTest {
             rgbPixelReference("libavif-test-data/color_grid_gainmap_different_grid.avif", PixelTolerance.perPixelDelta(1)),
             rgbPixelReference("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", PixelTolerance.bounded(3, 0.0, 3.0, 3.0)),
-            rgbPixelReference("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif",
-                    ANIMATED_RGB_EDGE_TOLERANCE),
-            rgbPixelReference("libavif-test-data/colors-animated-8bpc-audio.avif",
-                    ANIMATED_RGB_EDGE_TOLERANCE),
-            rgbPixelReference("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif",
-                    ANIMATED_RGB_EDGE_TOLERANCE),
-            rgbPixelReference("libavif-test-data/colors-animated-8bpc.avif", ANIMATED_RGB_EDGE_TOLERANCE),
             pixelReference("libavif-test-data/colors_hdr_p3.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_srgb.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
@@ -328,7 +324,7 @@ final class LibavifFFmpegAvifReferenceTest {
                 ));
     }
 
-    /// Verifies libavif AVIF fixtures against FFmpeg source metadata or an explicit FFmpeg limitation.
+    /// Verifies libavif AVIF fixtures against FFmpeg source metadata or an explicit decoder limitation.
     ///
     /// @return the dynamic FFmpeg metadata reference tests
     @TestFactory
@@ -340,7 +336,7 @@ final class LibavifFFmpegAvifReferenceTest {
                 ));
     }
 
-    /// Verifies libavif AVIF fixtures against FFmpeg decoded source planes or an explicit FFmpeg limitation.
+    /// Verifies libavif AVIF fixtures against FFmpeg decoded source planes or an explicit decoder limitation.
     ///
     /// @return the dynamic FFmpeg source-plane reference tests
     @TestFactory
@@ -387,6 +383,14 @@ final class LibavifFFmpegAvifReferenceTest {
             assertFFmpegArgbReferenceUnsupported(reference.resourceName());
             return;
         }
+        if (UNSUPPORTED_CICP_MATRIX_RESOURCE.equals(reference.resourceName())) {
+            ArgbImage expected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(reference.resourceName());
+            try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.resourceName()))) {
+                assertImageInfoMatchesFFmpegMetadata(reader.info(), expected);
+                assertUnsupportedCicpMatrix(assertThrows(AvifDecodeException.class, reader::readFrame));
+            }
+            return;
+        }
         if (!isEnabledMetadataReference(reference.resourceName())) {
             Assumptions.assumeTrue(false, "Pending FFmpeg source metadata parity for this fixture.");
         }
@@ -405,6 +409,15 @@ final class LibavifFFmpegAvifReferenceTest {
         }
         if (isUnsupportedFFmpegReference(reference.resourceName())) {
             assertFFmpegSourcePlaneReferenceUnsupported(reference.resourceName());
+            return;
+        }
+        if (UNSUPPORTED_CICP_MATRIX_RESOURCE.equals(reference.resourceName())) {
+            try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.resourceName()))) {
+                assertUnsupportedCicpMatrix(assertThrows(
+                        AvifDecodeException.class,
+                        () -> reader.readRawColorPlanes(0)
+                ));
+            }
             return;
         }
         @Nullable SourcePlaneReference sourcePlaneReference = enabledSourcePlaneReference(reference.resourceName());
@@ -434,6 +447,19 @@ final class LibavifFFmpegAvifReferenceTest {
                 () -> FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName)
         );
         assertTrue(exception.getMessage().contains(resourceName));
+    }
+
+    /// Asserts javif's explicit unsupported-feature result for CICP matrix coefficients 12.
+    ///
+    /// @param exception the javif decoding failure to inspect
+    private static void assertUnsupportedCicpMatrix(AvifDecodeException exception) {
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertEquals("Unsupported CICP matrix coefficients: 12", exception.getMessage());
+
+        assertTrue(exception.getCause() instanceof DecodeException);
+        DecodeException decodeException = (DecodeException) exception.getCause();
+        assertEquals(DecodeErrorCode.UNSUPPORTED_FEATURE, decodeException.code());
+        assertEquals(DecodeStage.OUTPUT_CONVERSION, decodeException.stage());
     }
 
     /// Asserts that javif and FFmpeg render the first frame of one AVIF resource within tolerance.

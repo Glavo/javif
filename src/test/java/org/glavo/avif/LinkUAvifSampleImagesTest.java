@@ -29,9 +29,11 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Corpus tests for the AVIF files published by `link-u/avif-sample-images`.
@@ -40,40 +42,68 @@ final class LinkUAvifSampleImagesTest {
     /// The copied sample-image resource root.
     private static final String TEST_DATA_ROOT = "link-u-avif-sample-images";
 
-    /// Creates one full-decode test for every copied AVIF or AVIFS resource.
+    /// Sequence samples whose dependent frames require unsupported reference-frame MV projection.
+    private static final @Unmodifiable Set<String> UNSUPPORTED_REFERENCE_FRAME_MV_RESOURCES = Set.of(
+            "link-u-avif-sample-images/star-8bpc.avifs",
+            "link-u-avif-sample-images/star-8bpc-with-alpha.avifs",
+            "link-u-avif-sample-images/star-10bpc.avifs",
+            "link-u-avif-sample-images/star-10bpc-with-alpha.avifs",
+            "link-u-avif-sample-images/star-12bpc.avifs",
+            "link-u-avif-sample-images/star-12bpc-with-alpha.avifs"
+    );
+
+    /// Creates one decode-behavior test for every copied AVIF or AVIFS resource.
     ///
     /// @return the dynamic sample-image tests
     /// @throws IOException if the resource directory cannot be walked
     /// @throws URISyntaxException if the resource root URL is invalid
     @TestFactory
-    Stream<DynamicTest> sampleImagesDecodeAllFrames() throws IOException, URISyntaxException {
+    Stream<DynamicTest> sampleImagesMatchExpectedDecodeBehavior() throws IOException, URISyntaxException {
         return sampleResourceNames().stream()
-                .map(resourceName -> DynamicTest.dynamicTest(resourceName, () -> assertDecodesAllFrames(resourceName)));
+                .map(resourceName -> DynamicTest.dynamicTest(resourceName, () -> assertDecodeBehavior(resourceName)));
     }
 
-    /// Decodes every frame in one sample and verifies the observable frame layout.
+    /// Verifies successful full decoding or the explicit unsupported-feature boundary for one sample.
     ///
     /// @param resourceName the classpath sample resource name
     /// @throws IOException if the sample cannot be read or decoded
-    private static void assertDecodesAllFrames(String resourceName) throws IOException {
+    private static void assertDecodeBehavior(String resourceName) throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
             AvifImageInfo info = reader.info();
             assertTrue(info.width() > 0, "width");
             assertTrue(info.height() > 0, "height");
+
+            if (UNSUPPORTED_REFERENCE_FRAME_MV_RESOURCES.contains(resourceName)) {
+                AvifFrame firstFrame = Objects.requireNonNull(reader.readFrame(), "firstFrame");
+                assertFrameLayout(firstFrame, 0);
+
+                AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readAllFrames);
+                assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+                assertEquals("Reference-frame motion-vector projection is not implemented", exception.getMessage());
+                return;
+            }
+
             @Unmodifiable List<AvifFrame> frames = reader.readAllFrames();
             assertEquals(info.frameCount(), frames.size(), "frame count");
             for (int frameIndex = 0; frameIndex < frames.size(); frameIndex++) {
-                AvifFrame frame = frames.get(frameIndex);
-                assertEquals(frameIndex, frame.frameIndex(), "frame index");
-                assertTrue(frame.width() > 0, "frame width");
-                assertTrue(frame.height() > 0, "frame height");
-                int pixelCount = Math.multiplyExact(frame.width(), frame.height());
-                if (frame.bitDepth().isEightBit()) {
-                    assertEquals(pixelCount, frame.intPixelBuffer().remaining(), "pixel count");
-                } else {
-                    assertEquals(pixelCount, frame.longPixelBuffer().remaining(), "pixel count");
-                }
+                assertFrameLayout(frames.get(frameIndex), frameIndex);
             }
+        }
+    }
+
+    /// Verifies the observable layout of one decoded frame.
+    ///
+    /// @param frame the decoded frame
+    /// @param frameIndex the expected zero-based frame index
+    private static void assertFrameLayout(AvifFrame frame, int frameIndex) {
+        assertEquals(frameIndex, frame.frameIndex(), "frame index");
+        assertTrue(frame.width() > 0, "frame width");
+        assertTrue(frame.height() > 0, "frame height");
+        int pixelCount = Math.multiplyExact(frame.width(), frame.height());
+        if (frame.bitDepth().isEightBit()) {
+            assertEquals(pixelCount, frame.intPixelBuffer().remaining(), "pixel count");
+        } else {
+            assertEquals(pixelCount, frame.longPixelBuffer().remaining(), "pixel count");
         }
     }
 

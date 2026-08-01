@@ -634,117 +634,10 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector1());
     }
 
-    /// Verifies that temporal motion-field samples feed the provisional motion-vector stack and
-    /// global-motion context when reference-frame motion vectors are enabled.
-    @Test
-    void provisionalInterModeContextsIncludeTemporalMotionFieldCandidates() {
-        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(8, 8);
-        TileDecodeContext.TemporalMotionBlock temporalBlock = TileDecodeContext.TemporalMotionBlock.singleReference(
-                0,
-                InterMotionVector.resolved(new MotionVector(28, -12))
-        );
-        temporalMotionField.setBlock(2, 2, temporalBlock);
-        temporalMotionField.setBlock(3, 2, temporalBlock);
-        BlockNeighborContext context = BlockNeighborContext.create(
-                testTileContext(FrameType.INTER, true, temporalMotionField)
-        );
-
-        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(4, 4), BlockSize.SIZE_16X16, false, 0, -1);
-
-        assertEquals(0, provisionalContext.singleNewMvContext());
-        assertEquals(1, provisionalContext.singleGlobalMvContext());
-        assertEquals(0, provisionalContext.singleReferenceMvContext());
-        assertEquals(0, provisionalContext.compoundInterModeContext());
-        assertEquals(2, provisionalContext.candidateCount());
-        assertEquals(640, provisionalContext.candidateWeight(0));
-        assertEquals(64, provisionalContext.candidateWeight(1));
-        assertEquals(2, provisionalContext.motionVectorCandidateCount());
-        assertEquals(InterMotionVector.resolved(new MotionVector(28, -12)), provisionalContext.motionVectorCandidate(0).motionVector0());
-        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
-    }
-
-    /// Verifies that small-block temporal fringe probes contribute candidates even when the main
-    /// temporal sampling footprint does not contain any matching sample.
-    @Test
-    void provisionalInterModeContextsIncludeTemporalFringeCandidates() {
-        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(8, 8);
-        temporalMotionField.setBlock(
-                1,
-                0,
-                TileDecodeContext.TemporalMotionBlock.singleReference(
-                        0,
-                        InterMotionVector.resolved(new MotionVector(16, 20))
-                )
-        );
-        BlockNeighborContext context = BlockNeighborContext.create(
-                testTileContext(FrameType.INTER, true, temporalMotionField)
-        );
-
-        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(0, 0), BlockSize.SIZE_8X8, false, 0, -1);
-
-        assertEquals(0, provisionalContext.singleNewMvContext());
-        assertEquals(1, provisionalContext.singleGlobalMvContext());
-        assertEquals(0, provisionalContext.singleReferenceMvContext());
-        assertEquals(0, provisionalContext.compoundInterModeContext());
-        assertEquals(2, provisionalContext.candidateCount());
-        assertEquals(640, provisionalContext.candidateWeight(0));
-        assertEquals(64, provisionalContext.candidateWeight(1));
-        assertEquals(2, provisionalContext.motionVectorCandidateCount());
-        assertEquals(InterMotionVector.resolved(new MotionVector(16, 20)), provisionalContext.motionVectorCandidate(0).motionVector0());
-        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
-    }
-
-    /// Verifies that small-block temporal fringe probes can append several distinct samples after
-    /// the main temporal footprint has already produced a candidate.
-    @Test
-    void provisionalInterModeContextsIncludeMultipleTemporalFringeCandidates() {
-        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(8, 8);
-        InterMotionVector mainMotionVector = InterMotionVector.resolved(new MotionVector(8, 0));
-        InterMotionVector bottomRightMotionVector = InterMotionVector.resolved(new MotionVector(16, 0));
-        InterMotionVector rightEdgeMotionVector = InterMotionVector.resolved(new MotionVector(24, 0));
-        temporalMotionField.setBlock(
-                0,
-                0,
-                TileDecodeContext.TemporalMotionBlock.singleReference(0, mainMotionVector)
-        );
-        temporalMotionField.setBlock(
-                1,
-                1,
-                TileDecodeContext.TemporalMotionBlock.singleReference(0, bottomRightMotionVector)
-        );
-        temporalMotionField.setBlock(
-                1,
-                0,
-                TileDecodeContext.TemporalMotionBlock.singleReference(0, rightEdgeMotionVector)
-        );
-        BlockNeighborContext context = BlockNeighborContext.create(
-                testTileContext(FrameType.INTER, true, temporalMotionField)
-        );
-
-        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                context.provisionalInterModeContext(new BlockPosition(0, 0), BlockSize.SIZE_8X8, false, 0, -1);
-
-        assertEquals(1, provisionalContext.singleGlobalMvContext());
-        assertEquals(4, provisionalContext.candidateCount());
-        assertEquals(640, provisionalContext.candidateWeight(0));
-        assertEquals(64, provisionalContext.candidateWeight(1));
-        assertEquals(64, provisionalContext.candidateWeight(2));
-        assertEquals(64, provisionalContext.candidateWeight(3));
-        assertEquals(4, provisionalContext.motionVectorCandidateCount());
-        assertEquals(mainMotionVector, provisionalContext.motionVectorCandidate(0).motionVector0());
-        assertEquals(bottomRightMotionVector, provisionalContext.motionVectorCandidate(1).motionVector0());
-        assertEquals(rightEdgeMotionVector, provisionalContext.motionVectorCandidate(2).motionVector0());
-        assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(3).motionVector0());
-    }
-
-    /// Verifies that decoded inter blocks are projected into the current-frame temporal motion
-    /// field without mutating the reference temporal field consumed by the same frame.
+    /// Verifies that decoded inter blocks populate the current frame's saved motion-vector field.
     @Test
     void updateFromBlockHeaderWritesDecodedTemporalMotionField() {
-        TileDecodeContext.TemporalMotionField sourceTemporalMotionField = new TileDecodeContext.TemporalMotionField(8, 8);
-        TileDecodeContext tileContext = testTileContext(FrameType.INTER, true, sourceTemporalMotionField);
+        TileDecodeContext tileContext = testTileContext(FrameType.INTER);
         BlockNeighborContext context = BlockNeighborContext.create(tileContext);
 
         context.updateFromBlockHeader(compoundInterBlock(
@@ -757,7 +650,6 @@ final class BlockNeighborContextTest {
                 InterMotionVector.predicted(new MotionVector(-4, 20))
         ));
 
-        assertNull(tileContext.temporalMotionField().block(2, 2));
         TileDecodeContext.TemporalMotionBlock temporalBlock = tileContext.decodedTemporalMotionField().block(2, 2);
         assertTrue(temporalBlock != null);
         assertTrue(temporalBlock.compoundReference());
@@ -973,36 +865,6 @@ final class BlockNeighborContextTest {
     /// @param pixelFormat the synthetic decoded pixel format
     /// @return a simple tile context used by neighbor-context tests
     private static TileDecodeContext testTileContext(FrameType frameType, AvifPixelFormat pixelFormat) {
-        return testTileContext(frameType, pixelFormat, false, null);
-    }
-
-    /// Creates a simple tile context used by neighbor-context tests.
-    ///
-    /// @param frameType the synthetic frame type
-    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
-    /// @param temporalMotionField the synthetic tile-local temporal motion field, or `null`
-    /// @return a simple tile context used by neighbor-context tests
-    private static TileDecodeContext testTileContext(
-            FrameType frameType,
-            boolean useReferenceFrameMotionVectors,
-            @org.jetbrains.annotations.Nullable TileDecodeContext.TemporalMotionField temporalMotionField
-    ) {
-        return testTileContext(frameType, AvifPixelFormat.I420, useReferenceFrameMotionVectors, temporalMotionField);
-    }
-
-    /// Creates a simple tile context used by neighbor-context tests.
-    ///
-    /// @param frameType the synthetic frame type
-    /// @param pixelFormat the synthetic decoded pixel format
-    /// @param useReferenceFrameMotionVectors whether reference-frame motion vectors are enabled
-    /// @param temporalMotionField the synthetic tile-local temporal motion field, or `null`
-    /// @return a simple tile context used by neighbor-context tests
-    private static TileDecodeContext testTileContext(
-            FrameType frameType,
-            AvifPixelFormat pixelFormat,
-            boolean useReferenceFrameMotionVectors,
-            @org.jetbrains.annotations.Nullable TileDecodeContext.TemporalMotionField temporalMotionField
-    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -1078,7 +940,7 @@ final class BlockNeighborContextTest {
                 false,
                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
                 false,
-                useReferenceFrameMotionVectors,
+                false,
                 true,
                 new FrameHeader.TilingInfo(
                         true,
@@ -1136,9 +998,7 @@ final class BlockNeighborContextTest {
                 0,
                 new TileBitstream[]{new TileBitstream(0, new byte[]{0x00}, 0, 1)}
         );
-        return temporalMotionField == null
-                ? TileDecodeContext.create(assembly, 0)
-                : TileDecodeContext.create(assembly, 0, temporalMotionField);
+        return TileDecodeContext.create(assembly, 0);
     }
 
     /// Creates default per-segment data with all features disabled.

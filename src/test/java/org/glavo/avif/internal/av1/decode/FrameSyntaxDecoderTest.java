@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FrameSyntaxDecoder`.
@@ -148,56 +149,17 @@ final class FrameSyntaxDecoderTest {
         assertTrue(seededSkip);
     }
 
-    /// Verifies that CDF inheritance can be enabled without also inheriting temporal motion fields.
+    /// Verifies that reference-frame motion vectors are rejected instead of being decoded with an
+    /// incomplete temporal projection model.
     @Test
-    void decodeFrameCanUseSeparateCdfAndTemporalReferenceSnapshots() {
-        CdfContext inheritedCdf = CdfContext.createDefault();
-        inheritedCdf.mutableSkipCdf(0)[0] = 32000;
-        FrameAssembly assembly = createAssembly(FrameType.INTER, DIFFERENT_INHERITED_SKIP_PAYLOAD, false, 8, 8);
-        FrameSyntaxDecodeResult cdfReferenceResult = new FrameSyntaxDecodeResult(
-                assembly,
-                new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
-                new TileDecodeContext.TemporalMotionField[]{new TileDecodeContext.TemporalMotionField(1, 1)},
-                new CdfContext[]{inheritedCdf}
-        );
-
-        FrameSyntaxDecodeResult defaultResult = new FrameSyntaxDecoder(null).decode(assembly);
-        FrameSyntaxDecodeResult cdfOnlyResult = new FrameSyntaxDecoder(cdfReferenceResult, null).decode(assembly);
-
-        boolean defaultSkip = firstLeaf(defaultResult.tileRoots(0)).header().skip();
-        boolean cdfOnlySkip = firstLeaf(cdfOnlyResult.tileRoots(0)).header().skip();
-        assertFalse(defaultSkip);
-        assertTrue(cdfOnlySkip);
-    }
-
-    /// Verifies that inherited temporal motion fields are projected to the current tile geometry
-    /// when the reference frame used a different tile scale.
-    @Test
-    void decodeFrameProjectsScaledTemporalReferenceWithoutCdfReference() {
+    void decodeFrameRejectsReferenceFrameMotionVectors() {
         FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 8, 8);
-        FrameAssembly referenceAssembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 16, 16);
-        TileDecodeContext.TemporalMotionField temporalMotionField = new TileDecodeContext.TemporalMotionField(2, 2);
-        InterMotionVector referenceMotionVector = InterMotionVector.resolved(new MotionVector(12, -4));
-        temporalMotionField.setBlock(
-                1,
-                1,
-                TileDecodeContext.TemporalMotionBlock.singleReference(0, referenceMotionVector)
-        );
-        FrameSyntaxDecodeResult temporalReferenceResult = new FrameSyntaxDecodeResult(
-                referenceAssembly,
-                new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
-                new TileDecodeContext.TemporalMotionField[]{temporalMotionField}
-        );
 
-        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null, temporalReferenceResult).decode(assembly);
-
-        TileDecodeContext.TemporalMotionField decodedTemporalMotionField = result.decodedTemporalMotionField(0);
-        assertEquals(1, decodedTemporalMotionField.width8());
-        assertEquals(1, decodedTemporalMotionField.height8());
-        TileDecodeContext.TemporalMotionBlock decodedTemporalBlock = decodedTemporalMotionField.block(0, 0);
-        assertNotNull(decodedTemporalBlock);
-        assertEquals(InterMotionVector.resolved(new MotionVector(6, -2)), firstLeaf(result.tileRoots(0)).header().motionVector0());
-        assertEquals(InterMotionVector.resolved(new MotionVector(6, -2)), decodedTemporalBlock.motionVector0());
+        UnsupportedOperationException exception = assertThrows(
+                UnsupportedOperationException.class,
+                () -> new FrameSyntaxDecoder(null).decode(assembly)
+        );
+        assertEquals("Reference-frame motion-vector projection is not implemented", exception.getMessage());
     }
 
     /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.

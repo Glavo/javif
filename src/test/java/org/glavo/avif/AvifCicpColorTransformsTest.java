@@ -19,6 +19,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests CICP transfer functions and primary conversion helpers used by AVIF gain maps.
@@ -59,18 +60,50 @@ public final class AvifCicpColorTransformsTest {
         assertTrue(rgb[2] < 0.0);
     }
 
-    /// Verifies that unsupported primary codes use the identity fallback.
+    /// Verifies that missing and explicitly unspecified signaling share BT.709/sRGB defaults.
     @Test
-    void unsupportedPrimariesUseIdentityFallback() {
-        AvifColorInfo unsupported = new AvifColorInfo(99, 13, 1, true);
-        AvifColorInfo srgb = new AvifColorInfo(1, 13, 1, true);
-        AvifCicpColorTransforms.RgbMatrix matrix = AvifCicpColorTransforms.conversionMatrix(unsupported, srgb);
+    void unspecifiedColorInfoUsesDefaultRgbColorSpace() {
+        AvifColorInfo unspecified = new AvifColorInfo(2, 2, 1, true);
+        double expectedLinear = AvifCicpColorTransforms.gammaToLinear(0.5, null);
+
+        assertEquals(expectedLinear, AvifCicpColorTransforms.gammaToLinear(0.5, unspecified), 0.0);
+
+        AvifCicpColorTransforms.RgbMatrix matrix =
+                AvifCicpColorTransforms.conversionMatrix(unspecified, null);
         double[] rgb = { 0.25, 0.5, 0.75 };
-
         matrix.apply(rgb);
-
         assertEquals(0.25, rgb[0], 0.0);
         assertEquals(0.5, rgb[1], 0.0);
         assertEquals(0.75, rgb[2], 0.0);
+    }
+
+    /// Verifies that unsupported explicit primary codes are rejected even when both sides match.
+    @Test
+    void unsupportedPrimariesAreRejected() {
+        AvifColorInfo unsupported = new AvifColorInfo(99, 13, 1, true);
+        UnsupportedOperationException exception = assertThrows(
+                UnsupportedOperationException.class,
+                () -> AvifCicpColorTransforms.conversionMatrix(unsupported, unsupported)
+        );
+
+        assertEquals("Unsupported CICP color primaries: 99", exception.getMessage());
+    }
+
+    /// Verifies that unsupported explicit transfer characteristics are rejected in both directions.
+    @Test
+    void unsupportedTransferCharacteristicsAreRejected() {
+        AvifColorInfo unsupported = new AvifColorInfo(1, 99, 1, true);
+
+        UnsupportedOperationException decodeException = assertThrows(
+                UnsupportedOperationException.class,
+                () -> AvifCicpColorTransforms.gammaToLinear(0.5, unsupported)
+        );
+        UnsupportedOperationException encodeException = assertThrows(
+                UnsupportedOperationException.class,
+                () -> AvifCicpColorTransforms.linearToGamma(0.5, unsupported)
+        );
+
+        assertEquals("Unsupported CICP transfer characteristics: 99", decodeException.getMessage());
+        assertEquals("Unsupported CICP transfer characteristics: 99", encodeException.getMessage());
     }
 }

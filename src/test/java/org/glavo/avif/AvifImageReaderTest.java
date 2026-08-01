@@ -15,6 +15,9 @@
  */
 package org.glavo.avif;
 
+import org.glavo.avif.decode.DecodeErrorCode;
+import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.decode.DecodeStage;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -55,7 +58,7 @@ final class AvifImageReaderTest {
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
-    /// The expected packed opaque gray pixel produced by the supported still-picture payload.
+    /// The expected packed opaque gray pixel produced by the full-range AVIF fixture.
     private static final int OPAQUE_MID_GRAY = 0xFF808080;
 
     /// The alpha auxiliary image type URN used by AVIF alpha items.
@@ -316,6 +319,19 @@ final class AvifImageReaderTest {
     private static void assertInputTooLarge(ThrowingOpen operation) {
         AvifDecodeException exception = assertThrows(AvifDecodeException.class, operation::open);
         assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
+    }
+
+    /// Asserts that decoding failed because reference-frame motion-vector projection is unavailable.
+    ///
+    /// @param exception the AVIF decoding failure to inspect
+    private static void assertUnsupportedReferenceFrameMotionVectors(AvifDecodeException exception) {
+        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertEquals("Reference-frame motion-vector projection is not implemented", exception.getMessage());
+
+        assertTrue(exception.getCause() instanceof DecodeException);
+        DecodeException decodeException = (DecodeException) exception.getCause();
+        assertEquals(DecodeErrorCode.UNSUPPORTED_FEATURE, decodeException.code());
+        assertEquals(DecodeStage.FRAME_DECODE, decodeException.stage());
     }
 
     /// Open operation that may fail with `IOException`.
@@ -1055,11 +1071,12 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
     }
 
-    /// Verifies that an animated AVIS sequence parses and decodes the first frame.
+    /// Verifies that an animated AVIS sequence exposes metadata and its independent first frame,
+    /// then rejects a dependent frame that requires reference-frame motion-vector projection.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void readsAnimatedSequenceAllFrames() throws IOException {
+    void readsAnimatedSequenceUntilUnsupportedReferenceFrameMotionVectors() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
@@ -1080,16 +1097,15 @@ final class AvifImageReaderTest {
             assertTrue(info.frameDurations()[0] > 0);
             assertTrue(sequenceInfo.frameDurations()[0] > 0);
 
-            List<AvifFrame> frames = reader.readAllFrames();
-            assertEquals(5, frames.size());
-            assertNull(reader.readFrame());
+            @Nullable AvifFrame firstFrame = reader.readFrame();
+            assertNotNull(firstFrame);
+            assertEquals(150, firstFrame.width());
+            assertEquals(150, firstFrame.height());
+            assertEquals(0, firstFrame.frameIndex());
 
-            for (int i = 0; i < 5; i++) {
-                AvifFrame f = frames.get(i);
-                assertEquals(150, f.width());
-                assertEquals(150, f.height());
-                assertEquals(i, f.frameIndex());
-            }
+            assertUnsupportedReferenceFrameMotionVectors(
+                    assertThrows(AvifDecodeException.class, reader::readFrame)
+            );
         }
     }
 
@@ -1404,53 +1420,43 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that indexed AVIS sequence reads do not disturb sequential playback state.
+    /// Verifies that an unsupported indexed AVIS read does not disturb sequential playback state.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void readFrameRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
+    void unsupportedReadFrameRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
-            AvifFrame third = reader.readFrame(3);
-            assertEquals(3, third.frameIndex());
+            assertUnsupportedReferenceFrameMotionVectors(
+                    assertThrows(AvifDecodeException.class, () -> reader.readFrame(3))
+            );
 
-            AvifFrame firstSequential = reader.readFrame();
+            @Nullable AvifFrame firstSequential = reader.readFrame();
             assertNotNull(firstSequential);
             assertEquals(0, firstSequential.frameIndex());
 
-            AvifFrame secondRandom = reader.readFrame(1);
-            assertEquals(1, secondRandom.frameIndex());
-
-            AvifFrame secondSequential = reader.readFrame();
-            assertNotNull(secondSequential);
-            assertEquals(1, secondSequential.frameIndex());
+            assertUnsupportedReferenceFrameMotionVectors(
+                    assertThrows(AvifDecodeException.class, reader::readFrame)
+            );
         }
     }
 
-    /// Verifies that indexed raw-plane AVIS sequence reads do not disturb sequential playback state.
+    /// Verifies that an unsupported indexed raw-plane AVIS read does not disturb sequential playback state.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void readRawColorPlanesRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
+    void unsupportedReadRawColorPlanesRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
-            AvifPlanes fourth = reader.readRawColorPlanes(3);
-            assertEquals(AvifBitDepth.EIGHT_BITS, fourth.bitDepth());
-            assertEquals(AvifPixelFormat.I420, fourth.pixelFormat());
-            assertEquals(150, fourth.codedWidth());
-            assertEquals(150, fourth.codedHeight());
-            assertEquals(150, fourth.renderWidth());
-            assertEquals(150, fourth.renderHeight());
+            assertUnsupportedReferenceFrameMotionVectors(
+                    assertThrows(AvifDecodeException.class, () -> reader.readRawColorPlanes(3))
+            );
 
-            AvifFrame firstSequential = reader.readFrame();
+            @Nullable AvifFrame firstSequential = reader.readFrame();
             assertNotNull(firstSequential);
             assertEquals(0, firstSequential.frameIndex());
 
-            AvifPlanes second = reader.readRawColorPlanes(1);
-            assertEquals(150, second.lumaPlane().width());
-            assertEquals(150, second.lumaPlane().height());
-
-            AvifFrame secondSequential = reader.readFrame();
-            assertNotNull(secondSequential);
-            assertEquals(1, secondSequential.frameIndex());
+            assertUnsupportedReferenceFrameMotionVectors(
+                    assertThrows(AvifDecodeException.class, reader::readFrame)
+            );
         }
     }
 

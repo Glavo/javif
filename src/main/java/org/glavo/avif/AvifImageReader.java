@@ -16,6 +16,8 @@
 package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1ImageReader;
+import org.glavo.avif.decode.DecodeErrorCode;
+import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
@@ -367,7 +369,7 @@ public final class AvifImageReader implements AutoCloseable {
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+            throw wrapAv1DecodeFailure(exception);
         }
     }
 
@@ -570,16 +572,20 @@ public final class AvifImageReader implements AutoCloseable {
                 return null;
             }
         }
-        return AvifGainMapToneMapper.apply(
-                readFrame(frameIndex),
-                gainMapPlanes,
-                metadata,
-                container.info().colorInfo(),
-                gainMapInfo.toneMappedColorInfo(),
-                gainMapInfo.gainMapColorInfo(),
-                outputColorInfo,
-                hdrHeadroom
-        );
+        try {
+            return AvifGainMapToneMapper.apply(
+                    readFrame(frameIndex),
+                    gainMapPlanes,
+                    metadata,
+                    container.info().colorInfo(),
+                    gainMapInfo.toneMappedColorInfo(),
+                    gainMapInfo.gainMapColorInfo(),
+                    outputColorInfo,
+                    hdrHeadroom
+            );
+        } catch (UnsupportedOperationException exception) {
+            throw unsupportedColorConversion(exception);
+        }
     }
 
     /// Reads raw decoded depth auxiliary planes for the frame at the supplied index.
@@ -672,10 +678,10 @@ public final class AvifImageReader implements AutoCloseable {
                     config.rgbOutputMode()
             );
             return combineFrameWithSequenceAlphaSequential(rawFrame, frameIndex);
-        } catch (AvifDecodeException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, e.getMessage(), null, e);
+        } catch (AvifDecodeException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw wrapAv1DecodeFailure(exception);
         }
     }
 
@@ -740,7 +746,7 @@ public final class AvifImageReader implements AutoCloseable {
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+            throw wrapAv1DecodeFailure(exception);
         }
     }
 
@@ -844,7 +850,7 @@ public final class AvifImageReader implements AutoCloseable {
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+            throw wrapAv1DecodeFailure(exception);
         }
     }
 
@@ -1210,10 +1216,10 @@ public final class AvifImageReader implements AutoCloseable {
                     config.rgbOutputMode()
             );
             return combineFrameWithSequenceAlphaRandomAccess(rawFrame, frameIndex);
-        } catch (AvifDecodeException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, e.getMessage(), null, e);
+        } catch (AvifDecodeException exception) {
+            throw exception;
+        } catch (IOException exception) {
+            throw wrapAv1DecodeFailure(exception);
         }
     }
 
@@ -1278,7 +1284,7 @@ public final class AvifImageReader implements AutoCloseable {
             } catch (AvifDecodeException exception) {
                 throw exception;
             } catch (IOException exception) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+                throw wrapAv1DecodeFailure(exception);
             }
         }
         return cellFrames;
@@ -1727,16 +1733,21 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frameIndex the zero-based AVIF frame index
     /// @param outputMode the requested packed RGB output mode
     /// @return an AVIF public frame
+    /// @throws AvifDecodeException if the container selects an unsupported color conversion
     private static AvifFrame adaptFrame(
             DecodedFrame frame,
             @Nullable DecodedPlanes planes,
             @Nullable AvifColorInfo colorInfo,
             int frameIndex,
             AvifRgbOutputMode outputMode
-    ) {
+    ) throws AvifDecodeException {
         AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(frame.bitDepth());
         if (colorInfo != null && planes != null) {
-            return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex, resolvedMode);
+            try {
+                return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex, resolvedMode);
+            } catch (UnsupportedOperationException exception) {
+                throw unsupportedColorConversion(exception);
+            }
         }
         if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
             return new AvifFrame(
@@ -1910,7 +1921,7 @@ public final class AvifImageReader implements AutoCloseable {
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+            throw wrapAv1DecodeFailure(exception);
         }
     }
 
@@ -2054,7 +2065,7 @@ public final class AvifImageReader implements AutoCloseable {
             } catch (AvifDecodeException exception) {
                 throw exception;
             } catch (IOException exception) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, exception.getMessage(), null, exception);
+                throw wrapAv1DecodeFailure(exception);
             }
         }
         return alphaCells;
@@ -2560,6 +2571,38 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return an unsupported-feature exception
     private static AvifDecodeException unsupported(String message, @Nullable Long offset) {
         return new AvifDecodeException(AvifErrorCode.UNSUPPORTED_FEATURE, message, offset);
+    }
+
+    /// Creates an unsupported-feature exception for an unavailable CICP color conversion.
+    ///
+    /// @param exception the unsupported color conversion failure
+    /// @return an unsupported-feature exception retaining the underlying cause
+    private static AvifDecodeException unsupportedColorConversion(UnsupportedOperationException exception) {
+        return new AvifDecodeException(
+                AvifErrorCode.UNSUPPORTED_FEATURE,
+                exception.getMessage() != null
+                        ? exception.getMessage()
+                        : "AVIF output uses an unsupported color conversion",
+                null,
+                exception
+        );
+    }
+
+    /// Wraps one low-level AV1 decoding failure while preserving unsupported-feature classification.
+    ///
+    /// @param exception the low-level decoding failure
+    /// @return the corresponding AVIF decoding failure
+    private static AvifDecodeException wrapAv1DecodeFailure(IOException exception) {
+        AvifErrorCode code = exception instanceof DecodeException decodeException
+                && decodeException.code() == DecodeErrorCode.UNSUPPORTED_FEATURE
+                ? AvifErrorCode.UNSUPPORTED_FEATURE
+                : AvifErrorCode.AV1_DECODE_FAILED;
+        return new AvifDecodeException(
+                code,
+                exception.getMessage() != null ? exception.getMessage() : "AV1 decoding failed",
+                null,
+                exception
+        );
     }
 
     /// Copies remaining integers from a buffer into an array.

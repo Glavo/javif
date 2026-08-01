@@ -40,6 +40,7 @@ import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
+import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
 import org.glavo.avif.internal.av1.postfilter.FilmGrainSynthesizer;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
@@ -114,12 +115,28 @@ final class Av1ImageReaderTest {
     private static final byte @Unmodifiable [] INTRABC_BLOCK_TILE_PAYLOAD =
             HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH, "intrabc");
 
-    /// The expected packed opaque gray pixel produced by the supported still-picture payload.
-    private static final int OPAQUE_MID_GRAY = 0xFF808080;
+    /// The expected packed opaque gray pixel produced by limited-range still-picture payloads.
+    private static final int OPAQUE_LIMITED_RANGE_MID_GRAY = 0xFF828282;
 
-    /// The stable top-left `8x8` ARGB block produced by the current legacy directional
+    /// The expected packed opaque gray pixel produced by full-range still-picture payloads.
+    private static final int OPAQUE_FULL_RANGE_MID_GRAY = 0xFF808080;
+
+    /// The stable top-left `8x8` ARGB block produced by the limited-range legacy directional
     /// still-picture payload.
-    private static final int @Unmodifiable [] @Unmodifiable [] LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8 = {
+    private static final int @Unmodifiable [] @Unmodifiable [] LIMITED_RANGE_LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8 = {
+            {0xFF828282, 0xFF7D7D7D, 0xFF828484, 0xFF858887, 0xFF878988, 0xFF878988, 0xFF858A88, 0xFF848987},
+            {0xFF828282, 0xFF7D7D7D, 0xFF818382, 0xFF858887, 0xFF878988, 0xFF858887, 0xFF858A88, 0xFF848987},
+            {0xFF818382, 0xFF7A7C7B, 0xFF808584, 0xFF8E9392, 0xFF919493, 0xFF909292, 0xFF8E9593, 0xFF8D9492},
+            {0xFF808281, 0xFF7A7C7B, 0xFF7E8381, 0xFF8B908E, 0xFF8E908F, 0xFF8C8F8E, 0xFF8A928F, 0xFF89908E},
+            {0xFF8C918F, 0xFF838886, 0xFF838B88, 0xFF909795, 0xFF929795, 0xFF929795, 0xFF8F9895, 0xFF8F9895},
+            {0xFF828685, 0xFF797E7D, 0xFF858C89, 0xFF939A97, 0xFF949997, 0xFF939896, 0xFF919B97, 0xFF919B97},
+            {0xFF7D807F, 0xFF797B7A, 0xFF7C817F, 0xFF8A8F8D, 0xFF8E8E8E, 0xFF8D8D8D, 0xFF8C918F, 0xFF8B908E},
+            {0xFF818382, 0xFF7A7C7B, 0xFF848987, 0xFF929795, 0xFF959595, 0xFF959595, 0xFF939896, 0xFF939896}
+    };
+
+    /// The stable top-left `8x8` ARGB block produced by the full-range legacy directional
+    /// still-picture payload.
+    private static final int @Unmodifiable [] @Unmodifiable [] FULL_RANGE_LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8 = {
             {0xFF808080, 0xFF7B7B7B, 0xFF808281, 0xFF838584, 0xFF848685, 0xFF848685, 0xFF828685, 0xFF818584},
             {0xFF808080, 0xFF7B7B7B, 0xFF7F8180, 0xFF838584, 0xFF848685, 0xFF838584, 0xFF828685, 0xFF818584},
             {0xFF7F8180, 0xFF797B7A, 0xFF7E8281, 0xFF8A8E8D, 0xFF8D8F8E, 0xFF8C8E8D, 0xFF8A908E, 0xFF898F8D},
@@ -456,13 +473,13 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            assertOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 0);
+            assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 0);
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
             assertTrue(firstSyntaxResult.assembly().frameHeader().superResolution().enabled());
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
-            assertOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 1);
+            assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 1);
             assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
@@ -707,24 +724,24 @@ final class Av1ImageReaderTest {
         assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I444, true);
     }
 
-    /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
-    /// once slot `0` already exposes one injected stored reference surface.
+    /// Verifies that one standalone real parsed inter frame with reference-frame motion vectors is
+    /// rejected instead of using an incomplete projection model.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsDecodedFrameForStandaloneRealParsedInterFrameBackedByInjectedStoredReferenceSurface()
+    void readFrameRejectsStandaloneRealParsedInterFrameWithReferenceFrameMotionVectors()
             throws IOException {
-        assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(false);
+        assertRealParsedInterFrameRejectsUnsupportedReferenceMotionVectors(false);
     }
 
-    /// Verifies that one combined real parsed inter frame reconstructs through the public reader
-    /// once slot `0` already exposes one injected stored reference surface.
+    /// Verifies that one combined real parsed inter frame with reference-frame motion vectors is
+    /// rejected instead of using an incomplete projection model.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsDecodedFrameForCombinedRealParsedInterFrameBackedByInjectedStoredReferenceSurface()
+    void readFrameRejectsCombinedRealParsedInterFrameWithReferenceFrameMotionVectors()
             throws IOException {
-        assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(true);
+        assertRealParsedInterFrameRejectsUnsupportedReferenceMotionVectors(true);
     }
 
     /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
@@ -878,12 +895,12 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
+            assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
-            assertOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
+            assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
             assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
@@ -906,13 +923,13 @@ final class Av1ImageReaderTest {
         try (Av1ImageReader reader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
-            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            assertFullRangeOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
             assertLegacyDirectionalLeafDecoded(firstSyntaxResult);
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
-            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 1);
+            assertFullRangeOpaqueDirectionalStillPictureFrame(reader.readFrame(), 1);
             assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
@@ -935,8 +952,8 @@ final class Av1ImageReaderTest {
         assertAcrossBufferedInputs(stream, reader -> {
             List<DecodedFrame> frames = reader.readAllFrames();
             assertEquals(2, frames.size());
-            assertOpaqueGrayStillPictureFrame(frames.get(0), 0);
-            assertOpaqueGrayStillPictureFrame(frames.get(1), 1);
+            assertFullRangeOpaqueGrayStillPictureFrame(frames.get(0), 0);
+            assertFullRangeOpaqueGrayStillPictureFrame(frames.get(1), 1);
             assertNotNull(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
         });
@@ -1095,7 +1112,10 @@ final class Av1ImageReaderTest {
             int tileColumns,
             int tileRows
     ) {
-        int[] expectedPixels = ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes());
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
+                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+        );
+        int[] expectedPixels = ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes(), transform);
         int tileWidth = frame.width() / tileColumns;
         int tileHeight = frame.height() / tileRows;
         for (int tileRow = 0; tileRow < tileRows; tileRow++) {
@@ -1128,10 +1148,10 @@ final class Av1ImageReaderTest {
             }
 
             DecodedFrame decodedFrame = reader.readFrame();
-            assertOpaqueGrayStillPictureFrame(decodedFrame, 0);
+            assertFullRangeOpaqueGrayStillPictureFrame(decodedFrame, 0);
             DecodedFrame frame = decodedFrame;
             int secondTileFirstPixelIndex = frame.width() / referenceState.frameHeader().tiling().columns();
-            assertEquals(OPAQUE_MID_GRAY, frame.intPixels()[secondTileFirstPixelIndex]);
+            assertEquals(OPAQUE_FULL_RANGE_MID_GRAY, frame.intPixels()[secondTileFirstPixelIndex]);
             assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
             assertEquals(2, reader.lastFrameSyntaxDecodeResult().tileCount());
             assertNull(reader.readFrame());
@@ -2165,7 +2185,7 @@ final class Av1ImageReaderTest {
             DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxDecodeResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(syntaxDecodeResult);
-            assertOpaqueGrayStillPictureFrame(decodedFrame, pixelFormat, 0);
+            assertFullRangeOpaqueGrayStillPictureFrame(decodedFrame, pixelFormat, 0);
             assertTrue(syntaxDecodeResult.assembly().frameHeader().superResolution().enabled());
             assertEquals(57, syntaxDecodeResult.assembly().frameHeader().frameSize().codedWidth());
             assertEquals(64, syntaxDecodeResult.assembly().frameHeader().frameSize().upscaledWidth());
@@ -2273,11 +2293,11 @@ final class Av1ImageReaderTest {
 
         assertAcrossBufferedInputs(stream, reader -> {
             DecodedFrame firstFrame = reader.readFrame();
-            assertOpaqueGrayStillPictureFrame(firstFrame, pixelFormat, 0);
+            assertFullRangeOpaqueGrayStillPictureFrame(firstFrame, pixelFormat, 0);
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
             DecodedFrame reusedFrame = reader.readFrame();
-            assertOpaqueGrayStillPictureFrame(reusedFrame, pixelFormat, 1);
+            assertFullRangeOpaqueGrayStillPictureFrame(reusedFrame, pixelFormat, 1);
             assertNotNull(firstFrame);
             assertNotNull(reusedFrame);
             assertEquals(AvifBitDepth.EIGHT_BITS, firstFrame.bitDepth());
@@ -2355,12 +2375,12 @@ final class Av1ImageReaderTest {
         });
     }
 
-    /// Asserts that one real parsed inter frame reconstructs through the public reader once the
-    /// required reference-frame parser state and slot `0` surface have been injected ahead of time.
+    /// Asserts that one real parsed inter frame with reference-frame motion vectors is rejected
+    /// after the required parser-visible reference state has been injected.
     ///
     /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
-    private static void assertRealParsedInterFrameRoundTripWithInjectedStoredReferenceSurface(
+    private static void assertRealParsedInterFrameRejectsUnsupportedReferenceMotionVectors(
             boolean combined
     ) throws IOException {
         InjectedReferenceState[] referenceStates = createInterReferenceStatesForRealParsedInterFrame();
@@ -2369,8 +2389,6 @@ final class Av1ImageReaderTest {
                 primaryReferenceState.referenceSurfaceSnapshot(),
                 "reference surface"
         );
-        ReferenceSurfaceSnapshot[] referenceSurfaceSlots = new ReferenceSurfaceSnapshot[8];
-        referenceSurfaceSlots[0] = primaryReferenceSurfaceSnapshot;
         byte[] stream = combined
                 ? obu(6, combinedInterFramePayload(INTER_BLOCK_TILE_PAYLOAD))
                 : concat(
@@ -2381,21 +2399,18 @@ final class Av1ImageReaderTest {
         assertAcrossBufferedInputs(stream, reader -> {
             injectInterReferenceStates(reader, referenceStates);
 
-            DecodedFrame decodedFrame = reader.readFrame();
-            FrameSyntaxDecodeResult syntaxResult =
-                    Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
-            ReferenceSurfaceSnapshot expectedOutputSnapshot = new ReferenceSurfaceSnapshot(
-                    syntaxResult.assembly().frameHeader(),
-                    syntaxResult,
-                    new FrameReconstructor().reconstruct(syntaxResult, referenceSurfaceSlots)
+            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
+            assertEquals(DecodeErrorCode.UNSUPPORTED_FEATURE, exception.code());
+            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+            assertEquals(
+                    "Reference-frame motion-vector projection is not implemented",
+                    exception.getMessage()
             );
-
-            assertFirstDecodedLeafIsInter(syntaxResult);
-            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 0);
+            assertTrue(exception.getCause() instanceof UnsupportedOperationException);
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertSame(primaryReferenceState.frameHeader(), reader.referenceFrameHeader(0));
             assertSame(primaryReferenceState.syntaxResult(), reader.referenceFrameSyntaxResult(0));
             assertSame(primaryReferenceSurfaceSnapshot, reader.referenceSurfaceSnapshot(0));
-            assertNull(reader.readFrame());
         });
     }
 
@@ -3135,7 +3150,42 @@ final class Av1ImageReaderTest {
             AvifPixelFormat expectedPixelFormat,
             long expectedPresentationIndex
     ) {
-        assertStillPictureFrameFilledWith(decodedFrame, expectedPixelFormat, expectedPresentationIndex, OPAQUE_MID_GRAY);
+        assertStillPictureFrameFilledWith(
+                decodedFrame,
+                expectedPixelFormat,
+                expectedPresentationIndex,
+                OPAQUE_LIMITED_RANGE_MID_GRAY
+        );
+    }
+
+    /// Asserts that the reader returned one full-range opaque gray still-picture frame.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertFullRangeOpaqueGrayStillPictureFrame(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            long expectedPresentationIndex
+    ) {
+        assertFullRangeOpaqueGrayStillPictureFrame(decodedFrame, AvifPixelFormat.I420, expectedPresentationIndex);
+    }
+
+    /// Asserts that the reader returned one full-range opaque gray still-picture frame with the
+    /// requested public chroma layout.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPixelFormat the expected chroma layout exposed by the public frame
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertFullRangeOpaqueGrayStillPictureFrame(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            AvifPixelFormat expectedPixelFormat,
+            long expectedPresentationIndex
+    ) {
+        assertStillPictureFrameFilledWith(
+                decodedFrame,
+                expectedPixelFormat,
+                expectedPresentationIndex,
+                OPAQUE_FULL_RANGE_MID_GRAY
+        );
     }
 
     /// Asserts that one parsed high-bit-depth still-picture frame matches the expected constant
@@ -3184,7 +3234,22 @@ final class Av1ImageReaderTest {
         assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
         DecodedFrame frame = decodedFrame;
         assertDecodedStillPictureFrameMetadata(frame, AvifPixelFormat.I420, expectedPresentationIndex);
-        assertArgbBlockEquals(frame, 0, 0, LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
+        assertArgbBlockEquals(frame, 0, 0, LIMITED_RANGE_LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
+    }
+
+    /// Asserts that the reader returned one full-range legacy directional still-picture frame.
+    ///
+    /// @param decodedFrame the decoded frame returned by the public reader
+    /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
+    private static void assertFullRangeOpaqueDirectionalStillPictureFrame(
+            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            long expectedPresentationIndex
+    ) {
+        assertNotNull(decodedFrame);
+        assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
+        DecodedFrame frame = decodedFrame;
+        assertDecodedStillPictureFrameMetadata(frame, AvifPixelFormat.I420, expectedPresentationIndex);
+        assertArgbBlockEquals(frame, 0, 0, FULL_RANGE_LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
     }
 
     /// Asserts that one decoded still-picture frame exactly matches one stored reconstructed
@@ -3209,12 +3274,15 @@ final class Av1ImageReaderTest {
                 referenceSurfaceSnapshot.frameHeader().frameType(),
                 expectedPresentationIndex
         );
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
+                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+        );
         if (decodedPlanes.bitDepth() == 8) {
             assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
-            assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(decodedPlanes), decodedFrame.intPixels());
+            assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(decodedPlanes, transform), decodedFrame.intPixels());
         } else {
             assertTrue(decodedFrame.bitDepth().isHighBitDepth());
-            assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes), decodedFrame.longPixels());
+            assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes, transform), decodedFrame.longPixels());
         }
     }
 
@@ -3241,12 +3309,15 @@ final class Av1ImageReaderTest {
                 referenceSurfaceSnapshot.frameHeader().frameType(),
                 expectedPresentationIndex
         );
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
+                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+        );
         if (synthesizedPlanes.bitDepth() == 8) {
             assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
-            assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(synthesizedPlanes), decodedFrame.intPixels());
+            assertArrayEquals(ArgbOutput.toOpaqueArgbPixels(synthesizedPlanes, transform), decodedFrame.intPixels());
         } else {
             assertTrue(decodedFrame.bitDepth().isHighBitDepth());
-            assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(synthesizedPlanes), decodedFrame.longPixels());
+            assertArrayEquals(ArgbOutput.toOpaqueArgbLongPixels(synthesizedPlanes, transform), decodedFrame.longPixels());
         }
     }
 

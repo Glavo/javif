@@ -51,9 +51,6 @@ public final class TileDecodeContext {
     /// The tile-local mutable CDF context.
     private final CdfContext cdfContext;
 
-    /// The tile-local temporal motion field sampled from refreshed reference frames.
-    private final TemporalMotionField temporalMotionField;
-
     /// The tile-local temporal motion field being produced while decoding the current frame.
     private final TemporalMotionField decodedTemporalMotionField;
 
@@ -113,7 +110,6 @@ public final class TileDecodeContext {
     /// @param tileBitstream the selected tile bitstream
     /// @param msacDecoder the tile-local arithmetic decoder
     /// @param cdfContext the tile-local mutable CDF context
-    /// @param temporalMotionField the tile-local temporal motion field sampled from refreshed reference frames
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
     /// @param blockSyntaxState the mutable tile-local block syntax state shared across superblocks
     /// @param restorationUnitMap the tile-local loop-restoration units decoded from this tile
@@ -138,7 +134,6 @@ public final class TileDecodeContext {
             TileBitstream tileBitstream,
             MsacDecoder msacDecoder,
             CdfContext cdfContext,
-            TemporalMotionField temporalMotionField,
             TemporalMotionField decodedTemporalMotionField,
             BlockSyntaxState blockSyntaxState,
             RestorationUnitMap restorationUnitMap,
@@ -163,7 +158,6 @@ public final class TileDecodeContext {
         this.tileBitstream = Objects.requireNonNull(tileBitstream, "tileBitstream");
         this.msacDecoder = Objects.requireNonNull(msacDecoder, "msacDecoder");
         this.cdfContext = Objects.requireNonNull(cdfContext, "cdfContext");
-        this.temporalMotionField = Objects.requireNonNull(temporalMotionField, "temporalMotionField");
         this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
         this.blockSyntaxState = Objects.requireNonNull(blockSyntaxState, "blockSyntaxState");
         this.restorationUnitMap = Objects.requireNonNull(restorationUnitMap, "restorationUnitMap");
@@ -204,42 +198,6 @@ public final class TileDecodeContext {
     /// @param baseCdfContext the base CDF context template to copy for this tile
     /// @return tile-local decode state for the selected tile
     public static TileDecodeContext create(FrameAssembly assembly, int tileIndex, CdfContext baseCdfContext) {
-        return create(assembly, tileIndex, baseCdfContext, null);
-    }
-
-    /// Creates tile-local decode state with a fresh default CDF context and a supplied temporal motion field.
-    ///
-    /// @param assembly the frame assembly that owns the tile
-    /// @param tileIndex the zero-based tile index within the frame
-    /// @param temporalMotionField the tile-local temporal motion field to attach
-    /// @return tile-local decode state for the selected tile
-    public static TileDecodeContext create(
-            FrameAssembly assembly,
-            int tileIndex,
-            TemporalMotionField temporalMotionField
-    ) {
-        FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
-        return create(
-                nonNullAssembly,
-                tileIndex,
-                CdfContext.createDefault(nonNullAssembly.frameHeader().quantization().baseQIndex()),
-                temporalMotionField
-        );
-    }
-
-    /// Creates tile-local decode state with a copy of the supplied base CDF context and a supplied temporal motion field.
-    ///
-    /// @param assembly the frame assembly that owns the tile
-    /// @param tileIndex the zero-based tile index within the frame
-    /// @param baseCdfContext the base CDF context template to copy for this tile
-    /// @param temporalMotionField the tile-local temporal motion field to attach, or `null` for an empty field
-    /// @return tile-local decode state for the selected tile
-    public static TileDecodeContext create(
-            FrameAssembly assembly,
-            int tileIndex,
-            CdfContext baseCdfContext,
-            @org.jetbrains.annotations.Nullable TemporalMotionField temporalMotionField
-    ) {
         FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
         CdfContext copiedCdfContext = Objects.requireNonNull(baseCdfContext, "baseCdfContext").copy();
         TileBitstream tileBitstream = nonNullAssembly.tileBitstream(tileIndex);
@@ -272,17 +230,6 @@ public final class TileDecodeContext {
         int codedHeight4 = endY4 - startY4;
         int width8 = (codedWidth4 + 1) >> 1;
         int height8 = (codedHeight4 + 1) >> 1;
-        TemporalMotionField effectiveTemporalMotionField = temporalMotionField == null
-                ? new TemporalMotionField(width8, height8)
-                : temporalMotionField;
-        if (effectiveTemporalMotionField.width8() != width8 || effectiveTemporalMotionField.height8() != height8) {
-            throw new IllegalArgumentException(
-                    "Temporal motion field dimensions do not match tile geometry: expected "
-                            + width8 + "x" + height8
-                            + " but got "
-                            + effectiveTemporalMotionField.width8() + "x" + effectiveTemporalMotionField.height8()
-            );
-        }
 
         return new TileDecodeContext(
                 nonNullAssembly,
@@ -291,7 +238,6 @@ public final class TileDecodeContext {
                 tileBitstream,
                 tileBitstream.openMsacDecoder(frameHeader.disableCdfUpdate()),
                 copiedCdfContext,
-                effectiveTemporalMotionField,
                 new TemporalMotionField(width8, height8),
                 new BlockSyntaxState(frameHeader.quantization().baseQIndex()),
                 RestorationUnitMap.createEmpty(nonNullAssembly),
@@ -360,13 +306,6 @@ public final class TileDecodeContext {
     /// @return the tile-local mutable CDF context
     public CdfContext cdfContext() {
         return cdfContext;
-    }
-
-    /// Returns the tile-local temporal motion field sampled from refreshed reference frames.
-    ///
-    /// @return the tile-local temporal motion field sampled from refreshed reference frames
-    public TemporalMotionField temporalMotionField() {
-        return temporalMotionField;
     }
 
     /// Returns the tile-local temporal motion field produced while decoding the current frame.

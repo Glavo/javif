@@ -60,11 +60,16 @@ final class LibavifTestDataCorpusTest {
             decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_gainmap_different_grid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", 128, 200, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", 64, 64, 12, AvifPixelFormat.I422, true, true, 5),
-            decode("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif", 150, 150, 8, AvifPixelFormat.I420, true, true, 5),
-            decode("libavif-test-data/colors-animated-8bpc-audio.avif", 150, 150, 8, AvifPixelFormat.I420, false, true, 5),
-            decode("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif", 150, 150, 8, AvifPixelFormat.I420, false, true, 5),
-            decode("libavif-test-data/colors-animated-8bpc.avif", 150, 150, 8, AvifPixelFormat.I420, false, true, 5),
+            decodeFailure("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", 64, 64, 12,
+                    AvifPixelFormat.I422, true, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
+            decodeFailure("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, true, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
+            decodeFailure("libavif-test-data/colors-animated-8bpc-audio.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, false, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
+            decodeFailure("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, false, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
+            decodeFailure("libavif-test-data/colors-animated-8bpc.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, false, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
             decode("libavif-test-data/colors_hdr_p3.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/colors_hdr_rec2020.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/colors_hdr_srgb.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
@@ -81,7 +86,8 @@ final class LibavifTestDataCorpusTest {
             decode("libavif-test-data/draw_points_idat_progressive.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/draw_points_idat_progressive_metasize0.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/extended_pixi.avif", 4, 4, 8, AvifPixelFormat.I420, false, false, 1),
-            decode("libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif", 1024, 428, 10, AvifPixelFormat.I444, false, false, 1),
+            decodeFailure("libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif", 1024, 428, 10,
+                    AvifPixelFormat.I444, false, false, 1, AvifErrorCode.UNSUPPORTED_FEATURE),
             decode("libavif-test-data/io/kodim03_yuv420_8bpc.avif", 768, 512, 8, AvifPixelFormat.I420, false, false, 1),
             decode("libavif-test-data/io/kodim23_yuv420_8bpc.avif", 768, 512, 8, AvifPixelFormat.I420, false, false, 1),
             decode("libavif-test-data/paris_icc_exif_xmp.avif", 403, 302, 8, AvifPixelFormat.I444, false, false, 1),
@@ -157,7 +163,7 @@ final class LibavifTestDataCorpusTest {
         try (AvifImageReader reader = AvifImageReader.open(bytes)) {
             assertInfo(expectedInfo, reader.info());
             if (testCase.decodeFailureCode != null) {
-                AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
+                AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readAllFrames);
                 assertEquals(testCase.decodeFailureCode, exception.code());
             } else if (expectedInfo.animated) {
                 List<AvifFrame> frames = reader.readAllFrames();

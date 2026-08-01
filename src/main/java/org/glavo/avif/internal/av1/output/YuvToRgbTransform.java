@@ -174,12 +174,14 @@ public final class YuvToRgbTransform {
 
     /// Selects a display transform for one parsed AV1 color configuration.
     ///
-    /// Unspecified matrix coefficients for chroma streams keep the legacy `BT.601` full-range
-    /// fallback because the bitstream has not identified a YUV matrix. Monochrome streams and
-    /// unsupported explicit matrix families preserve the signaled sample range.
+    /// Unspecified matrix coefficients use `BT.601` while preserving the signaled sample range.
+    /// Matrix coefficients are irrelevant for monochrome planes. Explicit matrix families that
+    /// this implementation does not model are rejected instead of being rendered with a different
+    /// matrix.
     ///
     /// @param colorConfig the AV1 color configuration
     /// @return the selected fixed-point YUV-to-RGB transform
+    /// @throws UnsupportedOperationException if a chroma stream signals an unsupported explicit matrix family
     public static YuvToRgbTransform fromColorConfig(SequenceHeader.ColorConfig colorConfig) {
         SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         boolean fullRange = checkedColorConfig.colorRange();
@@ -195,6 +197,7 @@ public final class YuvToRgbTransform {
     /// @param colorInfo the AVIF container color information
     /// @param monochrome whether the decoded AV1 planes are monochrome
     /// @return the selected fixed-point YUV-to-RGB transform
+    /// @throws UnsupportedOperationException if chroma planes use an unsupported explicit matrix family
     public static YuvToRgbTransform fromColorInfo(AvifColorInfo colorInfo, boolean monochrome) {
         AvifColorInfo checkedColorInfo = Objects.requireNonNull(colorInfo, "colorInfo");
         return fromMatrixCoefficients(
@@ -210,19 +213,25 @@ public final class YuvToRgbTransform {
     /// @param fullRange whether samples are full range
     /// @param monochrome whether the decoded planes are monochrome
     /// @return the selected fixed-point YUV-to-RGB transform
+    /// @throws UnsupportedOperationException if chroma planes use an unsupported explicit matrix family
     private static YuvToRgbTransform fromMatrixCoefficients(
             int matrixCoefficients,
             boolean fullRange,
             boolean monochrome
     ) {
+        if (monochrome) {
+            return defaultTransform(fullRange);
+        }
         return switch (matrixCoefficients) {
             case 0 -> RGB_IDENTITY;
             case 1 -> fullRange ? BT709_FULL_RANGE : BT709_LIMITED_RANGE;
-            case 2 -> monochrome ? defaultTransform(fullRange) : BT601_FULL_RANGE;
+            case 2 -> defaultTransform(fullRange);
             case 5, 6 -> fullRange ? BT601_FULL_RANGE : BT601_LIMITED_RANGE;
             case 7 -> fullRange ? SMPTE240M_FULL_RANGE : SMPTE240M_LIMITED_RANGE;
             case 9 -> fullRange ? BT2020_NCL_FULL_RANGE : BT2020_NCL_LIMITED_RANGE;
-            default -> defaultTransform(fullRange);
+            default -> throw new UnsupportedOperationException(
+                    "Unsupported CICP matrix coefficients: " + matrixCoefficients
+            );
         };
     }
 
@@ -479,10 +488,10 @@ public final class YuvToRgbTransform {
         return (int) Math.round(value * (1 << FRACTION_BITS));
     }
 
-    /// Returns the fallback transform for unsupported or unspecified matrix coefficients.
+    /// Returns the default transform for unspecified matrix coefficients or monochrome output.
     ///
     /// @param fullRange whether the signaled samples are full range
-    /// @return the fallback transform
+    /// @return the default transform
     private static YuvToRgbTransform defaultTransform(boolean fullRange) {
         return fullRange ? BT601_FULL_RANGE : BT601_LIMITED_RANGE;
     }
