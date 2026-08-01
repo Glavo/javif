@@ -58,11 +58,9 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -3094,7 +3092,7 @@ final class FrameReconstructorIntegrationTest {
         return new TilePartitionTreeReader.LeafNode(header, transformLayout, residualLayout);
     }
 
-    /// Creates one synthetic residual layout using whichever constructor shape the current checkout exposes.
+    /// Creates one synthetic luma-only residual layout.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
     /// @param blockSize the coded block size that owns the residual layout
@@ -3105,10 +3103,10 @@ final class FrameReconstructorIntegrationTest {
             BlockSize blockSize,
             TransformResidualUnit[] lumaUnits
     ) {
-        return createResidualLayout(position, blockSize, lumaUnits, new TransformResidualUnit[0], new TransformResidualUnit[0]);
+        return new ResidualLayout(position, blockSize, lumaUnits);
     }
 
-    /// Creates one synthetic residual layout using whichever constructor shape the current checkout exposes.
+    /// Creates one synthetic residual layout with separate chroma-plane units.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
     /// @param blockSize the coded block size that owns the residual layout
@@ -3123,99 +3121,7 @@ final class FrameReconstructorIntegrationTest {
             TransformResidualUnit[] chromaUUnits,
             TransformResidualUnit[] chromaVUnits
     ) {
-        @Nullable Constructor<?> chromaConstructor = findSplitChromaResidualLayoutConstructor();
-        if (chromaConstructor != null) {
-            return instantiateResidualLayout(chromaConstructor, position, blockSize, lumaUnits, chromaUUnits, chromaVUnits);
-        }
-
-        @Nullable Constructor<?> combinedChromaConstructor = findCombinedChromaResidualLayoutConstructor();
-        if (combinedChromaConstructor != null) {
-            return instantiateResidualLayout(
-                    combinedChromaConstructor,
-                    position,
-                    blockSize,
-                    lumaUnits,
-                    (Object) new TransformResidualUnit[][]{chromaUUnits, chromaVUnits}
-            );
-        }
-
-        assumeTrue(
-                chromaUUnits.length == 0 && chromaVUnits.length == 0,
-                "Synthetic chroma residual integration coverage is waiting for ResidualLayout chroma-unit support"
-        );
-
-        @Nullable Constructor<?> legacyConstructor = findLegacyResidualLayoutConstructor();
-        if (legacyConstructor != null) {
-            return instantiateResidualLayout(legacyConstructor, position, blockSize, lumaUnits);
-        }
-        throw new AssertionError("No compatible ResidualLayout constructor was available");
-    }
-
-    /// Returns the current split-chroma `ResidualLayout` constructor, or `null`.
-    ///
-    /// @return the current split-chroma `ResidualLayout` constructor, or `null`
-    private static @Nullable Constructor<?> findSplitChromaResidualLayoutConstructor() {
-        for (Constructor<?> constructor : ResidualLayout.class.getDeclaredConstructors()) {
-            Class<?>[] parameterTypes = constructor.getParameterTypes();
-            if (parameterTypes.length == 5
-                    && parameterTypes[0] == BlockPosition.class
-                    && parameterTypes[1] == BlockSize.class
-                    && parameterTypes[2] == TransformResidualUnit[].class
-                    && parameterTypes[3] == TransformResidualUnit[].class
-                    && parameterTypes[4] == TransformResidualUnit[].class) {
-                constructor.setAccessible(true);
-                return constructor;
-            }
-        }
-        return null;
-    }
-
-    /// Returns the current combined-chroma `ResidualLayout` constructor, or `null`.
-    ///
-    /// @return the current combined-chroma `ResidualLayout` constructor, or `null`
-    private static @Nullable Constructor<?> findCombinedChromaResidualLayoutConstructor() {
-        for (Constructor<?> constructor : ResidualLayout.class.getDeclaredConstructors()) {
-            Class<?>[] parameterTypes = constructor.getParameterTypes();
-            if (parameterTypes.length == 4
-                    && parameterTypes[0] == BlockPosition.class
-                    && parameterTypes[1] == BlockSize.class
-                    && parameterTypes[2] == TransformResidualUnit[].class
-                    && parameterTypes[3] == TransformResidualUnit[][].class) {
-                constructor.setAccessible(true);
-                return constructor;
-            }
-        }
-        return null;
-    }
-
-    /// Returns the legacy luma-only `ResidualLayout` constructor, or `null`.
-    ///
-    /// @return the legacy luma-only `ResidualLayout` constructor, or `null`
-    private static @Nullable Constructor<?> findLegacyResidualLayoutConstructor() {
-        for (Constructor<?> constructor : ResidualLayout.class.getDeclaredConstructors()) {
-            Class<?>[] parameterTypes = constructor.getParameterTypes();
-            if (parameterTypes.length == 3
-                    && parameterTypes[0] == BlockPosition.class
-                    && parameterTypes[1] == BlockSize.class
-                    && parameterTypes[2] == TransformResidualUnit[].class) {
-                constructor.setAccessible(true);
-                return constructor;
-            }
-        }
-        return null;
-    }
-
-    /// Instantiates one reflected `ResidualLayout` constructor and surfaces failures as test errors.
-    ///
-    /// @param constructor the reflected constructor to invoke
-    /// @param arguments the arguments supplied to the constructor
-    /// @return one instantiated residual layout
-    private static ResidualLayout instantiateResidualLayout(Constructor<?> constructor, Object... arguments) {
-        try {
-            return (ResidualLayout) constructor.newInstance(arguments);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Failed to instantiate synthetic ResidualLayout", e);
-        }
+        return new ResidualLayout(position, blockSize, lumaUnits, chromaUUnits, chromaVUnits);
     }
 
     /// Creates one all-zero transform residual unit.
@@ -4247,14 +4153,14 @@ final class FrameReconstructorIntegrationTest {
         return motionVector;
     }
 
-    /// Asserts that one residual-unit footprint carries at least one visible delta while samples
-    /// outside the visible footprint remain unchanged.
+    /// Asserts that one residual-unit footprint carries at least one delta with the expected sign
+    /// while samples outside the visible footprint remain unchanged.
     ///
     /// @param baseline the zero-residual baseline plane
     /// @param reconstructed the reconstructed plane after one non-zero residual
     /// @param residualUnit the residual unit whose footprint should carry the injected delta
-    /// @param expectedSign the historical expected delta sign, retained only for call-site stability
-    private static void assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+    /// @param expectedSign the expected sign of every non-zero delta inside the residual footprint
+    private static void assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
             DecodedPlane baseline,
             DecodedPlane reconstructed,
             TransformResidualUnit residualUnit,
@@ -4278,6 +4184,7 @@ final class FrameReconstructorIntegrationTest {
                 }
                 if (delta != 0) {
                     sawChangedSample = true;
+                    assertEquals(expectedSign, Integer.signum(delta));
                 }
             }
         }
@@ -4309,7 +4216,7 @@ final class FrameReconstructorIntegrationTest {
         if (!planeDiffers(baselineChromaU, reconstructedChromaU)) {
             assertPlanesEqual(baselineChromaU, reconstructedChromaU);
         } else {
-            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+            assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
                     baselineChromaU,
                     reconstructedChromaU,
                     chromaUUnit,
@@ -4323,7 +4230,7 @@ final class FrameReconstructorIntegrationTest {
         if (!planeDiffers(baselineChromaV, reconstructedChromaV)) {
             assertPlanesEqual(baselineChromaV, reconstructedChromaV);
         } else {
-            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+            assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
                     baselineChromaV,
                     reconstructedChromaV,
                     chromaVUnit,
@@ -4525,7 +4432,7 @@ final class FrameReconstructorIntegrationTest {
         if (chromaUDcCoefficient == 0) {
             assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(reconstructed.chromaUPlane()));
         } else {
-            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+            assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
                     requirePlane(baseline.chromaUPlane()),
                     requirePlane(reconstructed.chromaUPlane()),
                     injectedLeaf.residualLayout().chromaUUnits()[0],
@@ -4536,7 +4443,7 @@ final class FrameReconstructorIntegrationTest {
         if (chromaVDcCoefficient == 0) {
             assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(reconstructed.chromaVPlane()));
         } else {
-            assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+            assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
                     requirePlane(baseline.chromaVPlane()),
                     requirePlane(reconstructed.chromaVPlane()),
                     injectedLeaf.residualLayout().chromaVUnits()[0],
@@ -4581,7 +4488,7 @@ final class FrameReconstructorIntegrationTest {
                     if (chromaUDcCoefficient == 0) {
                         assertPlanesEqual(requirePlane(baseline.chromaUPlane()), requirePlane(reconstructed.chromaUPlane()));
                     } else {
-                        assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                        assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
                                 requirePlane(baseline.chromaUPlane()),
                                 requirePlane(reconstructed.chromaUPlane()),
                                 injectedLeaf.residualLayout().chromaUUnits()[0],
@@ -4591,7 +4498,7 @@ final class FrameReconstructorIntegrationTest {
                     if (chromaVDcCoefficient == 0) {
                         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(reconstructed.chromaVPlane()));
                     } else {
-                        assertPlaneDiffersOnlyWithinResidualUnitByUniformSignedOffset(
+                        assertPlaneDiffersOnlyWithinResidualUnitWithExpectedSign(
                                 requirePlane(baseline.chromaVPlane()),
                                 requirePlane(reconstructed.chromaVPlane()),
                                 injectedLeaf.residualLayout().chromaVUnits()[0],

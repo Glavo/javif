@@ -2251,57 +2251,6 @@ public final class AvifContainerParser {
             meta.moovState.syncSamples.add(checkedU32ToInt(input.readU32(), input.offset() - 4));
     }
 
-    /// Extracts the SEQUENCE_HEADER OBU bytes from av1C config OBUs.
-    private static byte @Nullable [] buildSequenceObu(byte[] configObus) {
-        int i = 0;
-        while (i < configObus.length) {
-            if (i >= configObus.length) break;
-            int obuHeader = Byte.toUnsignedInt(configObus[i]);
-            int obuType = (obuHeader >>> 3) & 0x1F;
-            boolean hasSize = (obuHeader & 2) != 0;
-            int obuSize = 0;
-            if (hasSize) {
-                int sizeOffset = i + 1;
-                obuSize = readLeb128Int(configObus, sizeOffset);
-                int lebSize = leb128ByteCount(configObus, sizeOffset);
-                int obuEnd = i + 1 + lebSize + obuSize;
-                if (obuType == 1 && obuEnd <= configObus.length) {
-                    int totalSize = 1 + lebSize + obuSize;
-                    byte[] result = new byte[totalSize];
-                    System.arraycopy(configObus, i, result, 0, totalSize);
-                    return result;
-                }
-                i = obuEnd;
-            } else {
-                break;
-            }
-        }
-        return null;
-    }
-
-    /// Reads a LEB128 unsigned integer from a byte array.
-    private static int readLeb128Int(byte[] data, int offset) {
-        int value = 0;
-        int shift = 0;
-        for (int i = 0; i < 5; i++) {
-            int b = Byte.toUnsignedInt(data[offset + i]);
-            value |= (b & 0x7F) << shift;
-            if ((b & 0x80) == 0) break;
-            shift += 7;
-        }
-        return value;
-    }
-
-    /// Returns the byte count of a LEB128-encoded value.
-    private static int leb128ByteCount(byte[] data, int offset) {
-        int count = 0;
-        for (int i = 0; i < 5; i++) {
-            count++;
-            if ((Byte.toUnsignedInt(data[offset + i]) & 0x80) == 0) break;
-        }
-        return count;
-    }
-
     /// Parses an `ipma` box.
     ///
     /// @param input the box payload input

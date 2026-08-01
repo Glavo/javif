@@ -710,45 +710,21 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I420` chroma residuals are both all-zero
     private static byte[] findPayloadForAllZeroMinimalI420ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, true, true);
-        if (isolatedPayload != null) {
-            return isolatedPayload;
-        }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, false, true);
-        if (fallbackPayload != null) {
-            return fallbackPayload;
-        }
-        throw new IllegalStateException("No fixture-backed payload produced minimal all-zero I420 chroma residuals");
+        return readTileResidualFixture("i420-minimal-all-zero-isolated");
     }
 
     /// Returns the fixture-backed payload whose minimal `I420` chroma residuals are both DC-only and non-zero.
     ///
     /// @return the fixture-backed payload whose minimal `I420` chroma residuals are both DC-only and non-zero
     private static byte[] findPayloadForDcOnlyMinimalI420ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, true, false);
-        if (isolatedPayload != null) {
-            return isolatedPayload;
-        }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I420, false, false);
-        if (fallbackPayload != null) {
-            return fallbackPayload;
-        }
-        throw new IllegalStateException("No fixture-backed payload produced minimal non-zero I420 chroma residuals");
+        return readTileResidualFixture("i420-minimal-dc-isolated");
     }
 
     /// Returns the fixture-backed payload whose minimal `I422` chroma residuals are both DC-only and non-zero.
     ///
     /// @return the fixture-backed payload whose minimal `I422` chroma residuals are both DC-only and non-zero
     private static byte[] findPayloadForDcOnlyMinimalI422ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I422, true, false);
-        if (isolatedPayload != null) {
-            return isolatedPayload;
-        }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I422, false, false);
-        if (fallbackPayload != null) {
-            return fallbackPayload;
-        }
-        throw new IllegalStateException("No fixture-backed payload produced minimal non-zero I422 chroma residuals");
+        return readTileResidualFixture("i422-minimal-dc-isolated");
     }
 
     /// Returns the fixture-backed payload whose minimal `I444` chroma residuals include non-zero
@@ -756,15 +732,7 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I444` chroma residuals include non-zero chroma tokens
     private static byte[] findPayloadForNonZeroMinimalI444ChromaResidual() {
-        byte[] isolatedPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I444, true, false);
-        if (isolatedPayload != null) {
-            return isolatedPayload;
-        }
-        byte[] fallbackPayload = findPayloadForMinimalChromaResidual(AvifPixelFormat.I444, false, false);
-        if (fallbackPayload != null) {
-            return fallbackPayload;
-        }
-        throw new IllegalStateException("No fixture-backed payload produced minimal non-zero I444 chroma residuals");
+        return readTileResidualFixture("i444-minimal-nonzero-isolated");
     }
 
     /// Returns the fixture-backed payload whose minimal `I420` chroma-U residual exposes one supported
@@ -772,15 +740,7 @@ final class TileResidualSyntaxReaderTest {
     ///
     /// @return the fixture-backed payload whose minimal `I420` chroma-U residual exposes one multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientMinimalI420ChromaUResidual() {
-        byte[] isolatedPayload = findPayloadForMultiCoefficientMinimalChromaUResidual(AvifPixelFormat.I420, true);
-        if (isolatedPayload != null) {
-            return isolatedPayload;
-        }
-        byte[] fallbackPayload = findPayloadForMultiCoefficientMinimalChromaUResidual(AvifPixelFormat.I420, false);
-        if (fallbackPayload != null) {
-            return fallbackPayload;
-        }
-        throw new IllegalStateException("No fixture-backed payload produced a minimal multi-coefficient I420 chroma-U residual");
+        return readTileResidualFixture("i420-minimal-multi-u-isolated");
     }
 
     /// Returns the fixture-backed payload whose larger-transform `I420` chroma-U residual exposes one supported
@@ -789,27 +749,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return the fixture-backed payload whose larger-transform `I420` chroma-U residual exposes one
     /// multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientLargerTransformI420ChromaUResidual() {
-        byte[] isolatedPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                AvifPixelFormat.I420,
-                BlockSize.SIZE_16X16,
-                16,
-                16,
-                true
-        );
-        if (isolatedPayload != null) {
-            return isolatedPayload;
-        }
-        byte[] fallbackPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                AvifPixelFormat.I420,
-                BlockSize.SIZE_16X16,
-                16,
-                16,
-                false
-        );
-        if (fallbackPayload != null) {
-            return fallbackPayload;
-        }
-        throw new IllegalStateException("No fixture-backed payload produced a larger-transform multi-coefficient I420 chroma-U residual");
+        return readTileResidualFixture("i420-tx8x8-multi-u-isolated");
     }
 
     /// Returns the fixture-backed payload whose larger-transform `I422` chroma-U residual exposes one supported
@@ -818,117 +758,7 @@ final class TileResidualSyntaxReaderTest {
     /// @return the fixture-backed payload whose larger-transform `I422` chroma-U residual exposes one
     /// multi-coefficient unit
     private static byte[] findPayloadForMultiCoefficientLargerTransformI422ChromaUResidual() {
-        byte[] isolatedPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                AvifPixelFormat.I422,
-                BlockSize.SIZE_16X16,
-                16,
-                16,
-                true
-        );
-        if (isolatedPayload != null) {
-            return isolatedPayload;
-        }
-        byte[] fallbackPayload = findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-                AvifPixelFormat.I422,
-                BlockSize.SIZE_16X16,
-                16,
-                16,
-                false
-        );
-        if (fallbackPayload != null) {
-            return fallbackPayload;
-        }
-        throw new IllegalStateException("No fixture-backed payload produced a larger-transform multi-coefficient I422 chroma-U residual");
-    }
-
-    /// Returns the fixture-backed payload whose minimal chroma residuals match the requested mode, or `null`.
-    ///
-    /// @param pixelFormat the synthetic sequence pixel format
-    /// @param requireAllZeroLuma whether the leading luma unit should stay all-zero to isolate chroma
-    /// @param requireAllZeroChroma whether both chroma units must be all-zero instead of DC-only
-    /// @return the fixture-backed payload whose minimal chroma residuals match the requested mode, or `null`
-    private static byte[] findPayloadForMinimalChromaResidual(
-            AvifPixelFormat pixelFormat,
-            boolean requireAllZeroLuma,
-            boolean requireAllZeroChroma
-    ) {
-        Objects.requireNonNull(pixelFormat, "pixelFormat");
-        if (pixelFormat == AvifPixelFormat.I420) {
-            if (requireAllZeroChroma) {
-                return readTileResidualFixture(requireAllZeroLuma
-                        ? "i420-minimal-all-zero-isolated"
-                        : "i420-minimal-all-zero-fallback");
-            }
-            return readTileResidualFixture(requireAllZeroLuma
-                    ? "i420-minimal-dc-isolated"
-                    : "i420-minimal-dc-fallback");
-        }
-        if (pixelFormat == AvifPixelFormat.I422 && !requireAllZeroChroma) {
-            return readTileResidualFixture(requireAllZeroLuma
-                    ? "i422-minimal-dc-isolated"
-                    : "i422-minimal-dc-fallback");
-        }
-        if (pixelFormat == AvifPixelFormat.I444 && !requireAllZeroChroma) {
-            return readTileResidualFixture(requireAllZeroLuma
-                    ? "i444-minimal-nonzero-isolated"
-                    : "i444-minimal-nonzero-fallback");
-        }
-        return null;
-    }
-
-    /// Returns the fixture-backed payload whose minimal chroma-U residual exposes one supported multi-coefficient
-    /// transform unit, or `null`.
-    ///
-    /// @param pixelFormat the synthetic sequence pixel format
-    /// @param requireAllZeroLuma whether the leading luma unit should stay all-zero to isolate chroma
-    /// @return the fixture-backed payload whose minimal chroma-U residual exposes one multi-coefficient unit,
-    /// or `null`
-    private static byte[] findPayloadForMultiCoefficientMinimalChromaUResidual(
-            AvifPixelFormat pixelFormat,
-            boolean requireAllZeroLuma
-    ) {
-        Objects.requireNonNull(pixelFormat, "pixelFormat");
-        if (pixelFormat == AvifPixelFormat.I420) {
-            return readTileResidualFixture(requireAllZeroLuma
-                    ? "i420-minimal-multi-u-isolated"
-                    : "i420-minimal-multi-u-fallback");
-        }
-        return null;
-    }
-
-    /// Returns the fixture-backed payload whose larger-transform chroma-U residual exposes one supported
-    /// multi-coefficient unit, or `null`.
-    ///
-    /// @param pixelFormat the synthetic sequence pixel format
-    /// @param blockSize the block size to decode
-    /// @param codedWidth the synthetic coded frame width in pixels
-    /// @param codedHeight the synthetic coded frame height in pixels
-    /// @param requireAllZeroLuma whether the leading luma residual unit should stay all-zero
-    /// @return the fixture-backed payload whose larger-transform chroma-U residual exposes one multi-coefficient
-    /// unit, or `null`
-    private static byte[] findPayloadForMultiCoefficientLargerTransformChromaUResidual(
-            AvifPixelFormat pixelFormat,
-            BlockSize blockSize,
-            int codedWidth,
-            int codedHeight,
-            boolean requireAllZeroLuma
-    ) {
-        Objects.requireNonNull(pixelFormat, "pixelFormat");
-        Objects.requireNonNull(blockSize, "blockSize");
-        if (blockSize != BlockSize.SIZE_16X16 || codedWidth != 16 || codedHeight != 16) {
-            return null;
-        }
-        if (pixelFormat == AvifPixelFormat.I420) {
-            return readTileResidualFixture(requireAllZeroLuma
-                    ? "i420-tx8x8-multi-u-isolated"
-                    : "i420-tx8x8-multi-u-fallback");
-        }
-        if (pixelFormat == AvifPixelFormat.I422) {
-            return readTileResidualFixture(requireAllZeroLuma
-                    ? "i422-rtx8x16-multi-u-isolated"
-                    : "i422-rtx8x16-multi-u-fallback");
-        }
-        return null;
+        return readTileResidualFixture("i422-rtx8x16-multi-u-isolated");
     }
 
     /// Reads one named residual payload fixture from the generated fixture resource.

@@ -24,12 +24,8 @@ import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
-import java.util.Locale;
-import java.util.Objects;
-
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Contract tests for high-bit-depth ARGB output built on `DecodedPlanes`.
 ///
@@ -152,14 +148,9 @@ final class DecodedPlanesArgbLongOutputTest {
         assertFrameMetadata(frame, planes);
     }
 
-    /// Verifies the intended `8-bit` contract for long-output entry points.
-    ///
-    /// Implementations may either reject `8-bit` decoded planes because long output is reserved for
-    /// high-bit-depth content, or they may explicitly support `8-bit` and expand it into 16-bit
-    /// lanes. This test accepts either behavior while requiring the pixel-returning and
-    /// frame-returning entry points to stay consistent with one another.
+    /// Verifies that long-output entry points expand `8-bit` samples into 16-bit lanes.
     @Test
-    void rejectsEightBitDecodedPlanesForLongOutputOnlyEntryPointsOrSupportsThemExplicitly() {
+    void expandsEightBitDecodedPlanesForLongOutputEntryPoints() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
                 AvifPixelFormat.I400,
@@ -177,69 +168,19 @@ final class DecodedPlanesArgbLongOutputTest {
                 DEFAULT_TRANSFORM.toOpaqueGrayArgb64(255, 8)
         };
 
-        boolean pixelEntryPointSupportsEightBit = assertEightBitPixelEntryPointContract(planes, expectedPixels);
-        boolean frameEntryPointSupportsEightBit = assertEightBitFrameEntryPointContract(planes, expectedPixels);
-
-        assertEquals(
-                pixelEntryPointSupportsEightBit,
-                frameEntryPointSupportsEightBit,
-                "Long pixel and frame entry points should agree on 8-bit support"
+        long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes);
+        DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
+                planes,
+                TEST_FRAME_TYPE,
+                TEST_VISIBLE,
+                TEST_PRESENTATION_INDEX
         );
-    }
 
-    /// Asserts the `8-bit` contract for the long pixel-returning entry point.
-    ///
-    /// @param planes the `8-bit` decoded planes
-    /// @param expectedPixels the expected expanded 64-bit ARGB pixels if the entry point supports `8-bit`
-    /// @return whether the entry point supports `8-bit`
-    private static boolean assertEightBitPixelEntryPointContract(DecodedPlanes planes, long[] expectedPixels) {
-        try {
-            long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes);
-            assertArrayEquals(expectedPixels, pixels);
-            assertOpaquePixels(pixels);
-            return true;
-        } catch (IllegalArgumentException | UnsupportedOperationException exception) {
-            assertEightBitRejection(exception);
-            return false;
-        }
-    }
-
-    /// Asserts the `8-bit` contract for the frame-returning long-output entry point.
-    ///
-    /// @param planes the `8-bit` decoded planes
-    /// @param expectedPixels the expected expanded 64-bit ARGB pixels if the entry point supports `8-bit`
-    /// @return whether the entry point supports `8-bit`
-    private static boolean assertEightBitFrameEntryPointContract(DecodedPlanes planes, long[] expectedPixels) {
-        try {
-            DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
-                    planes,
-                    TEST_FRAME_TYPE,
-                    TEST_VISIBLE,
-                    TEST_PRESENTATION_INDEX
-            );
-            assertArrayEquals(expectedPixels, frame.longPixels());
-            assertOpaquePixels(frame.longPixels());
-            assertFrameMetadata(frame, planes);
-            return true;
-        } catch (IllegalArgumentException | UnsupportedOperationException exception) {
-            assertEightBitRejection(exception);
-            return false;
-        }
-    }
-
-    /// Asserts that one `8-bit` rejection explains the long-output bit-depth contract.
-    ///
-    /// @param exception the rejection raised by the long-output entry point
-    private static void assertEightBitRejection(RuntimeException exception) {
-        String message = Objects.toString(exception.getMessage(), "").toLowerCase(Locale.ROOT);
-        assertTrue(
-                message.contains("8")
-                        || message.contains("bitdepth")
-                        || message.contains("bit depth")
-                        || message.contains("high-bit")
-                        || message.contains("high bit"),
-                "Unexpected 8-bit rejection message: " + exception.getMessage()
-        );
+        assertArrayEquals(expectedPixels, pixels);
+        assertOpaquePixels(pixels);
+        assertArrayEquals(expectedPixels, frame.longPixels());
+        assertOpaquePixels(frame.longPixels());
+        assertFrameMetadata(frame, planes);
     }
 
     /// Asserts public frame metadata on one `DecodedFrame`.

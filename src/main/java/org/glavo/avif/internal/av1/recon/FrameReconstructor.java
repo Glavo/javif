@@ -3296,63 +3296,6 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Samples one rectangular reference-plane footprint into the destination plane using the
-    /// current fixed AV1 subpel filter with edge extension.
-    ///
-    /// @param destinationPlane the mutable destination plane
-    /// @param referencePlane the immutable reference plane
-    /// @param destinationX the zero-based horizontal destination coordinate
-    /// @param destinationY the zero-based vertical destination coordinate
-    /// @param width the sampled width in samples
-    /// @param height the sampled height in samples
-    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
-    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
-    /// @param denominatorX the horizontal plane-local denominator
-    /// @param denominatorY the vertical plane-local denominator
-    /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
-    /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
-    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
-    /// @param verticalFilterMode the effective vertical interpolation filter mode
-    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
-    private static void filteredReferencePlaneBlock(
-            MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane,
-            int destinationX,
-            int destinationY,
-            int width,
-            int height,
-            int sourceNumeratorX,
-            int sourceNumeratorY,
-            int denominatorX,
-            int denominatorY,
-            int widthForFilterSelection,
-            int heightForFilterSelection,
-            FrameHeader.InterpolationFilter horizontalFilterMode,
-            FrameHeader.InterpolationFilter verticalFilterMode,
-            int maximumSampleValue
-    ) {
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                destinationPlane.setSample(
-                        destinationX + x,
-                        destinationY + y,
-                        filteredInterpolateAt(
-                                referencePlane,
-                                sourceNumeratorX + x * denominatorX,
-                                sourceNumeratorY + y * denominatorY,
-                                denominatorX,
-                                denominatorY,
-                                widthForFilterSelection,
-                                heightForFilterSelection,
-                                horizontalFilterMode,
-                                verticalFilterMode,
-                                maximumSampleValue
-                        )
-                );
-            }
-        }
-    }
-
     /// Returns one fixed-filter interpolated unsigned sample at the supplied plane-local source
     /// numerator coordinates.
     ///

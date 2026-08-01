@@ -23,6 +23,11 @@ repositories {
     mavenCentral()
 }
 
+val viewerRuntime = configurations.create("viewerRuntime") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
 dependencies {
     val osName = System.getProperty("os.name").lowercase()
     val osArch = System.getProperty("os.arch").lowercase()
@@ -47,6 +52,7 @@ dependencies {
             compileOnly(notation)
             testCompileOnly(notation)
             testRuntimeOnly(notation)
+            add(viewerRuntime.name, notation)
         }
     }
 
@@ -80,7 +86,7 @@ tasks.register<JavaExec>("run") {
     group = "application"
     description = "Runs the JavaFX AVIF viewer."
     dependsOn(tasks.classes)
-    classpath = sourceSets["test"].runtimeClasspath
+    classpath(sourceSets["main"].runtimeClasspath, viewerRuntime)
     mainClass.set(mainClassName)
 
     if (this.javaVersion >= JavaVersion.VERSION_25) {
@@ -90,7 +96,6 @@ tasks.register<JavaExec>("run") {
 
 tasks.test {
     useJUnitPlatform()
-    testLogging.showStandardStreams = true
     systemProperty(
         "org.bytedeco.javacpp.cachedir",
         layout.buildDirectory.dir("javacpp-cache").get().asFile.absolutePath,
@@ -108,17 +113,18 @@ val linkUAvifSampleImagesCommit = "c666a368b73006246694919b5dbcc078317af6cc"
 val linkUAvifSampleImagesZip =
     layout.buildDirectory.file("downloads/avif-sample-images-$linkUAvifSampleImagesCommit.zip")
 
-val downloadLibavif by tasks.registering(de.undercouch.gradle.tasks.download.Download::class) {
+val downloadLibavif = tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadLibavif") {
     src("https://github.com/AOMediaCodec/libavif/archive/$libavifCommit.zip")
     dest(libavifZip)
     overwrite(false)
 }
 
-val downloadLinkUAvifSampleImages by tasks.registering(de.undercouch.gradle.tasks.download.Download::class) {
-    src("https://github.com/link-u/avif-sample-images/archive/$linkUAvifSampleImagesCommit.zip")
-    dest(linkUAvifSampleImagesZip)
-    overwrite(false)
-}
+val downloadLinkUAvifSampleImages =
+    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadLinkUAvifSampleImages") {
+        src("https://github.com/link-u/avif-sample-images/archive/$linkUAvifSampleImagesCommit.zip")
+        dest(linkUAvifSampleImagesZip)
+        overwrite(false)
+    }
 
 tasks.processTestResources {
     dependsOn(downloadLibavif)
