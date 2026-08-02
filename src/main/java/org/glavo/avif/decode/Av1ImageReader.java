@@ -74,7 +74,7 @@ public final class Av1ImageReader implements AutoCloseable {
     private @Nullable FrameAssembly pendingFrameAssembly;
     /// The most recently completed structural frame-decode result.
     private @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult;
-    /// The minimal pixel reconstructor used by the first output-producing path.
+    /// The AV1 pixel reconstructor used for decoded frame output.
     private final FrameReconstructor frameReconstructor;
     /// The postfilter pipeline used before storing reference surfaces.
     private final FramePostprocessor framePostprocessor;
@@ -196,6 +196,14 @@ public final class Av1ImageReader implements AutoCloseable {
         return lastPlanes;
     }
 
+    /// Returns the color configuration from the active AV1 sequence header.
+    ///
+    /// @return the active color configuration, or `null` before a sequence header is parsed
+    public @Nullable SequenceHeader.ColorConfig lastColorConfig() {
+        SequenceHeader activeSequenceHeader = sequenceHeader;
+        return activeSequenceHeader != null ? activeSequenceHeader.colorConfig() : null;
+    }
+
     /// Reads all decoded frames from the source until end-of-stream.
     ///
     /// @return all decoded frames from the source
@@ -234,8 +242,7 @@ public final class Av1ImageReader implements AutoCloseable {
 
     /// Returns the most recently completed structural frame-decode result, or `null`.
     ///
-    /// This accessor exists for same-package tests while the public pixel output API is still
-    /// incomplete.
+    /// This package-private accessor exposes structural state for decoder conformance tests.
     ///
     /// @return the most recently completed structural frame-decode result, or `null`
     @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult() {
@@ -244,8 +251,7 @@ public final class Av1ImageReader implements AutoCloseable {
 
     /// Returns one refreshed reference-frame structural decode result, or `null`.
     ///
-    /// This accessor exists for same-package tests while the public pixel output API is still
-    /// incomplete.
+    /// This package-private accessor exposes reference-slot state for decoder conformance tests.
     ///
     /// @param slot the zero-based reference-frame slot
     /// @return one refreshed reference-frame structural decode result, or `null`
@@ -291,15 +297,11 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param slot the zero-based reference slot to refresh
     /// @param sequenceHeader the active sequence header to associate with the injected slot
-    /// @param frameHeader the stored frame header for the injected slot
-    /// @param syntaxResult the stored structural syntax result for the injected slot
-    /// @param referenceSurfaceSnapshot the stored reconstructed reference surface snapshot, or `null`
+    /// @param referenceSurfaceSnapshot the complete reconstructed reference state
     void injectReferenceStateForTest(
             int slot,
             SequenceHeader sequenceHeader,
-            FrameHeader frameHeader,
-            FrameSyntaxDecodeResult syntaxResult,
-            @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot
     ) {
         if (slot < 0 || slot >= referenceSlots.length) {
             throw new IndexOutOfBoundsException("slot out of range: " + slot);
@@ -308,13 +310,7 @@ public final class Av1ImageReader implements AutoCloseable {
         this.sequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
         RuntimeReferenceSlot referenceSlot = referenceSlots[slot];
         referenceSlot.clear();
-        referenceSlot.refreshSyntax(
-                Objects.requireNonNull(frameHeader, "frameHeader"),
-                Objects.requireNonNull(syntaxResult, "syntaxResult")
-        );
-        if (referenceSurfaceSnapshot != null) {
-            referenceSlot.refreshSurface(referenceSurfaceSnapshot);
-        }
+        referenceSlot.refresh(Objects.requireNonNull(referenceSurfaceSnapshot, "referenceSurfaceSnapshot"));
     }
 
     /// Ensures that this reader has not already been closed.
@@ -398,7 +394,7 @@ public final class Av1ImageReader implements AutoCloseable {
         );
         enforceFrameSizeLimit(frameHeader, packet);
         if (frameHeader.showExistingFrame()) {
-            return outputExistingFrame(packet, frameHeader.existingFrameIndex());
+            return outputExistingFrame(packet, frameHeader);
         }
 
         pendingFrameAssembly = new FrameAssembly(
@@ -437,7 +433,7 @@ public final class Av1ImageReader implements AutoCloseable {
                         "Combined frame OBU must not carry tile data when show_existing_frame is set"
                 );
             }
-            return CombinedFrameStart.immediateOutput(outputExistingFrame(packet, frameHeader.existingFrameIndex()));
+            return CombinedFrameStart.immediateOutput(outputExistingFrame(packet, frameHeader));
         }
 
         FrameAssembly assembly = new FrameAssembly(
@@ -463,16 +459,13 @@ public final class Av1ImageReader implements AutoCloseable {
     private @Nullable DecodedFrame completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
-        FrameSyntaxDecodeResult syntaxDecodeResult;
-        try {
-            syntaxDecodeResult = new FrameSyntaxDecoder(cdfReferenceResult).decode(assembly);
-        } catch (UnsupportedOperationException exception) {
-            throw unsupportedFrameDecode(packet, exception);
-        }
+        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(
+                cdfReferenceResult,
+                referenceFrameSyntaxResultsForDecoding()
+        ).decode(assembly);
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
         FrameSyntaxDecodeResult storedSyntaxDecodeResult =
                 storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult);
-        refreshReferenceFrameSyntaxState(frameHeader, storedSyntaxDecodeResult);
         boolean shouldOutput = FrameOutputPolicy.shouldOutputFrame(frameHeader, config);
         boolean needsSurfaceSnapshot = frameHeader.refreshFrameFlags() != 0;
 
@@ -484,7 +477,7 @@ public final class Av1ImageReader implements AutoCloseable {
         @Nullable DecodedPlanes postprocessedPlanes = null;
         if (decodedPlanes != null) {
             postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
-            refreshReferenceSurfaceState(
+            refreshReferenceState(
                     frameHeader,
                     new ReferenceSurfaceSnapshot(frameHeader, storedSyntaxDecodeResult, postprocessedPlanes)
             );
@@ -630,7 +623,7 @@ public final class Av1ImageReader implements AutoCloseable {
                     null
             );
         }
-        if (!referenceSlots[existingFrameIndex].hasSyntaxState()) {
+        if (!referenceSlots[existingFrameIndex].isPopulated()) {
             throw new DecodeException(
                     DecodeErrorCode.STATE_VIOLATION,
                     DecodeStage.FRAME_DECODE,
@@ -645,15 +638,17 @@ public final class Av1ImageReader implements AutoCloseable {
     /// Returns one decoded `show_existing_frame` output from the requested reference slot, or
     /// `null` when current public filtering suppresses presentation.
     ///
-    /// This first implementation reuses the already stored reconstructed reference surface
-    /// directly and therefore requires a populated `ReferenceSurfaceSnapshot`.
+    /// The output reuses the reconstructed surface atomically stored with the slot's syntax state.
     ///
     /// @param packet the source OBU packet that requested `show_existing_frame`
-    /// @param existingFrameIndex the referenced frame slot
+    /// @param outputRequestHeader the current show-existing-frame request header
     /// @return one decoded `show_existing_frame` output, or `null` when output filtering suppresses it
-    /// @throws DecodeException if the referenced slot is invalid, missing state, or would require
-    ///                         unsupported presentation work such as film grain synthesis
-    private @Nullable DecodedFrame outputExistingFrame(ObuPacket packet, int existingFrameIndex) throws DecodeException {
+    /// @throws DecodeException if the referenced slot is invalid or missing complete reference state
+    private @Nullable DecodedFrame outputExistingFrame(
+            ObuPacket packet,
+            FrameHeader outputRequestHeader
+    ) throws DecodeException {
+        int existingFrameIndex = outputRequestHeader.existingFrameIndex();
         requireExistingFrameState(packet, existingFrameIndex);
         RuntimeReferenceSlot slot = referenceSlots[existingFrameIndex];
         lastFrameSyntaxDecodeResult = slot.syntaxResult();
@@ -661,25 +656,17 @@ public final class Av1ImageReader implements AutoCloseable {
         if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
             return null;
         }
-        @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot = slot.surfaceSnapshot();
-        if (referenceSurfaceSnapshot == null) {
-            throw new DecodeException(
-                    DecodeErrorCode.NOT_IMPLEMENTED,
-                    DecodeStage.FRAME_DECODE,
-                    "show_existing_frame output currently requires a reconstructed reference surface",
-                    packet.streamOffset(),
-                    packet.obuIndex(),
-                    null
-            );
-        }
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(
+                slot.surfaceSnapshot(),
+                "populated reference slot"
+        );
         DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
         DecodedFrame outputFrame;
         try {
-            outputFrame = OutputFrameFactory.createFrame(
+            outputFrame = OutputFrameFactory.createExistingFrame(
                     presentationPlanes,
-                    referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig(),
-                    referencedFrameHeader,
-                    true,
+                    referenceSurfaceSnapshot,
+                    outputRequestHeader,
                     nextPresentationIndex
             );
         } catch (UnsupportedOperationException exception) {
@@ -738,28 +725,6 @@ public final class Av1ImageReader implements AutoCloseable {
                 exception.getMessage() != null
                         ? exception.getMessage()
                         : "AV1 output uses an unsupported color conversion",
-                packet.streamOffset(),
-                packet.obuIndex(),
-                null,
-                exception
-        );
-    }
-
-    /// Returns a contextual checked failure for unsupported frame syntax.
-    ///
-    /// @param packet the OBU that completed the frame assembly
-    /// @param exception the unsupported frame-decode failure
-    /// @return the contextual unsupported-feature exception
-    private static DecodeException unsupportedFrameDecode(
-            ObuPacket packet,
-            UnsupportedOperationException exception
-    ) {
-        return new DecodeException(
-                DecodeErrorCode.UNSUPPORTED_FEATURE,
-                DecodeStage.FRAME_DECODE,
-                exception.getMessage() != null
-                        ? exception.getMessage()
-                        : "AV1 frame uses unsupported syntax",
                 packet.streamOffset(),
                 packet.obuIndex(),
                 null,
@@ -851,34 +816,21 @@ public final class Av1ImageReader implements AutoCloseable {
         return syntaxDecodeResult.withFinalTileCdfContexts(storedTileCdfContexts);
     }
 
-    /// Refreshes any reference-frame slots targeted by the parsed frame header.
+    /// Atomically refreshes any reference slots targeted by the parsed frame header.
     ///
-    /// @param frameHeader the parsed frame header whose refresh flags should be applied
-    /// @param syntaxDecodeResult the structural frame-decode result to store in refreshed slots
-    private void refreshReferenceFrameSyntaxState(FrameHeader frameHeader, FrameSyntaxDecodeResult syntaxDecodeResult) {
-        int refreshFrameFlags = frameHeader.refreshFrameFlags();
-        for (int i = 0; i < referenceSlots.length; i++) {
-            if ((refreshFrameFlags & (1 << i)) != 0) {
-                referenceSlots[i].refreshSyntax(frameHeader, syntaxDecodeResult);
-            }
-        }
-    }
-
-    /// Refreshes any reference-surface slots targeted by the parsed frame header.
-    ///
-    /// Only successfully reconstructed frames populate these slots. Structural syntax refresh is
-    /// handled separately so unsupported pixel paths still preserve reference syntax state.
+    /// Only successfully reconstructed and postprocessed frames populate these slots, so a failed
+    /// frame never leaves partially updated parser or surface state.
     ///
     /// @param frameHeader the parsed frame header whose refresh flags should be applied
     /// @param referenceSurfaceSnapshot the reconstructed reference surface to store
-    private void refreshReferenceSurfaceState(
+    private void refreshReferenceState(
             FrameHeader frameHeader,
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot
     ) {
         int refreshFrameFlags = frameHeader.refreshFrameFlags();
         for (int i = 0; i < referenceSlots.length; i++) {
             if ((refreshFrameFlags & (1 << i)) != 0) {
-                referenceSlots[i].refreshSurface(referenceSurfaceSnapshot);
+                referenceSlots[i].refresh(referenceSurfaceSnapshot);
             }
         }
     }
@@ -923,6 +875,17 @@ public final class Av1ImageReader implements AutoCloseable {
             headers[i] = referenceSlots[i].frameHeader();
         }
         return headers;
+    }
+
+    /// Returns the current structural reference snapshots as one slot-indexed array.
+    ///
+    /// @return the current structural reference snapshots as one slot-indexed array
+    private FrameSyntaxDecodeResult[] referenceFrameSyntaxResultsForDecoding() {
+        FrameSyntaxDecodeResult[] results = new FrameSyntaxDecodeResult[referenceSlots.length];
+        for (int i = 0; i < referenceSlots.length; i++) {
+            results[i] = referenceSlots[i].syntaxResult();
+        }
+        return results;
     }
 
     /// Returns the current stored reference surfaces as one slot-indexed snapshot array.

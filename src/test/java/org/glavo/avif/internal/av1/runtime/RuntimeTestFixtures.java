@@ -47,9 +47,27 @@ final class RuntimeTestFixtures {
     /// @param refreshFrameFlags the refresh-frame bitset carried by the header
     /// @return one minimal frame header with caller-controlled output-policy fields
     static FrameHeader createFrameHeader(FrameType frameType, boolean showFrame, int refreshFrameFlags) {
+        return createFrameHeader(0, 0, frameType, showFrame, refreshFrameFlags);
+    }
+
+    /// Creates one minimal frame header with caller-controlled layer and output-policy fields.
+    ///
+    /// @param temporalId the AV1 temporal-layer identifier
+    /// @param spatialId the AV1 spatial-layer identifier
+    /// @param frameType the AV1 frame type to expose through the header
+    /// @param showFrame whether the frame is shown immediately
+    /// @param refreshFrameFlags the refresh-frame bitset carried by the header
+    /// @return one minimal frame header with caller-controlled layer and output-policy fields
+    static FrameHeader createFrameHeader(
+            int temporalId,
+            int spatialId,
+            FrameType frameType,
+            boolean showFrame,
+            int refreshFrameFlags
+    ) {
         return new FrameHeader(
-                0,
-                0,
+                temporalId,
+                spatialId,
                 false,
                 0,
                 0,

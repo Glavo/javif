@@ -21,9 +21,7 @@ import org.glavo.avif.testutil.ImagePixelAssertions.PixelTolerance;
 import org.glavo.avif.testutil.ImagePixelAssertions.PixelTransform;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
@@ -55,9 +53,6 @@ final class LibavifImageIoReferenceTest {
     private static final PixelTolerance ARC_TRIOMPHE_CHRM_TOLERANCE = PixelTolerance.bounded(43, 0.0, 8.0, 9.0);
     /// Aggregate tolerance accepted for the current lossy Paris still-image fixture.
     private static final PixelTolerance PARIS_LOSSY_TOLERANCE = PixelTolerance.bounded(24, 0.001, 4.0, 5.0);
-    /// Aggregate tolerance placeholder for lossy still-image fixtures once decode coverage catches up.
-    private static final PixelTolerance LOSSY_STILL_TOLERANCE = PixelTolerance.bounded(24, 0.001, 2.0, 6.0);
-
     /// Image resources copied from libavif's test data and their expected dimensions.
     private static final ImageResource @Unmodifiable [] IMAGE_RESOURCES = new ImageResource[]{
             new ImageResource("libavif-test-data/abc.png", 512, 256, true),
@@ -171,14 +166,6 @@ final class LibavifImageIoReferenceTest {
                     AvifPixelFormat.I444,
                     PixelTransform.IDENTITY,
                     PARIS_LOSSY_TOLERANCE
-            ),
-            disabledPixelImage(
-                    "libavif-test-data/weld_16bit.png",
-                    "libavif-test-data/weld_sato_12B_8B_q0.avif",
-                    AvifPixelFormat.I444,
-                    PixelTransform.IDENTITY,
-                    LOSSY_STILL_TOLERANCE,
-                    "Pending high-bit-depth decode accuracy validation."
             ),
     };
 
@@ -504,9 +491,6 @@ final class LibavifImageIoReferenceTest {
     /// @param reference the expected pixel reference
     /// @throws IOException if a resource cannot be read or decoded
     private static void assertPixelImageReference(PixelImageReference reference) throws IOException {
-        if (reference.disabledReason() != null) {
-            Assumptions.assumeTrue(false, reference.disabledReason());
-        }
         BufferedImage expected = TestResources.readImage(reference.sourceResource());
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.avifResource()))) {
             AvifFrame frame = reader.readFrame();
@@ -659,27 +643,7 @@ final class LibavifImageIoReferenceTest {
             PixelTransform transform,
             PixelTolerance tolerance
     ) {
-        return new PixelImageReference(sourceResource, avifResource, pixelFormat, transform, tolerance, null);
-    }
-
-    /// Creates a disabled full-image pixel reference.
-    ///
-    /// @param sourceResource the source image classpath resource name
-    /// @param avifResource the encoded AVIF classpath resource name
-    /// @param pixelFormat the expected decoded AV1 chroma sampling layout
-    /// @param transform the coordinate transform from actual output pixels to expected source pixels
-    /// @param tolerance the accepted pixel tolerance
-    /// @param disabledReason the disabled reason
-    /// @return the full-image pixel reference
-    private static PixelImageReference disabledPixelImage(
-            String sourceResource,
-            String avifResource,
-            AvifPixelFormat pixelFormat,
-            PixelTransform transform,
-            PixelTolerance tolerance,
-            String disabledReason
-    ) {
-        return new PixelImageReference(sourceResource, avifResource, pixelFormat, transform, tolerance, disabledReason);
+        return new PixelImageReference(sourceResource, avifResource, pixelFormat, transform, tolerance);
     }
 
     /// Expected ImageIO-readable image resource metadata.
@@ -707,15 +671,13 @@ final class LibavifImageIoReferenceTest {
     /// @param pixelFormat the expected decoded AV1 chroma sampling layout
     /// @param transform the coordinate transform from actual output pixels to expected source pixels
     /// @param tolerance the accepted pixel tolerance
-    /// @param disabledReason the disabled reason, or `null` when enabled
     @NotNullByDefault
     private record PixelImageReference(
             String sourceResource,
             String avifResource,
             AvifPixelFormat pixelFormat,
             PixelTransform transform,
-            PixelTolerance tolerance,
-            @Nullable String disabledReason
+            PixelTolerance tolerance
     ) {
     }
 

@@ -19,11 +19,11 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
-/// Shared AV1 QTX lookup tables used by the current reconstruction subset.
+/// Provides the fixed AV1 QTX lookup tables for coefficient dequantization.
 ///
-/// These tables mirror the fixed `dav1d_dq_tbl` QTX values for the currently supported `8-bit`,
-/// `10-bit`, and `12-bit` decode paths. Luma and chroma dequantization both reuse these lookup
-/// tables after applying plane-specific DC/AC delta adjustments to the block-local `qindex`.
+/// The values mirror `dav1d_dq_tbl` for 8-bit, 10-bit, and 12-bit samples. Luma and chroma
+/// dequantization reuse them after applying plane-specific DC and AC delta adjustments to the
+/// block-local `qindex`.
 @NotNullByDefault
 final class QuantizerTables {
     /// The 8-bit AV1 QTX lookup table for DC coefficients.

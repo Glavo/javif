@@ -172,7 +172,7 @@ public final class TileSyntaxReader {
         if (frameType == FrameType.KEY || frameType == FrameType.INTRA) {
             return true;
         }
-        return msacDecoder.decodeBooleanAdapt(cdfContext.mutableIntraCdf(context));
+        return !msacDecoder.decodeBooleanAdapt(cdfContext.mutableIntraCdf(context));
     }
 
     /// Decodes one compound-reference decision for inter and switch frames.
@@ -351,8 +351,9 @@ public final class TileSyntaxReader {
 
     /// Decodes one switchable interpolation-filter symbol for the supplied direction and context.
     ///
-    /// Direction `0` decodes the horizontal filter symbol and direction `1` decodes the vertical
-    /// filter symbol. The current switchable subset covers only the three fixed 8-tap filters.
+    /// Direction `0` decodes the vertical filter symbol and direction `1` decodes the horizontal
+    /// filter symbol. AV1 maps the three switchable symbols to its regular, smooth, and sharp
+    /// 8-tap kernels.
     ///
     /// @param direction the zero-based interpolation-filter direction index in `[0, 2)`
     /// @param context the zero-based switchable interpolation-filter context index in `[0, 8)`
@@ -506,9 +507,7 @@ public final class TileSyntaxReader {
     /// Decodes one coefficient base token for the supplied transform context and table context.
     ///
     /// The returned token is in `[0, 3]`, where zero means the coefficient level is zero and three
-    /// enters the high-token extension path. The currently supported `TX_4X4` residual path may
-    /// request more than context `0`, while the larger-transform fallback path still uses only
-    /// context `0`.
+    /// enters the high-token extension path.
     ///
     /// @param transformSize the active transform size
     /// @param chroma whether the syntax belongs to a chroma plane
@@ -522,22 +521,7 @@ public final class TileSyntaxReader {
         );
     }
 
-    /// Decodes one DC high token from the `br_tok` context `0`.
-    ///
-    /// This path currently covers the DC-only residual syntax where higher AC contexts are not yet
-    /// required.
-    ///
-    /// @param transformSize the active transform size
-    /// @param chroma whether the syntax belongs to a chroma plane
-    /// @return the decoded high token in `[3, 15]`
-    public int readDcHighToken(TransformSize transformSize, boolean chroma) {
-        return readHighToken(Objects.requireNonNull(transformSize, "transformSize"), chroma, 0);
-    }
-
     /// Decodes one coefficient high token from the supplied `br_tok` context.
-    ///
-    /// The currently supported `TX_4X4` residual path may request any context in `[0, 21)`, while
-    /// the larger-transform fallback path still uses only contexts `0` and `7`.
     ///
     /// @param transformSize the active transform size
     /// @param chroma whether the syntax belongs to a chroma plane
@@ -610,10 +594,10 @@ public final class TileSyntaxReader {
     ///
     /// The active frame header supplies the motion-vector precision mode. This syntax is available
     /// for inter/switch frames and for key/intra frames when `allow_intrabc` is enabled. The
-    /// returned vector is the fully decoded motion vector in quarter-pel units.
+    /// returned vector is the fully decoded motion vector in eighth-pel units.
     ///
     /// @param referenceMotionVector the predictor that the residual is added to
-    /// @return the fully decoded motion vector in quarter-pel units
+    /// @return the fully decoded motion vector in eighth-pel units
     public MotionVector readMotionVectorResidual(MotionVector referenceMotionVector) {
         MotionVector nonNullReferenceMotionVector = Objects.requireNonNull(referenceMotionVector, "referenceMotionVector");
         FrameType frameType = tileContext.frameHeader().frameType();
@@ -632,15 +616,15 @@ public final class TileSyntaxReader {
             return nonNullReferenceMotionVector;
         }
 
-        int rowQuarterPel = nonNullReferenceMotionVector.rowQuarterPel();
-        int columnQuarterPel = nonNullReferenceMotionVector.columnQuarterPel();
+        int rowEighthPel = nonNullReferenceMotionVector.rowEighthPel();
+        int columnEighthPel = nonNullReferenceMotionVector.columnEighthPel();
         if ((motionVectorJoint & MOTION_VECTOR_JOINT_VERTICAL) != 0) {
-            rowQuarterPel += readMotionVectorComponentDiff(0, motionVectorPrecision);
+            rowEighthPel += readMotionVectorComponentDiff(0, motionVectorPrecision);
         }
         if ((motionVectorJoint & MOTION_VECTOR_JOINT_HORIZONTAL) != 0) {
-            columnQuarterPel += readMotionVectorComponentDiff(1, motionVectorPrecision);
+            columnEighthPel += readMotionVectorComponentDiff(1, motionVectorPrecision);
         }
-        return new MotionVector(rowQuarterPel, columnQuarterPel);
+        return new MotionVector(rowEighthPel, columnEighthPel);
     }
 
     /// Decodes one single-reference inter prediction mode from the supplied contexts and already-forced segment flags.
@@ -985,7 +969,7 @@ public final class TileSyntaxReader {
     /// @param component the zero-based motion-vector component index, where `0` is vertical and `1` is horizontal
     /// @param motionVectorPrecision the active motion-vector precision mode: `-1` forces integer,
     ///                              `0` disables high precision, and `1` allows high precision
-    /// @return the signed motion-vector component residual in quarter-pel units
+    /// @return the signed motion-vector component residual in eighth-pel units
     private int readMotionVectorComponentDiff(int component, int motionVectorPrecision) {
         boolean negative = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorSignCdf(component));
         int motionVectorClass = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassCdf(component), 10);
@@ -1007,7 +991,8 @@ public final class TileSyntaxReader {
         } else {
             integerMagnitude = 1 << motionVectorClass;
             for (int bitIndex = 0; bitIndex < motionVectorClass; bitIndex++) {
-                if (msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNCdf(component, bitIndex))) {
+                boolean bit = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNCdf(component, bitIndex));
+                if (bit) {
                     integerMagnitude |= 1 << bitIndex;
                 }
             }

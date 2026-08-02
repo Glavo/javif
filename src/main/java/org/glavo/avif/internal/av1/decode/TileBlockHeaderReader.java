@@ -37,12 +37,10 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Reader for one leaf block header inside a tile partition tree.
+/// Decodes one leaf block header inside a tile partition tree.
 ///
-/// This implementation intentionally covers only the syntax elements already backed by
-/// `TileSyntaxReader`, including skip mode, CDEF and delta-q/delta-lf side syntax, provisional
-/// inter prediction modes, inter-intra syntax, palette size signaling, `intrabc`, directional angle
-/// deltas, and block-size-aware CFL gating.
+/// The reader combines entropy-coded syntax with tile-local state and neighboring block contexts,
+/// and optionally publishes the decoded state to the supplied neighbor context.
 @NotNullByDefault
 public final class TileBlockHeaderReader {
     /// The number of palette colors supported by AV1 screen-content palette syntax.
@@ -177,7 +175,7 @@ public final class TileBlockHeaderReader {
 
         boolean useIntrabc = false;
         boolean intra;
-        if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH) && skip) {
+        if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH) && skipMode) {
             intra = false;
         } else if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
             int segmentReferenceFrame = segmentData.referenceFrame();
@@ -231,12 +229,22 @@ public final class TileBlockHeaderReader {
                                 nonNullSize,
                                 compoundReference,
                                 referenceFrame0,
-                                referenceFrame1
+                                referenceFrame1,
+                                globalMotionVector(nonNullPosition, nonNullSize, referenceFrame0),
+                                globalMotionVector(nonNullPosition, nonNullSize, referenceFrame1)
                         );
                 BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
                         provisionalContext.motionVectorCandidate(0);
-                motionVector0 = resolveCompoundMotionVector0(compoundInterMode, candidate);
-                motionVector1 = resolveCompoundMotionVector1(compoundInterMode, candidate);
+                motionVector0 = resolveCompoundMotionVector0(
+                        compoundInterMode,
+                        candidate,
+                        globalMotionVector(nonNullPosition, nonNullSize, referenceFrame0)
+                );
+                motionVector1 = resolveCompoundMotionVector1(
+                        compoundInterMode,
+                        candidate,
+                        globalMotionVector(nonNullPosition, nonNullSize, referenceFrame1)
+                );
             } else {
                 InterModeSelection interModeSelection = readInterModeSelection(
                         nonNullPosition,
@@ -253,17 +261,6 @@ public final class TileBlockHeaderReader {
                 motionVector0 = interModeSelection.motionVector0();
                 motionVector1 = interModeSelection.motionVector1();
             }
-            motionMode = readMotionMode(
-                    nonNullPosition,
-                    nonNullSize,
-                    nonNullNeighborContext,
-                    segmentData,
-                    skipMode,
-                    compoundReference,
-                    referenceFrame0,
-                    singleInterMode,
-                    compoundInterMode
-            );
             if (compoundReference) {
                 CompoundPredictionSelection compoundPredictionSelection = readCompoundPredictionSelection(
                         nonNullPosition,
@@ -276,8 +273,10 @@ public final class TileBlockHeaderReader {
                 compoundMaskSign = compoundPredictionSelection.maskSign();
                 compoundWedgeIndex = compoundPredictionSelection.wedgeIndex();
             }
-            if (canDecodeInterIntra(nonNullSize, compoundReference)
-                    && syntaxReader.readUseInterIntra(nonNullSize.yModeSizeContext())) {
+            boolean canUseInterIntra = canDecodeInterIntra(nonNullSize, compoundReference);
+            boolean useInterIntra = canUseInterIntra
+                    && syntaxReader.readUseInterIntra(nonNullSize.yModeSizeContext());
+            if (useInterIntra) {
                 interIntra = true;
                 interIntraMode = syntaxReader.readInterIntraMode(nonNullSize.yModeSizeContext());
                 int wedgeContext = interIntraWedgeContext(nonNullSize);
@@ -286,15 +285,30 @@ public final class TileBlockHeaderReader {
                     interIntraWedgeIndex = syntaxReader.readWedgeIndex(wedgeContext);
                 }
             }
+            if (!interIntra) {
+                motionMode = readMotionMode(
+                        nonNullPosition,
+                        nonNullSize,
+                        nonNullNeighborContext,
+                        segmentData,
+                        skipMode,
+                        compoundReference,
+                        referenceFrame0,
+                        singleInterMode,
+                        compoundInterMode
+                );
+            }
             InterpolationFilterSelection interpolationFilterSelection = readInterpolationFilterSelection(
                     nonNullPosition,
+                    nonNullSize,
                     nonNullNeighborContext,
-                    hasChroma,
+                    skipMode,
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
-                    motionVector0,
-                    motionVector1
+                    singleInterMode,
+                    compoundInterMode,
+                    motionMode
             );
             horizontalInterpolationFilter = interpolationFilterSelection.horizontalInterpolationFilter();
             verticalInterpolationFilter = interpolationFilterSelection.verticalInterpolationFilter();
@@ -736,8 +750,9 @@ public final class TileBlockHeaderReader {
             );
         }
 
+        int compoundContext = neighborContext.compoundReferenceContext(position);
         boolean compoundReference = canDecodeCompoundReference(size, segmentData)
-                && syntaxReader.readCompoundReferenceFlag(neighborContext.compoundReferenceContext(position));
+                && syntaxReader.readCompoundReferenceFlag(compoundContext);
         if (compoundReference) {
             return readCompoundReferenceSelection(position, neighborContext);
         }
@@ -768,7 +783,17 @@ public final class TileBlockHeaderReader {
             FrameHeader.SegmentData segmentData
     ) {
         BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
-                neighborContext.provisionalInterModeContext(position, size, compoundReference, referenceFrame0, referenceFrame1);
+                neighborContext.provisionalInterModeContext(
+                        position,
+                        size,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        globalMotionVector(position, size, referenceFrame0),
+                        compoundReference
+                                ? globalMotionVector(position, size, referenceFrame1)
+                                : MotionVector.zero()
+                );
         if (compoundReference) {
             CompoundInterPredictionMode compoundInterMode =
                     syntaxReader.readCompoundInterMode(provisionalContext.compoundInterModeContext());
@@ -791,8 +816,16 @@ public final class TileBlockHeaderReader {
             }
             BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
                     provisionalContext.motionVectorCandidate(motionVectorCandidateIndex(compoundInterMode, drlIndex));
-            InterMotionVector motionVector0 = resolveCompoundMotionVector0(compoundInterMode, candidate);
-            InterMotionVector motionVector1 = resolveCompoundMotionVector1(compoundInterMode, candidate);
+            InterMotionVector motionVector0 = resolveCompoundMotionVector0(
+                    compoundInterMode,
+                    candidate,
+                    globalMotionVector(position, size, referenceFrame0)
+            );
+            InterMotionVector motionVector1 = resolveCompoundMotionVector1(
+                    compoundInterMode,
+                    candidate,
+                    globalMotionVector(position, size, referenceFrame1)
+            );
             if (compoundInterMode == CompoundInterPredictionMode.NEWMV_NEARESTMV
                     || compoundInterMode == CompoundInterPredictionMode.NEWMV_NEARMV
                     || compoundInterMode == CompoundInterPredictionMode.NEWMV_NEWMV) {
@@ -813,8 +846,10 @@ public final class TileBlockHeaderReader {
         }
 
         if (segmentData.globalMotion() || segmentData.skip()) {
-            InterMotionVector zeroMotionVector = InterMotionVector.resolved(MotionVector.zero());
-            return new InterModeSelection(SingleInterPredictionMode.GLOBALMV, null, 0, zeroMotionVector, null);
+            InterMotionVector globalMotionVector = InterMotionVector.resolved(
+                    globalMotionVector(position, size, referenceFrame0)
+            );
+            return new InterModeSelection(SingleInterPredictionMode.GLOBALMV, null, 0, globalMotionVector, null);
         }
 
         SingleInterPredictionMode singleInterMode = syntaxReader.readSingleInterMode(
@@ -831,7 +866,8 @@ public final class TileBlockHeaderReader {
         };
         InterMotionVector motionVector0 = resolveSingleMotionVector(
                 singleInterMode,
-                provisionalContext.motionVectorCandidate(motionVectorCandidateIndex(singleInterMode, drlIndex))
+                provisionalContext.motionVectorCandidate(motionVectorCandidateIndex(singleInterMode, drlIndex)),
+                globalMotionVector(position, size, referenceFrame0)
         );
         if (singleInterMode == SingleInterPredictionMode.NEWMV) {
             motionVector0 = decodeNewMotionVectorResidual(motionVector0);
@@ -842,7 +878,8 @@ public final class TileBlockHeaderReader {
     /// Decodes the block-level inter motion-compensation mode.
     ///
     /// The decoder reads the three-way motion-mode symbol when local warped motion has compatible
-    /// causal samples; otherwise it reads the legacy OBMC flag or returns simple prediction.
+    /// causal samples and the selected reference is not scaled; otherwise it reads the two-way
+    /// OBMC flag or returns simple prediction.
     ///
     /// @param position the local tile-relative block origin
     /// @param size the decoded block size
@@ -878,15 +915,45 @@ public final class TileBlockHeaderReader {
         if (compoundInterMode != null) {
             return MotionMode.SIMPLE;
         }
-        if (singleInterMode == SingleInterPredictionMode.GLOBALMV && !frameHeader.forceIntegerMotionVectors()) {
+        if (singleInterMode == SingleInterPredictionMode.GLOBALMV
+                && !frameHeader.forceIntegerMotionVectors()
+                && frameHeader.globalMotion(referenceFrame0).type().ordinal()
+                > FrameHeader.GlobalMotionType.TRANSLATION.ordinal()) {
             return MotionMode.SIMPLE;
         }
+        @Nullable FrameHeader referenceFrameHeader = tileContext.referenceFrameHeader(referenceFrame0);
         if (frameHeader.warpedMotion()
                 && !frameHeader.forceIntegerMotionVectors()
+                && (referenceFrameHeader == null
+                || !referenceFrameIsScaled(frameHeader.frameSize(), referenceFrameHeader.frameSize()))
                 && neighborContext.hasLocalWarpSamples(position, size, referenceFrame0)) {
             return syntaxReader.readMotionMode(size.cdfIndex());
         }
         return syntaxReader.readUseObmc(size.cdfIndex()) ? MotionMode.OBMC : MotionMode.SIMPLE;
+    }
+
+    /// Returns whether inter prediction from one reference frame requires spatial scaling.
+    ///
+    /// The current frame uses its coded width, while the stored reference surface uses the
+    /// reference frame's upscaled width. AV1 render-size hints do not participate in this test.
+    ///
+    /// @param currentFrameSize the current frame dimensions
+    /// @param referenceFrameSize the selected reference frame dimensions
+    /// @return whether the reference surface dimensions differ from the current coded dimensions
+    static boolean referenceFrameIsScaled(
+            FrameHeader.FrameSize currentFrameSize,
+            FrameHeader.FrameSize referenceFrameSize
+    ) {
+        FrameHeader.FrameSize nonNullCurrentFrameSize = Objects.requireNonNull(
+                currentFrameSize,
+                "currentFrameSize"
+        );
+        FrameHeader.FrameSize nonNullReferenceFrameSize = Objects.requireNonNull(
+                referenceFrameSize,
+                "referenceFrameSize"
+        );
+        return nonNullCurrentFrameSize.codedWidth() != nonNullReferenceFrameSize.upscaledWidth()
+                || nonNullCurrentFrameSize.height() != nonNullReferenceFrameSize.height();
     }
 
     /// Decodes the compound prediction blend type for one compound-reference block.
@@ -966,37 +1033,46 @@ public final class TileBlockHeaderReader {
     /// Decodes one switchable interpolation-filter selection for the current inter block.
     ///
     /// Non-switchable frame-level filter modes leave the block-level filter state unavailable. For
-    /// switchable frames, blocks that do not require subpel filtering default both directions to
-    /// regular 8-tap filtering so later neighbor contexts see the same state that AV1 would store
-    /// on the edges.
+    /// switchable frames, modes that do not signal block-level filters default both directions to
+    /// regular 8-tap filtering so later neighbor contexts see the same state that AV1 stores on the
+    /// edges.
     ///
     /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
     /// @param neighborContext the mutable neighbor context that supplies interpolation-filter contexts
-    /// @param hasChroma whether the current block has chroma samples in the active frame layout
+    /// @param skipMode whether the block uses frame-level skip-mode references
     /// @param compoundReference whether the current block uses compound inter references
     /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
     /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
-    /// @param motionVector0 the resolved primary motion-vector state chosen for the block
-    /// @param motionVector1 the resolved secondary motion-vector state chosen for the block, or `null`
+    /// @param singleInterMode the decoded single-reference inter mode, or `null` for compound blocks
+    /// @param compoundInterMode the decoded compound inter mode, or `null` for single-reference blocks
+    /// @param motionMode the decoded motion-compensation mode
     /// @return the decoded switchable interpolation-filter selection for the current inter block
     private InterpolationFilterSelection readInterpolationFilterSelection(
             BlockPosition position,
+            BlockSize size,
             BlockNeighborContext neighborContext,
-            boolean hasChroma,
+            boolean skipMode,
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
-            @Nullable InterMotionVector motionVector0,
-            @Nullable InterMotionVector motionVector1
+            @Nullable SingleInterPredictionMode singleInterMode,
+            @Nullable CompoundInterPredictionMode compoundInterMode,
+            MotionMode motionMode
     ) {
         FrameHeader.InterpolationFilter subpelFilterMode = tileContext.frameHeader().subpelFilterMode();
         if (subpelFilterMode != FrameHeader.InterpolationFilter.SWITCHABLE) {
             return new InterpolationFilterSelection(null, null);
         }
         if (!requiresSwitchableInterpolationFilterSignaling(
-                hasChroma,
-                Objects.requireNonNull(motionVector0, "motionVector0"),
-                compoundReference ? Objects.requireNonNull(motionVector1, "motionVector1") : null
+                size,
+                skipMode,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                singleInterMode,
+                compoundInterMode,
+                motionMode
         )) {
             return new InterpolationFilterSelection(
                     FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
@@ -1004,79 +1080,68 @@ public final class TileBlockHeaderReader {
             );
         }
 
-        int horizontalContext = neighborContext.interpolationFilterContext(position, referenceFrame0, referenceFrame1, 0);
-        FrameHeader.InterpolationFilter horizontalInterpolationFilter =
-                syntaxReader.readInterpolationFilter(0, horizontalContext);
-        FrameHeader.InterpolationFilter verticalInterpolationFilter;
+        int verticalContext = neighborContext.interpolationFilterContext(position, referenceFrame0, referenceFrame1, 0);
+        FrameHeader.InterpolationFilter verticalInterpolationFilter =
+                syntaxReader.readInterpolationFilter(0, verticalContext);
+        FrameHeader.InterpolationFilter horizontalInterpolationFilter;
         if (tileContext.sequenceHeader().features().dualFilter()) {
-            int verticalContext = neighborContext.interpolationFilterContext(position, referenceFrame0, referenceFrame1, 1);
-            verticalInterpolationFilter = syntaxReader.readInterpolationFilter(1, verticalContext);
+            int horizontalContext = neighborContext.interpolationFilterContext(position, referenceFrame0, referenceFrame1, 1);
+            horizontalInterpolationFilter = syntaxReader.readInterpolationFilter(1, horizontalContext);
         } else {
-            verticalInterpolationFilter = horizontalInterpolationFilter;
+            horizontalInterpolationFilter = verticalInterpolationFilter;
         }
         return new InterpolationFilterSelection(horizontalInterpolationFilter, verticalInterpolationFilter);
     }
 
-    /// Returns whether the current switchable inter block must decode explicit interpolation-filter symbols.
+    /// Returns whether the current switchable inter block must decode interpolation-filter symbols.
     ///
-    /// The current implementation treats any active-plane fractional motion vector as requiring
-    /// switchable filter signaling.
+    /// AV1 derives syntax availability from the decoded inter and motion modes rather than from the
+    /// fractional parts of the resolved motion vectors. Small global-motion blocks retain explicit
+    /// filter signaling, while larger non-translation global and local-warped blocks do not.
     ///
-    /// @param hasChroma whether the current block has chroma samples in the active frame layout
-    /// @param motionVector0 the resolved primary motion-vector state chosen for the block
-    /// @param motionVector1 the resolved secondary motion-vector state chosen for the block, or `null`
+    /// @param size the decoded block size
+    /// @param skipMode whether the block uses frame-level skip-mode references
+    /// @param compoundReference whether the current block uses compound inter references
+    /// @param referenceFrame0 the primary inter reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in internal LAST..ALTREF order, or `-1`
+    /// @param singleInterMode the decoded single-reference inter mode, or `null` for compound blocks
+    /// @param compoundInterMode the decoded compound inter mode, or `null` for single-reference blocks
+    /// @param motionMode the decoded motion-compensation mode
     /// @return whether the current switchable inter block must decode explicit interpolation-filter symbols
     private boolean requiresSwitchableInterpolationFilterSignaling(
-            boolean hasChroma,
-            InterMotionVector motionVector0,
-            @Nullable InterMotionVector motionVector1
+            BlockSize size,
+            boolean skipMode,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            @Nullable SingleInterPredictionMode singleInterMode,
+            @Nullable CompoundInterPredictionMode compoundInterMode,
+            MotionMode motionMode
     ) {
-        return requiresSubpelFiltering(Objects.requireNonNull(motionVector0, "motionVector0").vector(), hasChroma)
-                || (motionVector1 != null && requiresSubpelFiltering(motionVector1.vector(), hasChroma));
-    }
-
-    /// Returns whether one motion vector requires subpel filtering for the current pixel format.
-    ///
-    /// @param motionVector the resolved motion vector to inspect
-    /// @param hasChroma whether the current block has chroma samples in the active frame layout
-    /// @return whether the supplied motion vector requires subpel filtering for the current pixel format
-    private boolean requiresSubpelFiltering(MotionVector motionVector, boolean hasChroma) {
-        MotionVector nonNullMotionVector = Objects.requireNonNull(motionVector, "motionVector");
-        if ((nonNullMotionVector.rowQuarterPel() & 0x03) != 0 || (nonNullMotionVector.columnQuarterPel() & 0x03) != 0) {
-            return true;
-        }
-        if (!hasChroma) {
+        Objects.requireNonNull(size, "size");
+        Objects.requireNonNull(motionMode, "motionMode");
+        if (skipMode || motionMode == MotionMode.LOCAL_WARPED) {
             return false;
         }
-        AvifPixelFormat pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
-        int chromaHorizontalAlignment = 4 << chromaSubsamplingX(pixelFormat);
-        int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
-        return Math.floorMod(nonNullMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
-                || Math.floorMod(nonNullMotionVector.rowQuarterPel(), chromaVerticalAlignment) != 0;
-    }
 
-    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
-    ///
-    /// @param pixelFormat the decoded pixel format to inspect
-    /// @return the horizontal chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
-        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
-        return switch (nonNullPixelFormat) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
-        };
-    }
+        boolean smallestDimensionIsFourPixels = Math.min(size.width4(), size.height4()) == 1;
+        FrameHeader frameHeader = tileContext.frameHeader();
+        if (compoundReference) {
+            if (Objects.requireNonNull(compoundInterMode, "compoundInterMode")
+                    != CompoundInterPredictionMode.GLOBALMV_GLOBALMV
+                    || smallestDimensionIsFourPixels) {
+                return true;
+            }
+            return frameHeader.globalMotion(referenceFrame0).type() == FrameHeader.GlobalMotionType.TRANSLATION
+                    || frameHeader.globalMotion(referenceFrame1).type() == FrameHeader.GlobalMotionType.TRANSLATION;
+        }
 
-    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
-    ///
-    /// @param pixelFormat the decoded pixel format to inspect
-    /// @return the vertical chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
-        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
-        return switch (nonNullPixelFormat) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
-        };
+        if (Objects.requireNonNull(singleInterMode, "singleInterMode")
+                != SingleInterPredictionMode.GLOBALMV
+                || smallestDimensionIsFourPixels) {
+            return true;
+        }
+        return frameHeader.globalMotion(referenceFrame0).type() == FrameHeader.GlobalMotionType.TRANSLATION;
     }
 
     /// Returns the provisional motion-vector candidate index used by one single-reference mode.
@@ -1111,16 +1176,19 @@ public final class TileBlockHeaderReader {
     ///
     /// @param singleInterMode the decoded single-reference inter mode
     /// @param candidate the provisional motion-vector candidate selected for that mode
+    /// @param globalMotionVector the frame-level global motion vector for the selected reference
     /// @return the single-reference motion-vector predictor chosen for the decoded mode
     private static InterMotionVector resolveSingleMotionVector(
             SingleInterPredictionMode singleInterMode,
-            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate,
+            MotionVector globalMotionVector
     ) {
         SingleInterPredictionMode nonNullSingleInterMode = Objects.requireNonNull(singleInterMode, "singleInterMode");
         BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate =
                 Objects.requireNonNull(candidate, "candidate");
+        MotionVector nonNullGlobalMotionVector = Objects.requireNonNull(globalMotionVector, "globalMotionVector");
         return switch (nonNullSingleInterMode) {
-            case GLOBALMV -> InterMotionVector.resolved(MotionVector.zero());
+            case GLOBALMV -> InterMotionVector.resolved(nonNullGlobalMotionVector);
             case NEARESTMV, NEARMV -> nonNullCandidate.motionVector0().asResolved();
             case NEWMV -> nonNullCandidate.motionVector0().asPredicted();
         };
@@ -1130,16 +1198,18 @@ public final class TileBlockHeaderReader {
     ///
     /// @param compoundInterMode the decoded compound inter mode
     /// @param candidate the provisional motion-vector candidate selected for that mode
+    /// @param globalMotionVector the frame-level global motion vector for the first reference
     /// @return the first compound-reference motion-vector predictor chosen for the decoded mode
     private static InterMotionVector resolveCompoundMotionVector0(
             CompoundInterPredictionMode compoundInterMode,
-            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate,
+            MotionVector globalMotionVector
     ) {
         CompoundInterPredictionMode nonNullCompoundInterMode = Objects.requireNonNull(compoundInterMode, "compoundInterMode");
         BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate =
                 Objects.requireNonNull(candidate, "candidate");
         if (nonNullCompoundInterMode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV) {
-            return InterMotionVector.resolved(MotionVector.zero());
+            return InterMotionVector.resolved(Objects.requireNonNull(globalMotionVector, "globalMotionVector"));
         }
         if (nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEARESTMV
                 || nonNullCompoundInterMode == CompoundInterPredictionMode.NEWMV_NEARMV
@@ -1153,16 +1223,18 @@ public final class TileBlockHeaderReader {
     ///
     /// @param compoundInterMode the decoded compound inter mode
     /// @param candidate the provisional motion-vector candidate selected for that mode
+    /// @param globalMotionVector the frame-level global motion vector for the second reference
     /// @return the second compound-reference motion-vector predictor chosen for the decoded mode
     private static InterMotionVector resolveCompoundMotionVector1(
             CompoundInterPredictionMode compoundInterMode,
-            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
+            BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate,
+            MotionVector globalMotionVector
     ) {
         CompoundInterPredictionMode nonNullCompoundInterMode = Objects.requireNonNull(compoundInterMode, "compoundInterMode");
         BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate =
                 Objects.requireNonNull(candidate, "candidate");
         if (nonNullCompoundInterMode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV) {
-            return InterMotionVector.resolved(MotionVector.zero());
+            return InterMotionVector.resolved(Objects.requireNonNull(globalMotionVector, "globalMotionVector"));
         }
         @Nullable InterMotionVector motionVector1 = nonNullCandidate.motionVector1();
         if (motionVector1 == null) {
@@ -1174,6 +1246,75 @@ public final class TileBlockHeaderReader {
             return motionVector1.asPredicted();
         }
         return motionVector1.asResolved();
+    }
+
+    /// Returns the block-center global motion vector for one LAST-through-ALTREF reference.
+    ///
+    /// Translation parameters use AV1's historical row/column matrix ordering. Affine and
+    /// rotation-zoom parameters are evaluated at the current block center in frame coordinates.
+    ///
+    /// @param position the tile-relative block origin in 4x4 units
+    /// @param size the decoded block size
+    /// @param referenceFrame the reference in internal LAST-through-ALTREF order
+    /// @return the resolved global motion vector in eighth-pel units
+    private MotionVector globalMotionVector(BlockPosition position, BlockSize size, int referenceFrame) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        FrameHeader frameHeader = tileContext.frameHeader();
+        FrameHeader.GlobalMotionParams parameters = frameHeader.globalMotion(referenceFrame);
+        if (parameters.type() == FrameHeader.GlobalMotionType.IDENTITY) {
+            return MotionVector.zero();
+        }
+
+        int rowEighthPel;
+        int columnEighthPel;
+        if (parameters.type() == FrameHeader.GlobalMotionType.TRANSLATION) {
+            rowEighthPel = parameters.matrix(0) >> 13;
+            columnEighthPel = parameters.matrix(1) >> 13;
+        } else {
+            int blockX4 = (tileContext.startX() >> 2) + nonNullPosition.x4();
+            int blockY4 = (tileContext.startY() >> 2) + nonNullPosition.y4();
+            int centerX = blockX4 * 4 + nonNullSize.width4() * 2 - 1;
+            int centerY = blockY4 * 4 + nonNullSize.height4() * 2 - 1;
+            long transformedX = (long) (parameters.matrix(2) - (1 << 16)) * centerX
+                    + (long) parameters.matrix(3) * centerY
+                    + parameters.matrix(0);
+            long transformedY = (long) (parameters.matrix(5) - (1 << 16)) * centerY
+                    + (long) parameters.matrix(4) * centerX
+                    + parameters.matrix(1);
+            int shift = frameHeader.allowHighPrecisionMotionVectors() ? 13 : 14;
+            columnEighthPel = roundGlobalMotionComponent(transformedX, shift);
+            rowEighthPel = roundGlobalMotionComponent(transformedY, shift);
+            if (!frameHeader.allowHighPrecisionMotionVectors()) {
+                columnEighthPel <<= 1;
+                rowEighthPel <<= 1;
+            }
+        }
+
+        if (frameHeader.forceIntegerMotionVectors()) {
+            rowEighthPel = roundToIntegerMotionVectorPrecision(rowEighthPel);
+            columnEighthPel = roundToIntegerMotionVectorPrecision(columnEighthPel);
+        }
+        return new MotionVector(rowEighthPel, columnEighthPel);
+    }
+
+    /// Rounds one signed fixed-point global-motion component by its magnitude.
+    ///
+    /// @param value the signed fixed-point component
+    /// @param shift the number of fractional bits to discard
+    /// @return the signed rounded component
+    private static int roundGlobalMotionComponent(long value, int shift) {
+        long roundedMagnitude = (Math.abs(value) + (1L << (shift - 1))) >> shift;
+        return (int) (value < 0 ? -roundedMagnitude : roundedMagnitude);
+    }
+
+    /// Rounds one eighth-pel component to AV1's integer-motion-vector precision.
+    ///
+    /// @param value the component in eighth-pel units
+    /// @return the component rounded to a multiple of eight
+    private static int roundToIntegerMotionVectorPrecision(int value) {
+        int signExtension = value < 0 ? -1 : 0;
+        return (value - signExtension + 3) & ~7;
     }
 
     /// Decodes one `NEWMV` residual around the supplied provisional motion-vector predictor.
@@ -1277,18 +1418,24 @@ public final class TileBlockHeaderReader {
             return LAST_FRAME;
         }
 
-        if (syntaxReader.readSingleReferenceFlag(0, neighborContext.singleReferenceContext(position))) {
+        int singleReferenceContext = neighborContext.singleReferenceContext(position);
+        boolean backward = syntaxReader.readSingleReferenceFlag(0, singleReferenceContext);
+        if (backward) {
             if (syntaxReader.readSingleReferenceFlag(1, neighborContext.backwardReferenceContext(position))) {
                 return ALTREF_FRAME;
             }
             return BWDREF_FRAME
                     + (syntaxReader.readSingleReferenceFlag(5, neighborContext.backwardReference1Context(position)) ? 1 : 0);
         }
-        if (syntaxReader.readSingleReferenceFlag(2, neighborContext.forwardReferenceContext(position))) {
+        int forwardReferenceContext = neighborContext.forwardReferenceContext(position);
+        boolean last3OrGolden = syntaxReader.readSingleReferenceFlag(2, forwardReferenceContext);
+        if (last3OrGolden) {
             return LAST3_FRAME
                     + (syntaxReader.readSingleReferenceFlag(4, neighborContext.forwardReference2Context(position)) ? 1 : 0);
         }
-        return syntaxReader.readSingleReferenceFlag(3, neighborContext.forwardReference1Context(position))
+        int forwardReference1Context = neighborContext.forwardReference1Context(position);
+        boolean last2 = syntaxReader.readSingleReferenceFlag(3, forwardReference1Context);
+        return last2
                 ? LAST2_FRAME
                 : LAST_FRAME;
     }

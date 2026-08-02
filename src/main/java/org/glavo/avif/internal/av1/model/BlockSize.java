@@ -279,9 +279,9 @@ public enum BlockSize {
 
     /// Returns the largest chroma transform size allowed for this block size and pixel format.
     ///
-    /// The current implementation uses the `dav1d` lookup tables when available. For a subset of
-    /// 4:2:2 cases where `dav1d` leaves the direct table entry empty, the method falls back to the
-    /// exact transform size that matches the subsampled chroma block dimensions.
+    /// The mapping follows the `dav1d` lookup tables. For 4:2:2 entries without a direct table
+    /// value, it derives the exact transform size from the horizontally subsampled block
+    /// dimensions.
     ///
     /// @param pixelFormat the active sequence pixel format
     /// @return the largest chroma transform size allowed for this block size and pixel format, or `null`

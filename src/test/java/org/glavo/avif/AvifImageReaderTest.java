@@ -15,9 +15,7 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
+import org.glavo.avif.decode.Av1DecoderConfig;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -48,12 +46,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `AvifImageReader`.
-///
-/// Known gap: AV1 `I444` pixel-accuracy is tracked separately from AVIF container coverage.
-/// Some I444 images may produce slightly different pixel values compared to a reference decoder.
 @NotNullByDefault
 final class AvifImageReaderTest {
-    /// One fixed single-tile payload that decodes as opaque mid-gray in the current AV1 decoder.
+    /// One fixed single-tile payload that decodes as opaque mid-gray.
     private static final byte @Unmodifiable [] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
@@ -232,14 +227,23 @@ final class AvifImageReaderTest {
     /// @throws IOException if the source fixture cannot be read
     private static byte[] fixtureWithRewrittenAuxiliaryType(String resourceName, String replacementType)
             throws IOException {
-        byte[] bytes = testResourceBytes(resourceName);
+        return withRewrittenAuxiliaryType(testResourceBytes(resourceName), replacementType);
+    }
+
+    /// Rewrites the first alpha auxiliary type string in AVIF bytes.
+    ///
+    /// @param bytes the source AVIF bytes
+    /// @param replacementType the replacement auxiliary type string
+    /// @return a mutated copy of the AVIF bytes
+    private static byte[] withRewrittenAuxiliaryType(byte[] bytes, String replacementType) {
+        byte[] result = bytes.clone();
         byte[] alphaType = AUXILIARY_ALPHA_TYPE.getBytes(StandardCharsets.ISO_8859_1);
         byte[] replacementBytes = replacementType.getBytes(StandardCharsets.ISO_8859_1);
         assertEquals(alphaType.length, replacementBytes.length);
-        int offset = indexOf(bytes, alphaType);
+        int offset = indexOf(result, alphaType);
         assertTrue(offset >= 0);
-        System.arraycopy(replacementBytes, 0, bytes, offset, replacementBytes.length);
-        return bytes;
+        System.arraycopy(replacementBytes, 0, result, offset, replacementBytes.length);
+        return result;
     }
 
     /// Verifies that negative configured input-size limits are rejected.
@@ -321,19 +325,6 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
     }
 
-    /// Asserts that decoding failed because reference-frame motion-vector projection is unavailable.
-    ///
-    /// @param exception the AVIF decoding failure to inspect
-    private static void assertUnsupportedReferenceFrameMotionVectors(AvifDecodeException exception) {
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
-        assertEquals("Reference-frame motion-vector projection is not implemented", exception.getMessage());
-
-        assertTrue(exception.getCause() instanceof DecodeException);
-        DecodeException decodeException = (DecodeException) exception.getCause();
-        assertEquals(DecodeErrorCode.UNSUPPORTED_FEATURE, decodeException.code());
-        assertEquals(DecodeStage.FRAME_DECODE, decodeException.stage());
-    }
-
     /// Open operation that may fail with `IOException`.
     @FunctionalInterface
     private interface ThrowingOpen {
@@ -373,6 +364,19 @@ final class AvifImageReaderTest {
             assertEquals(OPAQUE_MID_GRAY, pixels[0]);
             assertEquals(OPAQUE_MID_GRAY, pixels[pixels.length - 1]);
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that the selected final AV1 output must match the item's `ispe` dimensions.
+    ///
+    /// @throws IOException if opening or decoding fails unexpectedly
+    @Test
+    void readFrameRejectsPrimaryDimensionsThatDifferFromIspe() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage(63, 64))) {
+            AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.ISPE_SIZE_MISMATCH, exception.code());
+            assertTrue(exception.getMessage().contains("64x64"));
+            assertTrue(exception.getMessage().contains("63x64"));
         }
     }
 
@@ -920,6 +924,34 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that a depth auxiliary image may use dimensions independent of the master image.
+    ///
+    /// @throws IOException if the synthetic image cannot be read or decoded
+    @Test
+    void readRawDepthPlanesSupportsIndependentStillDimensions() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(syntheticDepthAvifWithDimensions(32, 32))) {
+            AvifImageInfo info = reader.info();
+            assertEquals(64, info.width());
+            assertEquals(64, info.height());
+            assertFalse(info.alphaPresent());
+
+            AvifAuxiliaryImageInfo[] auxiliaryImages = info.auxiliaryImages();
+            assertEquals(1, auxiliaryImages.length);
+            assertEquals(AUXILIARY_DEPTH_TYPE, auxiliaryImages[0].auxiliaryType());
+            assertEquals(32, auxiliaryImages[0].width());
+            assertEquals(32, auxiliaryImages[0].height());
+
+            AvifPlanes depthPlanes = reader.readRawDepthPlanes(0);
+            assertNotNull(depthPlanes);
+            assertEquals(32, depthPlanes.codedWidth());
+            assertEquals(32, depthPlanes.codedHeight());
+            assertEquals(32, depthPlanes.renderWidth());
+            assertEquals(32, depthPlanes.renderHeight());
+            assertEquals(64, reader.readFrame(0).width());
+            assertEquals(64, reader.readFrame(0).height());
+        }
+    }
+
     /// Verifies that a `tmap` item is ignored when the `tmap` compatible brand is absent.
     ///
     /// @throws IOException if the fixture cannot be read or parsed
@@ -1035,16 +1067,18 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that non-default AVIF operating-point selection has a stable unsupported boundary.
+    /// Verifies that a primary `a1op` selection is passed to the AV1 decoder.
     ///
-    /// @throws IOException if an unexpected I/O error occurs
+    /// The synthetic AV1 payload declares only operating point zero, so selecting index one must
+    /// fail during AV1 decoding rather than during BMFF parsing.
+    ///
+    /// @throws IOException if the synthetic image cannot be opened
     @Test
-    void rejectsPrimaryNonDefaultOperatingPoint() throws IOException {
-        AvifDecodeException exception = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.open(minimalAvifWithOperatingPoint(1))
-        );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    void passesPrimaryNonDefaultOperatingPointToAv1Decoder() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvifWithOperatingPoint(1))) {
+            AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.AV1_DECODE_FAILED, exception.code());
+        }
     }
 
     /// Verifies that invalid `a1op` property values are rejected during BMFF parsing.
@@ -1059,24 +1093,111 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
-    /// Verifies that progressive dependencies cannot silently select a non-default AV1 operating point.
+    /// Verifies that `a1op` uses its one-byte property syntax rather than FullBox syntax.
     ///
     /// @throws IOException if an unexpected I/O error occurs
     @Test
-    void rejectsProgressiveDependencyNonDefaultOperatingPoint() throws IOException {
+    void rejectsFullBoxEncodedOperatingPointProperty() throws IOException {
         AvifDecodeException exception = assertThrows(
                 AvifDecodeException.class,
-                () -> AvifImageReader.open(syntheticProgressiveAvifWithDependencyOperatingPoint(1))
+                () -> AvifImageReader.open(minimalAvifWithProperty("a1op", new byte[]{0, 0, 0, 0, 0}))
         );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
-    /// Verifies that an animated AVIS sequence exposes metadata and its independent first frame,
-    /// then rejects a dependent frame that requires reference-frame motion-vector projection.
+    /// Verifies that `a1op` must be associated as an essential item property.
+    ///
+    /// @throws IOException if an unexpected I/O error occurs
+    @Test
+    void rejectsNonEssentialOperatingPointProperty() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalAvifWithNonEssentialProperty("a1op", new byte[]{0}))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that an essential `lsel` property selects a matching higher spatial layer.
+    ///
+    /// @throws IOException if the synthetic layered image cannot be read
+    @Test
+    void readsExplicitSelectedSpatialLayer() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalLayeredAvifWithLayerSelector(1, true))) {
+            AvifFrame frame = reader.readFrame();
+
+            assertNotNull(frame);
+            assertEquals(64, frame.width());
+            assertEquals(64, frame.height());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that the progressive `lsel` value selects the highest output spatial layer.
+    ///
+    /// @throws IOException if the synthetic layered image cannot be read
+    @Test
+    void readsProgressiveLayerSelector() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                minimalLayeredAvifWithLayerSelector(0xFFFF, true)
+        )) {
+            assertNotNull(reader.readFrame());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that an explicit `lsel` value must identify an output produced by the item.
+    ///
+    /// @throws IOException if the synthetic layered image cannot be opened
+    @Test
+    void rejectsUnavailableSelectedSpatialLayer() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalLayeredAvifWithLayerSelector(2, true))) {
+            AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.AV1_DECODE_FAILED, exception.code());
+        }
+    }
+
+    /// Verifies that reserved explicit `lsel` values are rejected during BMFF parsing.
+    ///
+    /// @throws IOException if an unexpected I/O error occurs
+    @Test
+    void rejectsInvalidLayerSelectorProperty() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalLayeredAvifWithLayerSelector(4, true))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that `lsel` must be associated as an essential item property.
+    ///
+    /// @throws IOException if an unexpected I/O error occurs
+    @Test
+    void rejectsNonEssentialLayerSelectorProperty() throws IOException {
+        AvifDecodeException exception = assertThrows(
+                AvifDecodeException.class,
+                () -> AvifImageReader.open(minimalLayeredAvifWithLayerSelector(1, false))
+        );
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that `a1op` on a progressive dependency does not replace the primary item's selection.
+    ///
+    /// @throws IOException if the synthetic image cannot be read
+    @Test
+    void progressiveDependencyOperatingPointDoesNotOverridePrimaryItem() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                syntheticProgressiveAvifWithDependencyOperatingPoint(1)
+        )) {
+            assertNotNull(reader.readFrame());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that an animated AVIS sequence exposes metadata and decodes all dependent frames.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void readsAnimatedSequenceUntilUnsupportedReferenceFrameMotionVectors() throws IOException {
+    void readsAnimatedSequenceWithReferenceFrameMotionVectors() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
             AvifImageInfo info = reader.info();
             assertTrue(info.animated());
@@ -1103,9 +1224,14 @@ final class AvifImageReaderTest {
             assertEquals(150, firstFrame.height());
             assertEquals(0, firstFrame.frameIndex());
 
-            assertUnsupportedReferenceFrameMotionVectors(
-                    assertThrows(AvifDecodeException.class, reader::readFrame)
-            );
+            for (int frameIndex = 1; frameIndex < info.frameCount(); frameIndex++) {
+                @Nullable AvifFrame frame = reader.readFrame();
+                assertNotNull(frame);
+                assertEquals(150, frame.width());
+                assertEquals(150, frame.height());
+                assertEquals(frameIndex, frame.frameIndex());
+            }
+            assertNull(reader.readFrame());
         }
     }
 
@@ -1179,6 +1305,22 @@ final class AvifImageReaderTest {
     @Test
     void readsAnimatedSequenceUsesPremultipliedAlphaReference() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithReferencedAlphaTrack(true, true))) {
+            AvifImageInfo info = reader.info();
+
+            assertTrue(info.animated());
+            assertTrue(info.alphaPresent());
+            assertTrue(info.alphaPremultiplied());
+        }
+    }
+
+    /// Verifies that additional `prem` targets do not hide the selected alpha track relationship.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be read or decoded
+    @Test
+    void readsAnimatedSequenceWithMultiplePremultipliedAlphaReferences() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(
+                minimalAvisSequenceWithReferencedAlphaTrack(true, 2, 3)
+        )) {
             AvifImageInfo info = reader.info();
 
             assertTrue(info.animated());
@@ -1284,24 +1426,26 @@ final class AvifImageReaderTest {
         assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
-    /// Verifies that ambiguous AVIS color-track selection is rejected.
+    /// Verifies that multiple AVIS color tracks retain the first equally preferred candidate.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be opened
     @Test
-    void rejectsAnimatedSequenceWithMultipleColorTracks() {
-        AvifDecodeException exception = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.open(minimalAvisSequenceWithMultipleColorTracks())
-        );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    void selectsFirstAnimatedSequenceFromMultipleColorTracks() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithMultipleColorTracks())) {
+            assertTrue(reader.info().animated());
+            assertEquals(3, reader.info().frameCount());
+        }
     }
 
-    /// Verifies that unsupported AVIS track-reference policies are rejected on selected image tracks.
+    /// Verifies that unknown AVIS track-reference types do not invalidate a selected image track.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be opened
     @Test
-    void rejectsAnimatedSequenceWithUnsupportedTrackReference() {
-        AvifDecodeException exception = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.open(minimalAvisSequenceWithUnsupportedTrackReference())
-        );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    void ignoresUnknownAnimatedSequenceTrackReference() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithUnsupportedTrackReference())) {
+            assertTrue(reader.info().animated());
+            assertEquals(3, reader.info().frameCount());
+        }
     }
 
     /// Verifies that AVIS alpha auxiliary tracks are exposed and decoded as raw planes.
@@ -1420,43 +1564,46 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that an unsupported indexed AVIS read does not disturb sequential playback state.
+    /// Verifies that an indexed AVIS frame read does not disturb sequential playback state.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void unsupportedReadFrameRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
+    void readFrameRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
-            assertUnsupportedReferenceFrameMotionVectors(
-                    assertThrows(AvifDecodeException.class, () -> reader.readFrame(3))
-            );
+            AvifFrame indexed = reader.readFrame(3);
+            assertEquals(3, indexed.frameIndex());
+            assertEquals(150, indexed.width());
+            assertEquals(150, indexed.height());
 
             @Nullable AvifFrame firstSequential = reader.readFrame();
             assertNotNull(firstSequential);
             assertEquals(0, firstSequential.frameIndex());
 
-            assertUnsupportedReferenceFrameMotionVectors(
-                    assertThrows(AvifDecodeException.class, reader::readFrame)
-            );
+            @Nullable AvifFrame secondSequential = reader.readFrame();
+            assertNotNull(secondSequential);
+            assertEquals(1, secondSequential.frameIndex());
         }
     }
 
-    /// Verifies that an unsupported indexed raw-plane AVIS read does not disturb sequential playback state.
+    /// Verifies that an indexed raw-plane AVIS read does not disturb sequential playback state.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
-    void unsupportedReadRawColorPlanesRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
+    void readRawColorPlanesRandomAccessDoesNotDisturbAnimatedSequencePlayback() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_ANIMATED_FIXTURE))) {
-            assertUnsupportedReferenceFrameMotionVectors(
-                    assertThrows(AvifDecodeException.class, () -> reader.readRawColorPlanes(3))
-            );
+            AvifPlanes indexed = reader.readRawColorPlanes(3);
+            assertEquals(150, indexed.codedWidth());
+            assertEquals(150, indexed.codedHeight());
+            assertEquals(150, indexed.renderWidth());
+            assertEquals(150, indexed.renderHeight());
 
             @Nullable AvifFrame firstSequential = reader.readFrame();
             assertNotNull(firstSequential);
             assertEquals(0, firstSequential.frameIndex());
 
-            assertUnsupportedReferenceFrameMotionVectors(
-                    assertThrows(AvifDecodeException.class, reader::readFrame)
-            );
+            @Nullable AvifFrame secondSequential = reader.readFrame();
+            assertNotNull(secondSequential);
+            assertEquals(1, secondSequential.frameIndex());
         }
     }
 
@@ -1650,7 +1797,40 @@ final class AvifImageReaderTest {
                         operatingPointProperty(operatingPoint)),
                 fullBox("ipma", 0, 0,
                         u32(1), u16(1),
-                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, 0x04}
+                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, (byte) 0x84}
+                )
+        );
+        byte[] metaFull = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), ilocPlaceholder(), itemInfoBox(), iprpBox
+        );
+        int itemPayloadOffset = ftyp.length + metaFull.length + 8;
+        byte[] iloc = itemLocationBox(itemPayloadOffset, av1Payload.length);
+        byte[] meta = fullBox("meta", 0, 0,
+                handlerBox(), primaryItemBox(), iloc, itemInfoBox(), iprpBox
+        );
+        return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
+    /// Builds a minimal layered AVIF whose primary item carries one `lsel` property.
+    ///
+    /// @param layerId the spatial-layer identifier or `65535` progressive-selection value
+    /// @param essential whether the property association has the essential bit set
+    /// @return the AVIF container bytes
+    private static byte[] minimalLayeredAvifWithLayerSelector(int layerId, boolean essential) {
+        byte[] av1Payload = av1LayeredStillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] iprpBox = box("iprp",
+                box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty(),
+                        box("lsel", u16(layerId))),
+                fullBox("ipma", 0, 0,
+                        u32(1), u16(1),
+                        new byte[]{
+                                4,
+                                (byte) 0x81,
+                                (byte) 0x82,
+                                0x03,
+                                (byte) (4 | (essential ? 0x80 : 0))
+                        }
                 )
         );
         byte[] metaFull = fullBox("meta", 0, 0,
@@ -1712,6 +1892,54 @@ final class AvifImageReaderTest {
             assertTrue(frame.width() > 0);
             assertTrue(frame.height() > 0);
             assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that a grid may encode its output dimensions in 32-bit fields.
+    ///
+    /// @throws IOException if the fixture cannot be parsed or decoded
+    @Test
+    void readFrameDecodesGridWith32BitOutputDimensions() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(singleCellGridAvif(true))) {
+            assertEquals(64, reader.info().width());
+            assertEquals(64, reader.info().height());
+
+            AvifFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(64, frame.width());
+            assertEquals(64, frame.height());
+        }
+    }
+
+    /// Verifies that the AVIF layer preserves the low-level frame-size limit classification.
+    ///
+    /// @throws IOException if the fixture cannot be parsed
+    @Test
+    void readFrameReportsConfiguredFrameSizeLimit() throws IOException {
+        AvifDecoderConfig config = AvifDecoderConfig.builder()
+                .av1DecoderConfig(Av1DecoderConfig.builder().frameSizeLimit(4_095).build())
+                .build();
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage(), config)) {
+            AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
+        }
+    }
+
+    /// Verifies that the frame-size limit covers the composed grid canvas, not only each AV1 cell.
+    ///
+    /// @throws IOException if the fixture cannot be read or parsed
+    @Test
+    void readFrameRejectsGridCanvasAboveConfiguredFrameSizeLimit() throws IOException {
+        AvifDecoderConfig config = AvifDecoderConfig.builder()
+                .av1DecoderConfig(Av1DecoderConfig.builder().frameSizeLimit(200_000).build())
+                .build();
+        try (AvifImageReader reader = AvifImageReader.open(
+                testResourceBytes(LIBAVIF_SOFA_GRID_1X5_FIXTURE),
+                config
+        )) {
+            AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
+            assertTrue(exception.getMessage().contains("grid size exceeds"));
         }
     }
 
@@ -1955,7 +2183,7 @@ final class AvifImageReaderTest {
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(syntheticAlphaAvifWithPremTarget(99))
         );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
     /// Verifies that still-image alpha item dimensions are validated before decoding.
@@ -1967,19 +2195,18 @@ final class AvifImageReaderTest {
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(syntheticAlphaAvifWithAlphaDimensions(32, 64))
         );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
-    /// Verifies that alpha auxiliary images cannot silently request a non-default AV1 operating point.
+    /// Verifies that an alpha auxiliary `a1op` selection is passed to its AV1 decoder.
     ///
-    /// @throws IOException if an unexpected I/O error occurs
+    /// @throws IOException if the synthetic image cannot be opened
     @Test
-    void rejectsAlphaAuxiliaryNonDefaultOperatingPoint() throws IOException {
-        AvifDecodeException exception = assertThrows(
-                AvifDecodeException.class,
-                () -> AvifImageReader.open(syntheticAlphaAvifWithAlphaOperatingPoint(1))
-        );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+    void passesAlphaAuxiliaryNonDefaultOperatingPointToAv1Decoder() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(syntheticAlphaAvifWithAlphaOperatingPoint(1))) {
+            AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
+            assertEquals(AvifErrorCode.AV1_DECODE_FAILED, exception.code());
+        }
     }
 
     /// Verifies that an AVIS `prem` track reference must target the selected alpha track.
@@ -1991,7 +2218,7 @@ final class AvifImageReaderTest {
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(minimalAvisSequenceWithPremReferenceToMissingAlphaTrack())
         );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
     }
 
     /// Verifies that AVIS alpha auxiliary track dimensions are validated during container parsing.
@@ -2003,7 +2230,20 @@ final class AvifImageReaderTest {
                 AvifDecodeException.class,
                 () -> AvifImageReader.open(minimalAvisSequenceWithMismatchedAlphaDimensions())
         );
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
+        assertEquals(AvifErrorCode.BMFF_PARSE_FAILED, exception.code());
+    }
+
+    /// Verifies that an AVIS depth track may advertise dimensions independent of the color track.
+    ///
+    /// @throws IOException if the synthetic sequence cannot be opened
+    @Test
+    void acceptsAvisDepthTrackDimensionMismatch() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(minimalAvisSequenceWithMismatchedDepthDimensions())) {
+            AvifImageInfo info = reader.info();
+            assertTrue(info.animated());
+            assertFalse(info.alphaPresent());
+            assertTrue(contains(info.auxiliaryImageTypes(), AUXILIARY_DEPTH_TYPE));
+        }
     }
 
     /// Verifies that a libavif fixture with a legacy alpha auxiliary item missing `ispe` is accepted.
@@ -2326,6 +2566,22 @@ final class AvifImageReaderTest {
         return syntheticAlphaAvif(false, 0, alphaWidth, alphaHeight);
     }
 
+    /// Creates a synthetic still image with an independently sized depth auxiliary image.
+    ///
+    /// @param depthWidth the depth image width
+    /// @param depthHeight the depth image height
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticDepthAvifWithDimensions(int depthWidth, int depthHeight) {
+        byte[] alphaAvif = syntheticAlphaAvif(
+                false,
+                0,
+                depthWidth,
+                depthHeight,
+                av1StillPicturePayload(depthWidth, depthHeight)
+        );
+        return withRewrittenAuxiliaryType(alphaAvif, AUXILIARY_DEPTH_TYPE);
+    }
+
     /// Creates a synthetic AVIF still image with an alpha auxiliary item carrying `a1op`.
     ///
     /// @param operatingPoint the alpha item operating point
@@ -2363,8 +2619,31 @@ final class AvifImageReaderTest {
             int alphaWidth,
             int alphaHeight
     ) {
+        return syntheticAlphaAvif(
+                premultiplied,
+                premTargetId,
+                alphaWidth,
+                alphaHeight,
+                av1StillPicturePayload()
+        );
+    }
+
+    /// Creates a synthetic AVIF still image with configurable alpha metadata and payload.
+    ///
+    /// @param premultiplied whether to add a `prem` item reference from color to alpha
+    /// @param premTargetId the item ID referenced by the `prem` reference, or `0`
+    /// @param alphaWidth the alpha item width
+    /// @param alphaHeight the alpha item height
+    /// @param alphaPayload the alpha item AV1 payload
+    /// @return the complete AVIF test file bytes
+    private static byte[] syntheticAlphaAvif(
+            boolean premultiplied,
+            int premTargetId,
+            int alphaWidth,
+            int alphaHeight,
+            byte[] alphaPayload
+    ) {
         byte[] colorPayload = av1StillPicturePayload();
-        byte[] alphaPayload = av1StillPicturePayload();
         byte[] ftyp = fileTypeBox();
         byte[] firstMeta = buildDualItemMeta(
                 colorPayload.length + alphaPayload.length,
@@ -2566,7 +2845,7 @@ final class AvifImageReaderTest {
                         u16(1),
                         new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03},
                         u16(2),
-                        new byte[]{4, (byte) 0x84, (byte) 0x85, (byte) 0x86, 0x07}
+                        new byte[]{4, (byte) 0x84, (byte) 0x85, (byte) 0x86, (byte) 0x87}
                 )
         );
 
@@ -2645,7 +2924,7 @@ final class AvifImageReaderTest {
                         u16(1),
                         new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03},
                         u16(2),
-                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, 0x04}
+                        new byte[]{4, (byte) 0x81, (byte) 0x82, 0x03, (byte) 0x84}
                 )
         );
         byte[] iref = fullBox("iref", 0, 0, box("prog", u16(1), u16(1), u16(2)));
@@ -2694,12 +2973,107 @@ final class AvifImageReaderTest {
     ///
     /// @return the complete AVIF test file bytes
     private static byte[] minimalAvifStillImage() {
+        return minimalAvifStillImage(64, 64);
+    }
+
+    /// Creates a minimal AVIF still image with custom `ispe` dimensions.
+    ///
+    /// @param width the `ispe` image width
+    /// @param height the `ispe` image height
+    /// @return the complete AVIF test file bytes
+    private static byte[] minimalAvifStillImage(int width, int height) {
         byte[] av1Payload = av1StillPicturePayload();
         byte[] ftyp = fileTypeBox();
-        byte[] firstMeta = metaBox(0, av1Payload.length);
+        byte[] firstMeta = metaBox(0, av1Payload.length, width, height);
         int itemPayloadOffset = ftyp.length + firstMeta.length + 8;
-        byte[] meta = metaBox(itemPayloadOffset, av1Payload.length);
+        byte[] meta = metaBox(itemPayloadOffset, av1Payload.length, width, height);
         return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
+    /// Creates a one-cell grid AVIF fixture.
+    ///
+    /// @param use32BitDimensions whether the grid payload uses 32-bit output dimensions
+    /// @return the complete AVIF test file bytes
+    private static byte[] singleCellGridAvif(boolean use32BitDimensions) {
+        byte[] gridPayload = concat(
+                new byte[]{0, (byte) (use32BitDimensions ? 1 : 0), 0, 0},
+                use32BitDimensions
+                        ? concat(u32(64), u32(64))
+                        : concat(u16(64), u16(64))
+        );
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        byte[] firstMeta = singleCellGridMeta(0, gridPayload.length, 0, av1Payload.length);
+        int gridPayloadOffset = ftyp.length + firstMeta.length + 8;
+        int av1PayloadOffset = gridPayloadOffset + gridPayload.length;
+        byte[] meta = singleCellGridMeta(
+                gridPayloadOffset,
+                gridPayload.length,
+                av1PayloadOffset,
+                av1Payload.length
+        );
+        return concat(ftyp, meta, box("mdat", gridPayload, av1Payload));
+    }
+
+    /// Creates metadata for a one-cell grid fixture.
+    ///
+    /// @param gridPayloadOffset the absolute grid item payload offset
+    /// @param gridPayloadLength the grid item payload length
+    /// @param av1PayloadOffset the absolute AV1 cell payload offset
+    /// @param av1PayloadLength the AV1 cell payload length
+    /// @return the grid fixture meta box
+    private static byte[] singleCellGridMeta(
+            int gridPayloadOffset,
+            int gridPayloadLength,
+            int av1PayloadOffset,
+            int av1PayloadLength
+    ) {
+        byte[] itemLocations = fullBox(
+                "iloc",
+                0,
+                0,
+                new byte[]{0x44, 0x40},
+                u16(2),
+                u16(1), u16(0), u32(0), u16(1), u32(gridPayloadOffset), u32(gridPayloadLength),
+                u16(2), u16(0), u32(0), u16(1), u32(av1PayloadOffset), u32(av1PayloadLength)
+        );
+        byte[] itemInformation = fullBox(
+                "iinf",
+                0,
+                0,
+                u16(2),
+                fullBox("infe", 2, 0, u16(1), u16(0), fourCc("grid"), new byte[]{0}),
+                fullBox("infe", 2, 0, u16(2), u16(0), fourCc("av01"), new byte[]{0})
+        );
+        byte[] itemProperties = box(
+                "iprp",
+                box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty()),
+                fullBox(
+                        "ipma",
+                        0,
+                        0,
+                        u32(2),
+                        u16(1), new byte[]{2, (byte) 0x81, 0x03},
+                        u16(2), new byte[]{3, (byte) 0x81, (byte) 0x82, 0x03}
+                )
+        );
+        byte[] itemReferences = fullBox(
+                "iref",
+                0,
+                0,
+                box("dimg", u16(1), u16(1), u16(2))
+        );
+        return fullBox(
+                "meta",
+                0,
+                0,
+                handlerBox(),
+                primaryItemBox(),
+                itemLocations,
+                itemInformation,
+                itemProperties,
+                itemReferences
+        );
     }
 
     /// Creates a minimal AVIS sequence with two chunks and padding between them.
@@ -2877,6 +3251,21 @@ final class AvifImageReaderTest {
             boolean includeMatchingAlpha,
             boolean premultiplied
     ) {
+        return minimalAvisSequenceWithReferencedAlphaTrack(
+                includeMatchingAlpha,
+                premultiplied ? new int[]{3} : new int[0]
+        );
+    }
+
+    /// Creates a minimal AVIS sequence with an optionally matching alpha track reference.
+    ///
+    /// @param includeMatchingAlpha whether to include a correctly referenced alpha track after a mismatched one
+    /// @param premultipliedByTrackIds the track IDs referenced by the color track's `prem` relationship
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithReferencedAlphaTrack(
+            boolean includeMatchingAlpha,
+            int... premultipliedByTrackIds
+    ) {
         byte[] sample0 = av1StillPicturePayload();
         byte[] sample1 = av1StillPicturePayload();
         byte[] sample2 = av1StillPicturePayload();
@@ -2891,7 +3280,7 @@ final class AvifImageReaderTest {
                 new int[]{0, 0},
                 new int[]{0, 0},
                 includeMatchingAlpha,
-                premultiplied,
+                premultipliedByTrackIds,
                 sample0.length,
                 sample1.length,
                 sample2.length
@@ -2904,7 +3293,7 @@ final class AvifImageReaderTest {
                 new int[]{colorChunk0Offset, colorChunk1Offset},
                 new int[]{alphaChunk0Offset, alphaChunk1Offset},
                 includeMatchingAlpha,
-                premultiplied,
+                premultipliedByTrackIds,
                 sample0.length,
                 sample1.length,
                 sample2.length
@@ -2996,6 +3385,16 @@ final class AvifImageReaderTest {
                 sample.length
         );
         return concat(sequenceFileTypeBox(), box("moov", colorTrack, alphaTrack));
+    }
+
+    /// Creates a minimal AVIS sequence with an independently sized depth track.
+    ///
+    /// @return the complete AVIS test file bytes
+    private static byte[] minimalAvisSequenceWithMismatchedDepthDimensions() {
+        return withRewrittenAuxiliaryType(
+                minimalAvisSequenceWithMismatchedAlphaDimensions(),
+                AUXILIARY_DEPTH_TYPE
+        );
     }
 
     /// Creates a minimal AVIS sequence with duplicate `mdia` handler boxes.
@@ -3163,20 +3562,22 @@ final class AvifImageReaderTest {
     /// @param colorChunkOffsets the absolute color track chunk offsets
     /// @param alphaChunkOffsets the absolute alpha track chunk offsets
     /// @param includeMatchingAlpha whether to include a matching alpha track
-    /// @param premultiplied whether to add a `prem` track reference from color to the matching alpha track
+    /// @param premultipliedByTrackIds the track IDs referenced by the color track's `prem` relationship
     /// @param sampleSizes the color and matching alpha sample sizes
     /// @return the `moov` box bytes
     private static byte[] minimalAvisMoovBoxWithReferencedAlphaTrack(
             int[] colorChunkOffsets,
             int[] alphaChunkOffsets,
             boolean includeMatchingAlpha,
-            boolean premultiplied,
+            int[] premultipliedByTrackIds,
             int... sampleSizes
     ) {
         byte[] colorTrack = avisTrackBox(
                 1,
                 "pict",
-                includeMatchingAlpha && premultiplied ? trackReferenceBox("prem", 3) : null,
+                premultipliedByTrackIds.length == 0
+                        ? null
+                        : trackReferenceBox("prem", premultipliedByTrackIds),
                 null,
                 colorChunkOffsets,
                 false,
@@ -3801,6 +4202,17 @@ final class AvifImageReaderTest {
     /// @param itemPayloadLength the AV1 item payload length
     /// @return the meta box bytes
     private static byte[] metaBox(int itemPayloadOffset, int itemPayloadLength) {
+        return metaBox(itemPayloadOffset, itemPayloadLength, 64, 64);
+    }
+
+    /// Creates the AVIF meta box used by a minimal test image with custom `ispe` dimensions.
+    ///
+    /// @param itemPayloadOffset the absolute file offset of the AV1 item payload
+    /// @param itemPayloadLength the AV1 item payload length
+    /// @param width the `ispe` image width
+    /// @param height the `ispe` image height
+    /// @return the meta box bytes
+    private static byte[] metaBox(int itemPayloadOffset, int itemPayloadLength, int width, int height) {
         return fullBox(
                 "meta",
                 0,
@@ -3809,7 +4221,7 @@ final class AvifImageReaderTest {
                 primaryItemBox(),
                 itemLocationBox(itemPayloadOffset, itemPayloadLength),
                 itemInfoBox(),
-                itemPropertiesBox()
+                itemPropertiesBox(width, height)
         );
     }
 
@@ -3883,9 +4295,18 @@ final class AvifImageReaderTest {
     ///
     /// @return the item property box tree bytes
     private static byte[] itemPropertiesBox() {
+        return itemPropertiesBox(64, 64);
+    }
+
+    /// Creates the item property box tree with custom `ispe` dimensions.
+    ///
+    /// @param width the `ispe` image width
+    /// @param height the `ispe` image height
+    /// @return the item property box tree bytes
+    private static byte[] itemPropertiesBox(int width, int height) {
         return box(
                 "iprp",
-                box("ipco", imageSpatialExtentsProperty(), av1ConfigProperty(), colorProperty()),
+                box("ipco", imageSpatialExtentsProperty(width, height), av1ConfigProperty(), colorProperty()),
                 fullBox(
                         "ipma",
                         0,
@@ -3932,16 +4353,37 @@ final class AvifImageReaderTest {
     /// @param operatingPoint the operating point value to encode
     /// @return the operating-point property bytes
     private static byte[] operatingPointProperty(int operatingPoint) {
-        return fullBox("a1op", 0, 0, new byte[]{(byte) operatingPoint});
+        return box("a1op", new byte[]{(byte) operatingPoint});
     }
 
     /// Creates a reduced still-picture AV1 stream with one supported frame OBU.
     ///
     /// @return the AV1 OBU stream bytes
     private static byte[] av1StillPicturePayload() {
+        return av1StillPicturePayload(64, 64);
+    }
+
+    /// Creates a reduced still-picture AV1 stream with custom frame dimensions.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @return the AV1 OBU stream bytes
+    private static byte[] av1StillPicturePayload(int width, int height) {
+        return concat(
+                obu(1, reducedStillPictureSequenceHeaderPayload(width, height)),
+                obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+        );
+    }
+
+    /// Creates a reduced still-picture AV1 stream with two output spatial layers.
+    ///
+    /// @return the layered AV1 OBU stream bytes
+    private static byte[] av1LayeredStillPicturePayload() {
+        byte[] framePayload = reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD);
         return concat(
                 obu(1, reducedStillPictureSequenceHeaderPayload()),
-                obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
+                obu(6, 0, 0, framePayload),
+                obu(6, 0, 1, framePayload)
         );
     }
 
@@ -3958,10 +4400,44 @@ final class AvifImageReaderTest {
         return output.toByteArray();
     }
 
+    /// Encodes a single self-delimited OBU with temporal and spatial identifiers.
+    ///
+    /// @param typeId the numeric OBU type identifier
+    /// @param temporalId the temporal-layer identifier in `[0, 7]`
+    /// @param spatialId the spatial-layer identifier in `[0, 3]`
+    /// @param payload the OBU payload
+    /// @return the encoded OBU bytes
+    private static byte[] obu(int typeId, int temporalId, int spatialId, byte[] payload) {
+        if (temporalId < 0 || temporalId > 7) {
+            throw new IllegalArgumentException("temporalId out of range: " + temporalId);
+        }
+        if (spatialId < 0 || spatialId > 3) {
+            throw new IllegalArgumentException("spatialId out of range: " + spatialId);
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write((typeId << 3) | (1 << 2) | (1 << 1));
+        output.write((temporalId << 5) | (spatialId << 3));
+        writeLeb128(output, payload.length);
+        output.writeBytes(payload);
+        return output.toByteArray();
+    }
+
     /// Creates a reduced `64x64 8-bit I420` still-picture sequence header payload.
     ///
     /// @return the reduced still-picture sequence header payload
     private static byte[] reducedStillPictureSequenceHeaderPayload() {
+        return reducedStillPictureSequenceHeaderPayload(64, 64);
+    }
+
+    /// Creates a reduced `8-bit I420` still-picture sequence header payload with custom dimensions.
+    ///
+    /// @param width the maximum frame width in `[1, 1024]`
+    /// @param height the maximum frame height in `[1, 512]`
+    /// @return the reduced still-picture sequence header payload
+    private static byte[] reducedStillPictureSequenceHeaderPayload(int width, int height) {
+        if (width <= 0 || width > 1024 || height <= 0 || height > 512) {
+            throw new IllegalArgumentException("Synthetic AV1 dimensions are out of range: " + width + "x" + height);
+        }
         BitWriter writer = new BitWriter();
         writer.writeBits(0, 3);
         writer.writeFlag(true);
@@ -3970,8 +4446,8 @@ final class AvifImageReaderTest {
         writer.writeBits(1, 2);
         writer.writeBits(9, 4);
         writer.writeBits(8, 4);
-        writer.writeBits(63, 10);
-        writer.writeBits(63, 9);
+        writer.writeBits(width - 1, 10);
+        writer.writeBits(height - 1, 9);
         writer.writeFlag(false);
         writer.writeFlag(true);
         writer.writeFlag(true);

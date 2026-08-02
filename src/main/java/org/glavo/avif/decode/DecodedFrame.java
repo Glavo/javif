@@ -44,6 +44,10 @@ public final class DecodedFrame {
     private final boolean visible;
     /// The zero-based presentation index of the frame.
     private final long presentationIndex;
+    /// The AV1 temporal-layer identifier carried by the frame OBU.
+    private final int temporalId;
+    /// The AV1 spatial-layer identifier carried by the frame OBU.
+    private final int spatialId;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
     private @Nullable @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
@@ -73,7 +77,38 @@ public final class DecodedFrame {
             @Unmodifiable IntBuffer pixels
     ) {
         this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
-                PixelBuffers.immutableIntPixels(pixels), null);
+                0, 0, PixelBuffers.immutableIntPixels(pixels), null);
+    }
+
+    /// Creates a decoded frame from a packed `int` ARGB pixel buffer with AV1 layer identifiers.
+    ///
+    /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
+    /// immutable storage or storage they will never mutate after construction.
+    ///
+    /// @param width             the output frame width in pixels
+    /// @param height            the output frame height in pixels
+    /// @param bitDepth          the decoded bit depth
+    /// @param pixelFormat       the chroma layout
+    /// @param frameType         the AV1 frame type
+    /// @param visible           whether the frame is visible
+    /// @param presentationIndex the zero-based presentation index
+    /// @param temporalId        the AV1 temporal-layer identifier in `[0, 7]`
+    /// @param spatialId         the AV1 spatial-layer identifier in `[0, 3]`
+    /// @param pixels            the packed non-premultiplied ARGB pixels
+    public DecodedFrame(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            FrameType frameType,
+            boolean visible,
+            long presentationIndex,
+            int temporalId,
+            int spatialId,
+            @Unmodifiable IntBuffer pixels
+    ) {
+        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
+                temporalId, spatialId, PixelBuffers.immutableIntPixels(pixels), null);
     }
 
     /// Creates a decoded frame from a packed `long` ARGB pixel buffer.
@@ -100,7 +135,38 @@ public final class DecodedFrame {
             @Unmodifiable LongBuffer pixels
     ) {
         this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
-                null, PixelBuffers.immutableLongPixels(pixels));
+                0, 0, null, PixelBuffers.immutableLongPixels(pixels));
+    }
+
+    /// Creates a decoded frame from a packed `long` ARGB pixel buffer with AV1 layer identifiers.
+    ///
+    /// The pixel buffer is stored as a read-only slice without copying. Callers must only pass
+    /// immutable storage or storage they will never mutate after construction.
+    ///
+    /// @param width             the output frame width in pixels
+    /// @param height            the output frame height in pixels
+    /// @param bitDepth          the decoded bit depth
+    /// @param pixelFormat       the chroma layout
+    /// @param frameType         the AV1 frame type
+    /// @param visible           whether the frame is visible
+    /// @param presentationIndex the zero-based presentation index
+    /// @param temporalId        the AV1 temporal-layer identifier in `[0, 7]`
+    /// @param spatialId         the AV1 spatial-layer identifier in `[0, 3]`
+    /// @param pixels            the packed non-premultiplied ARGB pixels
+    public DecodedFrame(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            AvifPixelFormat pixelFormat,
+            FrameType frameType,
+            boolean visible,
+            long presentationIndex,
+            int temporalId,
+            int spatialId,
+            @Unmodifiable LongBuffer pixels
+    ) {
+        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
+                temporalId, spatialId, null, PixelBuffers.immutableLongPixels(pixels));
     }
 
     /// Creates a decoded frame descriptor with one available pixel representation.
@@ -112,6 +178,8 @@ public final class DecodedFrame {
     /// @param frameType         the AV1 frame type
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
+    /// @param temporalId        the AV1 temporal-layer identifier
+    /// @param spatialId         the AV1 spatial-layer identifier
     /// @param intPixels         packed `int` pixels, or `null`
     /// @param longPixels        packed `long` pixels, or `null`
     private DecodedFrame(
@@ -122,11 +190,19 @@ public final class DecodedFrame {
             FrameType frameType,
             boolean visible,
             long presentationIndex,
+            int temporalId,
+            int spatialId,
             @Nullable @Unmodifiable IntBuffer intPixels,
             @Nullable @Unmodifiable LongBuffer longPixels
     ) {
         if (intPixels == null && longPixels == null) {
             throw new IllegalArgumentException("At least one pixel representation is required");
+        }
+        if (temporalId < 0 || temporalId > 7) {
+            throw new IllegalArgumentException("temporalId out of range: " + temporalId);
+        }
+        if (spatialId < 0 || spatialId > 3) {
+            throw new IllegalArgumentException("spatialId out of range: " + spatialId);
         }
         this.width = width;
         this.height = height;
@@ -135,6 +211,8 @@ public final class DecodedFrame {
         this.frameType = Objects.requireNonNull(frameType, "frameType");
         this.visible = visible;
         this.presentationIndex = presentationIndex;
+        this.temporalId = temporalId;
+        this.spatialId = spatialId;
         this.intPixels = intPixels;
         this.longPixels = longPixels;
     }
@@ -186,6 +264,20 @@ public final class DecodedFrame {
     /// @return the presentation index
     public long presentationIndex() {
         return presentationIndex;
+    }
+
+    /// Returns the AV1 temporal-layer identifier carried by the frame OBU.
+    ///
+    /// @return the temporal-layer identifier in `[0, 7]`
+    public int temporalId() {
+        return temporalId;
+    }
+
+    /// Returns the AV1 spatial-layer identifier carried by the frame OBU.
+    ///
+    /// @return the spatial-layer identifier in `[0, 3]`
+    public int spatialId() {
+        return spatialId;
     }
 
     /// Returns packed non-premultiplied ARGB pixels in `0xAARRGGBB` format.

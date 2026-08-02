@@ -30,14 +30,16 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /// Tile-local neighbor context state used to derive block-level syntax contexts while scanning a tile.
 @NotNullByDefault
 public final class BlockNeighborContext {
     /// The maximum number of provisional motion-vector candidate entries retained locally.
-    private static final int PROVISIONAL_CANDIDATE_CAPACITY = 12;
+    private static final int PROVISIONAL_CANDIDATE_CAPACITY = 8;
 
     /// The AV1 coefficient-context byte that marks one transform block as all-zero.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
@@ -89,6 +91,15 @@ public final class BlockNeighborContext {
 
     /// The tile-local temporal motion field produced while decoding the current frame.
     private final TileDecodeContext.TemporalMotionField decodedTemporalMotionField;
+
+    /// The current frame's immutable projected reference motion field.
+    private final ReferenceMotionVectorProjection referenceMotionVectorProjection;
+
+    /// The tile's frame-relative horizontal origin in 8x8 units.
+    private final int tileStartX8;
+
+    /// The tile's frame-relative vertical origin in 8x8 units.
+    private final int tileStartY8;
 
     /// The stored decoded block map indexed in tile-relative 4x4 units.
     private final StoredBlock[] storedBlocks;
@@ -238,6 +249,9 @@ public final class BlockNeighborContext {
     /// @param chromaSubsamplingX the horizontal chroma subsampling shift
     /// @param chromaSubsamplingY the vertical chroma subsampling shift
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
+    /// @param referenceMotionVectorProjection the current frame's immutable projected reference motion field
+    /// @param tileStartX8 the tile's frame-relative horizontal origin in 8x8 units
+    /// @param tileStartY8 the tile's frame-relative vertical origin in 8x8 units
     /// @param storedBlocks the stored decoded block map indexed in tile-relative 4x4 units
     /// @param aboveIntra the above-edge intra flags indexed in 4x4 units
     /// @param leftIntra the left-edge intra flags indexed in 4x4 units
@@ -291,6 +305,9 @@ public final class BlockNeighborContext {
             int chromaSubsamplingX,
             int chromaSubsamplingY,
             TileDecodeContext.TemporalMotionField decodedTemporalMotionField,
+            ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            int tileStartX8,
+            int tileStartY8,
             StoredBlock[] storedBlocks,
             byte[] aboveIntra,
             byte[] leftIntra,
@@ -344,6 +361,12 @@ public final class BlockNeighborContext {
         this.chromaSubsamplingX = chromaSubsamplingX;
         this.chromaSubsamplingY = chromaSubsamplingY;
         this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
+        this.referenceMotionVectorProjection = Objects.requireNonNull(
+                referenceMotionVectorProjection,
+                "referenceMotionVectorProjection"
+        );
+        this.tileStartX8 = tileStartX8;
+        this.tileStartY8 = tileStartY8;
         this.storedBlocks = Objects.requireNonNull(storedBlocks, "storedBlocks");
         this.aboveIntra = Objects.requireNonNull(aboveIntra, "aboveIntra");
         this.leftIntra = Objects.requireNonNull(leftIntra, "leftIntra");
@@ -505,6 +528,9 @@ public final class BlockNeighborContext {
                 chromaSubsamplingX,
                 chromaSubsamplingY,
                 nonNullTileContext.decodedTemporalMotionField(),
+                nonNullTileContext.referenceMotionVectorProjection(),
+                nonNullTileContext.startX() >> 3,
+                nonNullTileContext.startY() >> 3,
                 new StoredBlock[tileWidth4 * tileHeight4],
                 aboveIntra,
                 leftIntra,
@@ -694,13 +720,13 @@ public final class BlockNeighborContext {
                 if (leftCompoundReference[y4] != 0) {
                     return 2 + ((aboveReferenceFrame0[x4] & 0xFF) >= 4 ? 1 : 0);
                 }
-                return (((leftReferenceFrame0[y4] & 0xFF) >= 4) ? 1 : 0)
-                        ^ (((aboveReferenceFrame0[x4] & 0xFF) >= 4) ? 1 : 0);
+                return ((leftReferenceFrame0[y4] >= 4) ? 1 : 0)
+                        ^ ((aboveReferenceFrame0[x4] >= 4) ? 1 : 0);
             }
-            return aboveCompoundReference[x4] != 0 ? 3 : ((aboveReferenceFrame0[x4] & 0xFF) >= 4 ? 1 : 0);
+            return aboveCompoundReference[x4] != 0 ? 3 : (aboveReferenceFrame0[x4] >= 4 ? 1 : 0);
         }
         if (haveLeft) {
-            return leftCompoundReference[y4] != 0 ? 3 : ((leftReferenceFrame0[y4] & 0xFF) >= 4 ? 1 : 0);
+            return leftCompoundReference[y4] != 0 ? 3 : (leftReferenceFrame0[y4] >= 4 ? 1 : 0);
         }
         return 1;
     }
@@ -815,14 +841,16 @@ public final class BlockNeighborContext {
 
     /// Returns the switchable interpolation-filter context for the supplied block position and direction.
     ///
-    /// The current implementation matches only the primary current-block reference against the
-    /// neighboring edge state and uses the AV1 switchable-filter sentinel when no usable neighbor
-    /// filter is available.
+    /// The context matches the primary current-block reference against neighboring edge state and
+    /// uses the AV1 switchable-filter sentinel when no usable neighbor filter is available.
     ///
     /// @param position the current block position
     /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
     /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
-    /// @param direction the zero-based interpolation-filter direction index in `[0, 2)`
+    /// Direction zero selects the vertical filter and direction one selects the horizontal filter,
+    /// matching the AV1 syntax order.
+    ///
+    /// @param direction the zero-based interpolation-filter syntax direction in `[0, 2)`
     /// @return the switchable interpolation-filter context for the supplied block position and direction
     public int interpolationFilterContext(
             BlockPosition position,
@@ -841,7 +869,7 @@ public final class BlockNeighborContext {
                 aboveCompoundReference[x4] != 0,
                 aboveReferenceFrame0[x4],
                 aboveReferenceFrame1[x4],
-                checkedDirection == 0 ? aboveInterpolationFilterHorizontal[x4] : aboveInterpolationFilterVertical[x4]
+                checkedDirection == 0 ? aboveInterpolationFilterVertical[x4] : aboveInterpolationFilterHorizontal[x4]
         )
                 : INTERPOLATION_FILTER_UNSET;
         byte leftFilter = hasLeftNeighbor(nonNullPosition)
@@ -851,7 +879,7 @@ public final class BlockNeighborContext {
                 leftCompoundReference[y4] != 0,
                 leftReferenceFrame0[y4],
                 leftReferenceFrame1[y4],
-                checkedDirection == 0 ? leftInterpolationFilterHorizontal[y4] : leftInterpolationFilterVertical[y4]
+                checkedDirection == 0 ? leftInterpolationFilterVertical[y4] : leftInterpolationFilterHorizontal[y4]
         )
                 : INTERPOLATION_FILTER_UNSET;
         int contextBase = referenceFrame1 >= 0 ? 4 : 0;
@@ -948,19 +976,18 @@ public final class BlockNeighborContext {
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
 
-    /// Builds a provisional inter-mode syntax context from already-decoded spatial neighbors.
+    /// Builds an inter-mode syntax context using a zero global-motion baseline.
     ///
-    /// This helper scans the direct top row and left column across the full current-block span,
-    /// then augments that with odd-aligned secondary 8x8-resolution row/column offsets and
-    /// dedicated top-right and top-left spatial candidates. It remains an incomplete `refmvs`
-    /// implementation because temporal candidates and the full spatial walk are not available.
+    /// This compatibility overload is intended for callers that do not need the temporal
+    /// `globalmv` context. Tile syntax decoding supplies the actual block global motion through
+    /// the overload that accepts `globalMotionVector0`.
     ///
     /// @param position the current block position
     /// @param size the current block size
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
     /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
-    /// @return a provisional inter-mode syntax context derived from already-decoded neighbors
+    /// @return an inter-mode syntax context derived from available neighbors
     public ProvisionalInterModeContext provisionalInterModeContext(
             BlockPosition position,
             BlockSize size,
@@ -968,8 +995,45 @@ public final class BlockNeighborContext {
             int referenceFrame0,
             int referenceFrame1
     ) {
+        return provisionalInterModeContext(
+                position,
+                size,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                MotionVector.zero(),
+                MotionVector.zero()
+        );
+    }
+
+    /// Builds an inter-mode syntax context from spatial and projected temporal neighbors.
+    ///
+    /// This helper scans the direct top row and left column across the full current-block span,
+    /// then augments that with odd-aligned secondary 8x8-resolution row/column offsets and
+    /// dedicated top-right and top-left spatial candidates. Projected temporal candidates are
+    /// sampled over the current block footprint before the secondary spatial walk.
+    ///
+    /// @param position the current block position
+    /// @param size the current block size
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
+    /// @param globalMotionVector0 the current block's primary global-motion vector
+    /// @param globalMotionVector1 the current block's secondary global-motion vector, or zero for single-reference blocks
+    /// @return an inter-mode syntax context derived from available neighbors
+    public ProvisionalInterModeContext provisionalInterModeContext(
+            BlockPosition position,
+            BlockSize size,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector globalMotionVector0,
+            MotionVector globalMotionVector1
+    ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        MotionVector nonNullGlobalMotionVector0 = Objects.requireNonNull(globalMotionVector0, "globalMotionVector0");
+        MotionVector nonNullGlobalMotionVector1 = Objects.requireNonNull(globalMotionVector1, "globalMotionVector1");
         if (referenceFrame0 < 0) {
             throw new IllegalArgumentException("referenceFrame0 < 0");
         }
@@ -982,140 +1046,198 @@ public final class BlockNeighborContext {
 
         int x4 = nonNullPosition.x4();
         int y4 = nonNullPosition.y4();
-        int endX4 = Math.min(tileWidth4, x4 + nonNullSize.width4());
-        int endY4 = Math.min(tileHeight4, y4 + nonNullSize.height4());
+        int blockWidth4 = nonNullSize.width4();
+        int blockHeight4 = nonNullSize.height4();
+        int visibleWidth4 = Math.min(Math.min(blockWidth4, 16), tileWidth4 - x4);
+        int visibleHeight4 = Math.min(Math.min(blockHeight4, 16), tileHeight4 - y4);
         boolean directRowMatch = false;
         boolean directColumnMatch = false;
         boolean rowReferenceMatch = false;
         boolean columnReferenceMatch = false;
         boolean haveNewMotionVectorMatch = false;
+        int globalMotionContext = referenceMotionVectorProjection.enabled() ? 1 : 0;
         ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates =
                 new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[PROVISIONAL_CANDIDATE_CAPACITY];
-        candidates[0] =
-                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
-                        640,
-                        InterMotionVector.predicted(MotionVector.zero()),
-                        compoundReference ? InterMotionVector.predicted(MotionVector.zero()) : null,
-                        true
-                );
-        int candidateCount = 1;
+        int candidateCount = 0;
 
-        if (hasTopNeighbor(nonNullPosition)) {
-            SpatialScanResult directTopScan = scanStoredBlocksAlongSpan(
-                    true,
+        int maximumRows = 0;
+        int scannedRows = -1;
+        if (y4 > 0) {
+            maximumRows = Math.min((y4 + 1) >> 1, 2 + (blockHeight4 > 1 ? 1 : 0));
+            ExactSpatialScanResult topScan = scanExactRefMvsRow(
                     y4 - 1,
                     x4,
-                    endX4,
+                    blockWidth4,
+                    visibleWidth4,
+                    maximumRows,
+                    blockWidth4 >= 16 ? 4 : 1,
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
-                    0,
                     candidates,
                     candidateCount
             );
-            candidateCount = directTopScan.candidateCount();
-            directRowMatch = directTopScan.referenceMatch();
-            rowReferenceMatch = directTopScan.referenceMatch();
-            haveNewMotionVectorMatch |= directTopScan.haveNewMotionVectorMatch();
-        }
-        if (hasLeftNeighbor(nonNullPosition)) {
-            SpatialScanResult directLeftScan = scanStoredBlocksAlongSpan(
-                    false,
-                    x4 - 1,
-                    y4,
-                    endY4,
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    0,
-                    candidates,
-                    candidateCount
-            );
-            candidateCount = directLeftScan.candidateCount();
-            directColumnMatch = directLeftScan.referenceMatch();
-            columnReferenceMatch = directLeftScan.referenceMatch();
-            haveNewMotionVectorMatch |= directLeftScan.haveNewMotionVectorMatch();
-        }
-        int secondaryTopSpanStart4 = secondaryScanSpanStart(x4, endX4);
-        int secondaryLeftSpanStart4 = secondaryScanSpanStart(y4, endY4);
-        int maxSecondaryTopOffsets = Math.min((y4 + 1) >> 1, 2 + (nonNullSize.height4() > 1 ? 1 : 0));
-        for (int secondaryOffset = 2; secondaryOffset <= maxSecondaryTopOffsets; secondaryOffset++) {
-            int secondaryRowY4 = secondarySpatialOffsetCoordinate(y4, secondaryOffset);
-            if (secondaryRowY4 < 0) {
-                break;
-            }
-            SpatialScanResult secondaryTopScan = scanStoredBlocksAlongSpan(
-                    true,
-                    secondaryRowY4,
-                    secondaryTopSpanStart4,
-                    endX4,
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    secondarySpatialWeightPenalty(secondaryOffset),
-                    candidates,
-                    candidateCount
-            );
-            candidateCount = secondaryTopScan.candidateCount();
-            rowReferenceMatch |= secondaryTopScan.referenceMatch();
-            haveNewMotionVectorMatch |= secondaryTopScan.haveNewMotionVectorMatch();
-        }
-        int maxSecondaryLeftOffsets = Math.min((x4 + 1) >> 1, 2 + (nonNullSize.width4() > 1 ? 1 : 0));
-        for (int secondaryOffset = 2; secondaryOffset <= maxSecondaryLeftOffsets; secondaryOffset++) {
-            int secondaryColumnX4 = secondarySpatialOffsetCoordinate(x4, secondaryOffset);
-            if (secondaryColumnX4 < 0) {
-                break;
-            }
-            SpatialScanResult secondaryLeftScan = scanStoredBlocksAlongSpan(
-                    false,
-                    secondaryColumnX4,
-                    secondaryLeftSpanStart4,
-                    endY4,
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    secondarySpatialWeightPenalty(secondaryOffset),
-                    candidates,
-                    candidateCount
-            );
-            candidateCount = secondaryLeftScan.candidateCount();
-            columnReferenceMatch |= secondaryLeftScan.referenceMatch();
-            haveNewMotionVectorMatch |= secondaryLeftScan.haveNewMotionVectorMatch();
-        }
-        if (y4 > 0 && endX4 < tileWidth4) {
-            SpatialScanResult topRightScan = scanStoredBlocksAlongSpan(
-                    true,
-                    y4 - 1,
-                    endX4,
-                    Math.min(tileWidth4, endX4 + 1),
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    TOP_RIGHT_SPATIAL_WEIGHT_PENALTY,
-                    candidates,
-                    candidateCount
-            );
-            candidateCount = topRightScan.candidateCount();
-            rowReferenceMatch |= topRightScan.referenceMatch();
-            haveNewMotionVectorMatch |= topRightScan.haveNewMotionVectorMatch();
-        }
-        if (x4 > 0 && y4 > 0) {
-            SpatialScanResult topLeftScan = scanStoredBlockCoordinate(
-                    x4 - 1,
-                    y4 - 1,
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    TOP_LEFT_SPATIAL_WEIGHT_PENALTY,
-                    candidates,
-                    candidateCount
-            );
-            candidateCount = topLeftScan.candidateCount();
-            rowReferenceMatch |= topLeftScan.referenceMatch();
-            haveNewMotionVectorMatch |= topLeftScan.haveNewMotionVectorMatch();
+            candidateCount = topScan.candidateCount();
+            scannedRows = topScan.scanDistance();
+            directRowMatch = topScan.referenceMatch();
+            rowReferenceMatch = topScan.referenceMatch();
+            haveNewMotionVectorMatch |= topScan.haveNewMotionVectorMatch();
         }
 
-        sortDescending(candidates, candidateCount);
+        int maximumColumns = 0;
+        int scannedColumns = -1;
+        if (x4 > 0) {
+            maximumColumns = Math.min((x4 + 1) >> 1, 2 + (blockWidth4 > 1 ? 1 : 0));
+            ExactSpatialScanResult leftScan = scanExactRefMvsColumn(
+                    x4 - 1,
+                    y4,
+                    blockHeight4,
+                    visibleHeight4,
+                    maximumColumns,
+                    blockHeight4 >= 16 ? 4 : 1,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    candidates,
+                    candidateCount
+            );
+            candidateCount = leftScan.candidateCount();
+            scannedColumns = leftScan.scanDistance();
+            directColumnMatch = leftScan.referenceMatch();
+            columnReferenceMatch = leftScan.referenceMatch();
+            haveNewMotionVectorMatch |= leftScan.haveNewMotionVectorMatch();
+        }
+
+        if (scannedRows >= 0
+                && Math.max(blockWidth4, blockHeight4) <= 16
+                && x4 + blockWidth4 < tileWidth4) {
+            SpatialCandidateResult topRight = addExactSpatialCandidate(
+                    storedBlockAtOrNull(x4 + blockWidth4, y4 - 1),
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    4,
+                    candidates,
+                    candidateCount
+            );
+            candidateCount = topRight.candidateCount();
+            directRowMatch |= topRight.referenceMatch();
+            rowReferenceMatch |= topRight.referenceMatch();
+            haveNewMotionVectorMatch |= topRight.haveNewMotionVectorMatch();
+        }
+
+        int nearestCandidateCount = candidateCount;
+        for (int i = 0; i < nearestCandidateCount; i++) {
+            candidates[i] = candidates[i].withWeight(candidates[i].weight() + 640);
+        }
+
+        TemporalScanResult temporalScan = scanTemporalMotionField(
+                nonNullPosition,
+                nonNullSize,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                nonNullGlobalMotionVector0,
+                candidates,
+                candidateCount,
+                globalMotionContext
+        );
+        candidateCount = temporalScan.candidateCount();
+        globalMotionContext = temporalScan.globalMotionContext();
+
+        if (scannedRows >= 0 && scannedColumns >= 0) {
+            SpatialCandidateResult topLeft = addExactSpatialCandidate(
+                    storedBlockAtOrNull(x4 - 1, y4 - 1),
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    4,
+                    candidates,
+                    candidateCount
+            );
+            candidateCount = topLeft.candidateCount();
+            rowReferenceMatch |= topLeft.referenceMatch();
+        }
+
+        for (int spatialDepth = 2; spatialDepth <= 3; spatialDepth++) {
+            if (spatialDepth > scannedRows && spatialDepth <= maximumRows) {
+                ExactSpatialScanResult secondaryTop = scanExactRefMvsRow(
+                        secondarySpatialOffsetCoordinate(y4, spatialDepth),
+                        x4 | 1,
+                        blockWidth4,
+                        visibleWidth4,
+                        1 + maximumRows - spatialDepth,
+                        blockWidth4 >= 16 ? 4 : 2,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        candidates,
+                        candidateCount
+                );
+                candidateCount = secondaryTop.candidateCount();
+                scannedRows += secondaryTop.scanDistance();
+                rowReferenceMatch |= secondaryTop.referenceMatch();
+            }
+            if (spatialDepth > scannedColumns && spatialDepth <= maximumColumns) {
+                ExactSpatialScanResult secondaryLeft = scanExactRefMvsColumn(
+                        secondarySpatialOffsetCoordinate(x4, spatialDepth),
+                        y4 | 1,
+                        blockHeight4,
+                        visibleHeight4,
+                        1 + maximumColumns - spatialDepth,
+                        blockHeight4 >= 16 ? 4 : 2,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1,
+                        candidates,
+                        candidateCount
+                );
+                candidateCount = secondaryLeft.candidateCount();
+                scannedColumns += secondaryLeft.scanDistance();
+                columnReferenceMatch |= secondaryLeft.referenceMatch();
+            }
+        }
+
+        sortDescending(candidates, 0, nearestCandidateCount);
+        sortDescending(candidates, nearestCandidateCount, candidateCount);
+        if (compoundReference && candidateCount < 2) {
+            candidateCount = appendCompoundExtendedSpatialCandidates(
+                    x4,
+                    y4,
+                    Math.min(visibleWidth4, visibleHeight4),
+                    scannedRows >= 0,
+                    scannedColumns >= 0,
+                    referenceFrame0,
+                    referenceFrame1,
+                    nonNullGlobalMotionVector0,
+                    nonNullGlobalMotionVector1,
+                    candidates,
+                    candidateCount
+            );
+        } else if (candidateCount < 2) {
+            candidateCount = appendSingleExtendedSpatialCandidates(
+                    x4,
+                    y4,
+                    Math.min(visibleWidth4, visibleHeight4),
+                    scannedRows >= 0,
+                    scannedColumns >= 0,
+                    referenceFrame0,
+                    candidates,
+                    candidateCount
+            );
+        }
+        int syntaxCandidateCount = candidateCount;
+        while (candidateCount < 2) {
+            candidates[candidateCount++] = new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                    2,
+                    InterMotionVector.predicted(nonNullGlobalMotionVector0),
+                    compoundReference ? InterMotionVector.predicted(nonNullGlobalMotionVector1) : null,
+                    true
+            );
+        }
+        if (compoundReference) {
+            syntaxCandidateCount = candidateCount;
+        }
         RefMvsContextSummary refMvsContextSummary = summarizeDirectRefMvsContexts(
                 (directRowMatch ? 1 : 0) + (directColumnMatch ? 1 : 0),
                 (rowReferenceMatch ? 1 : 0) + (columnReferenceMatch ? 1 : 0),
@@ -1124,10 +1246,417 @@ public final class BlockNeighborContext {
 
         return new ProvisionalInterModeContext(
                 refMvsContextSummary.singleNewMvContext(),
+                globalMotionContext,
                 refMvsContextSummary.singleReferenceMvContext(),
                 refMvsContextSummary.compoundInterModeContext(),
+                syntaxCandidateCount,
                 Arrays.copyOf(candidates, candidateCount)
         );
+    }
+
+    /// Completes a short compound-reference candidate stack from direct-edge neighbors.
+    ///
+    /// Each requested reference first reuses matching neighbor components, then sign-normalized
+    /// components associated with other references, and finally its block-center global motion.
+    /// The two independently completed component lists are paired by index, matching AV1's
+    /// compound extended-candidate construction.
+    ///
+    /// @param x4 the current block origin X coordinate in tile-relative 4x4 units
+    /// @param y4 the current block origin Y coordinate in tile-relative 4x4 units
+    /// @param span4 the bounded direct-edge span in 4x4 units
+    /// @param hasTop whether a direct top edge is available
+    /// @param hasLeft whether a direct left edge is available
+    /// @param referenceFrame0 the requested primary reference
+    /// @param referenceFrame1 the requested secondary reference
+    /// @param globalMotionVector0 the primary global-motion fallback
+    /// @param globalMotionVector1 the secondary global-motion fallback
+    /// @param destination the destination candidate stack
+    /// @param count the number of active candidates already stored
+    /// @return the completed candidate count, which is always two
+    private int appendCompoundExtendedSpatialCandidates(
+            int x4,
+            int y4,
+            int span4,
+            boolean hasTop,
+            boolean hasLeft,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector globalMotionVector0,
+            MotionVector globalMotionVector1,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        List<MotionVector> matching0 = new ArrayList<>(2);
+        List<MotionVector> matching1 = new ArrayList<>(2);
+        List<MotionVector> alternate0 = new ArrayList<>(2);
+        List<MotionVector> alternate1 = new ArrayList<>(2);
+
+        if (hasTop) {
+            for (int offset4 = 0; offset4 < span4; ) {
+                @Nullable StoredBlock block = storedBlockAtOrNull(x4 + offset4, y4 - 1);
+                collectCompoundExtendedComponents(
+                        block,
+                        referenceFrame0,
+                        referenceFrame1,
+                        matching0,
+                        matching1,
+                        alternate0,
+                        alternate1
+                );
+                offset4 += block != null ? Math.max(1, block.width4()) : 1;
+            }
+        }
+        if (hasLeft) {
+            for (int offset4 = 0; offset4 < span4; ) {
+                @Nullable StoredBlock block = storedBlockAtOrNull(x4 - 1, y4 + offset4);
+                collectCompoundExtendedComponents(
+                        block,
+                        referenceFrame0,
+                        referenceFrame1,
+                        matching0,
+                        matching1,
+                        alternate0,
+                        alternate1
+                );
+                offset4 += block != null ? Math.max(1, block.height4()) : 1;
+            }
+        }
+
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate first = compoundExtendedCandidate(
+                matching0,
+                matching1,
+                alternate0,
+                alternate1,
+                globalMotionVector0,
+                globalMotionVector1,
+                0
+        );
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate second = compoundExtendedCandidate(
+                matching0,
+                matching1,
+                alternate0,
+                alternate1,
+                globalMotionVector0,
+                globalMotionVector1,
+                1
+        );
+        if (count == 0) {
+            destination[0] = first;
+            destination[1] = second;
+        } else if (equivalentMotionVectorCandidate(destination[0], first)) {
+            destination[1] = second;
+        } else {
+            destination[1] = first;
+        }
+        return 2;
+    }
+
+    /// Collects matching and sign-normalized alternate components from one direct-edge block.
+    ///
+    /// @param block the stored direct-edge block, or `null`
+    /// @param referenceFrame0 the requested primary reference
+    /// @param referenceFrame1 the requested secondary reference
+    /// @param matching0 primary components already using `referenceFrame0`
+    /// @param matching1 secondary components already using `referenceFrame1`
+    /// @param alternate0 components reusable for the primary reference after sign normalization
+    /// @param alternate1 components reusable for the secondary reference after sign normalization
+    private void collectCompoundExtendedComponents(
+            @Nullable StoredBlock block,
+            int referenceFrame0,
+            int referenceFrame1,
+            List<MotionVector> matching0,
+            List<MotionVector> matching1,
+            List<MotionVector> alternate0,
+            List<MotionVector> alternate1
+    ) {
+        if (block == null || block.intra()) {
+            return;
+        }
+        collectCompoundExtendedComponent(
+                block.referenceFrame0(),
+                block.motionVector0().vector(),
+                referenceFrame0,
+                referenceFrame1,
+                matching0,
+                matching1,
+                alternate0,
+                alternate1
+        );
+        if (block.compoundReference()) {
+            collectCompoundExtendedComponent(
+                    block.referenceFrame1(),
+                    block.motionVector1().vector(),
+                    referenceFrame0,
+                    referenceFrame1,
+                    matching0,
+                    matching1,
+                    alternate0,
+                    alternate1
+            );
+        }
+    }
+
+    /// Classifies one neighboring motion component for both requested compound references.
+    ///
+    /// @param neighborReferenceFrame the neighbor component reference
+    /// @param neighborMotionVector the neighbor component vector
+    /// @param referenceFrame0 the requested primary reference
+    /// @param referenceFrame1 the requested secondary reference
+    /// @param matching0 primary components already using `referenceFrame0`
+    /// @param matching1 secondary components already using `referenceFrame1`
+    /// @param alternate0 components reusable for the primary reference after sign normalization
+    /// @param alternate1 components reusable for the secondary reference after sign normalization
+    private void collectCompoundExtendedComponent(
+            int neighborReferenceFrame,
+            MotionVector neighborMotionVector,
+            int referenceFrame0,
+            int referenceFrame1,
+            List<MotionVector> matching0,
+            List<MotionVector> matching1,
+            List<MotionVector> alternate0,
+            List<MotionVector> alternate1
+    ) {
+        if (neighborReferenceFrame < 0) {
+            return;
+        }
+        MotionVector nonNullMotionVector = Objects.requireNonNull(neighborMotionVector, "neighborMotionVector");
+        if (neighborReferenceFrame == referenceFrame0) {
+            appendExtendedComponent(matching0, nonNullMotionVector);
+            appendExtendedComponent(
+                    alternate1,
+                    normalizeExtendedMotionVector(nonNullMotionVector, neighborReferenceFrame, referenceFrame1)
+            );
+        } else if (neighborReferenceFrame == referenceFrame1) {
+            appendExtendedComponent(matching1, nonNullMotionVector);
+            appendExtendedComponent(
+                    alternate0,
+                    normalizeExtendedMotionVector(nonNullMotionVector, neighborReferenceFrame, referenceFrame0)
+            );
+        } else {
+            appendExtendedComponent(
+                    alternate0,
+                    normalizeExtendedMotionVector(nonNullMotionVector, neighborReferenceFrame, referenceFrame0)
+            );
+            appendExtendedComponent(
+                    alternate1,
+                    normalizeExtendedMotionVector(nonNullMotionVector, neighborReferenceFrame, referenceFrame1)
+            );
+        }
+    }
+
+    /// Appends one component while retaining at most the first two values.
+    ///
+    /// @param destination the ordered component list
+    /// @param motionVector the component to append
+    private static void appendExtendedComponent(List<MotionVector> destination, MotionVector motionVector) {
+        if (destination.size() < 2) {
+            destination.add(Objects.requireNonNull(motionVector, "motionVector"));
+        }
+    }
+
+    /// Returns one component from matching, alternate, and global fallback sources in priority order.
+    ///
+    /// @param matching matching-reference components
+    /// @param alternate sign-normalized alternate-reference components
+    /// @param globalMotionVector the global-motion fallback
+    /// @param index the zero-based completed component index in `[0, 2)`
+    /// @return the selected component
+    private static MotionVector compoundExtendedComponent(
+            List<MotionVector> matching,
+            List<MotionVector> alternate,
+            MotionVector globalMotionVector,
+            int index
+    ) {
+        int sourceIndex = index;
+        if (sourceIndex < matching.size()) {
+            return matching.get(sourceIndex);
+        }
+        sourceIndex -= matching.size();
+        if (sourceIndex < alternate.size()) {
+            return alternate.get(sourceIndex);
+        }
+        return Objects.requireNonNull(globalMotionVector, "globalMotionVector");
+    }
+
+    /// Builds one paired compound extended candidate at the supplied completed-list index.
+    ///
+    /// @param matching0 matching components for the primary reference
+    /// @param matching1 matching components for the secondary reference
+    /// @param alternate0 alternate components for the primary reference
+    /// @param alternate1 alternate components for the secondary reference
+    /// @param globalMotionVector0 the primary global-motion fallback
+    /// @param globalMotionVector1 the secondary global-motion fallback
+    /// @param index the zero-based completed candidate index in `[0, 2)`
+    /// @return the paired candidate
+    private static ProvisionalInterModeContext.ProvisionalMotionVectorCandidate compoundExtendedCandidate(
+            List<MotionVector> matching0,
+            List<MotionVector> matching1,
+            List<MotionVector> alternate0,
+            List<MotionVector> alternate1,
+            MotionVector globalMotionVector0,
+            MotionVector globalMotionVector1,
+            int index
+    ) {
+        return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                2,
+                InterMotionVector.predicted(compoundExtendedComponent(matching0, alternate0, globalMotionVector0, index)),
+                InterMotionVector.predicted(compoundExtendedComponent(matching1, alternate1, globalMotionVector1, index)),
+                false
+        );
+    }
+
+    /// Returns a neighbor component normalized to the temporal direction of one requested reference.
+    ///
+    /// @param motionVector the neighbor component
+    /// @param neighborReferenceFrame the neighbor component reference
+    /// @param requestedReferenceFrame the requested reference
+    /// @return the direction-normalized component
+    private MotionVector normalizeExtendedMotionVector(
+            MotionVector motionVector,
+            int neighborReferenceFrame,
+            int requestedReferenceFrame
+    ) {
+        MotionVector nonNullMotionVector = Objects.requireNonNull(motionVector, "motionVector");
+        if (referenceMotionVectorProjection.signBias(neighborReferenceFrame)
+                == referenceMotionVectorProjection.signBias(requestedReferenceFrame)) {
+            return nonNullMotionVector;
+        }
+        return new MotionVector(
+                -nonNullMotionVector.rowEighthPel(),
+                -nonNullMotionVector.columnEighthPel()
+        );
+    }
+
+    /// Returns whether two provisional candidates carry equal primary and secondary vectors.
+    ///
+    /// @param left the first candidate
+    /// @param right the second candidate
+    /// @return whether both vector pairs are equal
+    private static boolean equivalentMotionVectorCandidate(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate left,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate right
+    ) {
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullLeft = Objects.requireNonNull(left, "left");
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullRight = Objects.requireNonNull(right, "right");
+        return nonNullLeft.motionVector0().vector().equals(nonNullRight.motionVector0().vector())
+                && equivalentMotionVector(nonNullLeft.motionVector1(), nonNullRight.motionVector1());
+    }
+
+    /// Appends single-reference extended candidates from the direct top and left edges.
+    ///
+    /// This fallback scan reuses motion vectors carried by neighbors with any inter reference.
+    /// Vectors whose reference lies on the opposite temporal side of the current frame are
+    /// negated. Unlike the final global-motion fallback, appended entries are real DRL-visible
+    /// candidates.
+    ///
+    /// @param x4 the current block origin X coordinate in tile-relative 4x4 units
+    /// @param y4 the current block origin Y coordinate in tile-relative 4x4 units
+    /// @param span4 the bounded direct-edge span in 4x4 units
+    /// @param hasTop whether a direct top edge is available
+    /// @param hasLeft whether a direct left edge is available
+    /// @param referenceFrame the current block reference in internal LAST..ALTREF order
+    /// @param destination the destination candidate stack
+    /// @param count the number of active candidates already stored
+    /// @return the updated real candidate count
+    private int appendSingleExtendedSpatialCandidates(
+            int x4,
+            int y4,
+            int span4,
+            boolean hasTop,
+            boolean hasLeft,
+            int referenceFrame,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        if (hasTop) {
+            for (int offset4 = 0; offset4 < span4 && count < 2; ) {
+                @Nullable StoredBlock block = storedBlockAtOrNull(x4 + offset4, y4 - 1);
+                count = appendSingleExtendedCandidate(block, referenceFrame, destination, count);
+                offset4 += block != null ? Math.max(1, block.width4()) : 1;
+            }
+        }
+        if (hasLeft) {
+            for (int offset4 = 0; offset4 < span4 && count < 2; ) {
+                @Nullable StoredBlock block = storedBlockAtOrNull(x4 - 1, y4 + offset4);
+                count = appendSingleExtendedCandidate(block, referenceFrame, destination, count);
+                offset4 += block != null ? Math.max(1, block.height4()) : 1;
+            }
+        }
+        return count;
+    }
+
+    /// Appends the unique motion components carried by one extended spatial neighbor.
+    ///
+    /// @param block the stored inter neighbor, or `null`
+    /// @param referenceFrame the current block reference in internal LAST..ALTREF order
+    /// @param destination the destination candidate stack
+    /// @param count the number of active candidates already stored
+    /// @return the updated real candidate count
+    private int appendSingleExtendedCandidate(
+            @Nullable StoredBlock block,
+            int referenceFrame,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        if (block == null || block.intra()) {
+            return count;
+        }
+        count = appendSingleExtendedComponent(
+                block.referenceFrame0(),
+                block.motionVector0(),
+                referenceFrame,
+                destination,
+                count
+        );
+        if (block.compoundReference() && count < 2) {
+            count = appendSingleExtendedComponent(
+                    block.referenceFrame1(),
+                    block.motionVector1(),
+                    referenceFrame,
+                    destination,
+                    count
+            );
+        }
+        return count;
+    }
+
+    /// Appends one sign-normalized extended motion-vector component when it is unique.
+    ///
+    /// @param neighborReferenceFrame the neighbor component reference in internal LAST..ALTREF order
+    /// @param neighborMotionVector the neighbor component motion vector
+    /// @param referenceFrame the current block reference in internal LAST..ALTREF order
+    /// @param destination the destination candidate stack
+    /// @param count the number of active candidates already stored
+    /// @return the updated real candidate count
+    private int appendSingleExtendedComponent(
+            int neighborReferenceFrame,
+            InterMotionVector neighborMotionVector,
+            int referenceFrame,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        if (neighborReferenceFrame < 0 || count >= destination.length) {
+            return count;
+        }
+        MotionVector vector = Objects.requireNonNull(neighborMotionVector, "neighborMotionVector").vector();
+        if (referenceMotionVectorProjection.signBias(referenceFrame)
+                != referenceMotionVectorProjection.signBias(neighborReferenceFrame)) {
+            vector = new MotionVector(-vector.rowEighthPel(), -vector.columnEighthPel());
+        }
+        for (int index = 0; index < count; index++) {
+            if (destination[index].motionVector0().vector().equals(vector)) {
+                return count;
+            }
+        }
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                        2,
+                        InterMotionVector.predicted(vector),
+                        null,
+                        false
+                );
+        destination[count] = candidate;
+        return count + 1;
     }
 
     /// Returns the odd-aligned coordinate used for one secondary spatial offset layer.
@@ -1346,9 +1875,9 @@ public final class BlockNeighborContext {
 
     /// Returns the luma coefficient skip-context for one transform unit.
     ///
-    /// This matches the luma-only `dav1d` `get_skip_ctx()` path by merging the already stored top
-    /// and left coefficient-context bytes across the current transform span and mapping the merged
-    /// counts through the `dav1d_skip_ctx` table. Chroma-specific contexts are still out of scope.
+    /// This matches the luma `dav1d` `get_skip_ctx()` path by merging the already stored top and
+    /// left coefficient-context bytes across the current transform span and mapping the merged
+    /// counts through the `dav1d_skip_ctx` table.
     ///
     /// @param blockSize the coded block size that owns the current transform unit
     /// @param transformUnit the current luma transform unit
@@ -1826,12 +2355,13 @@ public final class BlockNeighborContext {
     /// Returns whether the current block has already-decoded causal samples usable by local warped motion.
     ///
     /// Local warped motion can only use single-reference inter neighbors that share the current
-    /// primary reference and expose a final primary motion vector.
+    /// primary reference. The causal sample set includes direct top and left edges plus eligible
+    /// top-left and top-right corner blocks.
     ///
     /// @param position the local tile-relative block origin
     /// @param size the current block size
     /// @param referenceFrame0 the current block primary inter reference in internal LAST..ALTREF order
-    /// @return whether at least one compatible above or left neighbor can seed local warped motion
+    /// @return whether at least one compatible causal neighbor can seed local warped motion
     public boolean hasLocalWarpSamples(BlockPosition position, BlockSize size, int referenceFrame0) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
@@ -1843,10 +2373,43 @@ public final class BlockNeighborContext {
         int startY4 = nonNullPosition.y4();
         int endX4 = Math.min(tileWidth4, startX4 + nonNullSize.width4());
         int endY4 = Math.min(tileHeight4, startY4 + nonNullSize.height4());
+        boolean hasTop = startY4 > 0;
+        boolean hasLeft = startX4 > 0;
         if (startY4 > 0 && hasLocalWarpSampleAlongSpan(true, startY4 - 1, startX4, endX4, referenceFrame0)) {
             return true;
         }
-        return startX4 > 0 && hasLocalWarpSampleAlongSpan(false, startX4 - 1, startY4, endY4, referenceFrame0);
+        if (startX4 > 0 && hasLocalWarpSampleAlongSpan(false, startX4 - 1, startY4, endY4, referenceFrame0)) {
+            return true;
+        }
+
+        boolean hasTopLeft = hasTop && hasLeft;
+        boolean hasTopRight = hasTop
+                && Math.max(nonNullSize.width4(), nonNullSize.height4()) < 32
+                && endX4 < tileWidth4;
+        if (hasTop) {
+            @Nullable StoredBlock firstTopBlock = storedBlockAtOrNull(startX4, startY4 - 1);
+            if (firstTopBlock != null && firstTopBlock.width4() >= nonNullSize.width4()) {
+                if (firstTopBlock.originX4() != startX4) {
+                    hasTopLeft = false;
+                }
+                if (firstTopBlock.originX4() + firstTopBlock.width4() > endX4) {
+                    hasTopRight = false;
+                }
+            }
+        }
+        if (hasLeft) {
+            @Nullable StoredBlock firstLeftBlock = storedBlockAtOrNull(startX4 - 1, startY4);
+            if (firstLeftBlock != null
+                    && firstLeftBlock.height4() >= nonNullSize.height4()
+                    && firstLeftBlock.originY4() != startY4) {
+                hasTopLeft = false;
+            }
+        }
+        if (hasTopLeft && isLocalWarpSampleBlock(storedBlockAtOrNull(startX4 - 1, startY4 - 1), referenceFrame0)) {
+            return true;
+        }
+        return hasTopRight
+                && isLocalWarpSampleBlock(storedBlockAtOrNull(endX4, startY4 - 1), referenceFrame0);
     }
 
     /// Updates the neighbor state after decoding one block header.
@@ -1886,6 +2449,7 @@ public final class BlockNeighborContext {
                 segmentId & 0xFF,
                 intra != 0,
                 compoundReference != 0,
+                nonNullHeader.interIntra(),
                 referenceFrame0,
                 referenceFrame1,
                 motionVector0,
@@ -2083,12 +2647,13 @@ public final class BlockNeighborContext {
     /// @param storedBlock the stored causal neighbor block
     /// @param referenceFrame0 the current block primary inter reference in internal LAST..ALTREF order
     /// @return whether one stored block can seed current-block local warped motion
-    private static boolean isLocalWarpSampleBlock(StoredBlock storedBlock, int referenceFrame0) {
-        StoredBlock nonNullStoredBlock = Objects.requireNonNull(storedBlock, "storedBlock");
-        return !nonNullStoredBlock.intra()
-                && !nonNullStoredBlock.compoundReference()
-                && nonNullStoredBlock.referenceFrame0() == referenceFrame0
-                && nonNullStoredBlock.motionVector0().resolved();
+    private static boolean isLocalWarpSampleBlock(@Nullable StoredBlock storedBlock, int referenceFrame0) {
+        return storedBlock != null
+                && !storedBlock.intra()
+                && !storedBlock.compoundReference()
+                && !storedBlock.interIntra()
+                && storedBlock.referenceFrame0() == referenceFrame0
+                && storedBlock.motionVector0().resolved();
     }
 
     /// Returns one stored edge motion vector, falling back to a provisional zero vector.
@@ -2236,144 +2801,431 @@ public final class BlockNeighborContext {
         }
     }
 
-    /// Scans one bounded spatial row or column in the stored block map.
+    /// Scans one AV1 `refmvs` row using decoded block dimensions to advance between candidates.
     ///
-    /// The scan is bounded to one far row or one far column and therefore remains smaller than a
-    /// full AV1 `refmvs` walk. Each unique stored block is visited at most once per scan.
-    ///
-    /// @param rowScan whether the scan walks a fixed row instead of a fixed column
-    /// @param fixedCoordinate4 the fixed row or column coordinate in 4x4 units
-    /// @param spanStart4 the inclusive start of the scanned span on the varying axis
-    /// @param spanEnd4 the exclusive end of the scanned span on the varying axis
+    /// @param fixedY4 the fixed tile-relative row coordinate
+    /// @param startX4 the first tile-relative column coordinate
+    /// @param blockWidth4 the current block width in 4x4 units
+    /// @param visibleWidth4 the bounded scan width in 4x4 units
+    /// @param maximumRows the maximum spatial row depth used for candidate weighting
+    /// @param step4 the minimum horizontal scan step in 4x4 units
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary current-block reference
     /// @param referenceFrame1 the secondary current-block reference, or `-1`
-    /// @param destination the destination candidate array
-    /// @param count the number of valid candidates already stored in `destination`
-    /// @param weightPenalty the candidate-weight penalty applied to the scanned span
-    /// @return the result of scanning one bounded spatial row or column
-    private SpatialScanResult scanStoredBlocksAlongSpan(
-            boolean rowScan,
-            int fixedCoordinate4,
-            int spanStart4,
-            int spanEnd4,
+    /// @param destination the destination candidate stack
+    /// @param count the number of active candidates already stored
+    /// @return the updated candidate state and spatial-depth contribution
+    private ExactSpatialScanResult scanExactRefMvsRow(
+            int fixedY4,
+            int startX4,
+            int blockWidth4,
+            int visibleWidth4,
+            int maximumRows,
+            int step4,
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
-            int weightPenalty,
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
             int count
     ) {
-        StoredBlock[] visitedBlocks = new StoredBlock[Math.max(1, spanEnd4 - spanStart4)];
-        int visitedCount = 0;
+        @Nullable StoredBlock firstBlock = storedBlockAtOrNull(startX4, fixedY4);
+        int firstWidth4 = firstBlock != null ? firstBlock.width4() : 1;
+        int length4 = Math.max(step4, Math.min(blockWidth4, firstWidth4));
+        if (blockWidth4 <= firstWidth4) {
+            int firstHeight4 = firstBlock != null ? firstBlock.height4() : 1;
+            int weightFactor = blockWidth4 == 1
+                    ? 2
+                    : Math.max(2, Math.min(2 * maximumRows, firstHeight4));
+            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+                    firstBlock,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    length4 * weightFactor,
+                    destination,
+                    count
+            );
+            return new ExactSpatialScanResult(
+                    candidateResult.candidateCount(),
+                    candidateResult.referenceMatch(),
+                    candidateResult.haveNewMotionVectorMatch(),
+                    weightFactor >> 1
+            );
+        }
+
         boolean referenceMatch = false;
         boolean haveNewMotionVectorMatch = false;
-        for (int varyingCoordinate4 = spanStart4; varyingCoordinate4 < spanEnd4; varyingCoordinate4++) {
-            @Nullable StoredBlock storedBlock = rowScan
-                    ? storedBlockAt(varyingCoordinate4, fixedCoordinate4)
-                    : storedBlockAt(fixedCoordinate4, varyingCoordinate4);
-            if (storedBlock == null || storedBlock.intra() || containsStoredBlock(visitedBlocks, visitedCount, storedBlock)) {
-                continue;
-            }
-            visitedBlocks[visitedCount++] = storedBlock;
-            boolean blockReferenceMatch = sharesAnyReference(
+        for (int offset4 = 0; ; ) {
+            @Nullable StoredBlock block = storedBlockAtOrNull(startX4 + offset4, fixedY4);
+            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+                    block,
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
-                    storedBlock.compoundReference(),
-                    storedBlock.referenceFrame0(),
-                    storedBlock.referenceFrame1()
-            );
-            int baseWeight = provisionalNeighborWeight(
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    storedBlock.compoundReference(),
-                    storedBlock.referenceFrame0(),
-                    storedBlock.referenceFrame1()
-            );
-            int weight = Math.max(128, baseWeight - weightPenalty);
-            count = appendProvisionalCandidateWeights(
+                    length4 * 2,
                     destination,
-                    count,
-                    provisionalMotionVectorCandidate(
-                            compoundReference,
-                            referenceFrame0,
-                            referenceFrame1,
-                            storedBlock.compoundReference(),
-                            storedBlock.referenceFrame0(),
-                            storedBlock.referenceFrame1(),
-                            storedBlock.motionVector0(),
-                            storedBlock.motionVector1(),
-                            weight
-                    )
+                    count
             );
-            referenceMatch |= blockReferenceMatch;
-            if (blockReferenceMatch) {
-                haveNewMotionVectorMatch |= storedBlock.usesNewMotionVector();
+            count = candidateResult.candidateCount();
+            referenceMatch |= candidateResult.referenceMatch();
+            haveNewMotionVectorMatch |= candidateResult.haveNewMotionVectorMatch();
+            offset4 += length4;
+            if (offset4 >= visibleWidth4) {
+                return new ExactSpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch, 1);
             }
+            @Nullable StoredBlock nextBlock = storedBlockAtOrNull(startX4 + offset4, fixedY4);
+            length4 = Math.max(step4, nextBlock != null ? nextBlock.width4() : 1);
         }
-        return new SpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch);
     }
 
-    /// Scans one stored block at a single tile-relative 4x4 coordinate.
+    /// Scans one AV1 `refmvs` column using decoded block dimensions to advance between candidates.
     ///
-    /// @param x4 the tile-relative X coordinate in 4x4 units
-    /// @param y4 the tile-relative Y coordinate in 4x4 units
+    /// @param fixedX4 the fixed tile-relative column coordinate
+    /// @param startY4 the first tile-relative row coordinate
+    /// @param blockHeight4 the current block height in 4x4 units
+    /// @param visibleHeight4 the bounded scan height in 4x4 units
+    /// @param maximumColumns the maximum spatial column depth used for candidate weighting
+    /// @param step4 the minimum vertical scan step in 4x4 units
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary current-block reference
     /// @param referenceFrame1 the secondary current-block reference, or `-1`
-    /// @param weightPenalty the candidate-weight penalty applied to the scanned block
-    /// @param destination the destination candidate array
-    /// @param count the number of valid candidates already stored in `destination`
-    /// @return the result of scanning one stored block at a single tile-relative 4x4 coordinate
-    private SpatialScanResult scanStoredBlockCoordinate(
-            int x4,
-            int y4,
+    /// @param destination the destination candidate stack
+    /// @param count the number of active candidates already stored
+    /// @return the updated candidate state and spatial-depth contribution
+    private ExactSpatialScanResult scanExactRefMvsColumn(
+            int fixedX4,
+            int startY4,
+            int blockHeight4,
+            int visibleHeight4,
+            int maximumColumns,
+            int step4,
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
-            int weightPenalty,
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
             int count
     ) {
-        @Nullable StoredBlock storedBlock = storedBlockAt(x4, y4);
-        if (storedBlock == null || storedBlock.intra()) {
-            return new SpatialScanResult(count, false, false);
+        @Nullable StoredBlock firstBlock = storedBlockAtOrNull(fixedX4, startY4);
+        int firstHeight4 = firstBlock != null ? firstBlock.height4() : 1;
+        int length4 = Math.max(step4, Math.min(blockHeight4, firstHeight4));
+        if (blockHeight4 <= firstHeight4) {
+            int firstWidth4 = firstBlock != null ? firstBlock.width4() : 1;
+            int weightFactor = blockHeight4 == 1
+                    ? 2
+                    : Math.max(2, Math.min(2 * maximumColumns, firstWidth4));
+            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+                    firstBlock,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    length4 * weightFactor,
+                    destination,
+                    count
+            );
+            return new ExactSpatialScanResult(
+                    candidateResult.candidateCount(),
+                    candidateResult.referenceMatch(),
+                    candidateResult.haveNewMotionVectorMatch(),
+                    weightFactor >> 1
+            );
         }
-        boolean referenceMatch = sharesAnyReference(
-                compoundReference,
-                referenceFrame0,
-                referenceFrame1,
-                storedBlock.compoundReference(),
-                storedBlock.referenceFrame0(),
-                storedBlock.referenceFrame1()
-        );
-        int baseWeight = provisionalNeighborWeight(
-                compoundReference,
-                referenceFrame0,
-                referenceFrame1,
-                storedBlock.compoundReference(),
-                storedBlock.referenceFrame0(),
-                storedBlock.referenceFrame1()
-        );
-        int weight = Math.max(128, baseWeight - weightPenalty);
-        count = appendProvisionalCandidateWeights(
-                destination,
-                count,
+
+        boolean referenceMatch = false;
+        boolean haveNewMotionVectorMatch = false;
+        for (int offset4 = 0; ; ) {
+            @Nullable StoredBlock block = storedBlockAtOrNull(fixedX4, startY4 + offset4);
+            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+                    block,
+                    compoundReference,
+                    referenceFrame0,
+                    referenceFrame1,
+                    length4 * 2,
+                    destination,
+                    count
+            );
+            count = candidateResult.candidateCount();
+            referenceMatch |= candidateResult.referenceMatch();
+            haveNewMotionVectorMatch |= candidateResult.haveNewMotionVectorMatch();
+            offset4 += length4;
+            if (offset4 >= visibleHeight4) {
+                return new ExactSpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch, 1);
+            }
+            @Nullable StoredBlock nextBlock = storedBlockAtOrNull(fixedX4, startY4 + offset4);
+            length4 = Math.max(step4, nextBlock != null ? nextBlock.height4() : 1);
+        }
+    }
+
+    /// Adds one matching spatial candidate to an AV1 `refmvs` stack.
+    ///
+    /// @param block the decoded spatial block, or `null`
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param weight the spatial candidate weight
+    /// @param destination the destination candidate stack
+    /// @param count the number of active candidates already stored
+    /// @return the updated stack and reference-match state
+    private static SpatialCandidateResult addExactSpatialCandidate(
+            @Nullable StoredBlock block,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            int weight,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count
+    ) {
+        if (block == null || block.intra()) {
+            return new SpatialCandidateResult(count, false, false);
+        }
+        @Nullable ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
                 provisionalMotionVectorCandidate(
                         compoundReference,
                         referenceFrame0,
                         referenceFrame1,
-                        storedBlock.compoundReference(),
-                        storedBlock.referenceFrame0(),
-                        storedBlock.referenceFrame1(),
-                        storedBlock.motionVector0(),
-                        storedBlock.motionVector1(),
+                        block.compoundReference(),
+                        block.referenceFrame0(),
+                        block.referenceFrame1(),
+                        block.motionVector0(),
+                        block.motionVector1(),
                         weight
-                )
+                );
+        if (candidate == null) {
+            return new SpatialCandidateResult(count, false, false);
+        }
+        return new SpatialCandidateResult(
+                appendProvisionalCandidate(destination, count, candidate),
+                true,
+                block.usesNewMotionVector()
         );
-        return new SpatialScanResult(count, referenceMatch, referenceMatch && storedBlock.usesNewMotionVector());
+    }
+
+    /// Returns one stored block without throwing when a coordinate is outside the tile.
+    ///
+    /// @param x4 the tile-relative X coordinate in 4x4 units
+    /// @param y4 the tile-relative Y coordinate in 4x4 units
+    /// @return the stored block covering the coordinate, or `null`
+    private @Nullable StoredBlock storedBlockAtOrNull(int x4, int y4) {
+        if (x4 < 0 || x4 >= tileWidth4 || y4 < 0 || y4 >= tileHeight4) {
+            return null;
+        }
+        return storedBlockAt(x4, y4);
+    }
+
+    /// Samples projected temporal motion vectors over one current-block footprint.
+    ///
+    /// Main samples cover at most an 8x8 temporal-grid region and use a two-cell stride for block
+    /// dimensions of at least 64 pixels. The three AV1 edge probes are included for eligible block
+    /// dimensions inside the current 64-pixel temporal group.
+    ///
+    /// @param position the current tile-relative block position
+    /// @param size the current block size
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param globalMotionVector0 the primary block global-motion vector
+    /// @param destination the destination candidate array
+    /// @param count the number of active candidates already stored
+    /// @param initialGlobalMotionContext the initial temporal `globalmv` context
+    /// @return the updated candidate count and temporal `globalmv` context
+    private TemporalScanResult scanTemporalMotionField(
+            BlockPosition position,
+            BlockSize size,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector globalMotionVector0,
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count,
+            int initialGlobalMotionContext
+    ) {
+        if (!referenceMotionVectorProjection.enabled()) {
+            return new TemporalScanResult(count, 0);
+        }
+
+        int x4 = position.x4();
+        int y4 = position.y4();
+        int width4 = Math.min(Math.min(size.width4(), 16), tileWidth4 - x4);
+        int height4 = Math.min(Math.min(size.height4(), 16), tileHeight4 - y4);
+        int width8 = Math.min((width4 + 1) >> 1, 8);
+        int height8 = Math.min((height4 + 1) >> 1, 8);
+        int stepX8 = size.width4() >= 16 ? 2 : 1;
+        int stepY8 = size.height4() >= 16 ? 2 : 1;
+        int originX8 = tileStartX8 + position.x8();
+        int originY8 = tileStartY8 + position.y8();
+        int globalMotionContext = initialGlobalMotionContext;
+        for (int y8 = 0; y8 < height8; y8 += stepY8) {
+            for (int x8 = 0; x8 < width8; x8 += stepX8) {
+                @Nullable MotionVector motionVector0 = referenceMotionVectorProjection.motionVectorAt(
+                        originX8 + x8,
+                        originY8 + y8,
+                        referenceFrame0
+                );
+                if (motionVector0 == null) {
+                    continue;
+                }
+                if (x8 == 0 && y8 == 0) {
+                    globalMotionContext = differsFromGlobalMotion(motionVector0, globalMotionVector0) ? 1 : 0;
+                }
+                count = appendTemporalCandidate(
+                        destination,
+                        count,
+                        motionVector0,
+                        compoundReference
+                                ? referenceMotionVectorProjection.motionVectorAt(
+                                originX8 + x8,
+                                originY8 + y8,
+                                referenceFrame1
+                        )
+                                : null,
+                        compoundReference
+                );
+            }
+        }
+
+        if (Math.min(size.width4(), size.height4()) >= 2
+                && Math.max(size.width4(), size.height4()) < 16) {
+            int localX8 = position.x8();
+            int localY8 = position.y8();
+            int blockWidth8 = size.width4() >> 1;
+            int blockHeight8 = size.height4() >> 1;
+            int tileEndX8 = tileWidth4 >> 1;
+            int tileEndY8 = tileHeight4 >> 1;
+            int bottomY8 = localY8 + blockHeight8;
+            boolean hasBottom = bottomY8 < Math.min(tileEndY8, (localY8 & ~7) + 8);
+            if (hasBottom && localX8 - 1 >= Math.max(0, localX8 & ~7)) {
+                count = appendTemporalCandidateAt(
+                        destination,
+                        count,
+                        tileStartX8 + localX8 - 1,
+                        tileStartY8 + bottomY8,
+                        compoundReference,
+                        referenceFrame0,
+                        referenceFrame1
+                );
+            }
+            int rightX8 = localX8 + blockWidth8;
+            if (rightX8 < Math.min(tileEndX8, (localX8 & ~7) + 8)) {
+                if (hasBottom) {
+                    count = appendTemporalCandidateAt(
+                            destination,
+                            count,
+                            tileStartX8 + rightX8,
+                            tileStartY8 + bottomY8,
+                            compoundReference,
+                            referenceFrame0,
+                            referenceFrame1
+                    );
+                }
+                if (localY8 + blockHeight8 - 1 < Math.min(tileEndY8, (localY8 & ~7) + 8)) {
+                    count = appendTemporalCandidateAt(
+                            destination,
+                            count,
+                            tileStartX8 + rightX8,
+                            tileStartY8 + localY8 + blockHeight8 - 1,
+                            compoundReference,
+                            referenceFrame0,
+                            referenceFrame1
+                    );
+                }
+            }
+        }
+        return new TemporalScanResult(count, globalMotionContext);
+    }
+
+    /// Appends one projected temporal candidate read at a frame-relative coordinate.
+    ///
+    /// @param destination the destination candidate array
+    /// @param count the number of active candidates already stored
+    /// @param x8 the frame-relative X coordinate in 8x8 units
+    /// @param y8 the frame-relative Y coordinate in 8x8 units
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference
+    /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @return the updated candidate count
+    private int appendTemporalCandidateAt(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count,
+            int x8,
+            int y8,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1
+    ) {
+        @Nullable MotionVector motionVector0 = referenceMotionVectorProjection.motionVectorAt(x8, y8, referenceFrame0);
+        if (motionVector0 == null) {
+            return count;
+        }
+        return appendTemporalCandidate(
+                destination,
+                count,
+                motionVector0,
+                compoundReference ? referenceMotionVectorProjection.motionVectorAt(x8, y8, referenceFrame1) : null,
+                compoundReference
+        );
+    }
+
+    /// Appends or reweights one temporal motion-vector candidate.
+    ///
+    /// @param destination the destination candidate array
+    /// @param count the number of active candidates already stored
+    /// @param motionVector0 the projected primary vector
+    /// @param motionVector1 the projected secondary vector, or `null`
+    /// @param compoundReference whether a secondary vector is required
+    /// @return the updated candidate count
+    private static int appendTemporalCandidate(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
+            int count,
+            MotionVector motionVector0,
+            @Nullable MotionVector motionVector1,
+            boolean compoundReference
+    ) {
+        if (compoundReference && motionVector1 == null) {
+            return count;
+        }
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                        2,
+                        InterMotionVector.predicted(motionVector0),
+                        compoundReference
+                                ? InterMotionVector.predicted(Objects.requireNonNull(motionVector1, "motionVector1"))
+                                : null,
+                        false
+                );
+        for (int i = 0; i < count; i++) {
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate existing = destination[i];
+            if (!existing.synthetic()
+                    && existing.motionVector0().vector().equals(candidate.motionVector0().vector())
+                    && equivalentMotionVector(existing.motionVector1(), candidate.motionVector1())) {
+                destination[i] = existing.withWeight(existing.weight() + 2);
+                return count;
+            }
+        }
+        if (count < destination.length) {
+            destination[count++] = candidate;
+        }
+        return count;
+    }
+
+    /// Returns whether two optional inter motion vectors carry equal vector values.
+    ///
+    /// @param left the first optional motion-vector state
+    /// @param right the second optional motion-vector state
+    /// @return whether both values are absent or carry equal vectors
+    private static boolean equivalentMotionVector(
+            @Nullable InterMotionVector left,
+            @Nullable InterMotionVector right
+    ) {
+        return left == null ? right == null : right != null && left.vector().equals(right.vector());
+    }
+
+    /// Returns whether one projected vector differs materially from the block global vector.
+    ///
+    /// @param projected the projected temporal vector
+    /// @param global the block global-motion vector
+    /// @return whether either component differs by at least two luma pixels
+    private static boolean differsFromGlobalMotion(MotionVector projected, MotionVector global) {
+        return (Math.abs(projected.columnEighthPel() - global.columnEighthPel())
+                | Math.abs(projected.rowEighthPel() - global.rowEighthPel())) >= 16;
     }
 
     /// Returns whether one stored-block list prefix already contains the supplied block instance.
@@ -2392,45 +3244,6 @@ public final class BlockNeighborContext {
         return false;
     }
 
-    /// Computes one provisional neighbor weight for inter-mode context derivation.
-    ///
-    /// Exact reference matches receive the highest weight, partial reference overlap receives a
-    /// medium weight, matching forward/backward direction receives a weaker weight, and unrelated
-    /// inter neighbors receive the weakest retained weight.
-    ///
-    /// @param compoundReference whether the current block uses compound references
-    /// @param referenceFrame0 the primary current-block reference
-    /// @param referenceFrame1 the secondary current-block reference, or `-1`
-    /// @param neighborCompound whether the stored neighbor uses compound references
-    /// @param neighborReferenceFrame0 the neighbor primary reference
-    /// @param neighborReferenceFrame1 the neighbor secondary reference, or `-1`
-    /// @return the provisional neighbor weight
-    private static int provisionalNeighborWeight(
-            boolean compoundReference,
-            int referenceFrame0,
-            int referenceFrame1,
-            boolean neighborCompound,
-            int neighborReferenceFrame0,
-            int neighborReferenceFrame1
-    ) {
-        if (compoundReference == neighborCompound
-                && referenceFrame0 == neighborReferenceFrame0
-                && referenceFrame1 == neighborReferenceFrame1) {
-            return 640;
-        }
-        if (sharesAnyReference(
-                compoundReference,
-                referenceFrame0,
-                referenceFrame1,
-                neighborCompound,
-                neighborReferenceFrame0,
-                neighborReferenceFrame1
-        )) {
-            return compoundReference == neighborCompound ? 512 : 448;
-        }
-        return referenceDirection(referenceFrame0) == referenceDirection(neighborReferenceFrame0) ? 384 : 256;
-    }
-
     /// Builds one provisional motion-vector candidate from one stored neighbor.
     ///
     /// @param compoundReference whether the current block uses compound references
@@ -2442,8 +3255,8 @@ public final class BlockNeighborContext {
     /// @param neighborMotionVector0 the stored neighbor primary motion vector
     /// @param neighborMotionVector1 the stored neighbor secondary motion vector
     /// @param weight the provisional candidate weight to assign
-    /// @return one provisional motion-vector candidate from one stored neighbor
-    private static ProvisionalInterModeContext.ProvisionalMotionVectorCandidate provisionalMotionVectorCandidate(
+    /// @return one matching motion-vector candidate, or `null` when the neighbor does not carry the requested reference selection
+    private static @Nullable ProvisionalInterModeContext.ProvisionalMotionVectorCandidate provisionalMotionVectorCandidate(
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
@@ -2454,78 +3267,65 @@ public final class BlockNeighborContext {
             InterMotionVector neighborMotionVector1,
             int weight
     ) {
-        InterMotionVector motionVector0 = matchingMotionVector(
-                referenceFrame0,
-                neighborCompound,
-                neighborReferenceFrame0,
-                neighborReferenceFrame1,
-                Objects.requireNonNull(neighborMotionVector0, "neighborMotionVector0"),
-                Objects.requireNonNull(neighborMotionVector1, "neighborMotionVector1")
-        );
-        @Nullable InterMotionVector motionVector1 = compoundReference
-                ? matchingMotionVector(
-                referenceFrame1,
-                neighborCompound,
-                neighborReferenceFrame0,
-                neighborReferenceFrame1,
-                neighborMotionVector0,
-                neighborMotionVector1
-        )
-                : null;
-        return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(weight, motionVector0, motionVector1, false);
+        InterMotionVector nonNullNeighborMotionVector0 =
+                Objects.requireNonNull(neighborMotionVector0, "neighborMotionVector0");
+        InterMotionVector nonNullNeighborMotionVector1 =
+                Objects.requireNonNull(neighborMotionVector1, "neighborMotionVector1");
+        if (compoundReference) {
+            if (!neighborCompound
+                    || referenceFrame0 != neighborReferenceFrame0
+                    || referenceFrame1 != neighborReferenceFrame1) {
+                return null;
+            }
+            return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                    weight,
+                    nonNullNeighborMotionVector0,
+                    nonNullNeighborMotionVector1,
+                    false
+            );
+        }
+        if (referenceFrame0 == neighborReferenceFrame0) {
+            return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                    weight,
+                    nonNullNeighborMotionVector0,
+                    null,
+                    false
+            );
+        }
+        if (neighborCompound && referenceFrame0 == neighborReferenceFrame1) {
+            return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                    weight,
+                    nonNullNeighborMotionVector1,
+                    null,
+                    false
+            );
+        }
+        return null;
     }
 
-    /// Returns the best provisional motion vector contributed by one stored neighbor for one reference.
-    ///
-    /// @param referenceFrame the requested current-block reference-frame index
-    /// @param neighborCompound whether the stored neighbor uses compound references
-    /// @param neighborReferenceFrame0 the neighbor primary reference-frame index
-    /// @param neighborReferenceFrame1 the neighbor secondary reference-frame index, or `-1`
-    /// @param neighborMotionVector0 the stored neighbor primary motion vector
-    /// @param neighborMotionVector1 the stored neighbor secondary motion vector
-    /// @return the best provisional motion vector contributed by one stored neighbor for one reference
-    private static InterMotionVector matchingMotionVector(
-            int referenceFrame,
-            boolean neighborCompound,
-            int neighborReferenceFrame0,
-            int neighborReferenceFrame1,
-            InterMotionVector neighborMotionVector0,
-            InterMotionVector neighborMotionVector1
-    ) {
-        if (referenceFrame == neighborReferenceFrame0) {
-            return neighborMotionVector0;
-        }
-        if (neighborCompound && referenceFrame == neighborReferenceFrame1) {
-            return neighborMotionVector1;
-        }
-        return InterMotionVector.predicted(MotionVector.zero());
-    }
-
-    /// Appends one provisional motion-vector candidate and an optional weaker companion candidate.
+    /// Appends one provisional candidate or merges its weight into an equivalent candidate.
     ///
     /// @param destination the destination candidate array
     /// @param count the number of valid candidates currently stored in `destination`
     /// @param candidate the base candidate to append
-    /// @return the updated candidate count after appending the provisional candidate entries
-    private static int appendProvisionalCandidateWeights(
+    /// @return the updated candidate count
+    private static int appendProvisionalCandidate(
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
             int count,
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate
     ) {
         ProvisionalInterModeContext.ProvisionalMotionVectorCandidate nonNullCandidate = Objects.requireNonNull(candidate, "candidate");
+        for (int i = 0; i < count; i++) {
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate existing = destination[i];
+            if (!existing.synthetic()
+                    && existing.motionVector0().vector().equals(nonNullCandidate.motionVector0().vector())
+                    && equivalentMotionVector(existing.motionVector1(), nonNullCandidate.motionVector1())) {
+                destination[i] = existing.withWeight(existing.weight() + nonNullCandidate.weight());
+                return count;
+            }
+        }
         if (count < destination.length) {
             destination[count++] = nonNullCandidate;
-        }
-        int secondaryWeight;
-        if (nonNullCandidate.weight() >= 640) {
-            secondaryWeight = 512;
-        } else if (nonNullCandidate.weight() >= 512) {
-            secondaryWeight = 384;
-        } else {
-            secondaryWeight = -1;
-        }
-        if (secondaryWeight > 0 && count < destination.length) {
-            destination[count++] = nonNullCandidate.withWeight(secondaryWeight);
         }
         return count;
     }
@@ -2535,12 +3335,17 @@ public final class BlockNeighborContext {
     /// Real neighbor-derived candidates win ties over the synthetic zero baseline.
     ///
     /// @param values the provisional candidate array to sort
-    /// @param count the number of active candidates at the front of the array
-    private static void sortDescending(ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] values, int count) {
-        for (int i = 1; i < count; i++) {
+    /// @param start the inclusive first candidate to sort
+    /// @param end the exclusive end candidate index
+    private static void sortDescending(
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] values,
+            int start,
+            int end
+    ) {
+        for (int i = start + 1; i < end; i++) {
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate current = values[i];
             int j = i - 1;
-            while (j >= 0 && compareCandidates(current, values[j]) < 0) {
+            while (j >= start && compareCandidates(current, values[j]) < 0) {
                 values[j + 1] = values[j];
                 j--;
             }
@@ -2569,56 +3374,16 @@ public final class BlockNeighborContext {
         return 0;
     }
 
-    /// Returns whether two reference selections share at least one reference-frame index.
-    ///
-    /// @param compoundReference whether the current block uses compound references
-    /// @param referenceFrame0 the primary current-block reference
-    /// @param referenceFrame1 the secondary current-block reference, or `-1`
-    /// @param neighborCompound whether the stored neighbor uses compound references
-    /// @param neighborReferenceFrame0 the neighbor primary reference
-    /// @param neighborReferenceFrame1 the neighbor secondary reference, or `-1`
-    /// @return whether the two reference selections share at least one reference-frame index
-    private static boolean sharesAnyReference(
-            boolean compoundReference,
-            int referenceFrame0,
-            int referenceFrame1,
-            boolean neighborCompound,
-            int neighborReferenceFrame0,
-            int neighborReferenceFrame1
-    ) {
-        if (referenceFrame0 == neighborReferenceFrame0) {
-            return true;
-        }
-        if (neighborCompound && referenceFrame0 == neighborReferenceFrame1) {
-            return true;
-        }
-        if (!compoundReference) {
-            return false;
-        }
-        if (referenceFrame1 == neighborReferenceFrame0) {
-            return true;
-        }
-        return neighborCompound && referenceFrame1 == neighborReferenceFrame1;
-    }
-
-    /// Returns the coarse forward/backward reference direction for one reference-frame index.
-    ///
-    /// @param referenceFrame the reference-frame index in internal LAST..ALTREF order
-    /// @return `0` for forward references and `1` for backward references
-    private static int referenceDirection(int referenceFrame) {
-        return referenceFrame >= 4 ? 1 : 0;
-    }
-
-    /// Summarizes the currently implemented spatial subset of AV1 `refmvs` syntax contexts.
+    /// Summarizes AV1 spatial-match counts into `refmvs` syntax contexts.
     ///
     /// This summary mirrors `dav1d_refmvs_find()`'s `nearest_match` / `ref_match_count` /
-    /// `have_newmv` handling for the currently implemented direct-edge and bounded secondary
-    /// spatial scans, while still omitting temporal candidates.
+    /// `have_newmv` handling. Projected temporal candidates do not contribute to these spatial
+    /// match counts.
     ///
     /// @param nearestMatchCount the number of direct top/left matches in `[0, 2]`
     /// @param referenceMatchCount the number of spatial row/column match groups in `[0, 2]`
     /// @param haveNewMotionVectorMatch whether any matching spatial neighbor used a `NEWMV`-carrying mode
-    /// @return the summarized spatial subset of AV1 `refmvs` syntax contexts
+    /// @return the summarized AV1 `refmvs` syntax contexts
     private static RefMvsContextSummary summarizeDirectRefMvsContexts(
             int nearestMatchCount,
             int referenceMatchCount,
@@ -2669,11 +3434,14 @@ public final class BlockNeighborContext {
         }
     }
 
-    /// A provisional inter-mode syntax context derived only from already-decoded neighbors.
+    /// An inter-mode syntax context derived from spatial and projected temporal candidates.
     @NotNullByDefault
     public static final class ProvisionalInterModeContext {
         /// The zero-based provisional `newmv` context index in `[0, 6)`.
         private final int singleNewMvContext;
+
+        /// The zero-based temporal `globalmv` context index in `[0, 2)`.
+        private final int singleGlobalMvContext;
 
         /// The zero-based provisional `refmv` context index in `[0, 6)`.
         private final int singleReferenceMvContext;
@@ -2681,29 +3449,40 @@ public final class BlockNeighborContext {
         /// The zero-based provisional compound inter-mode context index in `[0, 8)`.
         private final int compoundInterModeContext;
 
+        /// The number of candidates reported to dynamic-reference-list syntax.
+        private final int syntaxCandidateCount;
+
         /// The provisional motion-vector candidates sorted in descending weight order.
         private final ProvisionalMotionVectorCandidate @Unmodifiable [] candidates;
-
-        /// The de-duplicated spatial motion-vector candidates used for nearest/near/new prediction.
-        private final ProvisionalMotionVectorCandidate @Unmodifiable [] referenceMotionVectorCandidates;
 
         /// Creates one provisional inter-mode syntax context.
         ///
         /// @param singleNewMvContext the zero-based provisional `newmv` context index in `[0, 6)`
+        /// @param singleGlobalMvContext the zero-based temporal `globalmv` context index in `[0, 2)`
         /// @param singleReferenceMvContext the zero-based provisional `refmv` context index in `[0, 6)`
         /// @param compoundInterModeContext the zero-based provisional compound inter-mode context index in `[0, 8)`
+        /// @param syntaxCandidateCount the number of candidates visible to dynamic-reference-list syntax
         /// @param candidates the provisional motion-vector candidates sorted in descending weight order
         public ProvisionalInterModeContext(
                 int singleNewMvContext,
+                int singleGlobalMvContext,
                 int singleReferenceMvContext,
                 int compoundInterModeContext,
+                int syntaxCandidateCount,
                 ProvisionalMotionVectorCandidate[] candidates
         ) {
             this.singleNewMvContext = singleNewMvContext;
+            if (singleGlobalMvContext < 0 || singleGlobalMvContext > 1) {
+                throw new IllegalArgumentException("singleGlobalMvContext out of range: " + singleGlobalMvContext);
+            }
+            this.singleGlobalMvContext = singleGlobalMvContext;
             this.singleReferenceMvContext = singleReferenceMvContext;
             this.compoundInterModeContext = compoundInterModeContext;
             this.candidates = Arrays.copyOf(Objects.requireNonNull(candidates, "candidates"), candidates.length);
-            this.referenceMotionVectorCandidates = buildReferenceMotionVectorCandidates(this.candidates);
+            if (syntaxCandidateCount < 0 || syntaxCandidateCount > this.candidates.length) {
+                throw new IllegalArgumentException("syntaxCandidateCount out of range: " + syntaxCandidateCount);
+            }
+            this.syntaxCandidateCount = syntaxCandidateCount;
         }
 
         /// Returns the zero-based provisional `newmv` context index in `[0, 6)`.
@@ -2713,14 +3492,11 @@ public final class BlockNeighborContext {
             return singleNewMvContext;
         }
 
-        /// Returns the baseline `globalmv` context.
+        /// Returns the temporal `globalmv` context.
         ///
-        /// Reference-frame motion vectors are rejected before tile decoding, so the temporal
-        /// non-zero-motion condition that selects context `1` cannot occur.
-        ///
-        /// @return zero
+        /// @return the zero-based temporal `globalmv` context index in `[0, 2)`
         public int singleGlobalMvContext() {
-            return 0;
+            return singleGlobalMvContext;
         }
 
         /// Returns the zero-based provisional `refmv` context index in `[0, 6)`.
@@ -2737,11 +3513,14 @@ public final class BlockNeighborContext {
             return compoundInterModeContext;
         }
 
-        /// Returns the number of provisional motion-vector candidates currently available.
+        /// Returns the number of candidates visible to dynamic-reference-list syntax.
         ///
-        /// @return the number of provisional motion-vector candidates currently available
+        /// Single-reference global-motion fallback slots remain addressable through
+        /// [#motionVectorCandidate(int)] but are not included in this count.
+        ///
+        /// @return the number of candidates visible to dynamic-reference-list syntax
         public int candidateCount() {
-            return candidates.length;
+            return syntaxCandidateCount;
         }
 
         /// Returns one provisional candidate weight by index.
@@ -2770,8 +3549,7 @@ public final class BlockNeighborContext {
 
         /// Returns the provisional dynamic-reference-list context for one candidate boundary.
         ///
-        /// This follows `dav1d`'s threshold rule over the locally stored provisional candidate
-        /// weights instead of a full `refmvs` stack.
+        /// This follows `dav1d`'s threshold rule over the candidate-stack weights.
         ///
         /// @param referenceIndex the zero-based candidate boundary index
         /// @return the zero-based provisional dynamic-reference-list context in `[0, 3)`
@@ -2798,7 +3576,7 @@ public final class BlockNeighborContext {
         ///
         /// @return the number of de-duplicated spatial motion-vector candidates currently available
         public int motionVectorCandidateCount() {
-            return referenceMotionVectorCandidates.length;
+            return candidates.length;
         }
 
         /// Returns one de-duplicated spatial motion-vector candidate by index.
@@ -2806,61 +3584,7 @@ public final class BlockNeighborContext {
         /// @param index the zero-based spatial motion-vector candidate index
         /// @return one de-duplicated spatial motion-vector candidate by index
         public ProvisionalMotionVectorCandidate motionVectorCandidate(int index) {
-            return referenceMotionVectorCandidates[Objects.checkIndex(index, referenceMotionVectorCandidates.length)];
-        }
-
-        /// Builds the de-duplicated spatial motion-vector candidate stack used by motion prediction.
-        ///
-        /// @param weightedCandidates the full weighted candidate list used by syntax contexts
-        /// @return the de-duplicated spatial motion-vector candidate stack used by motion prediction
-        private static ProvisionalMotionVectorCandidate[] buildReferenceMotionVectorCandidates(
-                ProvisionalMotionVectorCandidate[] weightedCandidates
-        ) {
-            ProvisionalMotionVectorCandidate[] realCandidates = new ProvisionalMotionVectorCandidate[weightedCandidates.length];
-            int realCount = 0;
-            @Nullable ProvisionalMotionVectorCandidate syntheticCandidate = null;
-            for (ProvisionalMotionVectorCandidate candidate : weightedCandidates) {
-                if (candidate.synthetic()) {
-                    if (syntheticCandidate == null) {
-                        syntheticCandidate = candidate;
-                    }
-                    continue;
-                }
-                if (!containsEquivalentMotionVectorCandidate(realCandidates, realCount, candidate)) {
-                    realCandidates[realCount++] = candidate;
-                }
-            }
-            ProvisionalMotionVectorCandidate[] result =
-                    new ProvisionalMotionVectorCandidate[realCount + (syntheticCandidate != null ? 1 : 0)];
-            System.arraycopy(realCandidates, 0, result, 0, realCount);
-            if (syntheticCandidate != null) {
-                result[realCount] = syntheticCandidate;
-            }
-            return result;
-        }
-
-        /// Returns whether one candidate list prefix already contains an equivalent motion-vector candidate.
-        ///
-        /// Two candidates are considered equivalent when they carry the same primary and secondary
-        /// motion vectors, regardless of weight.
-        ///
-        /// @param candidates the candidate array prefix to scan
-        /// @param count the number of active candidates at the front of the array
-        /// @param expected the candidate to search for
-        /// @return whether the candidate list prefix already contains an equivalent motion-vector candidate
-        private static boolean containsEquivalentMotionVectorCandidate(
-                ProvisionalMotionVectorCandidate[] candidates,
-                int count,
-                ProvisionalMotionVectorCandidate expected
-        ) {
-            for (int i = 0; i < count; i++) {
-                ProvisionalMotionVectorCandidate candidate = candidates[i];
-                if (candidate.motionVector0().equals(expected.motionVector0())
-                        && Objects.equals(candidate.motionVector1(), expected.motionVector1())) {
-                    return true;
-                }
-            }
-            return false;
+            return candidates[Objects.checkIndex(index, candidates.length)];
         }
 
         /// One provisional motion-vector candidate derived from one bounded neighbor source.
@@ -2958,6 +3682,9 @@ public final class BlockNeighborContext {
         /// Whether the stored block uses compound inter references.
         private final boolean compoundReference;
 
+        /// Whether the stored block blends inter and intra prediction.
+        private final boolean interIntra;
+
         /// The stored primary inter reference in internal LAST..ALTREF order.
         private final int referenceFrame0;
 
@@ -2982,6 +3709,7 @@ public final class BlockNeighborContext {
         /// @param segmentId the decoded segment identifier
         /// @param intra whether the stored block is intra-coded
         /// @param compoundReference whether the stored block uses compound inter references
+        /// @param interIntra whether the stored block blends inter and intra prediction
         /// @param referenceFrame0 the stored primary inter reference in internal LAST..ALTREF order
         /// @param referenceFrame1 the stored secondary inter reference in internal LAST..ALTREF order, or `-1`
         /// @param motionVector0 the stored primary motion-vector state
@@ -2995,6 +3723,7 @@ public final class BlockNeighborContext {
                 int segmentId,
                 boolean intra,
                 boolean compoundReference,
+                boolean interIntra,
                 int referenceFrame0,
                 int referenceFrame1,
                 InterMotionVector motionVector0,
@@ -3008,6 +3737,7 @@ public final class BlockNeighborContext {
             this.segmentId = segmentId;
             this.intra = intra;
             this.compoundReference = compoundReference;
+            this.interIntra = interIntra;
             this.referenceFrame0 = referenceFrame0;
             this.referenceFrame1 = referenceFrame1;
             this.motionVector0 = Objects.requireNonNull(motionVector0, "motionVector0");
@@ -3064,6 +3794,13 @@ public final class BlockNeighborContext {
             return compoundReference;
         }
 
+        /// Returns whether the stored block blends inter and intra prediction.
+        ///
+        /// @return whether the stored block blends inter and intra prediction
+        public boolean interIntra() {
+            return interIntra;
+        }
+
         /// Returns the stored primary inter reference in internal LAST..ALTREF order.
         ///
         /// @return the stored primary inter reference in internal LAST..ALTREF order
@@ -3100,27 +3837,133 @@ public final class BlockNeighborContext {
         }
     }
 
-    /// The result of scanning one bounded spatial row or column.
+    /// The result of one dimension-aware AV1 spatial row or column scan.
     @NotNullByDefault
-    private static final class SpatialScanResult {
-        /// The updated number of valid weighted candidates.
+    private static final class ExactSpatialScanResult {
+        /// The updated number of valid candidates.
         private final int candidateCount;
 
-        /// Whether the scanned row or column found any matching reference.
+        /// Whether the scan found the requested reference selection.
         private final boolean referenceMatch;
 
-        /// Whether any matching scanned block used a `NEWMV`-carrying mode.
+        /// Whether a matching block used a `NEWMV`-carrying mode.
         private final boolean haveNewMotionVectorMatch;
 
-        /// Creates one bounded spatial scan result.
+        /// The spatial-depth contribution returned by the scan.
+        private final int scanDistance;
+
+        /// Creates one dimension-aware spatial scan result.
         ///
-        /// @param candidateCount the updated number of valid weighted candidates
-        /// @param referenceMatch whether the scanned row or column found any matching reference
-        /// @param haveNewMotionVectorMatch whether any matching scanned block used a `NEWMV`-carrying mode
-        private SpatialScanResult(int candidateCount, boolean referenceMatch, boolean haveNewMotionVectorMatch) {
+        /// @param candidateCount the updated number of valid candidates
+        /// @param referenceMatch whether the scan found the requested reference selection
+        /// @param haveNewMotionVectorMatch whether a matching block used a `NEWMV`-carrying mode
+        /// @param scanDistance the spatial-depth contribution returned by the scan
+        private ExactSpatialScanResult(
+                int candidateCount,
+                boolean referenceMatch,
+                boolean haveNewMotionVectorMatch,
+                int scanDistance
+        ) {
             this.candidateCount = candidateCount;
             this.referenceMatch = referenceMatch;
             this.haveNewMotionVectorMatch = haveNewMotionVectorMatch;
+            this.scanDistance = scanDistance;
+        }
+
+        /// Returns the updated candidate count.
+        ///
+        /// @return the updated candidate count
+        public int candidateCount() {
+            return candidateCount;
+        }
+
+        /// Returns whether the scan found the requested reference selection.
+        ///
+        /// @return whether the scan found the requested reference selection
+        public boolean referenceMatch() {
+            return referenceMatch;
+        }
+
+        /// Returns whether a matching block used a `NEWMV`-carrying mode.
+        ///
+        /// @return whether a matching block used a `NEWMV`-carrying mode
+        public boolean haveNewMotionVectorMatch() {
+            return haveNewMotionVectorMatch;
+        }
+
+        /// Returns the spatial-depth contribution.
+        ///
+        /// @return the spatial-depth contribution
+        public int scanDistance() {
+            return scanDistance;
+        }
+    }
+
+    /// The result of attempting to add one spatial motion-vector candidate.
+    @NotNullByDefault
+    private static final class SpatialCandidateResult {
+        /// The updated number of valid candidates.
+        private final int candidateCount;
+
+        /// Whether the block matched the requested reference selection.
+        private final boolean referenceMatch;
+
+        /// Whether the matching block used a `NEWMV`-carrying mode.
+        private final boolean haveNewMotionVectorMatch;
+
+        /// Creates one spatial candidate result.
+        ///
+        /// @param candidateCount the updated number of valid candidates
+        /// @param referenceMatch whether the block matched the requested reference selection
+        /// @param haveNewMotionVectorMatch whether the matching block used a `NEWMV`-carrying mode
+        private SpatialCandidateResult(
+                int candidateCount,
+                boolean referenceMatch,
+                boolean haveNewMotionVectorMatch
+        ) {
+            this.candidateCount = candidateCount;
+            this.referenceMatch = referenceMatch;
+            this.haveNewMotionVectorMatch = haveNewMotionVectorMatch;
+        }
+
+        /// Returns the updated candidate count.
+        ///
+        /// @return the updated candidate count
+        public int candidateCount() {
+            return candidateCount;
+        }
+
+        /// Returns whether the block matched the requested reference selection.
+        ///
+        /// @return whether the block matched the requested reference selection
+        public boolean referenceMatch() {
+            return referenceMatch;
+        }
+
+        /// Returns whether the matching block used a `NEWMV`-carrying mode.
+        ///
+        /// @return whether the matching block used a `NEWMV`-carrying mode
+        public boolean haveNewMotionVectorMatch() {
+            return haveNewMotionVectorMatch;
+        }
+    }
+
+    /// The result of sampling the current block's projected temporal motion field.
+    @NotNullByDefault
+    private static final class TemporalScanResult {
+        /// The updated number of valid weighted candidates.
+        private final int candidateCount;
+
+        /// The temporal `globalmv` context in `[0, 2)`.
+        private final int globalMotionContext;
+
+        /// Creates one temporal scan result.
+        ///
+        /// @param candidateCount the updated number of valid weighted candidates
+        /// @param globalMotionContext the temporal `globalmv` context in `[0, 2)`
+        private TemporalScanResult(int candidateCount, int globalMotionContext) {
+            this.candidateCount = candidateCount;
+            this.globalMotionContext = globalMotionContext;
         }
 
         /// Returns the updated number of valid weighted candidates.
@@ -3130,22 +3973,15 @@ public final class BlockNeighborContext {
             return candidateCount;
         }
 
-        /// Returns whether the scanned row or column found any matching reference.
+        /// Returns the temporal `globalmv` context.
         ///
-        /// @return whether the scanned row or column found any matching reference
-        public boolean referenceMatch() {
-            return referenceMatch;
-        }
-
-        /// Returns whether any matching scanned block used a `NEWMV`-carrying mode.
-        ///
-        /// @return whether any matching scanned block used a `NEWMV`-carrying mode
-        public boolean haveNewMotionVectorMatch() {
-            return haveNewMotionVectorMatch;
+        /// @return the temporal `globalmv` context in `[0, 2)`
+        public int globalMotionContext() {
+            return globalMotionContext;
         }
     }
 
-    /// The direct-neighbor subset of AV1 `refmvs` syntax contexts.
+    /// AV1 `refmvs` syntax contexts derived from the scanned neighbors.
     @NotNullByDefault
     private static final class RefMvsContextSummary {
         /// The zero-based `newmv` context index in `[0, 6)`.
@@ -3157,7 +3993,7 @@ public final class BlockNeighborContext {
         /// The zero-based compound inter-mode context index in `[0, 8)`.
         private final int compoundInterModeContext;
 
-        /// Creates one direct-neighbor `refmvs` syntax context summary.
+        /// Creates one neighbor-derived `refmvs` syntax context summary.
         ///
         /// @param singleNewMvContext the zero-based `newmv` context index in `[0, 6)`
         /// @param singleReferenceMvContext the zero-based `refmv` context index in `[0, 6)`

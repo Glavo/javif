@@ -17,25 +17,25 @@ package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// One AV1 motion vector stored in quarter-pel units.
+/// One AV1 motion vector stored in eighth-pel units.
 @NotNullByDefault
 public final class MotionVector {
     /// The shared zero motion-vector instance.
     private static final MotionVector ZERO = new MotionVector(0, 0);
 
-    /// The signed vertical component in quarter-pel units.
-    private final int rowQuarterPel;
+    /// The signed vertical component in eighth-pel units.
+    private final int rowEighthPel;
 
-    /// The signed horizontal component in quarter-pel units.
-    private final int columnQuarterPel;
+    /// The signed horizontal component in eighth-pel units.
+    private final int columnEighthPel;
 
-    /// Creates one motion vector in quarter-pel units.
+    /// Creates one motion vector in eighth-pel units.
     ///
-    /// @param rowQuarterPel the signed vertical component in quarter-pel units
-    /// @param columnQuarterPel the signed horizontal component in quarter-pel units
-    public MotionVector(int rowQuarterPel, int columnQuarterPel) {
-        this.rowQuarterPel = rowQuarterPel;
-        this.columnQuarterPel = columnQuarterPel;
+    /// @param rowEighthPel the signed vertical component in eighth-pel units
+    /// @param columnEighthPel the signed horizontal component in eighth-pel units
+    public MotionVector(int rowEighthPel, int columnEighthPel) {
+        this.rowEighthPel = rowEighthPel;
+        this.columnEighthPel = columnEighthPel;
     }
 
     /// Returns the shared zero motion-vector instance.
@@ -45,18 +45,18 @@ public final class MotionVector {
         return ZERO;
     }
 
-    /// Returns the signed vertical component in quarter-pel units.
+    /// Returns the signed vertical component in eighth-pel units.
     ///
-    /// @return the signed vertical component in quarter-pel units
-    public int rowQuarterPel() {
-        return rowQuarterPel;
+    /// @return the signed vertical component in eighth-pel units
+    public int rowEighthPel() {
+        return rowEighthPel;
     }
 
-    /// Returns the signed horizontal component in quarter-pel units.
+    /// Returns the signed horizontal component in eighth-pel units.
     ///
-    /// @return the signed horizontal component in quarter-pel units
-    public int columnQuarterPel() {
-        return columnQuarterPel;
+    /// @return the signed horizontal component in eighth-pel units
+    public int columnEighthPel() {
+        return columnEighthPel;
     }
 
     /// Returns whether this motion vector equals the supplied object.
@@ -68,7 +68,7 @@ public final class MotionVector {
         if (!(obj instanceof MotionVector other)) {
             return false;
         }
-        return rowQuarterPel == other.rowQuarterPel && columnQuarterPel == other.columnQuarterPel;
+        return rowEighthPel == other.rowEighthPel && columnEighthPel == other.columnEighthPel;
     }
 
     /// Returns the hash code of this motion vector.
@@ -76,6 +76,6 @@ public final class MotionVector {
     /// @return the hash code of this motion vector
     @Override
     public int hashCode() {
-        return rowQuarterPel * 31 + columnQuarterPel;
+        return rowEighthPel * 31 + columnEighthPel;
     }
 }

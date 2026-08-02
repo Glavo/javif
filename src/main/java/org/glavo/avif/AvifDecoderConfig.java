@@ -97,8 +97,8 @@ public final class AvifDecoderConfig {
 
         /// Sets the requested packed RGB output storage mode.
         ///
-        /// `AUTOMATIC` preserves the legacy behavior: 8-bit inputs expose `IntBuffer` pixels first,
-        /// while 10/12-bit inputs expose `LongBuffer` pixels first.
+        /// `AUTOMATIC` exposes `IntBuffer` pixels first for 8-bit inputs and `LongBuffer` pixels
+        /// first for 10/12-bit inputs.
         ///
         /// @param value the requested packed RGB output storage mode
         /// @return this builder

@@ -495,8 +495,8 @@ final class AvifGainMapToneMapper {
         /// @param channel the RGB channel index
         /// @return the normalized gain-map channel
         private double channel(int baseX, int baseY, int channel) {
-            int x = mapCoordinate(baseX, baseWidth, planes.renderWidth());
-            int y = mapCoordinate(baseY, baseHeight, planes.renderHeight());
+            int x = mapCoordinate(baseX, baseWidth, planes.codedWidth());
+            int y = mapCoordinate(baseY, baseHeight, planes.codedHeight());
             if (planes.pixelFormat() == AvifPixelFormat.I400) {
                 return sampleToUnit(planes.lumaPlane().sample(x, y));
             }

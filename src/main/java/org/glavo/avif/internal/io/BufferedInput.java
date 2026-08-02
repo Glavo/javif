@@ -26,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SeekableByteChannel;
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Little-endian primitive reader backed by a reusable staging buffer.
@@ -282,6 +283,18 @@ public sealed abstract class BufferedInput implements Closeable {
         return buffer.getLong();
     }
 
+    /// Returns the unread byte count in the current externally framed input unit, when known.
+    ///
+    /// A non-negative result is an exact snapshot. `-1` indicates that the backing source does
+    /// not expose an external boundary for the current unit.
+    ///
+    /// @return the unread byte count in the current unit, or `-1` when unknown
+    /// @throws IOException if the input is closed or its boundary cannot be queried
+    public long currentUnitRemaining() throws IOException {
+        ensureOpen();
+        return -1L;
+    }
+
     /// `BufferedInput` backed by an `InputStream`.
     ///
     /// The implementation uses a heap buffer so bytes can be read directly into the buffer's
@@ -397,6 +410,17 @@ public sealed abstract class BufferedInput implements Closeable {
         }
 
         @Override
+        public long currentUnitRemaining() throws IOException {
+            ensureOpen();
+            if (!(channel instanceof SeekableByteChannel seekableChannel)) {
+                return -1L;
+            }
+
+            long remaining = seekableChannel.size() - seekableChannel.position();
+            return buffer.remaining() + Math.max(remaining, 0L);
+        }
+
+        @Override
         public void skip(long len) throws IOException {
             if (len < 0) {
                 throw new IllegalArgumentException("len < 0: " + len);
@@ -475,11 +499,8 @@ public sealed abstract class BufferedInput implements Closeable {
             throw unexpectedEndOfInput();
         }
 
-        /// Returns the unread byte count in the wrapped buffer.
-        ///
-        /// @return the unread byte count
-        /// @throws IOException if the reader has been closed
-        public int remaining() throws IOException {
+        @Override
+        public long currentUnitRemaining() throws IOException {
             ensureOpen();
             return buffer.remaining();
         }
@@ -513,9 +534,14 @@ public sealed abstract class BufferedInput implements Closeable {
     ///
     /// The wrapper copies only into its reusable staging buffer as scalar reads require data.
     /// It does not concatenate the source buffers into a separate byte array or byte buffer.
+    /// Each supplied buffer remains an externally framed unit for [#currentUnitRemaining()].
     public static final class OfByteBuffers extends BufferedInput {
         /// Source buffers read in order.
-        private final ByteBuffer[] sources;
+        private final ByteBuffer @Unmodifiable [] sources;
+        /// Exclusive logical end offset of each externally framed source buffer.
+        private final long @Unmodifiable [] sourceEndOffsets;
+        /// Total logical byte length of all source buffers.
+        private final long totalSize;
         /// Index of the source buffer currently being consumed.
         private int sourceIndex;
 
@@ -526,11 +552,16 @@ public sealed abstract class BufferedInput implements Closeable {
             super();
             Objects.requireNonNull(buffers, "buffers");
             this.sources = new ByteBuffer[buffers.length];
+            this.sourceEndOffsets = new long[buffers.length];
+            long endOffset = 0L;
             for (int i = 0; i < buffers.length; i++) {
                 this.sources[i] = Objects.requireNonNull(buffers[i], "buffers[" + i + "]")
                         .slice()
                         .order(ByteOrder.LITTLE_ENDIAN);
+                endOffset += this.sources[i].remaining();
+                sourceEndOffsets[i] = endOffset;
             }
+            this.totalSize = endOffset;
         }
 
         @Override
@@ -556,6 +587,25 @@ public sealed abstract class BufferedInput implements Closeable {
             } finally {
                 target.flip();
             }
+        }
+
+        @Override
+        public long currentUnitRemaining() throws IOException {
+            ensureOpen();
+
+            long unreadBytes = buffer.remaining();
+            if (sourceIndex < sources.length) {
+                unreadBytes += sources[sourceIndex].remaining();
+                unreadBytes += totalSize - sourceEndOffsets[sourceIndex];
+            }
+            long logicalOffset = totalSize - unreadBytes;
+            int unitIndex = Arrays.binarySearch(sourceEndOffsets, logicalOffset + 1L);
+            if (unitIndex < 0) {
+                unitIndex = -unitIndex - 1;
+            }
+            return unitIndex < sourceEndOffsets.length
+                    ? sourceEndOffsets[unitIndex] - logicalOffset
+                    : 0L;
         }
 
         @Override

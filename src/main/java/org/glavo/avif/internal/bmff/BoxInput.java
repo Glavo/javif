@@ -95,6 +95,14 @@ public final class BoxInput {
         return Byte.toUnsignedInt(source[offset++]);
     }
 
+    /// Reads one signed 8-bit integer.
+    ///
+    /// @return one signed 8-bit integer
+    /// @throws AvifDecodeException if the input is truncated
+    public int readI8() throws AvifDecodeException {
+        return (byte) readU8();
+    }
+
     /// Reads one unsigned 16-bit big-endian integer.
     ///
     /// @return one unsigned 16-bit big-endian integer
@@ -105,6 +113,14 @@ public final class BoxInput {
                 | Byte.toUnsignedInt(source[offset + 1]);
         offset += 2;
         return value;
+    }
+
+    /// Reads one signed 16-bit big-endian integer.
+    ///
+    /// @return one signed 16-bit big-endian integer
+    /// @throws AvifDecodeException if the input is truncated
+    public int readI16() throws AvifDecodeException {
+        return (short) readU16();
     }
 
     /// Reads one unsigned 24-bit big-endian integer.
@@ -134,6 +150,14 @@ public final class BoxInput {
         return value;
     }
 
+    /// Reads one signed 32-bit big-endian integer.
+    ///
+    /// @return one signed 32-bit big-endian integer
+    /// @throws AvifDecodeException if the input is truncated
+    public int readI32() throws AvifDecodeException {
+        return (int) readU32();
+    }
+
     /// Reads one unsigned 64-bit big-endian integer that fits in `long`.
     ///
     /// @return one unsigned 64-bit big-endian integer
@@ -145,6 +169,16 @@ public final class BoxInput {
         if ((high & 0x8000_0000L) != 0) {
             throw parseFailed("64-bit box value exceeds supported range", offset - 8);
         }
+        return (high << 32) | low;
+    }
+
+    /// Reads one signed 64-bit big-endian integer.
+    ///
+    /// @return one signed 64-bit big-endian integer
+    /// @throws AvifDecodeException if the input is truncated
+    public long readI64() throws AvifDecodeException {
+        long high = readU32();
+        long low = readU32();
         return (high << 32) | low;
     }
 

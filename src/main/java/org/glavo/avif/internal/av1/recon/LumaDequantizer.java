@@ -24,11 +24,10 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
-/// Minimal luma dequantizer for the first residual-producing reconstruction path.
+/// Dequantizes AV1 luma transform coefficients.
 ///
-/// The current implementation matches the AV1 `8-bit`, `10-bit`, and `12-bit` QTX lookup tables
-/// for luma coefficients, optional frame-level quantization matrices, the transform-size
-/// dequantization shift, and the coefficient saturation behavior used by dav1d.
+/// Applies the AV1 `8-bit`, `10-bit`, and `12-bit` QTX lookup tables, optional frame-level
+/// quantization matrices, transform-size shifts, and coefficient saturation.
 @NotNullByDefault
 final class LumaDequantizer {
     /// Prevents instantiation of this utility class.
@@ -208,12 +207,10 @@ final class LumaDequantizer {
         return (128 << bitDepth) - 1;
     }
 
-    /// Minimal luma dequantization context used by the current reconstruction path.
+    /// Block-local luma dequantization parameters.
     ///
     /// The block-local `qindex` already includes any superblock-level delta-q updates. The luma DC
-    /// delta remains frame-level state. Bit depth is carried explicitly so callers can wire the same
-    /// shape through broader reconstruction code even though the current implementation only accepts
-    /// `8-bit`, `10-bit`, and `12-bit` inputs.
+    /// delta remains frame-level state. Bit depth must be `8`, `10`, or `12`.
     @NotNullByDefault
     static final class Context {
         /// The block-local luma AC quantizer index in `[0, 255]`.

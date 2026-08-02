@@ -22,7 +22,7 @@ import java.util.Objects;
 /// One inter motion-vector state that may already be final or still provisional.
 @NotNullByDefault
 public final class InterMotionVector {
-    /// The underlying motion-vector value in quarter-pel units.
+    /// The underlying motion-vector value in eighth-pel units.
     private final MotionVector vector;
 
     /// Whether the vector is final for the current block instead of only a provisional predictor.
@@ -30,7 +30,7 @@ public final class InterMotionVector {
 
     /// Creates one inter motion-vector state.
     ///
-    /// @param vector the underlying motion-vector value in quarter-pel units
+    /// @param vector the underlying motion-vector value in eighth-pel units
     /// @param resolved whether the vector is final for the current block
     public InterMotionVector(MotionVector vector, boolean resolved) {
         this.vector = Objects.requireNonNull(vector, "vector");
@@ -39,7 +39,7 @@ public final class InterMotionVector {
 
     /// Creates one final inter motion-vector state.
     ///
-    /// @param vector the underlying motion-vector value in quarter-pel units
+    /// @param vector the underlying motion-vector value in eighth-pel units
     /// @return one final inter motion-vector state
     public static InterMotionVector resolved(MotionVector vector) {
         return new InterMotionVector(vector, true);
@@ -47,15 +47,15 @@ public final class InterMotionVector {
 
     /// Creates one provisional inter motion-vector state.
     ///
-    /// @param vector the underlying motion-vector value in quarter-pel units
+    /// @param vector the underlying motion-vector value in eighth-pel units
     /// @return one provisional inter motion-vector state
     public static InterMotionVector predicted(MotionVector vector) {
         return new InterMotionVector(vector, false);
     }
 
-    /// Returns the underlying motion-vector value in quarter-pel units.
+    /// Returns the underlying motion-vector value in eighth-pel units.
     ///
-    /// @return the underlying motion-vector value in quarter-pel units
+    /// @return the underlying motion-vector value in eighth-pel units
     public MotionVector vector() {
         return vector;
     }

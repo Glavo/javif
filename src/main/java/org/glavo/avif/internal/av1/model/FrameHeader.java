@@ -109,6 +109,8 @@ public final class FrameHeader {
     private final boolean warpedMotion;
     /// Whether the reduced transform type set is used.
     private final boolean reducedTransformSet;
+    /// The decoded global-motion parameters for LAST through ALTREF.
+    private final GlobalMotionParams @Unmodifiable [] globalMotionParameters;
     /// Whether film grain is present for this frame.
     private final boolean filmGrainPresent;
     /// The normalized film grain parameters for this frame.
@@ -608,8 +610,82 @@ public final class FrameHeader {
         this.skipModeReferenceIndices = Arrays.copyOf(skipModeReferenceIndices, skipModeReferenceIndices.length);
         this.warpedMotion = warpedMotion;
         this.reducedTransformSet = reducedTransformSet;
+        this.globalMotionParameters = defaultGlobalMotionParameters();
         this.filmGrain = Objects.requireNonNull(filmGrain, "filmGrain");
         this.filmGrainPresent = filmGrain.applyGrain();
+    }
+
+    /// Creates a frame header by replacing the global-motion state of an already parsed header.
+    ///
+    /// All other immutable state is copied from `source`. The supplied array is defensively copied.
+    ///
+    /// @param source the parsed frame header whose remaining state is copied
+    /// @param globalMotionParameters the seven global-motion parameter sets for LAST through ALTREF
+    private FrameHeader(FrameHeader source, GlobalMotionParams[] globalMotionParameters) {
+        FrameHeader nonNullSource = Objects.requireNonNull(source, "source");
+        this.temporalId = nonNullSource.temporalId;
+        this.spatialId = nonNullSource.spatialId;
+        this.showExistingFrame = nonNullSource.showExistingFrame;
+        this.existingFrameIndex = nonNullSource.existingFrameIndex;
+        this.frameId = nonNullSource.frameId;
+        this.framePresentationDelay = nonNullSource.framePresentationDelay;
+        this.frameType = nonNullSource.frameType;
+        this.showFrame = nonNullSource.showFrame;
+        this.showableFrame = nonNullSource.showableFrame;
+        this.errorResilientMode = nonNullSource.errorResilientMode;
+        this.disableCdfUpdate = nonNullSource.disableCdfUpdate;
+        this.allowScreenContentTools = nonNullSource.allowScreenContentTools;
+        this.forceIntegerMotionVectors = nonNullSource.forceIntegerMotionVectors;
+        this.frameSizeOverride = nonNullSource.frameSizeOverride;
+        this.primaryRefFrame = nonNullSource.primaryRefFrame;
+        this.frameOffset = nonNullSource.frameOffset;
+        this.refreshFrameFlags = nonNullSource.refreshFrameFlags;
+        this.frameReferenceShortSignaling = nonNullSource.frameReferenceShortSignaling;
+        this.referenceFrameIndices = Arrays.copyOf(
+                nonNullSource.referenceFrameIndices,
+                nonNullSource.referenceFrameIndices.length
+        );
+        this.frameSize = nonNullSource.frameSize;
+        this.superResolution = nonNullSource.superResolution;
+        this.allowIntrabc = nonNullSource.allowIntrabc;
+        this.allowHighPrecisionMotionVectors = nonNullSource.allowHighPrecisionMotionVectors;
+        this.subpelFilterMode = nonNullSource.subpelFilterMode;
+        this.switchableMotionMode = nonNullSource.switchableMotionMode;
+        this.useReferenceFrameMotionVectors = nonNullSource.useReferenceFrameMotionVectors;
+        this.refreshContext = nonNullSource.refreshContext;
+        this.tiling = nonNullSource.tiling;
+        this.quantization = nonNullSource.quantization;
+        this.segmentation = nonNullSource.segmentation;
+        this.delta = nonNullSource.delta;
+        this.allLossless = nonNullSource.allLossless;
+        this.loopFilter = nonNullSource.loopFilter;
+        this.cdef = nonNullSource.cdef;
+        this.restoration = nonNullSource.restoration;
+        this.transformMode = nonNullSource.transformMode;
+        this.switchableCompoundReferences = nonNullSource.switchableCompoundReferences;
+        this.skipModeAllowed = nonNullSource.skipModeAllowed;
+        this.skipModeEnabled = nonNullSource.skipModeEnabled;
+        this.skipModeReferenceIndices = Arrays.copyOf(
+                nonNullSource.skipModeReferenceIndices,
+                nonNullSource.skipModeReferenceIndices.length
+        );
+        this.warpedMotion = nonNullSource.warpedMotion;
+        this.reducedTransformSet = nonNullSource.reducedTransformSet;
+        Objects.requireNonNull(globalMotionParameters, "globalMotionParameters");
+        if (globalMotionParameters.length != 7) {
+            throw new IllegalArgumentException(
+                    "globalMotionParameters.length != 7: " + globalMotionParameters.length
+            );
+        }
+        this.globalMotionParameters = new GlobalMotionParams[globalMotionParameters.length];
+        for (int i = 0; i < globalMotionParameters.length; i++) {
+            this.globalMotionParameters[i] = Objects.requireNonNull(
+                    globalMotionParameters[i],
+                    "globalMotionParameters[" + i + "]"
+            );
+        }
+        this.filmGrain = nonNullSource.filmGrain;
+        this.filmGrainPresent = nonNullSource.filmGrainPresent;
     }
 
     /// Returns the temporal layer identifier copied from the OBU header.
@@ -922,6 +998,25 @@ public final class FrameHeader {
         return reducedTransformSet;
     }
 
+    /// Returns the global-motion parameters for one LAST-through-ALTREF reference position.
+    ///
+    /// @param referenceFrame the zero-based reference position in `[0, 7)`
+    /// @return the decoded global-motion parameters for the supplied reference
+    public GlobalMotionParams globalMotion(int referenceFrame) {
+        return globalMotionParameters[Objects.checkIndex(referenceFrame, globalMotionParameters.length)];
+    }
+
+    /// Returns this header with the supplied global-motion parameters.
+    ///
+    /// The receiver is not modified. The supplied array is defensively copied into the returned
+    /// header.
+    ///
+    /// @param parameters the seven global-motion parameter sets for LAST through ALTREF
+    /// @return a copied header carrying the supplied global-motion parameters
+    public FrameHeader withGlobalMotionParameters(GlobalMotionParams[] parameters) {
+        return new FrameHeader(this, parameters);
+    }
+
     /// Returns whether film grain is present for this frame.
     ///
     /// @return whether film grain is present for this frame
@@ -934,6 +1029,15 @@ public final class FrameHeader {
     /// @return the normalized film grain parameters for this frame
     public FilmGrainParams filmGrain() {
         return filmGrain;
+    }
+
+    /// Creates identity global-motion state for all seven inter references.
+    ///
+    /// @return seven identity global-motion parameter sets
+    private static GlobalMotionParams[] defaultGlobalMotionParameters() {
+        GlobalMotionParams[] parameters = new GlobalMotionParams[7];
+        Arrays.fill(parameters, GlobalMotionParams.identity());
+        return parameters;
     }
 
     /// Creates default film grain state for compatibility constructors.
@@ -995,6 +1099,80 @@ public final class FrameHeader {
         BILINEAR,
         /// Switchable interpolation selected per block.
         SWITCHABLE
+    }
+
+    /// Global warped-motion model types signaled by AV1 frame headers.
+    @NotNullByDefault
+    public enum GlobalMotionType {
+        /// No global displacement is applied.
+        IDENTITY,
+        /// A translation-only model is applied.
+        TRANSLATION,
+        /// A constrained rotation-and-zoom model is applied.
+        ROTATION_ZOOM,
+        /// A general affine model is applied.
+        AFFINE
+    }
+
+    /// Immutable AV1 global-motion parameters for one inter reference.
+    @NotNullByDefault
+    public static final class GlobalMotionParams {
+        /// The identity affine matrix in AV1 fixed-point representation.
+        private static final int @Unmodifiable [] IDENTITY_MATRIX = {0, 0, 1 << 16, 0, 0, 1 << 16};
+
+        /// The shared immutable identity parameter set.
+        private static final GlobalMotionParams IDENTITY =
+                new GlobalMotionParams(GlobalMotionType.IDENTITY, IDENTITY_MATRIX);
+
+        /// The decoded global-motion model type.
+        private final GlobalMotionType type;
+
+        /// The six AV1 affine matrix entries in fixed-point representation.
+        private final int @Unmodifiable [] matrix;
+
+        /// Creates global-motion parameters.
+        ///
+        /// The supplied matrix is defensively copied.
+        ///
+        /// @param type the decoded global-motion model type
+        /// @param matrix the six AV1 affine matrix entries
+        public GlobalMotionParams(GlobalMotionType type, int[] matrix) {
+            this.type = Objects.requireNonNull(type, "type");
+            Objects.requireNonNull(matrix, "matrix");
+            if (matrix.length != 6) {
+                throw new IllegalArgumentException("matrix.length != 6: " + matrix.length);
+            }
+            this.matrix = Arrays.copyOf(matrix, matrix.length);
+        }
+
+        /// Returns the shared identity global-motion parameter set.
+        ///
+        /// @return the identity global-motion parameters
+        public static GlobalMotionParams identity() {
+            return IDENTITY;
+        }
+
+        /// Returns the decoded global-motion model type.
+        ///
+        /// @return the decoded global-motion model type
+        public GlobalMotionType type() {
+            return type;
+        }
+
+        /// Returns a copy of the six AV1 affine matrix entries.
+        ///
+        /// @return a copy of the six fixed-point matrix entries
+        public int @Unmodifiable [] matrix() {
+            return Arrays.copyOf(matrix, matrix.length);
+        }
+
+        /// Returns one AV1 affine matrix entry.
+        ///
+        /// @param index the zero-based matrix index in `[0, 6)`
+        /// @return the requested fixed-point matrix entry
+        public int matrix(int index) {
+            return matrix[Objects.checkIndex(index, matrix.length)];
+        }
     }
 
     /// Loop restoration filter types used by AV1 frame headers.

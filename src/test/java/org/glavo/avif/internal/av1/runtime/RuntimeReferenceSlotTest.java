@@ -16,8 +16,6 @@
 package org.glavo.avif.internal.av1.runtime;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
-import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -27,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests for mutable runtime reference-slot state.
+/// Tests atomic runtime reference-slot state.
 @NotNullByDefault
 final class RuntimeReferenceSlotTest {
     /// Verifies that one newly created runtime reference slot starts empty.
@@ -38,46 +36,36 @@ final class RuntimeReferenceSlotTest {
         assertNull(slot.frameHeader());
         assertNull(slot.syntaxResult());
         assertNull(slot.surfaceSnapshot());
-        assertFalse(slot.hasSyntaxState());
+        assertFalse(slot.isPopulated());
     }
 
-    /// Verifies that syntax refresh stores header plus structural decode state without requiring a surface.
+    /// Verifies that refresh replaces every component atomically and clear removes the snapshot.
     @Test
-    void refreshSyntaxStoresFrameHeaderAndSyntaxResult() {
+    void refreshReplacesCompleteStateAndClearEmptiesSlot() {
         RuntimeReferenceSlot slot = new RuntimeReferenceSlot();
-        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x01);
-        FrameSyntaxDecodeResult syntaxResult = RuntimeTestFixtures.createFrameSyntaxDecodeResult(frameHeader);
+        ReferenceSurfaceSnapshot first = RuntimeTestFixtures.createReferenceSurfaceSnapshot(
+                RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x01),
+                8,
+                96
+        );
+        ReferenceSurfaceSnapshot second = RuntimeTestFixtures.createReferenceSurfaceSnapshot(
+                RuntimeTestFixtures.createFrameHeader(FrameType.INTRA, false, 0x08),
+                8,
+                144
+        );
 
-        slot.refreshSyntax(frameHeader, syntaxResult);
+        slot.refresh(first);
+        slot.refresh(second);
 
-        assertSame(frameHeader, slot.frameHeader());
-        assertSame(syntaxResult, slot.syntaxResult());
-        assertNull(slot.surfaceSnapshot());
-        assertTrue(slot.hasSyntaxState());
-    }
-
-    /// Verifies that surface refresh supersedes older syntax state and that `clear()` empties the slot again.
-    @Test
-    void refreshSurfaceSupersedesOlderSyntaxStateAndClearRemovesAllState() {
-        RuntimeReferenceSlot slot = new RuntimeReferenceSlot();
-        FrameHeader olderFrameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x01);
-        FrameSyntaxDecodeResult olderSyntaxResult = RuntimeTestFixtures.createFrameSyntaxDecodeResult(olderFrameHeader);
-        FrameHeader referencedFrameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.INTRA, false, 0x08);
-        ReferenceSurfaceSnapshot surfaceSnapshot = RuntimeTestFixtures.createReferenceSurfaceSnapshot(referencedFrameHeader, 8, 144);
-
-        slot.refreshSyntax(olderFrameHeader, olderSyntaxResult);
-        slot.refreshSurface(surfaceSnapshot);
-
-        assertSame(referencedFrameHeader, slot.frameHeader());
-        assertSame(surfaceSnapshot.frameSyntaxDecodeResult(), slot.syntaxResult());
-        assertSame(surfaceSnapshot, slot.surfaceSnapshot());
-        assertTrue(slot.hasSyntaxState());
+        assertSame(second.frameHeader(), slot.frameHeader());
+        assertSame(second.frameSyntaxDecodeResult(), slot.syntaxResult());
+        assertSame(second, slot.surfaceSnapshot());
+        assertTrue(slot.isPopulated());
 
         slot.clear();
-
         assertNull(slot.frameHeader());
         assertNull(slot.syntaxResult());
         assertNull(slot.surfaceSnapshot());
-        assertFalse(slot.hasSyntaxState());
+        assertFalse(slot.isPopulated());
     }
 }

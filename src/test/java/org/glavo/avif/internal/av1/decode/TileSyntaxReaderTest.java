@@ -76,7 +76,7 @@ final class TileSyntaxReaderTest {
         CdfContext oracleCdf = CdfContext.createDefault();
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-        boolean expectedIntra = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(2));
+        boolean expectedIntra = !oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(2));
         PartitionType expectedPartition = PartitionType.fromSymbolIndex(
                 oracleDecoder.decodeSymbolAdapt(
                         oracleCdf.mutablePartitionCdf(TileSyntaxReader.PartitionBlockLevel.BLOCK_64X64.cdfIndex(), 1),
@@ -587,7 +587,7 @@ final class TileSyntaxReaderTest {
     /// @param predictor the predictor that the residual is added to
     /// @param allowHighPrecisionMotionVectors whether the active frame allows high-precision motion vectors
     /// @param forceIntegerMotionVectors whether the active frame forces integer motion vectors
-    /// @return the decoded motion vector in quarter-pel units
+    /// @return the decoded motion vector in eighth-pel units
     private static MotionVector decodeMotionVectorResidual(
             MsacDecoder decoder,
             CdfContext cdfContext,
@@ -597,15 +597,15 @@ final class TileSyntaxReaderTest {
     ) {
         int motionVectorPrecision = (allowHighPrecisionMotionVectors ? 1 : 0) - (forceIntegerMotionVectors ? 1 : 0);
         int motionVectorJoint = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorJointCdf(), 3);
-        int rowQuarterPel = predictor.rowQuarterPel();
-        int columnQuarterPel = predictor.columnQuarterPel();
+        int rowEighthPel = predictor.rowEighthPel();
+        int columnEighthPel = predictor.columnEighthPel();
         if ((motionVectorJoint & 2) != 0) {
-            rowQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 0, motionVectorPrecision);
+            rowEighthPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 0, motionVectorPrecision);
         }
         if ((motionVectorJoint & 1) != 0) {
-            columnQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 1, motionVectorPrecision);
+            columnEighthPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 1, motionVectorPrecision);
         }
-        return new MotionVector(rowQuarterPel, columnQuarterPel);
+        return new MotionVector(rowEighthPel, columnEighthPel);
     }
 
     /// Decodes one signed motion-vector component residual with the same syntax as `TileSyntaxReader`.
@@ -614,7 +614,7 @@ final class TileSyntaxReaderTest {
     /// @param cdfContext the oracle CDF context
     /// @param component the zero-based motion-vector component index, where `0` is vertical and `1` is horizontal
     /// @param motionVectorPrecision the active motion-vector precision mode
-    /// @return the decoded signed motion-vector component residual in quarter-pel units
+    /// @return the decoded signed motion-vector component residual in eighth-pel units
     private static int decodeMotionVectorComponentDiff(
             MsacDecoder decoder,
             CdfContext cdfContext,

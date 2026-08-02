@@ -49,6 +49,12 @@ public final class FrameHeaderParser {
     private static final int TOTAL_REFERENCE_FRAMES = 8;
     /// The AV1 reference-frame count signaled per frame.
     private static final int REFERENCES_PER_FRAME = 7;
+    /// The subexponential group-width parameter used by AV1 global motion.
+    private static final int GLOBAL_MOTION_SUBEXP_K = 3;
+    /// The fixed-point precision of AV1 global-motion matrix entries.
+    private static final int GLOBAL_MOTION_MATRIX_PRECISION = 16;
+    /// The signed alpha parameter magnitude bit count used by AV1 global motion.
+    private static final int GLOBAL_MOTION_ALPHA_BITS = 12;
     /// The AV1 maximum CDEF strength count.
     private static final int MAX_CDEF_STRENGTHS = 8;
     /// The AV1 maximum luma film grain point count.
@@ -468,6 +474,14 @@ public final class FrameHeaderParser {
             warpedMotion = reader.readFlag();
         }
         boolean reducedTransformSet = reader.readFlag();
+        FrameHeader.GlobalMotionParams[] globalMotionParameters = parseGlobalMotion(
+                reader,
+                frameType,
+                allowHighPrecisionMotionVectors,
+                primaryRefFrame,
+                referenceFrameHeaders,
+                referenceFrameIndices
+        );
         FrameHeader.FilmGrainParams filmGrain = parseFilmGrain(
                 reader,
                 sequenceHeader,
@@ -478,7 +492,7 @@ public final class FrameHeaderParser {
                 referenceFrameIndices
         );
 
-        return new FrameHeader(
+        FrameHeader parsedHeader = new FrameHeader(
                 temporalId,
                 spatialId,
                 false,
@@ -523,6 +537,7 @@ public final class FrameHeaderParser {
                 reducedTransformSet,
                 filmGrain
         );
+        return parsedHeader.withGlobalMotionParameters(globalMotionParameters);
     }
 
     /// Validates the supplied reference-frame header array shape.
@@ -1278,6 +1293,200 @@ public final class FrameHeaderParser {
         return new FrameHeader.RestorationInfo(types, unitSizeLog2Y, unitSizeLog2Uv);
     }
 
+    /// Parses the seven frame-level global-motion parameter sets.
+    ///
+    /// Inter and switch frames inherit each parameter reference from `primary_ref_frame`; other
+    /// frame types use identity parameters without consuming global-motion syntax.
+    ///
+    /// @param reader the payload bit reader
+    /// @param frameType the decoded frame type
+    /// @param allowHighPrecisionMotionVectors whether high-precision motion vectors are allowed
+    /// @param primaryRefFrame the primary reference position, or `7` when absent
+    /// @param referenceFrameHeaders the refreshed reference headers indexed by slot
+    /// @param referenceFrameIndices the current LAST-through-ALTREF slot selection
+    /// @return the seven decoded global-motion parameter sets
+    /// @throws IOException if the payload is truncated or inherited state is unavailable
+    private static FrameHeader.GlobalMotionParams[] parseGlobalMotion(
+            BitReader reader,
+            FrameType frameType,
+            boolean allowHighPrecisionMotionVectors,
+            int primaryRefFrame,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int[] referenceFrameIndices
+    ) throws IOException {
+        FrameHeader.GlobalMotionParams[] parameters = new FrameHeader.GlobalMotionParams[REFERENCES_PER_FRAME];
+        if (!isInterOrSwitch(frameType)) {
+            Arrays.fill(parameters, FrameHeader.GlobalMotionParams.identity());
+            return parameters;
+        }
+
+        @Nullable FrameHeader primaryReferenceHeader = resolvePrimaryReferenceFrameHeader(
+                primaryRefFrame,
+                referenceFrameHeaders,
+                referenceFrameIndices
+        );
+        if (primaryRefFrame != PRIMARY_REF_NONE && primaryReferenceHeader == null) {
+            fail("Global motion parameters cannot be inherited without a primary reference frame");
+        }
+
+        for (int referenceFrame = 0; referenceFrame < parameters.length; referenceFrame++) {
+            FrameHeader.GlobalMotionParams referenceParameters = primaryReferenceHeader == null
+                    ? FrameHeader.GlobalMotionParams.identity()
+                    : primaryReferenceHeader.globalMotion(referenceFrame);
+            parameters[referenceFrame] = parseGlobalMotionParameters(
+                    reader,
+                    referenceParameters,
+                    allowHighPrecisionMotionVectors
+            );
+        }
+        return parameters;
+    }
+
+    /// Parses one global-motion parameter set relative to inherited reference parameters.
+    ///
+    /// @param reader the payload bit reader
+    /// @param referenceParameters the inherited parameters used for subexponential recentering
+    /// @param allowHighPrecisionMotionVectors whether high-precision motion vectors are allowed
+    /// @return the decoded global-motion parameters
+    /// @throws IOException if the payload is truncated
+    private static FrameHeader.GlobalMotionParams parseGlobalMotionParameters(
+            BitReader reader,
+            FrameHeader.GlobalMotionParams referenceParameters,
+            boolean allowHighPrecisionMotionVectors
+    ) throws IOException {
+        if (!reader.readFlag()) {
+            return FrameHeader.GlobalMotionParams.identity();
+        }
+
+        FrameHeader.GlobalMotionType type;
+        if (reader.readFlag()) {
+            type = FrameHeader.GlobalMotionType.ROTATION_ZOOM;
+        } else {
+            type = reader.readFlag()
+                    ? FrameHeader.GlobalMotionType.TRANSLATION
+                    : FrameHeader.GlobalMotionType.AFFINE;
+        }
+
+        int[] matrix = FrameHeader.GlobalMotionParams.identity().matrix();
+        int translationBits;
+        int translationShift;
+        if (type == FrameHeader.GlobalMotionType.ROTATION_ZOOM || type == FrameHeader.GlobalMotionType.AFFINE) {
+            int identityScale = 1 << GLOBAL_MOTION_MATRIX_PRECISION;
+            matrix[2] = identityScale + 2 * readSignedSubexpWithReference(
+                    reader,
+                    GLOBAL_MOTION_ALPHA_BITS,
+                    (referenceParameters.matrix(2) - identityScale) >> 1
+            );
+            matrix[3] = 2 * readSignedSubexpWithReference(
+                    reader,
+                    GLOBAL_MOTION_ALPHA_BITS,
+                    referenceParameters.matrix(3) >> 1
+            );
+            translationBits = 12;
+            translationShift = 10;
+        } else {
+            int precisionReduction = allowHighPrecisionMotionVectors ? 0 : 1;
+            translationBits = 9 - precisionReduction;
+            translationShift = 13 + precisionReduction;
+        }
+
+        if (type == FrameHeader.GlobalMotionType.AFFINE) {
+            int identityScale = 1 << GLOBAL_MOTION_MATRIX_PRECISION;
+            matrix[4] = 2 * readSignedSubexpWithReference(
+                    reader,
+                    GLOBAL_MOTION_ALPHA_BITS,
+                    referenceParameters.matrix(4) >> 1
+            );
+            matrix[5] = identityScale + 2 * readSignedSubexpWithReference(
+                    reader,
+                    GLOBAL_MOTION_ALPHA_BITS,
+                    (referenceParameters.matrix(5) - identityScale) >> 1
+            );
+        } else if (type == FrameHeader.GlobalMotionType.ROTATION_ZOOM) {
+            matrix[4] = -matrix[3];
+            matrix[5] = matrix[2];
+        }
+
+        matrix[0] = readSignedSubexpWithReference(
+                reader,
+                translationBits,
+                referenceParameters.matrix(0) >> translationShift
+        ) << translationShift;
+        matrix[1] = readSignedSubexpWithReference(
+                reader,
+                translationBits,
+                referenceParameters.matrix(1) >> translationShift
+        ) << translationShift;
+        return new FrameHeader.GlobalMotionParams(type, matrix);
+    }
+
+    /// Reads a signed AV1 subexponential value recentered around a reference.
+    ///
+    /// @param reader the payload bit reader
+    /// @param magnitudeBits the signed magnitude bit count
+    /// @param reference the signed recentering reference
+    /// @return the decoded signed value
+    /// @throws IOException if the payload is truncated
+    private static int readSignedSubexpWithReference(
+            BitReader reader,
+            int magnitudeBits,
+            int reference
+    ) throws IOException {
+        int magnitude = 1 << magnitudeBits;
+        int maximum = magnitude << 1;
+        int unsignedReference = reference + magnitude;
+        if (unsignedReference < 0 || unsignedReference > maximum) {
+            fail("Global motion subexponential reference is out of range: " + reference);
+        }
+        return readUnsignedSubexpWithReference(reader, maximum, unsignedReference) - magnitude;
+    }
+
+    /// Reads an unsigned finite subexponential value recentered around a reference.
+    ///
+    /// @param reader the payload bit reader
+    /// @param maximum the inclusive decoded maximum
+    /// @param reference the unsigned recentering reference in `[0, maximum]`
+    /// @return the decoded unsigned value
+    /// @throws IOException if the payload is truncated
+    private static int readUnsignedSubexpWithReference(
+            BitReader reader,
+            int maximum,
+            int reference
+    ) throws IOException {
+        int value = 0;
+        for (int group = 0; ; group++) {
+            int bits = group == 0 ? GLOBAL_MOTION_SUBEXP_K : GLOBAL_MOTION_SUBEXP_K + group - 1;
+            int groupSize = 1 << bits;
+            if (maximum < value + 3 * groupSize) {
+                value += readUniform(reader, maximum - value + 1);
+                break;
+            }
+            if (!reader.readFlag()) {
+                value += readInt(reader, bits);
+                break;
+            }
+            value += groupSize;
+        }
+
+        return reference * 2 <= maximum
+                ? inverseRecenter(reference, value)
+                : maximum - inverseRecenter(maximum - reference, value);
+    }
+
+    /// Applies the AV1 inverse non-negative recentering transform.
+    ///
+    /// @param reference the non-negative recentering reference
+    /// @param value the coded non-negative value
+    /// @return the inverse-recentered value
+    private static int inverseRecenter(int reference, int value) {
+        if (value > (reference << 1)) {
+            return value;
+        }
+        return (value & 1) == 0
+                ? (value >> 1) + reference
+                : reference - ((value + 1) >> 1);
+    }
+
     /// Parses normalized film grain parameters.
     ///
     /// @param reader the payload bit reader
@@ -1782,15 +1991,6 @@ public final class FrameHeaderParser {
     /// @param message the validation message
     /// @throws IOException always
     private static void fail(String message) throws IOException {
-        throw new IOException(message);
-    }
-
-    /// Throws an `IOException` describing an unsupported feature.
-    ///
-    /// @param message the unsupported feature description
-    /// @return this method never returns normally
-    /// @throws IOException always
-    private static IOException unsupported(String message) throws IOException {
         throw new IOException(message);
     }
 

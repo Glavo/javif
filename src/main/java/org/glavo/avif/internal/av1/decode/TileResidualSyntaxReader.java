@@ -31,11 +31,10 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
-/// Reader for the first coefficient-side syntax elements inside one tile bitstream.
+/// Reads AV1 luma and chroma transform-coefficient syntax from one tile bitstream.
 ///
-/// The current implementation fully decodes the currently modeled two-dimensional luma residual
-/// path and the chroma-U/chroma-V residual unit arrays exposed by `TransformLayout`, including
-/// pixel-level clipped chroma footprints along the frame fringe.
+/// The reader decodes the luma, chroma-U, and chroma-V residual units exposed by
+/// `TransformLayout`, including pixel-clipped chroma footprints along the frame fringe.
 /// `TX_4X4` keeps its dedicated context helpers, while larger transform sizes use the same
 /// coefficient-neighbor token contexts so multi-coefficient blocks do not fall back to fixed
 /// probabilities once AC residuals are present.
@@ -141,12 +140,12 @@ public final class TileResidualSyntaxReader {
         this.syntaxReader = new TileSyntaxReader(this.tileContext);
     }
 
-    /// Decodes the first residual syntax pass for one already-decoded block.
+    /// Decodes residual syntax for one already-decoded block.
     ///
     /// @param header the decoded leaf block header
     /// @param transformLayout the decoded transform layout for the same block
     /// @param neighborContext the mutable neighbor context that supplies coefficient skip contexts
-    /// @return the decoded first-pass residual layout for the supplied block
+    /// @return the decoded residual layout for the supplied block
     public ResidualLayout read(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,

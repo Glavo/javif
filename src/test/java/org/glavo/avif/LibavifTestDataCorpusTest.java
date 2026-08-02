@@ -16,7 +16,6 @@
 package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
@@ -31,13 +30,11 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Corpus tests for AVIF files copied from libavif's `tests/data` directory.
@@ -60,16 +57,16 @@ final class LibavifTestDataCorpusTest {
             decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_gainmap_different_grid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", 128, 200, 10, AvifPixelFormat.I444, true, false, 1),
-            decodeFailure("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", 64, 64, 12,
-                    AvifPixelFormat.I422, true, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
-            decodeFailure("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, true, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
-            decodeFailure("libavif-test-data/colors-animated-8bpc-audio.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, false, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
-            decodeFailure("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, false, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
-            decodeFailure("libavif-test-data/colors-animated-8bpc.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, false, true, 5, AvifErrorCode.UNSUPPORTED_FEATURE),
+            decode("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", 64, 64, 12,
+                    AvifPixelFormat.I422, true, true, 5),
+            decode("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, true, true, 5),
+            decode("libavif-test-data/colors-animated-8bpc-audio.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, false, true, 5),
+            decode("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, false, true, 5),
+            decode("libavif-test-data/colors-animated-8bpc.avif", 150, 150, 8,
+                    AvifPixelFormat.I420, false, true, 5),
             decode("libavif-test-data/colors_hdr_p3.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/colors_hdr_rec2020.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/colors_hdr_srgb.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
@@ -86,8 +83,8 @@ final class LibavifTestDataCorpusTest {
             decode("libavif-test-data/draw_points_idat_progressive.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/draw_points_idat_progressive_metasize0.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/extended_pixi.avif", 4, 4, 8, AvifPixelFormat.I420, false, false, 1),
-            decodeFailure("libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif", 1024, 428, 10,
-                    AvifPixelFormat.I444, false, false, 1, AvifErrorCode.UNSUPPORTED_FEATURE),
+            decode("libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif", 1024, 428, 10,
+                    AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/io/kodim03_yuv420_8bpc.avif", 768, 512, 8, AvifPixelFormat.I420, false, false, 1),
             decode("libavif-test-data/io/kodim23_yuv420_8bpc.avif", 768, 512, 8, AvifPixelFormat.I420, false, false, 1),
             decode("libavif-test-data/paris_icc_exif_xmp.avif", 403, 302, 8, AvifPixelFormat.I444, false, false, 1),
@@ -108,7 +105,7 @@ final class LibavifTestDataCorpusTest {
             decode("libavif-test-data/unsupported_gainmap_minimum_version.avif", 100, 100, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/unsupported_gainmap_version.avif", 100, 100, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif", 100, 100, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/weld_sato_12B_8B_q0.avif", 1024, 684, 12, AvifPixelFormat.I444, false, false, 1),
+            decode("libavif-test-data/weld_sato_12B_8B_q0.avif", 1024, 684, 16, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/white_1x1.avif", 1, 1, 8, AvifPixelFormat.I444, false, false, 1),
     };
 
@@ -150,22 +147,10 @@ final class LibavifTestDataCorpusTest {
     /// @throws IOException if the resource cannot be read or decoded
     private static void assertCorpusCase(CorpusCase testCase) throws IOException {
         byte[] bytes = testResourceBytes(testCase.resourceName);
-        if (testCase.parseFailureCode != null) {
-            AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(bytes));
-            assertEquals(testCase.parseFailureCode, exception.code());
-            if (testCase.parseFailureMessageFragment != null) {
-                assertTrue(exception.getMessage().contains(testCase.parseFailureMessageFragment), exception.getMessage());
-            }
-            return;
-        }
-
-        ExpectedInfo expectedInfo = Objects.requireNonNull(testCase.expectedInfo, "expectedInfo");
+        ExpectedInfo expectedInfo = testCase.expectedInfo;
         try (AvifImageReader reader = AvifImageReader.open(bytes)) {
             assertInfo(expectedInfo, reader.info());
-            if (testCase.decodeFailureCode != null) {
-                AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readAllFrames);
-                assertEquals(testCase.decodeFailureCode, exception.code());
-            } else if (expectedInfo.animated) {
+            if (expectedInfo.animated) {
                 List<AvifFrame> frames = reader.readAllFrames();
                 assertEquals(expectedInfo.frameCount, frames.size());
                 for (int i = 0; i < frames.size(); i++) {
@@ -325,81 +310,16 @@ final class LibavifTestDataCorpusTest {
     ) {
         return new CorpusCase(
                 resourceName,
-                new ExpectedInfo(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount),
-                null,
-                null,
-                null
+                new ExpectedInfo(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount)
         );
     }
 
-    /// Creates a corpus case that must parse but fail during frame decode.
+    /// Expected output for one libavif AVIF fixture.
     ///
-    /// @param resourceName      the classpath resource name
-    /// @param width             the expected width
-    /// @param height            the expected height
-    /// @param bitDepth          the expected bit depth
-    /// @param pixelFormat       the expected pixel format
-    /// @param alphaPresent      whether alpha is expected
-    /// @param animated          whether animation is expected
-    /// @param frameCount        the expected frame count
-    /// @param decodeFailureCode the expected decode failure code
-    /// @return the corpus case
-    private static CorpusCase decodeFailure(
-            String resourceName,
-            int width,
-            int height,
-            int bitDepth,
-            AvifPixelFormat pixelFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            AvifErrorCode decodeFailureCode
-    ) {
-        return new CorpusCase(
-                resourceName,
-                new ExpectedInfo(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount),
-                null,
-                null,
-                decodeFailureCode
-        );
-    }
-
-    /// Creates a corpus case that must fail during container parsing.
-    ///
-    /// @param resourceName     the classpath resource name
-    /// @param parseFailureCode the expected parse failure code
-    /// @return the corpus case
-    private static CorpusCase parseFailure(String resourceName, AvifErrorCode parseFailureCode) {
-        return parseFailure(resourceName, parseFailureCode, null);
-    }
-
-    /// Creates a corpus case that must fail during container parsing with a diagnostic fragment.
-    ///
-    /// @param resourceName                the classpath resource name
-    /// @param parseFailureCode            the expected parse failure code
-    /// @param parseFailureMessageFragment the expected diagnostic message fragment
-    /// @return the corpus case
-    private static CorpusCase parseFailure(
-            String resourceName,
-            AvifErrorCode parseFailureCode,
-            @Nullable String parseFailureMessageFragment
-    ) {
-        return new CorpusCase(resourceName, null, parseFailureCode, parseFailureMessageFragment, null);
-    }
-
-    /// Expected behavior for one libavif AVIF fixture.
-    ///
-    /// @param resourceName      The classpath resource name.
-    /// @param expectedInfo      The expected parsed image info, or `null` when parsing must fail.
-    /// @param parseFailureCode  The expected parse failure code, or `null` when parsing must succeed.
-    /// @param parseFailureMessageFragment The expected parse-failure diagnostic fragment, or `null`.
-    /// @param decodeFailureCode           The expected frame decode failure code, or `null` when frame decoding must succeed.
+    /// @param resourceName the classpath resource name
+    /// @param expectedInfo the expected parsed image info
     @NotNullByDefault
-    private record CorpusCase(String resourceName, @Nullable ExpectedInfo expectedInfo,
-                              @Nullable AvifErrorCode parseFailureCode,
-                              @Nullable String parseFailureMessageFragment,
-                              @Nullable AvifErrorCode decodeFailureCode) {
-
+    private record CorpusCase(String resourceName, ExpectedInfo expectedInfo) {
     }
 
     /// Expected parsed image metadata for one libavif AVIF fixture.

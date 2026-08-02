@@ -39,7 +39,9 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 import static org.bytedeco.ffmpeg.global.avcodec.av_packet_alloc;
@@ -165,6 +167,40 @@ public final class FFmpegAvifReferenceDecoder {
                 throw new IOException("FFmpeg found no video stream: " + resourceName);
             }
             return decodeFirstFrameSourcePlanes(formatContext, videoStreamIndex, resourceName);
+        } finally {
+            avformat_close_input(formatContext);
+        }
+    }
+
+    /// Decodes every frame from the first video stream of one classpath AVIF sequence and copies
+    /// its decoded source planes before RGB conversion.
+    ///
+    /// Tile-grid resources are not accepted because composing a sequence of independently decoded
+    /// tile streams requires container-level frame synchronization outside this helper's scope.
+    ///
+    /// @param resourceName the classpath AVIF sequence resource name
+    /// @return the decoded source planes in presentation order
+    /// @throws IOException if FFmpeg or resource resolution fails, or if the resource is a tile grid
+    /// @throws URISyntaxException if the classpath resource URL cannot be converted to a path
+    public static @Unmodifiable List<SourcePlanes> decodeAllFrameSourcePlanes(String resourceName)
+            throws IOException, URISyntaxException {
+        AVFormatContext formatContext = avformat_alloc_context();
+        if (formatContext == null) {
+            throw new IOException("Failed to allocate FFmpeg format context");
+        }
+
+        try {
+            Path path = resourcePath(resourceName);
+            check(avformat_open_input(formatContext, path.toString(), null, null), "open input: " + resourceName);
+            check(avformat_find_stream_info(formatContext, (PointerPointer<?>) null), "find stream info: " + resourceName);
+            if (firstTileGridReference(formatContext, resourceName) != null) {
+                throw new IOException("All-frame source-plane decoding does not support tile grids: " + resourceName);
+            }
+            int videoStreamIndex = findLongestVideoStream(formatContext);
+            if (videoStreamIndex < 0) {
+                throw new IOException("FFmpeg found no video stream: " + resourceName);
+            }
+            return decodeAllFrameSourcePlanes(formatContext, videoStreamIndex, resourceName);
         } finally {
             avformat_close_input(formatContext);
         }
@@ -315,6 +351,86 @@ public final class FFmpegAvifReferenceDecoder {
             av_packet_free(packet);
             av_frame_free(frame);
             avcodec_free_context(codecContext);
+        }
+    }
+
+    /// Decodes every frame from one selected FFmpeg stream and copies its source planes.
+    ///
+    /// @param formatContext the opened format context
+    /// @param videoStreamIndex the selected video stream index
+    /// @param label the diagnostic label
+    /// @return the decoded source planes in presentation order
+    /// @throws IOException if FFmpeg decoding fails
+    private static @Unmodifiable List<SourcePlanes> decodeAllFrameSourcePlanes(
+            AVFormatContext formatContext,
+            int videoStreamIndex,
+            String label
+    ) throws IOException {
+        AVCodecParameters parameters = formatContext.streams(videoStreamIndex).codecpar();
+        AVCodec codec = avcodec_find_decoder(parameters.codec_id());
+        if (codec == null) {
+            throw new IOException("FFmpeg found no decoder for video stream: " + label);
+        }
+
+        AVCodecContext codecContext = avcodec_alloc_context3(codec);
+        if (codecContext == null) {
+            throw new IOException("Failed to allocate FFmpeg codec context: " + label);
+        }
+        AVPacket packet = av_packet_alloc();
+        AVFrame frame = av_frame_alloc();
+        if (packet == null || frame == null) {
+            av_packet_free(packet);
+            av_frame_free(frame);
+            avcodec_free_context(codecContext);
+            throw new IOException("Failed to allocate FFmpeg decode buffers: " + label);
+        }
+
+        try {
+            check(avcodec_parameters_to_context(codecContext, parameters), "copy codec parameters: " + label);
+            check(avcodec_open2(codecContext, codec, (PointerPointer<?>) null), "open decoder: " + label);
+            List<SourcePlanes> frames = new ArrayList<>();
+            while (av_read_frame(formatContext, packet) >= 0) {
+                try {
+                    if (packet.stream_index() == videoStreamIndex) {
+                        check(avcodec_send_packet(codecContext, packet), "send packet: " + label);
+                        drainSourceFrames(codecContext, frame, label, frames);
+                    }
+                } finally {
+                    av_packet_unref(packet);
+                }
+            }
+            check(avcodec_send_packet(codecContext, null), "flush decoder: " + label);
+            drainSourceFrames(codecContext, frame, label, frames);
+            if (frames.isEmpty()) {
+                throw new IOException("FFmpeg produced no decoded frame: " + label);
+            }
+            return List.copyOf(frames);
+        } finally {
+            av_packet_free(packet);
+            av_frame_free(frame);
+            avcodec_free_context(codecContext);
+        }
+    }
+
+    /// Receives every currently available source-plane frame from one decoder.
+    ///
+    /// @param codecContext the opened codec context
+    /// @param frame the reusable destination frame
+    /// @param label the diagnostic label
+    /// @param destination the destination frame list
+    /// @throws IOException if FFmpeg decoding or plane copying fails
+    private static void drainSourceFrames(
+            AVCodecContext codecContext,
+            AVFrame frame,
+            String label,
+            List<SourcePlanes> destination
+    ) throws IOException {
+        while (true) {
+            @Nullable SourcePlanes planes = receiveFrameSourcePlanes(codecContext, frame, label);
+            if (planes == null) {
+                return;
+            }
+            destination.add(planes);
         }
     }
 
@@ -477,7 +593,7 @@ public final class FFmpegAvifReferenceDecoder {
             rgbaFrame.format(AV_PIX_FMT_RGBA);
             rgbaFrame.width(width);
             rgbaFrame.height(height);
-            check(av_frame_get_buffer(rgbaFrame, 1), "allocate RGBA frame: " + label);
+            check(av_frame_get_buffer(rgbaFrame, 0), "allocate RGBA frame: " + label);
 
             swsContext = sws_getContext(
                     width,
@@ -1045,6 +1161,27 @@ public final class FFmpegAvifReferenceDecoder {
             }
         }
         return -1;
+    }
+
+    /// Finds the video stream declaring the largest frame count in an opened format context.
+    ///
+    /// AVIFS resources may expose a one-frame primary item before their timed sequence track. A
+    /// tie retains the earliest video stream.
+    ///
+    /// @param formatContext the opened format context
+    /// @return the zero-based video stream index, or -1
+    private static int findLongestVideoStream(AVFormatContext formatContext) {
+        int selectedIndex = -1;
+        long selectedFrameCount = -1;
+        int streamCount = formatContext.nb_streams();
+        for (int i = 0; i < streamCount; i++) {
+            AVStream stream = formatContext.streams(i);
+            if (stream.codecpar().codec_type() == AVMEDIA_TYPE_VIDEO && stream.nb_frames() > selectedFrameCount) {
+                selectedIndex = i;
+                selectedFrameCount = stream.nb_frames();
+            }
+        }
+        return selectedIndex;
     }
 
     /// Returns the chroma plane width for one luma width and AVIF pixel format.

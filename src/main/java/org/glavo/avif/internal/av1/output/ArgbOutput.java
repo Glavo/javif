@@ -28,12 +28,11 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.Objects;
 
-/// Internal entry points for converting `DecodedPlanes` into opaque ARGB output.
+/// Internal entry points for converting complete `DecodedPlanes` snapshots into opaque ARGB output.
 ///
-/// The current implementation supports 8-bit and 10/12-bit `DecodedFrame`
-/// conversion with point-sampled chroma expansion for `I420`, `I422`, and `I444`. The render
-/// rectangle is copied directly from the top-left portion of the coded planes, so render upscaling
-/// is intentionally unsupported here.
+/// Conversion covers every stored luma sample and uses point-sampled chroma expansion for `I420`,
+/// `I422`, and `I444`. AV1 render dimensions are display hints and do not crop or resample the
+/// decoded planes.
 @NotNullByDefault
 public final class ArgbOutput {
     /// The default YUV-to-RGB transform used by convenience overloads.
@@ -62,9 +61,9 @@ public final class ArgbOutput {
         DecodedPlanes checkedDecodedPlanes = requireIntOutputDecodedPlanes(decodedPlanes);
         YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
 
-        int renderWidth = checkedDecodedPlanes.renderWidth();
-        int renderHeight = checkedDecodedPlanes.renderHeight();
-        int pixelCount = checkedPixelCount(renderWidth, renderHeight);
+        int outputWidth = checkedDecodedPlanes.codedWidth();
+        int outputHeight = checkedDecodedPlanes.codedHeight();
+        int pixelCount = checkedPixelCount(outputWidth, outputHeight);
         int[] pixels = new int[pixelCount];
 
         AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
@@ -72,8 +71,8 @@ public final class ArgbOutput {
         return switch (pixelFormat) {
             case I400 -> convertOpaqueI400(
                     checkedDecodedPlanes.lumaPlane(),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -82,8 +81,8 @@ public final class ArgbOutput {
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -92,8 +91,8 @@ public final class ArgbOutput {
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -102,8 +101,8 @@ public final class ArgbOutput {
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -178,13 +177,15 @@ public final class ArgbOutput {
         OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
         int[] pixels = toOpaqueArgbPixels(checkedDecodedPlanes, transform);
         return new DecodedFrame(
-                checkedDecodedPlanes.renderWidth(),
-                checkedDecodedPlanes.renderHeight(),
+                checkedDecodedPlanes.codedWidth(),
+                checkedDecodedPlanes.codedHeight(),
                 AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),
                 checkedDecodedPlanes.pixelFormat(),
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),
                 checkedMetadata.presentationIndex(),
+                checkedMetadata.temporalId(),
+                checkedMetadata.spatialId(),
                 IntBuffer.wrap(pixels).asReadOnlyBuffer()
         );
     }
@@ -208,9 +209,9 @@ public final class ArgbOutput {
         DecodedPlanes checkedDecodedPlanes = requireLongOutputDecodedPlanes(decodedPlanes);
         YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
 
-        int renderWidth = checkedDecodedPlanes.renderWidth();
-        int renderHeight = checkedDecodedPlanes.renderHeight();
-        int pixelCount = checkedPixelCount(renderWidth, renderHeight);
+        int outputWidth = checkedDecodedPlanes.codedWidth();
+        int outputHeight = checkedDecodedPlanes.codedHeight();
+        int pixelCount = checkedPixelCount(outputWidth, outputHeight);
         long[] pixels = new long[pixelCount];
 
         AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
@@ -218,8 +219,8 @@ public final class ArgbOutput {
         return switch (pixelFormat) {
             case I400 -> convertOpaqueLongI400(
                     checkedDecodedPlanes.lumaPlane(),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -228,8 +229,8 @@ public final class ArgbOutput {
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -238,8 +239,8 @@ public final class ArgbOutput {
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -248,8 +249,8 @@ public final class ArgbOutput {
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    renderWidth,
-                    renderHeight,
+                    outputWidth,
+                    outputHeight,
                     bitDepth,
                     pixels,
                     checkedTransform
@@ -321,36 +322,17 @@ public final class ArgbOutput {
         OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
         long[] pixels = toOpaqueArgbLongPixels(checkedDecodedPlanes, transform);
         return new DecodedFrame(
-                checkedDecodedPlanes.renderWidth(),
-                checkedDecodedPlanes.renderHeight(),
+                checkedDecodedPlanes.codedWidth(),
+                checkedDecodedPlanes.codedHeight(),
                 AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),
                 checkedDecodedPlanes.pixelFormat(),
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),
                 checkedMetadata.presentationIndex(),
+                checkedMetadata.temporalId(),
+                checkedMetadata.spatialId(),
                 LongBuffer.wrap(pixels).asReadOnlyBuffer()
         );
-    }
-
-    /// Validates that one decoded-plane snapshot is renderable by this output layer.
-    ///
-    /// @param decodedPlanes the decoded planes to validate
-    /// @return the validated decoded planes
-    private static DecodedPlanes requireRenderableDecodedPlanes(DecodedPlanes decodedPlanes) {
-        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
-        if (checkedDecodedPlanes.renderWidth() > checkedDecodedPlanes.codedWidth()) {
-            throw new IllegalArgumentException(
-                    "renderWidth exceeds codedWidth and would require resampling: "
-                            + checkedDecodedPlanes.renderWidth() + " > " + checkedDecodedPlanes.codedWidth()
-            );
-        }
-        if (checkedDecodedPlanes.renderHeight() > checkedDecodedPlanes.codedHeight()) {
-            throw new IllegalArgumentException(
-                    "renderHeight exceeds codedHeight and would require resampling: "
-                            + checkedDecodedPlanes.renderHeight() + " > " + checkedDecodedPlanes.codedHeight()
-            );
-        }
-        return checkedDecodedPlanes;
     }
 
     /// Validates that one decoded-plane snapshot is supported by 8-bit output.
@@ -358,12 +340,13 @@ public final class ArgbOutput {
     /// @param decodedPlanes the decoded planes to validate
     /// @return the validated decoded planes
     private static DecodedPlanes requireIntOutputDecodedPlanes(DecodedPlanes decodedPlanes) {
-        DecodedPlanes checkedDecodedPlanes = requireRenderableDecodedPlanes(decodedPlanes);
+        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         if (checkedDecodedPlanes.bitDepth() != 8
                 && checkedDecodedPlanes.bitDepth() != 10
-                && checkedDecodedPlanes.bitDepth() != 12) {
+                && checkedDecodedPlanes.bitDepth() != 12
+                && checkedDecodedPlanes.bitDepth() != 16) {
             throw new IllegalArgumentException(
-                    "8-bit ARGB output requires 8-bit, 10-bit, or 12-bit decoded planes: "
+                    "8-bit ARGB output requires 8-bit, 10-bit, 12-bit, or 16-bit decoded planes: "
                             + checkedDecodedPlanes.bitDepth()
             );
         }
@@ -375,28 +358,29 @@ public final class ArgbOutput {
     /// @param decodedPlanes the decoded planes to validate
     /// @return the validated decoded planes
     private static DecodedPlanes requireLongOutputDecodedPlanes(DecodedPlanes decodedPlanes) {
-        DecodedPlanes checkedDecodedPlanes = requireRenderableDecodedPlanes(decodedPlanes);
+        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         if (checkedDecodedPlanes.bitDepth() != 8
                 && checkedDecodedPlanes.bitDepth() != 10
-                && checkedDecodedPlanes.bitDepth() != 12) {
+                && checkedDecodedPlanes.bitDepth() != 12
+                && checkedDecodedPlanes.bitDepth() != 16) {
             throw new IllegalArgumentException(
-                    "High-bit-depth ARGB output requires 8-bit, 10-bit, or 12-bit decoded planes: "
+                    "High-bit-depth ARGB output requires 8-bit, 10-bit, 12-bit, or 16-bit decoded planes: "
                             + checkedDecodedPlanes.bitDepth()
             );
         }
         return checkedDecodedPlanes;
     }
 
-    /// Validates one render-area size and returns its pixel count.
+    /// Validates one output size and returns its pixel count.
     ///
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
-    /// @return the render-area pixel count
-    private static int checkedPixelCount(int renderWidth, int renderHeight) {
+    /// @param outputWidth the output width
+    /// @param outputHeight the output height
+    /// @return the output pixel count
+    private static int checkedPixelCount(int outputWidth, int outputHeight) {
         try {
-            return Math.multiplyExact(renderWidth, renderHeight);
+            return Math.multiplyExact(outputWidth, outputHeight);
         } catch (ArithmeticException exception) {
-            throw new IllegalArgumentException("render area is too large", exception);
+            throw new IllegalArgumentException("output area is too large", exception);
         }
     }
 
@@ -415,26 +399,26 @@ public final class ArgbOutput {
     /// Converts one monochrome plane snapshot into opaque grayscale ARGB pixels.
     ///
     /// @param lumaPlane the decoded luma plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for grayscale expansion
     /// @return the filled destination pixel buffer
     private static int[] convertOpaqueI400(
             DecodedPlane lumaPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             int[] pixels,
             YuvToRgbTransform transform
     ) {
         short[] lumaSamples = lumaPlane.samples();
         int lumaStride = lumaPlane.stride();
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
-            int pixelRow = y * renderWidth;
-            for (int x = 0; x < renderWidth; x++) {
+            int pixelRow = y * outputWidth;
+            for (int x = 0; x < outputWidth; x++) {
                 pixels[pixelRow + x] = transform.toOpaqueGrayArgb(lumaSamples[lumaRow + x] & 0xFFFF, bitDepth);
             }
         }
@@ -444,26 +428,26 @@ public final class ArgbOutput {
     /// Converts one monochrome plane snapshot into opaque 16-bit-per-channel grayscale ARGB pixels.
     ///
     /// @param lumaPlane the decoded luma plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for grayscale expansion
     /// @return the filled destination pixel buffer
     private static long[] convertOpaqueLongI400(
             DecodedPlane lumaPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             long[] pixels,
             YuvToRgbTransform transform
     ) {
         short[] lumaSamples = lumaPlane.samples();
         int lumaStride = lumaPlane.stride();
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
-            int pixelRow = y * renderWidth;
-            for (int x = 0; x < renderWidth; x++) {
+            int pixelRow = y * outputWidth;
+            for (int x = 0; x < outputWidth; x++) {
                 pixels[pixelRow + x] = transform.toOpaqueGrayArgb64(lumaSamples[lumaRow + x] & 0xFFFF, bitDepth);
             }
         }
@@ -475,8 +459,8 @@ public final class ArgbOutput {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
     /// @param chromaVPlane the decoded chroma V plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
@@ -485,8 +469,8 @@ public final class ArgbOutput {
             DecodedPlane lumaPlane,
             DecodedPlane chromaUPlane,
             DecodedPlane chromaVPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             int[] pixels,
             YuvToRgbTransform transform
@@ -498,14 +482,14 @@ public final class ArgbOutput {
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
 
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int chromaURow = (y >> 1) * chromaUStride;
             int chromaVRow = (y >> 1) * chromaVStride;
-            int pixelRow = y * renderWidth;
+            int pixelRow = y * outputWidth;
 
             int x = 0;
-            for (; x + 1 < renderWidth; x += 2) {
+            for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
@@ -525,7 +509,7 @@ public final class ArgbOutput {
                 );
             }
 
-            if (x < renderWidth) {
+            if (x < outputWidth) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
@@ -545,8 +529,8 @@ public final class ArgbOutput {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
     /// @param chromaVPlane the decoded chroma V plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
@@ -555,8 +539,8 @@ public final class ArgbOutput {
             DecodedPlane lumaPlane,
             DecodedPlane chromaUPlane,
             DecodedPlane chromaVPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             long[] pixels,
             YuvToRgbTransform transform
@@ -568,14 +552,14 @@ public final class ArgbOutput {
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
 
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int chromaURow = (y >> 1) * chromaUStride;
             int chromaVRow = (y >> 1) * chromaVStride;
-            int pixelRow = y * renderWidth;
+            int pixelRow = y * outputWidth;
 
             int x = 0;
-            for (; x + 1 < renderWidth; x += 2) {
+            for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
@@ -590,7 +574,7 @@ public final class ArgbOutput {
                 );
             }
 
-            if (x < renderWidth) {
+            if (x < outputWidth) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb64(
@@ -609,8 +593,8 @@ public final class ArgbOutput {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
     /// @param chromaVPlane the decoded chroma V plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
@@ -619,8 +603,8 @@ public final class ArgbOutput {
             DecodedPlane lumaPlane,
             DecodedPlane chromaUPlane,
             DecodedPlane chromaVPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             int[] pixels,
             YuvToRgbTransform transform
@@ -632,14 +616,14 @@ public final class ArgbOutput {
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
 
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int chromaURow = y * chromaUStride;
             int chromaVRow = y * chromaVStride;
-            int pixelRow = y * renderWidth;
+            int pixelRow = y * outputWidth;
 
             int x = 0;
-            for (; x + 1 < renderWidth; x += 2) {
+            for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
@@ -659,7 +643,7 @@ public final class ArgbOutput {
                 );
             }
 
-            if (x < renderWidth) {
+            if (x < outputWidth) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
@@ -679,8 +663,8 @@ public final class ArgbOutput {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
     /// @param chromaVPlane the decoded chroma V plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
@@ -689,8 +673,8 @@ public final class ArgbOutput {
             DecodedPlane lumaPlane,
             DecodedPlane chromaUPlane,
             DecodedPlane chromaVPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             long[] pixels,
             YuvToRgbTransform transform
@@ -702,14 +686,14 @@ public final class ArgbOutput {
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
 
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int chromaURow = y * chromaUStride;
             int chromaVRow = y * chromaVStride;
-            int pixelRow = y * renderWidth;
+            int pixelRow = y * outputWidth;
 
             int x = 0;
-            for (; x + 1 < renderWidth; x += 2) {
+            for (; x + 1 < outputWidth; x += 2) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 int uSample = chromaUSamples[chromaIndexU] & 0xFFFF;
@@ -724,7 +708,7 @@ public final class ArgbOutput {
                 );
             }
 
-            if (x < renderWidth) {
+            if (x < outputWidth) {
                 int chromaIndexU = chromaURow + (x >> 1);
                 int chromaIndexV = chromaVRow + (x >> 1);
                 pixels[pixelRow + x] = transform.toOpaqueArgb64(
@@ -743,8 +727,8 @@ public final class ArgbOutput {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
     /// @param chromaVPlane the decoded chroma V plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
@@ -753,8 +737,8 @@ public final class ArgbOutput {
             DecodedPlane lumaPlane,
             DecodedPlane chromaUPlane,
             DecodedPlane chromaVPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             int[] pixels,
             YuvToRgbTransform transform
@@ -766,12 +750,12 @@ public final class ArgbOutput {
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
 
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int chromaURow = y * chromaUStride;
             int chromaVRow = y * chromaVStride;
-            int pixelRow = y * renderWidth;
-            for (int x = 0; x < renderWidth; x++) {
+            int pixelRow = y * outputWidth;
+            for (int x = 0; x < outputWidth; x++) {
                 pixels[pixelRow + x] = transform.toOpaqueArgb(
                         lumaSamples[lumaRow + x] & 0xFFFF,
                         chromaUSamples[chromaURow + x] & 0xFFFF,
@@ -789,8 +773,8 @@ public final class ArgbOutput {
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
     /// @param chromaVPlane the decoded chroma V plane
-    /// @param renderWidth the presentation render width
-    /// @param renderHeight the presentation render height
+    /// @param outputWidth the decoded output width
+    /// @param outputHeight the decoded output height
     /// @param bitDepth the decoded sample bit depth
     /// @param pixels the destination ARGB pixel buffer
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
@@ -799,8 +783,8 @@ public final class ArgbOutput {
             DecodedPlane lumaPlane,
             DecodedPlane chromaUPlane,
             DecodedPlane chromaVPlane,
-            int renderWidth,
-            int renderHeight,
+            int outputWidth,
+            int outputHeight,
             int bitDepth,
             long[] pixels,
             YuvToRgbTransform transform
@@ -812,12 +796,12 @@ public final class ArgbOutput {
         int chromaUStride = chromaUPlane.stride();
         int chromaVStride = chromaVPlane.stride();
 
-        for (int y = 0; y < renderHeight; y++) {
+        for (int y = 0; y < outputHeight; y++) {
             int lumaRow = y * lumaStride;
             int chromaURow = y * chromaUStride;
             int chromaVRow = y * chromaVStride;
-            int pixelRow = y * renderWidth;
-            for (int x = 0; x < renderWidth; x++) {
+            int pixelRow = y * outputWidth;
+            for (int x = 0; x < outputWidth; x++) {
                 pixels[pixelRow + x] = transform.toOpaqueArgb64(
                         lumaSamples[lumaRow + x] & 0xFFFF,
                         chromaUSamples[chromaURow + x] & 0xFFFF,

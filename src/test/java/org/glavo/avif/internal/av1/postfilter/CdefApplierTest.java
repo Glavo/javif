@@ -26,6 +26,7 @@ import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
+import org.glavo.avif.internal.bmff.AvifImageSource;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -56,7 +57,8 @@ final class CdefApplierTest {
     void applyUsesZeroDirectionForSecondaryOnlyStrength() throws IOException, URISyntaxException {
         byte[] bytes = TestResources.readBytes(KODIM23_RESOURCE);
         AvifContainer container = AvifContainerParser.parse(bytes);
-        ByteBuffer primaryPayload = Objects.requireNonNull(container.primaryItemPayload(), "primaryItemPayload");
+        AvifImageSource primarySource = Objects.requireNonNull(container.primarySource(), "primarySource");
+        ByteBuffer primaryPayload = primarySource.payload(0);
         try (Av1ImageReader reader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(primaryPayload),
                 Av1DecoderConfig.DEFAULT

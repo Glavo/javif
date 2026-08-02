@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,9 +37,7 @@ final class Av1DecoderConfigTest {
         assertFalse(config.outputInvisibleFrames());
         assertEquals(DecodeFrameType.ALL, config.decodeFrameType());
         assertEquals(0, config.operatingPoint());
-        assertTrue(config.allLayers());
         assertEquals(0, config.frameSizeLimit());
-        assertEquals(1, config.threadCount());
     }
 
     /// Verifies that invalid operating points are rejected.
@@ -48,15 +47,32 @@ final class Av1DecoderConfigTest {
         assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.builder().operatingPoint(32).build());
     }
 
+    /// Verifies that changing only the operating point retains every other decoder option.
+    @Test
+    void withOperatingPointRetainsOtherSettings() {
+        Av1DecoderConfig config = Av1DecoderConfig.builder()
+                .applyFilmGrain(false)
+                .strictStdCompliance(true)
+                .outputInvisibleFrames(true)
+                .decodeFrameType(DecodeFrameType.REFERENCE)
+                .operatingPoint(2)
+                .frameSizeLimit(1234)
+                .build();
+
+        assertSame(config, config.withOperatingPoint(2));
+        Av1DecoderConfig changed = config.withOperatingPoint(7);
+        assertFalse(changed.applyFilmGrain());
+        assertTrue(changed.strictStdCompliance());
+        assertTrue(changed.outputInvisibleFrames());
+        assertEquals(DecodeFrameType.REFERENCE, changed.decodeFrameType());
+        assertEquals(7, changed.operatingPoint());
+        assertEquals(1234, changed.frameSizeLimit());
+        assertThrows(IllegalArgumentException.class, () -> config.withOperatingPoint(32));
+    }
+
     /// Verifies that negative frame size limits are rejected.
     @Test
     void builderRejectsNegativeFrameSizeLimit() {
         assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.builder().frameSizeLimit(-1).build());
-    }
-
-    /// Verifies that non-positive thread counts are rejected.
-    @Test
-    void builderRejectsNonPositiveThreadCount() {
-        assertThrows(IllegalArgumentException.class, () -> Av1DecoderConfig.builder().threadCount(0).build());
     }
 }

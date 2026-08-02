@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.output;
 
 import org.glavo.avif.AvifColorInfo;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.color.CicpColorPrimaries;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
@@ -55,6 +56,12 @@ public final class YuvToRgbTransform {
     /// Limited-range `BT.709` coefficients for nominal 8-bit YUV samples.
     public static final YuvToRgbTransform BT709_LIMITED_RANGE = createMatrixTransform(0.2126, 0.0722, false);
 
+    /// Full-range FCC coefficients for nominal 8-bit YUV samples.
+    public static final YuvToRgbTransform FCC_FULL_RANGE = createMatrixTransform(0.30, 0.11, true);
+
+    /// Limited-range FCC coefficients for nominal 8-bit YUV samples.
+    public static final YuvToRgbTransform FCC_LIMITED_RANGE = createMatrixTransform(0.30, 0.11, false);
+
     /// Full-range `BT.2020` non-constant-luminance coefficients for nominal 8-bit YUV samples.
     public static final YuvToRgbTransform BT2020_NCL_FULL_RANGE = createMatrixTransform(0.2627, 0.0593, true);
 
@@ -67,11 +74,19 @@ public final class YuvToRgbTransform {
     /// Limited-range `SMPTE 240M` coefficients for nominal 8-bit YUV samples.
     public static final YuvToRgbTransform SMPTE240M_LIMITED_RANGE = createMatrixTransform(0.2120, 0.0870, false);
 
+    /// Full-range `YCgCo` inverse transform for equal-depth component samples.
+    public static final YuvToRgbTransform YCGCO_FULL_RANGE = createYcgcoTransform(true);
+
+    /// Limited-range `YCgCo` inverse transform for equal-depth component samples.
+    public static final YuvToRgbTransform YCGCO_LIMITED_RANGE = createYcgcoTransform(false);
+
     /// Full-range RGB identity mapping used by AV1 identity matrix signaling.
     public static final YuvToRgbTransform RGB_IDENTITY = new YuvToRgbTransform(
             0,
             0,
             65_536,
+            0,
+            0,
             0,
             0,
             0,
@@ -88,6 +103,9 @@ public final class YuvToRgbTransform {
     /// The fixed-point luma coefficient shared by every output channel.
     private final int lumaCoefficient;
 
+    /// The fixed-point red-from-U coefficient.
+    private final int redCoefficientU;
+
     /// The fixed-point red-from-V coefficient.
     private final int redCoefficientV;
 
@@ -99,6 +117,9 @@ public final class YuvToRgbTransform {
 
     /// The fixed-point blue-from-U coefficient.
     private final int blueCoefficientU;
+
+    /// The fixed-point blue-from-V coefficient.
+    private final int blueCoefficientV;
 
     /// Whether this transform maps AV1 identity-matrix planes directly as RGB samples.
     private final boolean identityMatrix;
@@ -125,32 +146,38 @@ public final class YuvToRgbTransform {
                 lumaOffset,
                 chromaCenter,
                 lumaCoefficient,
+                0,
                 redCoefficientV,
                 greenCoefficientU,
                 greenCoefficientV,
                 blueCoefficientU,
+                0,
                 false
         );
     }
 
-    /// Creates one fixed-point YUV-to-RGB transform for 8-bit sample domains.
+    /// Creates one fixed-point component-to-RGB transform for 8-bit sample domains.
     ///
     /// @param lumaOffset the luma offset removed before matrix multiplication
     /// @param chromaCenter the neutral chroma sample value
     /// @param lumaCoefficient the fixed-point luma coefficient shared by every output channel
+    /// @param redCoefficientU the fixed-point red-from-U coefficient
     /// @param redCoefficientV the fixed-point red-from-V coefficient
     /// @param greenCoefficientU the fixed-point green-from-U coefficient
     /// @param greenCoefficientV the fixed-point green-from-V coefficient
     /// @param blueCoefficientU the fixed-point blue-from-U coefficient
+    /// @param blueCoefficientV the fixed-point blue-from-V coefficient
     /// @param identityMatrix whether this transform maps identity-matrix planes directly as RGB
     private YuvToRgbTransform(
             int lumaOffset,
             int chromaCenter,
             int lumaCoefficient,
+            int redCoefficientU,
             int redCoefficientV,
             int greenCoefficientU,
             int greenCoefficientV,
             int blueCoefficientU,
+            int blueCoefficientV,
             boolean identityMatrix
     ) {
         if (lumaOffset < 0) {
@@ -165,10 +192,12 @@ public final class YuvToRgbTransform {
         this.lumaOffset = lumaOffset;
         this.chromaCenter = chromaCenter;
         this.lumaCoefficient = lumaCoefficient;
+        this.redCoefficientU = redCoefficientU;
         this.redCoefficientV = redCoefficientV;
         this.greenCoefficientU = greenCoefficientU;
         this.greenCoefficientV = greenCoefficientV;
         this.blueCoefficientU = blueCoefficientU;
+        this.blueCoefficientV = blueCoefficientV;
         this.identityMatrix = identityMatrix;
     }
 
@@ -185,7 +214,12 @@ public final class YuvToRgbTransform {
     public static YuvToRgbTransform fromColorConfig(SequenceHeader.ColorConfig colorConfig) {
         SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         boolean fullRange = checkedColorConfig.colorRange();
-        return fromMatrixCoefficients(checkedColorConfig.matrixCoefficients(), fullRange, checkedColorConfig.monochrome());
+        return fromMatrixCoefficients(
+                checkedColorConfig.matrixCoefficients(),
+                checkedColorConfig.colorPrimaries(),
+                fullRange,
+                checkedColorConfig.monochrome()
+        );
     }
 
     /// Selects a display transform for one AVIF container `nclx` color property.
@@ -202,6 +236,7 @@ public final class YuvToRgbTransform {
         AvifColorInfo checkedColorInfo = Objects.requireNonNull(colorInfo, "colorInfo");
         return fromMatrixCoefficients(
                 checkedColorInfo.matrixCoefficients(),
+                checkedColorInfo.colorPrimaries(),
                 checkedColorInfo.fullRange(),
                 monochrome
         );
@@ -210,12 +245,14 @@ public final class YuvToRgbTransform {
     /// Selects a display transform from CICP matrix coefficients and sample-range signaling.
     ///
     /// @param matrixCoefficients the CICP matrix coefficients value
+    /// @param colorPrimaries the CICP color-primary value used by chromaticity-derived matrices
     /// @param fullRange whether samples are full range
     /// @param monochrome whether the decoded planes are monochrome
     /// @return the selected fixed-point YUV-to-RGB transform
     /// @throws UnsupportedOperationException if chroma planes use an unsupported explicit matrix family
     private static YuvToRgbTransform fromMatrixCoefficients(
             int matrixCoefficients,
+            int colorPrimaries,
             boolean fullRange,
             boolean monochrome
     ) {
@@ -226,13 +263,29 @@ public final class YuvToRgbTransform {
             case 0 -> RGB_IDENTITY;
             case 1 -> fullRange ? BT709_FULL_RANGE : BT709_LIMITED_RANGE;
             case 2 -> defaultTransform(fullRange);
+            case 4 -> fullRange ? FCC_FULL_RANGE : FCC_LIMITED_RANGE;
             case 5, 6 -> fullRange ? BT601_FULL_RANGE : BT601_LIMITED_RANGE;
             case 7 -> fullRange ? SMPTE240M_FULL_RANGE : SMPTE240M_LIMITED_RANGE;
+            case 8 -> fullRange ? YCGCO_FULL_RANGE : YCGCO_LIMITED_RANGE;
             case 9 -> fullRange ? BT2020_NCL_FULL_RANGE : BT2020_NCL_LIMITED_RANGE;
+            case 12 -> chromaticityDerivedTransform(colorPrimaries, fullRange);
             default -> throw new UnsupportedOperationException(
                     "Unsupported CICP matrix coefficients: " + matrixCoefficients
             );
         };
+    }
+
+    /// Creates a non-constant-luminance transform from signaled color-primary chromaticities.
+    ///
+    /// @param colorPrimaries the CICP color-primary value
+    /// @param fullRange whether samples are full range
+    /// @return the chromaticity-derived transform
+    /// @throws UnsupportedOperationException if the color-primary code is unsupported
+    /// @throws IllegalStateException if the primary definition cannot produce luma coefficients
+    private static YuvToRgbTransform chromaticityDerivedTransform(int colorPrimaries, boolean fullRange) {
+        CicpColorPrimaries.LumaCoefficients coefficients =
+                CicpColorPrimaries.resolveForMatrix(colorPrimaries).lumaCoefficients();
+        return createMatrixTransform(coefficients.red(), coefficients.blue(), fullRange);
     }
 
     /// Returns the luma offset removed before matrix multiplication.
@@ -254,6 +307,13 @@ public final class YuvToRgbTransform {
     /// @return the fixed-point luma coefficient shared by every output channel
     public int lumaCoefficient() {
         return lumaCoefficient;
+    }
+
+    /// Returns the fixed-point red-from-U coefficient.
+    ///
+    /// @return the fixed-point red-from-U coefficient
+    public int redCoefficientU() {
+        return redCoefficientU;
     }
 
     /// Returns the fixed-point red-from-V coefficient.
@@ -282,6 +342,13 @@ public final class YuvToRgbTransform {
     /// @return the fixed-point blue-from-U coefficient
     public int blueCoefficientU() {
         return blueCoefficientU;
+    }
+
+    /// Returns the fixed-point blue-from-V coefficient.
+    ///
+    /// @return the fixed-point blue-from-V coefficient
+    public int blueCoefficientV() {
+        return blueCoefficientV;
     }
 
     /// Converts one luma sample with neutral chroma into an opaque grayscale ARGB pixel.
@@ -328,11 +395,15 @@ public final class YuvToRgbTransform {
         int centeredU = uSample - chromaCenter;
         int centeredV = vSample - chromaCenter;
 
-        int red = clampToByte((scaledLuma + centeredV * redCoefficientV + ROUNDING) >> FRACTION_BITS);
+        int red = clampToByte(
+                (scaledLuma + centeredU * redCoefficientU + centeredV * redCoefficientV + ROUNDING) >> FRACTION_BITS
+        );
         int green = clampToByte(
                 (scaledLuma + centeredU * greenCoefficientU + centeredV * greenCoefficientV + ROUNDING) >> FRACTION_BITS
         );
-        int blue = clampToByte((scaledLuma + centeredU * blueCoefficientU + ROUNDING) >> FRACTION_BITS);
+        int blue = clampToByte(
+                (scaledLuma + centeredU * blueCoefficientU + centeredV * blueCoefficientV + ROUNDING) >> FRACTION_BITS
+        );
         return 0xFF00_0000 | (red << 16) | (green << 8) | blue;
     }
 
@@ -368,7 +439,10 @@ public final class YuvToRgbTransform {
         int centeredV = vSample - scaledChromaCenter;
 
         int red = normalizeHighBitDepthChannel(
-                (int) ((scaledLuma + (long) centeredV * redCoefficientV + ROUNDING) >> FRACTION_BITS),
+                (int) ((scaledLuma
+                        + (long) centeredU * redCoefficientU
+                        + (long) centeredV * redCoefficientV
+                        + ROUNDING) >> FRACTION_BITS),
                 bitDepth,
                 sampleMax
         );
@@ -381,7 +455,10 @@ public final class YuvToRgbTransform {
                 sampleMax
         );
         int blue = normalizeHighBitDepthChannel(
-                (int) ((scaledLuma + (long) centeredU * blueCoefficientU + ROUNDING) >> FRACTION_BITS),
+                (int) ((scaledLuma
+                        + (long) centeredU * blueCoefficientU
+                        + (long) centeredV * blueCoefficientV
+                        + ROUNDING) >> FRACTION_BITS),
                 bitDepth,
                 sampleMax
         );
@@ -431,7 +508,10 @@ public final class YuvToRgbTransform {
         int centeredV = vSample - scaledChromaCenter;
 
         int red = normalizeHighBitDepthChannel(
-                (int) ((scaledLuma + (long) centeredV * redCoefficientV + ROUNDING) >> FRACTION_BITS),
+                (int) ((scaledLuma
+                        + (long) centeredU * redCoefficientU
+                        + (long) centeredV * redCoefficientV
+                        + ROUNDING) >> FRACTION_BITS),
                 bitDepth,
                 sampleMax
         );
@@ -444,7 +524,10 @@ public final class YuvToRgbTransform {
                 sampleMax
         );
         int blue = normalizeHighBitDepthChannel(
-                (int) ((scaledLuma + (long) centeredU * blueCoefficientU + ROUNDING) >> FRACTION_BITS),
+                (int) ((scaledLuma
+                        + (long) centeredU * blueCoefficientU
+                        + (long) centeredV * blueCoefficientV
+                        + ROUNDING) >> FRACTION_BITS),
                 bitDepth,
                 sampleMax
         );
@@ -477,6 +560,29 @@ public final class YuvToRgbTransform {
                 fixed(-2.0 * blueLumaCoefficient * (1.0 - blueLumaCoefficient) / greenLumaCoefficient * chromaScale),
                 fixed(-2.0 * redLumaCoefficient * (1.0 - redLumaCoefficient) / greenLumaCoefficient * chromaScale),
                 fixed(2.0 * (1.0 - blueLumaCoefficient) * chromaScale)
+        );
+    }
+
+    /// Creates the equal-bit-depth inverse `YCgCo` transform defined by H.273.
+    ///
+    /// Limited-range `YCgCo` applies the luma-range scale to every reconstructed RGB component;
+    /// its reversible color-difference samples do not use the conventional 224-code chroma range.
+    ///
+    /// @param fullRange whether nominal full-range component values are used
+    /// @return one fixed-point inverse `YCgCo` transform
+    private static YuvToRgbTransform createYcgcoTransform(boolean fullRange) {
+        double componentScale = fullRange ? 1.0 : 255.0 / 219.0;
+        return new YuvToRgbTransform(
+                fullRange ? 0 : 16,
+                128,
+                fixed(componentScale),
+                fixed(-componentScale),
+                fixed(componentScale),
+                fixed(componentScale),
+                0,
+                fixed(-componentScale),
+                fixed(-componentScale),
+                false
         );
     }
 

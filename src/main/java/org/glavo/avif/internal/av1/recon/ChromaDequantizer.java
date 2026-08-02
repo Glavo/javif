@@ -24,11 +24,10 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
 
-/// Minimal chroma dequantizer for the first residual-producing reconstruction path.
+/// Dequantizes AV1 chroma transform coefficients.
 ///
-/// The current implementation matches the AV1 `8-bit`, `10-bit`, and `12-bit` QTX lookup tables
-/// shared by luma and chroma coefficients, optional frame-level quantization matrices, the
-/// transform-size dequantization shift, and the coefficient saturation behavior used by dav1d.
+/// Applies the AV1 `8-bit`, `10-bit`, and `12-bit` QTX lookup tables, optional frame-level
+/// quantization matrices, transform-size shifts, and coefficient saturation.
 @NotNullByDefault
 final class ChromaDequantizer {
     /// Prevents instantiation of this utility class.
@@ -199,7 +198,7 @@ final class ChromaDequantizer {
         return (128 << bitDepth) - 1;
     }
 
-    /// Minimal chroma dequantization context used by the current reconstruction path.
+    /// Block-local chroma dequantization parameters.
     ///
     /// The block-local `qindex` already includes any superblock-level delta-q updates. Plane-local
     /// DC and AC deltas are carried explicitly so U and V can reuse the same logic with different

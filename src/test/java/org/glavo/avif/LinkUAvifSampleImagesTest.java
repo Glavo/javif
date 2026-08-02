@@ -29,11 +29,9 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Corpus tests for the AVIF files published by `link-u/avif-sample-images`.
@@ -41,16 +39,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class LinkUAvifSampleImagesTest {
     /// The copied sample-image resource root.
     private static final String TEST_DATA_ROOT = "link-u-avif-sample-images";
-
-    /// Sequence samples whose dependent frames require unsupported reference-frame MV projection.
-    private static final @Unmodifiable Set<String> UNSUPPORTED_REFERENCE_FRAME_MV_RESOURCES = Set.of(
-            "link-u-avif-sample-images/star-8bpc.avifs",
-            "link-u-avif-sample-images/star-8bpc-with-alpha.avifs",
-            "link-u-avif-sample-images/star-10bpc.avifs",
-            "link-u-avif-sample-images/star-10bpc-with-alpha.avifs",
-            "link-u-avif-sample-images/star-12bpc.avifs",
-            "link-u-avif-sample-images/star-12bpc-with-alpha.avifs"
-    );
 
     /// Creates one decode-behavior test for every copied AVIF or AVIFS resource.
     ///
@@ -63,7 +51,7 @@ final class LinkUAvifSampleImagesTest {
                 .map(resourceName -> DynamicTest.dynamicTest(resourceName, () -> assertDecodeBehavior(resourceName)));
     }
 
-    /// Verifies successful full decoding or the explicit unsupported-feature boundary for one sample.
+    /// Verifies successful full decoding for one sample.
     ///
     /// @param resourceName the classpath sample resource name
     /// @throws IOException if the sample cannot be read or decoded
@@ -72,16 +60,6 @@ final class LinkUAvifSampleImagesTest {
             AvifImageInfo info = reader.info();
             assertTrue(info.width() > 0, "width");
             assertTrue(info.height() > 0, "height");
-
-            if (UNSUPPORTED_REFERENCE_FRAME_MV_RESOURCES.contains(resourceName)) {
-                AvifFrame firstFrame = Objects.requireNonNull(reader.readFrame(), "firstFrame");
-                assertFrameLayout(firstFrame, 0);
-
-                AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readAllFrames);
-                assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
-                assertEquals("Reference-frame motion-vector projection is not implemented", exception.getMessage());
-                return;
-            }
 
             @Unmodifiable List<AvifFrame> frames = reader.readAllFrames();
             assertEquals(info.frameCount(), frames.size(), "frame count");

@@ -49,13 +49,48 @@ final class TileTransformLayoutReaderTest {
     private static final byte @Unmodifiable [] KEY_FRAME_DEPTH_TWO_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/key-transform-depth-2.hex");
 
-    /// One fixed inter payload whose first 8x8 block splits into four 4x4 transform units.
+    /// One fixed transform-only payload that splits an 8x8 inter block into four 4x4 units.
     private static final byte @Unmodifiable [] INTER_8X8_SPLIT_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/inter-transform-8x8-split.hex");
 
-    /// One fixed inter payload whose first 16x16 block splits into four 8x8 transform units.
+    /// One fixed transform-only payload that splits a 16x16 inter block into four 8x8 units.
     private static final byte @Unmodifiable [] INTER_16X16_SPLIT_PAYLOAD =
             HexFixtureResources.readBytes("av1/fixtures/inter-transform-16x16-split.hex");
+
+    /// Creates one non-skipped single-reference inter header for a transform-layout test.
+    ///
+    /// @param blockSize the tested block size
+    /// @return one synthetic inter block header with no preceding entropy syntax
+    private static TileBlockHeaderReader.BlockHeader interBlockHeader(BlockSize blockSize) {
+        return new TileBlockHeaderReader.BlockHeader(
+                new BlockPosition(0, 0),
+                blockSize,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                false,
+                0,
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+    }
 
     /// Verifies that switchable key-frame transform syntax selects a smaller repeated luma transform size.
     @Test
@@ -202,12 +237,10 @@ final class TileTransformLayoutReaderTest {
                 64,
                 64
         );
-        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
-        TileBlockHeaderReader.BlockHeader header =
-                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext, false);
+        TileBlockHeaderReader.BlockHeader header = interBlockHeader(BlockSize.SIZE_8X8);
         TransformLayout layout = transformLayoutReader.read(header, neighborContext);
 
         assertTrue(layout.variableLumaTransformTree());
@@ -235,12 +268,10 @@ final class TileTransformLayoutReaderTest {
                 64,
                 64
         );
-        TileBlockHeaderReader blockHeaderReader = new TileBlockHeaderReader(tileContext);
         TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
-        TileBlockHeaderReader.BlockHeader header =
-                blockHeaderReader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext, false);
+        TileBlockHeaderReader.BlockHeader header = interBlockHeader(BlockSize.SIZE_16X16);
         TransformLayout layout = transformLayoutReader.read(header, neighborContext);
 
         assertTrue(layout.variableLumaTransformTree());

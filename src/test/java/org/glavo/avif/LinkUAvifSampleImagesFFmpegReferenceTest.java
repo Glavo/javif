@@ -60,6 +60,22 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
                 ));
     }
 
+    /// Creates one all-frame source-plane comparison for each non-alpha AVIFS bit-depth variant.
+    ///
+    /// @return the dynamic sequence-frame reference tests
+    @TestFactory
+    Stream<DynamicTest> sequenceSourcePlanesMatchFFmpeg() {
+        return Stream.of(
+                        "link-u-avif-sample-images/star-8bpc.avifs",
+                        "link-u-avif-sample-images/star-10bpc.avifs",
+                        "link-u-avif-sample-images/star-12bpc.avifs"
+                )
+                .map(resourceName -> DynamicTest.dynamicTest(
+                        resourceName,
+                        () -> assertSequenceSourcePlanesMatchFFmpeg(resourceName)
+                ));
+    }
+
     /// Compares javif's raw first-frame color planes with FFmpeg's decoded source planes.
     ///
     /// @param resourceName the classpath sample resource name
@@ -69,45 +85,75 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
         SourcePlanes expected = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
             AvifPlanes actual = reader.readRawColorPlanes(0);
-            assertEquals(expected.width(), actual.codedWidth(), resourceName + " width");
-            assertEquals(expected.height(), actual.codedHeight(), resourceName + " height");
-            assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), resourceName + " bit depth");
-            assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), resourceName + " pixel format");
+            assertSourcePlanesMatch(resourceName, expected, actual);
+        }
+    }
 
-            assertPlaneMatches(
-                    resourceName + " Y",
-                    expected.width(),
-                    expected.height(),
-                    actual.lumaPlane(),
-                    expected::lumaSample,
-                    actual.bitDepth()
-            );
-            if (expected.sourceMetadata().pixelFormat() == AvifPixelFormat.I400) {
-                assertNull(actual.chromaUPlane(), resourceName + " U plane");
-                assertNull(actual.chromaVPlane(), resourceName + " V plane");
-            } else {
-                AvifPlane chromaUPlane = actual.chromaUPlane();
-                AvifPlane chromaVPlane = actual.chromaVPlane();
-                assertNotNull(chromaUPlane, resourceName + " U plane");
-                assertNotNull(chromaVPlane, resourceName + " V plane");
-                assertPlaneMatches(
-                        resourceName + " U",
-                        expected.chromaWidth(),
-                        expected.chromaHeight(),
-                        chromaUPlane,
-                        expected::chromaUSample,
-                        actual.bitDepth()
-                );
-                assertPlaneMatches(
-                        resourceName + " V",
-                        expected.chromaWidth(),
-                        expected.chromaHeight(),
-                        chromaVPlane,
-                        expected::chromaVSample,
-                        actual.bitDepth()
+    /// Compares every javif sequence frame with FFmpeg's decoded source planes.
+    ///
+    /// @param resourceName the classpath AVIFS resource name
+    /// @throws IOException if the sample cannot be read or decoded
+    /// @throws URISyntaxException if FFmpeg cannot resolve the sample resource path
+    private static void assertSequenceSourcePlanesMatchFFmpeg(String resourceName)
+            throws IOException, URISyntaxException {
+        @Unmodifiable List<SourcePlanes> expectedFrames =
+                FFmpegAvifReferenceDecoder.decodeAllFrameSourcePlanes(resourceName);
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
+            assertEquals(reader.info().frameCount(), expectedFrames.size(), resourceName + " frame count");
+            for (int frameIndex = 0; frameIndex < expectedFrames.size(); frameIndex++) {
+                assertSourcePlanesMatch(
+                        resourceName + " frame " + frameIndex,
+                        expectedFrames.get(frameIndex),
+                        reader.readRawColorPlanes(frameIndex)
                 );
             }
         }
+    }
+
+    /// Compares one javif raw-plane frame with FFmpeg's decoded source planes.
+    ///
+    /// @param label the diagnostic label
+    /// @param expected the FFmpeg source planes
+    /// @param actual the javif source planes
+    private static void assertSourcePlanesMatch(String label, SourcePlanes expected, AvifPlanes actual) {
+        assertEquals(expected.width(), actual.codedWidth(), label + " width");
+        assertEquals(expected.height(), actual.codedHeight(), label + " height");
+        assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), label + " bit depth");
+        assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), label + " pixel format");
+
+        assertPlaneMatches(
+                label + " Y",
+                expected.width(),
+                expected.height(),
+                actual.lumaPlane(),
+                expected::lumaSample,
+                actual.bitDepth()
+        );
+        if (expected.sourceMetadata().pixelFormat() == AvifPixelFormat.I400) {
+            assertNull(actual.chromaUPlane(), label + " U plane");
+            assertNull(actual.chromaVPlane(), label + " V plane");
+            return;
+        }
+        AvifPlane chromaUPlane = actual.chromaUPlane();
+        AvifPlane chromaVPlane = actual.chromaVPlane();
+        assertNotNull(chromaUPlane, label + " U plane");
+        assertNotNull(chromaVPlane, label + " V plane");
+        assertPlaneMatches(
+                label + " U",
+                expected.chromaWidth(),
+                expected.chromaHeight(),
+                chromaUPlane,
+                expected::chromaUSample,
+                actual.bitDepth()
+        );
+        assertPlaneMatches(
+                label + " V",
+                expected.chromaWidth(),
+                expected.chromaHeight(),
+                chromaVPlane,
+                expected::chromaVSample,
+                actual.bitDepth()
+        );
     }
 
     /// Asserts that one decoded color plane remains within the known FFmpeg parity envelope.

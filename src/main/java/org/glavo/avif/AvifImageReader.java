@@ -21,10 +21,13 @@ import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
+import org.glavo.avif.internal.bmff.AvifImageSource;
+import org.glavo.avif.internal.bmff.SampleTransform;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -324,53 +327,46 @@ public final class AvifImageReader implements AutoCloseable {
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
-        if (frameIndex != 0 && !container.isSequence()) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.UNSUPPORTED_FEATURE,
-                    "Indexed AVIF frame decoding beyond the primary still image is not implemented in this slice",
-                    null
-            );
-        }
         if (container.isSequence()) {
             return readSequenceFrameRandomAccess(frameIndex);
         }
-        if (container.isGrid()) {
-            return readGridFrame(frameIndex);
+        SampleTransform sampleTransform = container.sampleTransform();
+        if (sampleTransform != null) {
+            return readSampleTransformedFrame(frameIndex, sampleTransform);
         }
-        ByteBuffer primaryPayload = container.primaryItemPayload();
-        if (primaryPayload == null) {
+        AvifImageSource primarySource = container.primarySource();
+        if (primarySource == null) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item payload is missing", null);
         }
-        try (Av1ImageReader colorReader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(primaryPayload),
-                config.av1DecoderConfig()
-        )) {
-            DecodedFrame colorFrame = colorReader.readFrame();
-            if (colorFrame == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item produced no frame", null);
-            }
-            ByteBuffer alphaPayload = container.alphaItemPayload();
-            AvifFrame rawFrame = adaptFrame(
-                    colorFrame,
-                    colorReader.lastPlanes(),
-                    container.info().colorInfo(),
-                    frameIndex,
-                    config.rgbOutputMode()
+        DecodedRawImage decodedColor = decodeImageSource(primarySource, "Primary AV1 image");
+        AvifFrame rawFrame = adaptRawPlanes(
+                decodedColor.planes(),
+                decodedColor.colorConfig(),
+                container.info().colorInfo(),
+                frameIndex,
+                config.rgbOutputMode()
+        );
+        AvifImageSource alphaSource = container.alphaSource();
+        if (alphaSource != null) {
+            AvifPlanes alphaPlanes = alphaPlanesFromDecodedImage(
+                    decodeImageSource(alphaSource, "Alpha auxiliary AV1 image").planes()
             );
-            if (alphaPayload != null) {
-                rawFrame = adaptFrameWithAlpha(
-                        rawFrame,
-                        alphaPayload,
-                        frameIndex,
-                        container.info().alphaPremultiplied()
+            if (alphaPlanes.codedWidth() != rawFrame.width() || alphaPlanes.codedHeight() != rawFrame.height()) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.AV1_DECODE_FAILED,
+                        "Alpha dimensions differ from color dimensions",
+                        null
                 );
             }
-            return applyTransforms(rawFrame);
-        } catch (AvifDecodeException exception) {
-            throw exception;
-        } catch (IOException exception) {
-            throw wrapAv1DecodeFailure(exception);
+            rawFrame = combineFrameWithAlphaPlane(
+                    rawFrame,
+                    toDecodedPlanes(alphaPlanes),
+                    alphaPlanes.bitDepth(),
+                    frameIndex,
+                    container.info().alphaPremultiplied()
+            );
         }
+        return applyTransforms(rawFrame);
     }
 
     /// Reads raw decoded color planes for the frame at the supplied index.
@@ -390,21 +386,15 @@ public final class AvifImageReader implements AutoCloseable {
         if (container.isSequence()) {
             return readSequenceRawColorPlanes(frameIndex);
         }
-        if (container.isGrid()) {
-            return readGridRawColorPlanes();
+        SampleTransform sampleTransform = container.sampleTransform();
+        if (sampleTransform != null) {
+            return decodeSampleTransform(sampleTransform, false).planes();
         }
-        if (frameIndex != 0) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.UNSUPPORTED_FEATURE,
-                    "Indexed AVIF raw plane decoding beyond the primary still image is not implemented in this slice",
-                    null
-            );
-        }
-        ByteBuffer primaryPayload = container.primaryItemPayload();
-        if (primaryPayload == null) {
+        AvifImageSource primarySource = container.primarySource();
+        if (primarySource == null) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Primary AV1 item payload is missing", null);
         }
-        return decodeRawColorPlanes(primaryPayload, "Primary AV1 item");
+        return decodeImageSource(primarySource, "Primary AV1 image").planes();
     }
 
     /// Reads raw decoded alpha auxiliary planes for the frame at the supplied index.
@@ -434,22 +424,14 @@ public final class AvifImageReader implements AutoCloseable {
                     "Alpha sequence frame"
             ));
         }
-        if (frameIndex != 0) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.UNSUPPORTED_FEATURE,
-                    "Indexed AVIF alpha plane decoding beyond the primary still image is not implemented in this slice",
-                    null
-            );
+        SampleTransform sampleTransform = container.sampleTransform();
+        if (sampleTransform != null) {
+            return decodeSampleTransform(sampleTransform, true).planes();
         }
-        ByteBuffer alphaPayload = container.alphaItemPayload();
-        if (alphaPayload != null) {
-            return alphaPlanesFromDecodedImage(decodeRawColorPlanes(alphaPayload, "Alpha auxiliary AV1 item"));
-        }
-        @Unmodifiable ByteBuffer @Nullable [] alphaCellPayloads = container.gridAlphaCellPayloads();
-        if (alphaCellPayloads != null) {
-            return readGridRawAlphaPlanes(alphaCellPayloads);
-        }
-        return null;
+        AvifImageSource alphaSource = container.alphaSource();
+        return alphaSource != null
+                ? alphaPlanesFromDecodedImage(decodeImageSource(alphaSource, "Alpha auxiliary AV1 image").planes())
+                : null;
     }
 
     /// Reads raw decoded gain-map planes for the frame at the supplied index.
@@ -470,29 +452,9 @@ public final class AvifImageReader implements AutoCloseable {
         if (gainMapInfo == null) {
             return null;
         }
-        if (container.isSequence()) {
-            throw unsupported("Raw gain-map planes for AVIS sequences are not implemented", null);
-        }
-        if (frameIndex != 0) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.UNSUPPORTED_FEATURE,
-                    "Indexed AVIF gain-map plane decoding beyond the primary still image is not implemented in this slice",
-                    null
-            );
-        }
-        ByteBuffer gainMapPayload = container.gainMapItemPayload();
-        if (gainMapPayload != null) {
-            return decodeRawColorPlanes(gainMapPayload, "Gain-map AV1 item");
-        }
-        @Unmodifiable ByteBuffer @Nullable [] gainMapCellPayloads = container.gainMapGridCellPayloads();
-        if (gainMapCellPayloads != null) {
-            return composeGridRawColorPlanes(
-                    decodeGridRawColorPlanes(gainMapCellPayloads),
-                    container.gainMapGridRows(),
-                    container.gainMapGridColumns(),
-                    container.gainMapGridOutputWidth(),
-                    container.gainMapGridOutputHeight()
-            );
+        AvifImageSource gainMapSource = container.gainMapSource();
+        if (gainMapSource != null) {
+            return decodeImageSource(gainMapSource, "Gain-map AV1 image").planes();
         }
         throw unsupported("Gain-map item type is not decodable as AV1 planes: " + gainMapInfo.gainMapItemType(), null);
     }
@@ -501,7 +463,7 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// The returned frame preserves the regular `readFrame(int)` alpha composition, item
     /// transforms, frame index, and RGB storage mode. A `null` return value means the frame has no
-    /// supported gain-map association. AVIS sequence gain maps are not implemented yet.
+    /// supported gain-map association.
     ///
     /// @param frameIndex the zero-based frame index
     /// @param hdrHeadroom the requested display HDR headroom in log2 space
@@ -558,9 +520,6 @@ public final class AvifImageReader implements AutoCloseable {
         if (gainMapInfo == null) {
             return null;
         }
-        if (container.isSequence()) {
-            throw unsupported("Tone mapping AVIS gain-map sequences is not implemented", null);
-        }
         AvifGainMapMetadata metadata = gainMapInfo.metadata();
         if (metadata == null) {
             return null;
@@ -608,26 +567,9 @@ public final class AvifImageReader implements AutoCloseable {
             }
             return readSequenceRawAuxiliaryPlanes(frameIndex, depthPayloads, "Depth sequence frame");
         }
-        if (frameIndex != 0) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.UNSUPPORTED_FEATURE,
-                    "Indexed AVIF depth plane decoding beyond the primary still image is not implemented in this slice",
-                    null
-            );
-        }
-        ByteBuffer depthPayload = container.depthItemPayload();
-        if (depthPayload != null) {
-            return decodeRawColorPlanes(depthPayload, "Depth auxiliary AV1 item");
-        }
-        @Unmodifiable ByteBuffer @Nullable [] depthCellPayloads = container.gridDepthCellPayloads();
-        if (depthCellPayloads != null) {
-            return composeGridRawColorPlanes(
-                    decodeGridRawColorPlanes(depthCellPayloads),
-                    container.gridDepthRows(),
-                    container.gridDepthColumns(),
-                    container.gridDepthOutputWidth(),
-                    container.gridDepthOutputHeight()
-            );
+        AvifImageSource depthSource = container.depthSource();
+        if (depthSource != null) {
+            return decodeImageSource(depthSource, "Depth auxiliary AV1 image").planes();
         }
         if (!hasAuxiliaryType(container.info(), AvifAuxiliaryImageInfo.DEPTH_TYPE)) {
             return null;
@@ -750,108 +692,351 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Decodes raw color planes for one grid-derived still image.
-    ///
-    /// @return raw decoded color planes composed from grid cells
-    /// @throws IOException if decoding fails
-    private AvifPlanes readGridRawColorPlanes() throws IOException {
-        @Unmodifiable ByteBuffer @Nullable [] cellPayloads = container.gridCellPayloads();
-        if (cellPayloads == null || cellPayloads.length == 0) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cell payloads", null);
-        }
-        AvifPlanes[] cellPlanes = decodeGridRawColorPlanes(cellPayloads);
-        return composeGridRawColorPlanes(
-                cellPlanes,
-                container.gridRows(),
-                container.gridColumns(),
-                container.gridOutputWidth(),
-                container.gridOutputHeight()
-        );
-    }
-
-    /// Decodes grid cell payloads into raw color planes.
-    ///
-    /// @param cellPayloads the cell payloads
-    /// @return decoded raw color planes for each cell
-    /// @throws IOException if one cell cannot be decoded
-    private AvifPlanes[] decodeGridRawColorPlanes(@Unmodifiable ByteBuffer @Unmodifiable [] cellPayloads)
-            throws IOException {
-        AvifPlanes[] cellPlanes = new AvifPlanes[cellPayloads.length];
-        for (int i = 0; i < cellPayloads.length; i++) {
-            ByteBuffer payload = cellPayloads[i];
-            if (payload == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid cell payload is null: " + i, null);
-            }
-            cellPlanes[i] = decodeRawColorPlanes(payload, "Grid cell " + i);
-        }
-        return cellPlanes;
-    }
-
-    /// Decodes and composes raw alpha planes for an alpha grid.
-    ///
-    /// @param alphaCellPayloads the alpha grid cell payloads
-    /// @return composed raw alpha planes
-    /// @throws IOException if one alpha grid cell cannot be decoded
-    private AvifPlanes readGridRawAlphaPlanes(@Unmodifiable ByteBuffer @Unmodifiable [] alphaCellPayloads)
-            throws IOException {
-        validateAlphaGridParameters(
-                alphaCellPayloads.length,
-                container.gridAlphaRows(),
-                container.gridAlphaColumns(),
-                container.gridAlphaOutputWidth(),
-                container.gridAlphaOutputHeight()
-        );
-        AvifPlanes[] cellPlanes = decodeGridRawColorPlanes(alphaCellPayloads);
-        AvifBitDepth bitDepth = cellPlanes[0].bitDepth();
-        validateGridRawAlphaPlaneCells(
-                cellPlanes,
-                bitDepth,
-                container.gridAlphaRows(),
-                container.gridAlphaColumns(),
-                container.gridAlphaOutputWidth(),
-                container.gridAlphaOutputHeight()
-        );
-        AvifPlane lumaPlane = composeGridPlane(
-                lumaPlanes(cellPlanes),
-                container.gridAlphaRows(),
-                container.gridAlphaColumns(),
-                container.gridAlphaOutputWidth(),
-                container.gridAlphaOutputHeight()
-        );
-        return new AvifPlanes(
-                bitDepth,
-                AvifPixelFormat.I400,
-                container.gridAlphaOutputWidth(),
-                container.gridAlphaOutputHeight(),
-                container.gridAlphaOutputWidth(),
-                container.gridAlphaOutputHeight(),
-                lumaPlane,
-                null,
-                null
-        );
-    }
-
-    /// Decodes one AV1 payload and returns raw color planes.
+    /// Decodes one AV1 item payload and selects its requested output spatial layer.
     ///
     /// @param payload the AV1 payload to decode
     /// @param label the diagnostic label for failures
-    /// @return raw decoded color planes
+    /// @param operatingPoint the selected AV1 operating-point index
+    /// @param selectedSpatialLayer the selected spatial-layer identifier, or
+    ///        [AvifImageSource#HIGHEST_SPATIAL_LAYER]
+    /// @return decoded raw planes and their AV1 color configuration
     /// @throws IOException if decoding fails
-    private AvifPlanes decodeRawColorPlanes(@Unmodifiable ByteBuffer payload, String label) throws IOException {
+    private DecodedRawImage decodeRawImage(
+            @Unmodifiable ByteBuffer payload,
+            String label,
+            int operatingPoint,
+            int selectedSpatialLayer
+    ) throws IOException {
         try (Av1ImageReader rawReader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(payload),
-                config.av1DecoderConfig()
+                config.av1DecoderConfig().withOperatingPoint(operatingPoint)
         )) {
-            DecodedFrame decodedFrame = rawReader.readFrame();
-            if (decodedFrame == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " produced no frame", null);
+            @Nullable DecodedRawImage selectedImage = null;
+            int highestSpatialId = -1;
+            while (true) {
+                DecodedFrame decodedFrame = rawReader.readFrame();
+                if (decodedFrame == null) {
+                    break;
+                }
+                boolean matchesSelection = selectedSpatialLayer == AvifImageSource.HIGHEST_SPATIAL_LAYER
+                        ? decodedFrame.spatialId() >= highestSpatialId
+                        : decodedFrame.spatialId() == selectedSpatialLayer;
+                if (!matchesSelection) {
+                    continue;
+                }
+                SequenceHeader.ColorConfig colorConfig = rawReader.lastColorConfig();
+                if (colorConfig == null) {
+                    throw new AvifDecodeException(
+                            AvifErrorCode.AV1_DECODE_FAILED,
+                            label + " has no active AV1 color configuration",
+                            null
+                    );
+                }
+                selectedImage = new DecodedRawImage(lastRawColorPlanes(rawReader, label), colorConfig);
+                highestSpatialId = decodedFrame.spatialId();
+                if (selectedSpatialLayer != AvifImageSource.HIGHEST_SPATIAL_LAYER) {
+                    break;
+                }
             }
-            return lastRawColorPlanes(rawReader, label);
+            if (selectedImage == null) {
+                String message = selectedSpatialLayer == AvifImageSource.HIGHEST_SPATIAL_LAYER
+                        ? label + " produced no frame"
+                        : label + " produced no output for selected spatial layer " + selectedSpatialLayer;
+                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, message, null);
+            }
+            return selectedImage;
         } catch (AvifDecodeException exception) {
             throw exception;
         } catch (IOException exception) {
             throw wrapAv1DecodeFailure(exception);
         }
+    }
+
+    /// Decodes and applies one parsed Sample Transform.
+    ///
+    /// @param sampleTransform the parsed Sample Transform
+    /// @param alpha whether to reconstruct alpha rather than color planes
+    /// @return the reconstructed planes and primary-input AV1 color configuration
+    /// @throws IOException if one input image cannot be decoded
+    private DecodedSampleTransform decodeSampleTransform(SampleTransform sampleTransform, boolean alpha)
+            throws IOException {
+        AvifPlanes[] inputPlanes = new AvifPlanes[sampleTransform.inputCount()];
+        @Nullable SequenceHeader.ColorConfig primaryColorConfig = null;
+        for (int inputIndex = 0; inputIndex < sampleTransform.inputCount(); inputIndex++) {
+            SampleTransform.Input input = sampleTransform.input(inputIndex);
+            @Nullable AvifImageSource source = alpha ? input.alphaSource() : input.colorSource();
+            if (source == null) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.BMFF_PARSE_FAILED,
+                        "Sample Transform alpha input is missing: " + inputIndex,
+                        null
+                );
+            }
+            String label = "Sample Transform " + (alpha ? "alpha " : "color ") + "input " + inputIndex;
+            DecodedRawImage decoded = decodeImageSource(source, label);
+            inputPlanes[inputIndex] = alpha ? alphaPlanesFromDecodedImage(decoded.planes()) : decoded.planes();
+            if (inputIndex == sampleTransform.primaryInputIndex()) {
+                primaryColorConfig = decoded.colorConfig();
+            }
+        }
+        if (primaryColorConfig == null) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Sample Transform primary input is missing",
+                    null
+            );
+        }
+        try {
+            AvifPlanes reconstructed = alpha
+                    ? sampleTransform.applyAlpha(inputPlanes)
+                    : sampleTransform.apply(inputPlanes);
+            return new DecodedSampleTransform(reconstructed, primaryColorConfig);
+        } catch (IllegalArgumentException | ArithmeticException exception) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    "Sample Transform input planes cannot be reconstructed: " + exception.getMessage(),
+                    null,
+                    exception
+            );
+        }
+    }
+
+    /// Decodes one standalone or grid-derived AV1 image source.
+    ///
+    /// @param source the image source
+    /// @param label the diagnostic label for failures
+    /// @return decoded raw planes and their AV1 color configuration
+    /// @throws IOException if the image source cannot be decoded
+    private DecodedRawImage decodeImageSource(AvifImageSource source, String label) throws IOException {
+        if (!source.isGrid()) {
+            DecodedRawImage decoded = decodeRawImage(
+                    source.payload(0),
+                    label,
+                    source.operatingPoint(0),
+                    source.selectedSpatialLayer(0)
+            );
+            validateDecodedItemDimensions(source, 0, decoded.planes(), label);
+            return decoded;
+        }
+        enforceGridFrameSizeLimit(source, label);
+        @Unmodifiable ByteBuffer @Unmodifiable [] cellPayloads = source.payloads();
+        if (cellPayloads.length == 0) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    label + " grid has no cells",
+                    null
+            );
+        }
+        AvifPlanes[] cellPlanes = new AvifPlanes[cellPayloads.length];
+        @Nullable SequenceHeader.ColorConfig colorConfig = null;
+        for (int cellIndex = 0; cellIndex < cellPayloads.length; cellIndex++) {
+            DecodedRawImage decoded = decodeRawImage(
+                    cellPayloads[cellIndex],
+                    label + " grid cell " + cellIndex,
+                    source.operatingPoint(cellIndex),
+                    source.selectedSpatialLayer(cellIndex)
+            );
+            validateDecodedItemDimensions(
+                    source,
+                    cellIndex,
+                    decoded.planes(),
+                    label + " grid cell " + cellIndex
+            );
+            cellPlanes[cellIndex] = decoded.planes();
+            if (colorConfig == null) {
+                colorConfig = decoded.colorConfig();
+            }
+        }
+        validateGridGeometry(
+                cellPlanes,
+                source.rows(),
+                source.columns(),
+                source.outputWidth(),
+                source.outputHeight(),
+                label
+        );
+        assert colorConfig != null;
+        AvifPlanes composed = composeGridRawColorPlanes(
+                cellPlanes,
+                source.rows(),
+                source.columns(),
+                source.outputWidth(),
+                source.outputHeight()
+        );
+        return new DecodedRawImage(composed, colorConfig);
+    }
+
+    /// Enforces the configured frame-size limit against a derived grid canvas.
+    ///
+    /// Individual AV1 cells are checked by `Av1ImageReader`; this additional check prevents a
+    /// collection of individually valid cells from producing an oversized composed image.
+    ///
+    /// @param source the normalized grid image source
+    /// @param label the diagnostic image label
+    /// @throws AvifDecodeException if the grid canvas exceeds the configured frame-size limit
+    private void enforceGridFrameSizeLimit(AvifImageSource source, String label) throws AvifDecodeException {
+        long frameSizeLimit = config.av1DecoderConfig().frameSizeLimit();
+        long pixelCount = (long) source.outputWidth() * source.outputHeight();
+        if (frameSizeLimit != 0 && pixelCount > frameSizeLimit) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.FRAME_SIZE_LIMIT_EXCEEDED,
+                    label + " grid size exceeds the configured limit: "
+                            + source.outputWidth() + "x" + source.outputHeight(),
+                    null
+            );
+        }
+    }
+
+    /// Validates a selected AV1 output frame against its associated `ispe` dimensions.
+    ///
+    /// @param source the normalized image source
+    /// @param itemIndex the zero-based payload or grid-cell index
+    /// @param planes the selected final decoded planes
+    /// @param label the diagnostic image label
+    /// @throws AvifDecodeException if the decoded dimensions differ from `ispe`
+    private static void validateDecodedItemDimensions(
+            AvifImageSource source,
+            int itemIndex,
+            AvifPlanes planes,
+            String label
+    ) throws AvifDecodeException {
+        int expectedWidth = source.itemWidth(itemIndex);
+        int expectedHeight = source.itemHeight(itemIndex);
+        if (planes.codedWidth() != expectedWidth || planes.codedHeight() != expectedHeight) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.ISPE_SIZE_MISMATCH,
+                    label + " decoded dimensions " + planes.codedWidth() + "x" + planes.codedHeight()
+                            + " do not match ispe " + expectedWidth + "x" + expectedHeight,
+                    null
+            );
+        }
+    }
+
+    /// Decodes and renders one preferred Sample Transform still image.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @param sampleTransform the parsed Sample Transform
+    /// @return the reconstructed and transformed AVIF frame
+    /// @throws IOException if an input image cannot be decoded
+    private AvifFrame readSampleTransformedFrame(int frameIndex, SampleTransform sampleTransform) throws IOException {
+        DecodedSampleTransform decodedColor = decodeSampleTransform(sampleTransform, false);
+        AvifFrame rawFrame = adaptRawPlanes(
+                decodedColor.planes(),
+                decodedColor.primaryColorConfig(),
+                container.info().colorInfo(),
+                frameIndex,
+                config.rgbOutputMode()
+        );
+        if (container.info().alphaPresent()) {
+            AvifPlanes alphaPlanes = decodeSampleTransform(sampleTransform, true).planes();
+            if (alphaPlanes.codedWidth() != rawFrame.width() || alphaPlanes.codedHeight() != rawFrame.height()) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.AV1_DECODE_FAILED,
+                        "Sample Transform alpha dimensions differ from color dimensions",
+                        null
+                );
+            }
+            DecodedPlanes decodedAlphaPlanes = toDecodedPlanes(alphaPlanes);
+            validateAlphaLumaPlane(
+                    decodedAlphaPlanes.lumaPlane(),
+                    rawFrame.width(),
+                    rawFrame.height(),
+                    "Sample Transform alpha"
+            );
+            rawFrame = combineFrameWithAlphaPlane(
+                    rawFrame,
+                    decodedAlphaPlanes,
+                    alphaPlanes.bitDepth(),
+                    frameIndex,
+                    container.info().alphaPremultiplied()
+            );
+        }
+        return applyTransforms(rawFrame);
+    }
+
+    /// Renders reconstructed color planes into the requested packed RGB format.
+    ///
+    /// Container `nclx` metadata takes precedence over the primary input's AV1 sequence-header
+    /// color configuration, matching the normal still-image path.
+    ///
+    /// @param planes the reconstructed color planes
+    /// @param av1ColorConfig the primary input's AV1 color configuration
+    /// @param colorInfo the AVIF container color information, or `null`
+    /// @param frameIndex the zero-based frame index
+    /// @param outputMode the requested packed RGB output mode
+    /// @return the rendered AVIF frame
+    /// @throws AvifDecodeException if the selected color conversion is unsupported
+    private static AvifFrame adaptRawPlanes(
+            AvifPlanes planes,
+            SequenceHeader.ColorConfig av1ColorConfig,
+            @Nullable AvifColorInfo colorInfo,
+            int frameIndex,
+            AvifRgbOutputMode outputMode
+    ) throws AvifDecodeException {
+        AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(planes.bitDepth());
+        try {
+            YuvToRgbTransform transform = colorInfo != null
+                    ? YuvToRgbTransform.fromColorInfo(colorInfo, planes.pixelFormat() == AvifPixelFormat.I400)
+                    : YuvToRgbTransform.fromColorConfig(av1ColorConfig);
+            DecodedPlanes decodedPlanes = toDecodedPlanes(planes);
+            if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
+                return new AvifFrame(
+                        planes.codedWidth(),
+                        planes.codedHeight(),
+                        planes.bitDepth(),
+                        planes.pixelFormat(),
+                        frameIndex,
+                        ArgbOutput.toOpaqueArgbPixels(decodedPlanes, transform)
+                );
+            }
+            if (resolvedMode == AvifRgbOutputMode.ARGB_16161616) {
+                return new AvifFrame(
+                        planes.codedWidth(),
+                        planes.codedHeight(),
+                        planes.bitDepth(),
+                        planes.pixelFormat(),
+                        frameIndex,
+                        ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes, transform)
+                );
+            }
+            throw new IllegalArgumentException("Unsupported RGB output mode: " + resolvedMode);
+        } catch (UnsupportedOperationException exception) {
+            throw unsupportedColorConversion(exception);
+        }
+    }
+
+    /// Converts public raw planes back to the internal output-conversion representation.
+    ///
+    /// @param planes the public raw planes
+    /// @return equivalent internal decoded planes
+    private static DecodedPlanes toDecodedPlanes(AvifPlanes planes) {
+        return new DecodedPlanes(
+                planes.bitDepth().bits(),
+                planes.pixelFormat(),
+                planes.codedWidth(),
+                planes.codedHeight(),
+                planes.renderWidth(),
+                planes.renderHeight(),
+                toDecodedPlane(planes.lumaPlane()),
+                toNullableDecodedPlane(planes.chromaUPlane()),
+                toNullableDecodedPlane(planes.chromaVPlane())
+        );
+    }
+
+    /// Converts one public plane to the internal output-conversion representation.
+    ///
+    /// @param plane the public plane
+    /// @return the equivalent internal plane
+    private static DecodedPlane toDecodedPlane(AvifPlane plane) {
+        return new DecodedPlane(plane.width(), plane.height(), plane.stride(), plane.samples());
+    }
+
+    /// Converts one optional public plane to the internal output-conversion representation.
+    ///
+    /// @param plane the public plane, or `null`
+    /// @return the equivalent internal plane, or `null`
+    private static @Nullable DecodedPlane toNullableDecodedPlane(@Nullable AvifPlane plane) {
+        return plane != null ? toDecodedPlane(plane) : null;
     }
 
     /// Returns the last decoded raw color planes from one AV1 reader.
@@ -949,6 +1134,64 @@ public final class AvifImageReader implements AutoCloseable {
                 lumaPlane, chromaUPlane, chromaVPlane);
     }
 
+    /// Validates decoded grid-cell consistency and canvas coverage.
+    ///
+    /// @param cellPlanes the decoded cells in row-major order
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the output luma width
+    /// @param outputHeight the output luma height
+    /// @param label the diagnostic image label
+    /// @throws AvifDecodeException if the cells or canvas violate grid requirements
+    private static void validateGridGeometry(
+            AvifPlanes[] cellPlanes,
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight,
+            String label
+    ) throws AvifDecodeException {
+        if (cellPlanes.length != rows * columns || cellPlanes.length == 0) {
+            throw invalidImageGrid(label + " grid cell count does not match its row and column counts");
+        }
+        AvifPlanes firstCell = cellPlanes[0];
+        int tileWidth = firstCell.codedWidth();
+        int tileHeight = firstCell.codedHeight();
+        for (int cellIndex = 1; cellIndex < cellPlanes.length; cellIndex++) {
+            AvifPlanes cell = cellPlanes[cellIndex];
+            if (cell.codedWidth() != tileWidth || cell.codedHeight() != tileHeight) {
+                throw invalidImageGrid(
+                        label + " grid cell " + cellIndex + " dimensions "
+                                + cell.codedWidth() + "x" + cell.codedHeight()
+                                + " differ from the first cell " + tileWidth + "x" + tileHeight
+                );
+            }
+        }
+        if (tileWidth < 64 || tileHeight < 64) {
+            throw invalidImageGrid(label + " grid cells must be at least 64x64 samples");
+        }
+        if ((long) tileWidth * columns < outputWidth || (long) tileHeight * rows < outputHeight) {
+            throw invalidImageGrid(label + " grid cells do not cover the output canvas");
+        }
+        if ((long) tileWidth * (columns - 1) >= outputWidth
+                || (long) tileHeight * (rows - 1) >= outputHeight) {
+            throw invalidImageGrid(label + " rightmost or bottommost grid cells do not overlap the output canvas");
+        }
+
+        AvifPixelFormat pixelFormat = gridRawPlanePixelFormat(cellPlanes);
+        if ((pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422)
+                && ((tileWidth & 1) != 0 || (outputWidth & 1) != 0)) {
+            throw invalidImageGrid(label + " horizontally subsampled grid widths must be even");
+        }
+        if (pixelFormat == AvifPixelFormat.I420
+                && ((tileHeight & 1) != 0 || (outputHeight & 1) != 0)) {
+            throw invalidImageGrid(label + " vertically subsampled grid heights must be even");
+        }
+        if ((long) outputWidth * outputHeight > Integer.MAX_VALUE) {
+            throw unsupported(label + " grid output contains too many samples for a Java array", null);
+        }
+    }
+
     /// Returns the common raw grid pixel format, allowing monochrome cells in a chroma grid.
     ///
     /// @param cellPlanes the decoded cell planes
@@ -988,46 +1231,6 @@ public final class AvifImageReader implements AutoCloseable {
                 throw new IllegalArgumentException("grid cell pixel format mismatch");
             }
         }
-    }
-
-    /// Validates that all alpha grid cells share the same bit depth and rectangular layout.
-    ///
-    /// @param cellPlanes the decoded alpha cell planes
-    /// @param bitDepth the expected bit depth
-    /// @param rows the alpha grid row count
-    /// @param columns the alpha grid column count
-    /// @param outputWidth the alpha grid output width
-    /// @param outputHeight the alpha grid output height
-    /// @throws AvifDecodeException if the alpha grid cannot be represented as one raw alpha plane
-    private static void validateGridRawAlphaPlaneCells(
-            AvifPlanes[] cellPlanes,
-            AvifBitDepth bitDepth,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight
-    ) throws AvifDecodeException {
-        int[] columnWidths = new int[columns];
-        int[] rowHeights = new int[rows];
-        for (int i = 0; i < cellPlanes.length; i++) {
-            AvifPlanes cellPlane = cellPlanes[i];
-            if (cellPlane.bitDepth() != bitDepth) {
-                throw unsupported("Alpha grid cell bit depth mismatch", null);
-            }
-            AvifPlane lumaPlane = cellPlane.lumaPlane();
-            int row = i / columns;
-            int col = i % columns;
-            validateAlphaGridCellGeometry(
-                    lumaPlane.width(),
-                    lumaPlane.height(),
-                    columnWidths,
-                    rowHeights,
-                    row,
-                    col,
-                    "Alpha grid"
-            );
-        }
-        validateAlphaGridCoverage(columnWidths, rowHeights, "Alpha grid");
     }
 
     /// Returns luma planes for all grid cells.
@@ -1097,18 +1300,25 @@ public final class AvifImageReader implements AutoCloseable {
             int outputWidth,
             int outputHeight
     ) {
-        short[] samples = new short[outputWidth * outputHeight];
-        int yOffset = 0;
+        short[] samples = new short[Math.multiplyExact(outputWidth, outputHeight)];
+        int cellWidth = cellPlanes[0].width();
+        int cellHeight = cellPlanes[0].height();
         for (int row = 0; row < rows; row++) {
-            int maxCellHeight = 0;
             for (int col = 0; col < columns; col++) {
                 int cellIndex = row * columns + col;
                 AvifPlane cellPlane = cellPlanes[cellIndex];
-                maxCellHeight = Math.max(maxCellHeight, cellPlane.height());
-                int cellX = gridPlaneCellX(cellPlanes, row, col, columns);
-                copyGridPlaneCell(samples, outputWidth, outputHeight, cellPlane, cellX, yOffset);
+                if (cellPlane.width() != cellWidth || cellPlane.height() != cellHeight) {
+                    throw new IllegalArgumentException("grid cell plane dimensions mismatch");
+                }
+                copyGridPlaneCell(
+                        samples,
+                        outputWidth,
+                        outputHeight,
+                        cellPlane,
+                        col * cellWidth,
+                        row * cellHeight
+                );
             }
-            yOffset += maxCellHeight;
         }
         return new AvifPlane(outputWidth, outputHeight, outputWidth, samples);
     }
@@ -1140,21 +1350,6 @@ public final class AvifImageReader implements AutoCloseable {
                 destination[destinationBase + x] = (short) cellPlane.sample(x, y);
             }
         }
-    }
-
-    /// Returns the x offset of one grid cell plane.
-    ///
-    /// @param cellPlanes the row-major cell planes
-    /// @param row the grid row
-    /// @param col the grid column
-    /// @param columns the grid column count
-    /// @return the plane x offset
-    private static int gridPlaneCellX(AvifPlane[] cellPlanes, int row, int col, int columns) {
-        int cellX = 0;
-        for (int prevCol = 0; prevCol < col; prevCol++) {
-            cellX += cellPlanes[row * columns + prevCol].width();
-        }
-        return cellX;
     }
 
     /// Returns the expected chroma width for one pixel format.
@@ -1223,206 +1418,6 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Decodes grid cell items and composes the final canvas.
-    ///
-    /// @param frameIndex the zero-based frame index
-    /// @return the composed frame
-    /// @throws IOException if decoding fails
-    private AvifFrame readGridFrame(int frameIndex) throws IOException {
-        @Unmodifiable ByteBuffer @Nullable [] cellPayloads = container.gridCellPayloads();
-        if (cellPayloads == null || cellPayloads.length == 0) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cell payloads", null);
-        }
-        DecodedFrame[] cellFrames = decodeGridFrames(cellPayloads, "Grid cell");
-        AvifFrame rawFrame = composeGridFrames(cellFrames, container.gridRows(), container.gridColumns(),
-                container.gridOutputWidth(), container.gridOutputHeight(), frameIndex, config.rgbOutputMode());
-
-        ByteBuffer alphaPayload = container.alphaItemPayload();
-        if (alphaPayload != null) {
-            rawFrame = adaptFrameWithAlpha(
-                    rawFrame,
-                    alphaPayload,
-                    frameIndex,
-                    container.info().alphaPremultiplied()
-            );
-        }
-        @Unmodifiable ByteBuffer @Nullable [] alphaCellPayloads = container.gridAlphaCellPayloads();
-        if (alphaCellPayloads != null) {
-            rawFrame = combineFrameWithAlphaGrid(rawFrame, alphaCellPayloads,
-                    container.gridAlphaRows(), container.gridAlphaColumns(),
-                    container.gridAlphaOutputWidth(), container.gridAlphaOutputHeight(), frameIndex,
-                    container.info().alphaPremultiplied());
-        }
-        return applyTransforms(rawFrame);
-    }
-
-    /// Decodes grid cell payloads into AV1 frames.
-    ///
-    /// @param cellPayloads the cell payloads
-    /// @param label the diagnostic label for failures
-    /// @return decoded cell frames
-    /// @throws IOException if one cell cannot be decoded
-    private DecodedFrame[] decodeGridFrames(@Unmodifiable ByteBuffer @Unmodifiable [] cellPayloads, String label)
-            throws IOException {
-        int cellCount = cellPayloads.length;
-        DecodedFrame[] cellFrames = new DecodedFrame[cellCount];
-        for (int i = 0; i < cellCount; i++) {
-            ByteBuffer payload = cellPayloads[i];
-            if (payload == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " payload is null: " + i, null);
-            }
-            try (Av1ImageReader cellReader = Av1ImageReader.open(
-                    new BufferedInput.OfByteBuffer(payload),
-                    config.av1DecoderConfig()
-            )) {
-                DecodedFrame cellFrame = cellReader.readFrame();
-                if (cellFrame == null) {
-                    throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED,
-                            label + " produced no frame: " + i, null);
-                }
-                cellFrames[i] = cellFrame;
-            } catch (AvifDecodeException exception) {
-                throw exception;
-            } catch (IOException exception) {
-                throw wrapAv1DecodeFailure(exception);
-            }
-        }
-        return cellFrames;
-    }
-
-    /// Composes decoded grid cell frames into a single canvas.
-    ///
-    /// @param cellFrames the decoded cell frames in row-major order
-    /// @param rows the grid row count
-    /// @param columns the grid column count
-    /// @param outputWidth the output width
-    /// @param outputHeight the output height
-    /// @param frameIndex the zero-based frame index
-    /// @param outputMode the requested packed RGB output mode
-    /// @return the composed frame
-    private static AvifFrame composeGridFrames(
-            DecodedFrame[] cellFrames, int rows, int columns,
-            int outputWidth, int outputHeight, int frameIndex,
-            AvifRgbOutputMode outputMode
-    ) throws AvifDecodeException {
-        if (cellFrames.length == 0) {
-            throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Grid has no cells", null);
-        }
-        DecodedFrame firstCell = cellFrames[0];
-        AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(firstCell.bitDepth());
-        if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
-            return composeGridIntFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
-        }
-        if (resolvedMode == AvifRgbOutputMode.ARGB_16161616) {
-            return composeGridLongFrames(cellFrames, rows, columns, outputWidth, outputHeight, frameIndex);
-        }
-        throw unsupported("Unsupported grid RGB output mode: " + resolvedMode, null);
-    }
-
-    /// Composes 8-bit grid cell frames into a single canvas.
-    ///
-    /// @param cellFrames the decoded 8-bit cell frames
-    /// @param rows the grid row count
-    /// @param columns the grid column count
-    /// @param outputWidth the output width
-    /// @param outputHeight the output height
-    /// @param frameIndex the zero-based frame index
-    /// @return the composed frame
-    private static AvifFrame composeGridIntFrames(
-            DecodedFrame[] cellFrames, int rows, int columns,
-            int outputWidth, int outputHeight, int frameIndex
-    ) {
-        int[] canvas = new int[outputWidth * outputHeight];
-        int yOffset = 0;
-        for (int row = 0; row < rows; row++) {
-            int maxCellHeight = 0;
-            for (int col = 0; col < columns; col++) {
-                int cellIndex = row * columns + col;
-                DecodedFrame cellFrame = cellFrames[cellIndex];
-                IntBuffer cellPixels = cellFrame.intPixelBuffer();
-                int cellWidth = cellFrame.width();
-                int cellHeight = cellFrame.height();
-                maxCellHeight = Math.max(maxCellHeight, cellHeight);
-                int cellX = 0;
-                for (int prevCol = 0; prevCol < col; prevCol++) {
-                    DecodedFrame prevFrame = cellFrames[row * columns + prevCol];
-                    cellX += prevFrame.width();
-                }
-                for (int cy = 0; cy < cellHeight; cy++) {
-                    int destRow = yOffset + cy;
-                    if (destRow >= outputHeight) {
-                        break;
-                    }
-                    int destCol = cellX;
-                    if (destCol >= outputWidth) {
-                        break;
-                    }
-                    int srcRow = cy * cellWidth;
-                    int copyWidth = Math.min(cellWidth, outputWidth - destCol);
-                    for (int cx = 0; cx < copyWidth; cx++) {
-                        canvas[destRow * outputWidth + destCol + cx] = cellPixels.get(srcRow + cx);
-                    }
-                }
-            }
-            yOffset += maxCellHeight;
-        }
-        AvifPixelFormat fmt = cellFrames[0].pixelFormat();
-        return new AvifFrame(outputWidth, outputHeight,
-                cellFrames[0].bitDepth(), fmt, frameIndex, canvas);
-    }
-
-    /// Composes 10/12-bit grid cell frames into a single canvas.
-    ///
-    /// @param cellFrames the decoded high-bit-depth cell frames
-    /// @param rows the grid row count
-    /// @param columns the grid column count
-    /// @param outputWidth the output width
-    /// @param outputHeight the output height
-    /// @param frameIndex the zero-based frame index
-    /// @return the composed frame
-    private static AvifFrame composeGridLongFrames(
-            DecodedFrame[] cellFrames, int rows, int columns,
-            int outputWidth, int outputHeight, int frameIndex
-    ) {
-        long[] canvas = new long[outputWidth * outputHeight];
-        int yOffset = 0;
-        for (int row = 0; row < rows; row++) {
-            int maxCellHeight = 0;
-            for (int col = 0; col < columns; col++) {
-                int cellIndex = row * columns + col;
-                DecodedFrame cellFrame = cellFrames[cellIndex];
-                LongBuffer cellPixels = cellFrame.longPixelBuffer();
-                int cellWidth = cellFrame.width();
-                int cellHeight = cellFrame.height();
-                maxCellHeight = Math.max(maxCellHeight, cellHeight);
-                int cellX = 0;
-                for (int prevCol = 0; prevCol < col; prevCol++) {
-                    DecodedFrame prevFrame = cellFrames[row * columns + prevCol];
-                    cellX += prevFrame.width();
-                }
-                for (int cy = 0; cy < cellHeight; cy++) {
-                    int destRow = yOffset + cy;
-                    if (destRow >= outputHeight) {
-                        break;
-                    }
-                    int destCol = cellX;
-                    if (destCol >= outputWidth) {
-                        break;
-                    }
-                    int srcRow = cy * cellWidth;
-                    int copyWidth = Math.min(cellWidth, outputWidth - destCol);
-                    for (int cx = 0; cx < copyWidth; cx++) {
-                        canvas[destRow * outputWidth + destCol + cx] = cellPixels.get(srcRow + cx);
-                    }
-                }
-            }
-            yOffset += maxCellHeight;
-        }
-        AvifPixelFormat fmt = cellFrames[0].pixelFormat();
-        return new AvifFrame(outputWidth, outputHeight,
-                cellFrames[0].bitDepth(), fmt, frameIndex, canvas);
-    }
-
     /// Reads all decoded frames.
     ///
     /// @return all decoded frames
@@ -1467,7 +1462,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param frame the raw decoded frame
     /// @return the transformed frame, or the same frame when no transforms are present
     private AvifFrame applyTransforms(AvifFrame frame) {
-        if (!container.hasClapCrop() && container.rotationCode() <= 0 && container.mirrorAxis() < 0) {
+        AvifImageInfo info = container.info();
+        if (!info.hasCleanApertureCrop() && info.rotationCode() <= 0 && info.mirrorAxis() < 0) {
             return frame;
         }
         if (frame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
@@ -1475,16 +1471,16 @@ public final class AvifImageReader implements AutoCloseable {
             int width = frame.width();
             int height = frame.height();
 
-            if (container.hasClapCrop()) {
+            if (info.hasCleanApertureCrop()) {
                 int[] cropped = applyClapCropInt(pixels, width, height,
-                        container.clapCropX(), container.clapCropY(),
-                        container.clapCropWidth(), container.clapCropHeight());
+                        info.cleanApertureCropX(), info.cleanApertureCropY(),
+                        info.cleanApertureCropWidth(), info.cleanApertureCropHeight());
                 pixels = cropped;
-                width = container.clapCropWidth();
-                height = container.clapCropHeight();
+                width = info.cleanApertureCropWidth();
+                height = info.cleanApertureCropHeight();
             }
 
-            int rotation = container.rotationCode();
+            int rotation = info.rotationCode();
             if (rotation > 0) {
                 int[] rotated = applyRotationInt(pixels, width, height, rotation);
                 pixels = rotated;
@@ -1495,7 +1491,7 @@ public final class AvifImageReader implements AutoCloseable {
                 }
             }
 
-            int mirror = container.mirrorAxis();
+            int mirror = info.mirrorAxis();
             if (mirror >= 0) {
                 pixels = applyMirrorInt(pixels, width, height, mirror);
             }
@@ -1508,16 +1504,16 @@ public final class AvifImageReader implements AutoCloseable {
             int width = frame.width();
             int height = frame.height();
 
-            if (container.hasClapCrop()) {
+            if (info.hasCleanApertureCrop()) {
                 long[] cropped = applyClapCropLong(pixels, width, height,
-                        container.clapCropX(), container.clapCropY(),
-                        container.clapCropWidth(), container.clapCropHeight());
+                        info.cleanApertureCropX(), info.cleanApertureCropY(),
+                        info.cleanApertureCropWidth(), info.cleanApertureCropHeight());
                 pixels = cropped;
-                width = container.clapCropWidth();
-                height = container.clapCropHeight();
+                width = info.cleanApertureCropWidth();
+                height = info.cleanApertureCropHeight();
             }
 
-            int rotation = container.rotationCode();
+            int rotation = info.rotationCode();
             if (rotation > 0) {
                 long[] rotated = applyRotationLong(pixels, width, height, rotation);
                 pixels = rotated;
@@ -1528,7 +1524,7 @@ public final class AvifImageReader implements AutoCloseable {
                 }
             }
 
-            int mirror = container.mirrorAxis();
+            int mirror = info.mirrorAxis();
             if (mirror >= 0) {
                 pixels = applyMirrorLong(pixels, width, height, mirror);
             }
@@ -1895,36 +1891,6 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Decodes an alpha auxiliary AV1 payload and combines it with a decoded color frame.
-    ///
-    /// @param colorFrame the decoded color frame
-    /// @param alphaPayload the alpha auxiliary AV1 OBU payload
-    /// @param frameIndex the zero-based AVIF frame index
-    /// @return the combined AVIF frame
-    /// @throws IOException if the alpha payload cannot be decoded
-    private AvifFrame adaptFrameWithAlpha(
-            AvifFrame colorFrame,
-            @Unmodifiable ByteBuffer alphaPayload,
-            int frameIndex,
-            boolean alphaPremultiplied
-    ) throws IOException {
-        try (Av1ImageReader alphaReader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(alphaPayload),
-                config.av1DecoderConfig()
-        )) {
-            DecodedFrame alphaFrame = alphaReader.readFrame();
-            if (alphaFrame == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha auxiliary item produced no frame", null);
-            }
-            DecodedPlanes alphaPlanes = alphaReader.lastPlanes();
-            return combineFrameWithDecodedAlpha(colorFrame, alphaFrame, alphaPlanes, frameIndex, alphaPremultiplied);
-        } catch (AvifDecodeException exception) {
-            throw exception;
-        } catch (IOException exception) {
-            throw wrapAv1DecodeFailure(exception);
-        }
-    }
-
     /// Combines one decoded alpha frame with a color frame.
     ///
     /// @param colorFrame the decoded color frame
@@ -1980,97 +1946,6 @@ public final class AvifImageReader implements AutoCloseable {
         );
     }
 
-    /// Decodes alpha grid cells and combines their luma planes into a color frame.
-    ///
-    /// @param colorFrame the decoded color frame
-    /// @param alphaCellPayloads the alpha grid cell AV1 OBU payloads
-    /// @param rows the alpha grid row count
-    /// @param columns the alpha grid column count
-    /// @param outputWidth the alpha grid output width
-    /// @param outputHeight the alpha grid output height
-    /// @param frameIndex the zero-based AVIF frame index
-    /// @return the combined AVIF frame
-    /// @throws IOException if an alpha cell cannot be decoded
-    private AvifFrame combineFrameWithAlphaGrid(
-            AvifFrame colorFrame,
-            @Unmodifiable ByteBuffer @Unmodifiable [] alphaCellPayloads,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight,
-            int frameIndex,
-            boolean alphaPremultiplied
-    ) throws IOException {
-        if (outputWidth != colorFrame.width() || outputHeight != colorFrame.height()) {
-            throw unsupported("Alpha grid with different decoded dimensions than master image", null);
-        }
-        validateAlphaGridParameters(alphaCellPayloads.length, rows, columns, outputWidth, outputHeight);
-        DecodedAlphaCell[] alphaCells = decodeAlphaGridCells(alphaCellPayloads);
-        validateDecodedAlphaGrid(alphaCells, rows, columns, outputWidth, outputHeight);
-        if (colorFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
-            return combineIntGridAlpha(
-                    colorFrame,
-                    alphaCells,
-                    rows,
-                    columns,
-                    outputWidth,
-                    outputHeight,
-                    frameIndex,
-                    alphaPremultiplied
-            );
-        }
-        if (colorFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
-            return combineLongGridAlpha(
-                    colorFrame,
-                    alphaCells,
-                    rows,
-                    columns,
-                    outputWidth,
-                    outputHeight,
-                    frameIndex,
-                    alphaPremultiplied
-            );
-        }
-        throw unsupported("Unsupported alpha color frame RGB output mode: " + colorFrame.rgbOutputMode(), null);
-    }
-
-    /// Decodes alpha grid cells and retains their raw luma planes.
-    ///
-    /// @param alphaCellPayloads the alpha grid cell AV1 OBU payloads
-    /// @return decoded alpha cells
-    /// @throws IOException if one alpha cell cannot be decoded
-    private DecodedAlphaCell[] decodeAlphaGridCells(@Unmodifiable ByteBuffer @Unmodifiable [] alphaCellPayloads)
-            throws IOException {
-        DecodedAlphaCell[] alphaCells = new DecodedAlphaCell[alphaCellPayloads.length];
-        for (int i = 0; i < alphaCellPayloads.length; i++) {
-            ByteBuffer payload = alphaCellPayloads[i];
-            if (payload == null) {
-                throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, "Alpha grid cell payload is null: " + i, null);
-            }
-            try (Av1ImageReader cellReader = Av1ImageReader.open(
-                    new BufferedInput.OfByteBuffer(payload),
-                    config.av1DecoderConfig()
-            )) {
-                DecodedFrame frame = cellReader.readFrame();
-                if (frame == null) {
-                    throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED,
-                            "Alpha grid cell produced no frame: " + i, null);
-                }
-                DecodedPlanes planes = cellReader.lastPlanes();
-                if (planes == null) {
-                    throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED,
-                            "Alpha grid cell planes not available: " + i, null);
-                }
-                alphaCells[i] = new DecodedAlphaCell(frame, planes);
-            } catch (AvifDecodeException exception) {
-                throw exception;
-            } catch (IOException exception) {
-                throw wrapAv1DecodeFailure(exception);
-            }
-        }
-        return alphaCells;
-    }
-
     /// Validates one decoded alpha frame before composition.
     ///
     /// @param expectedWidth the expected alpha width
@@ -2087,88 +1962,16 @@ public final class AvifImageReader implements AutoCloseable {
             String label
     ) throws AvifDecodeException {
         if (alphaFrame.width() != expectedWidth || alphaFrame.height() != expectedHeight) {
-            throw unsupported(label + " with different decoded dimensions than master image", null);
+            throw new AvifDecodeException(
+                    AvifErrorCode.AV1_DECODE_FAILED,
+                    label + " with different decoded dimensions than master image",
+                    null
+            );
         }
         if (alphaPlanes == null) {
             throw new AvifDecodeException(AvifErrorCode.AV1_DECODE_FAILED, label + " planes not available", null);
         }
         validateAlphaLumaPlane(alphaPlanes.lumaPlane(), alphaFrame.width(), alphaFrame.height(), label);
-    }
-
-    /// Validates alpha grid metadata before decoding cells.
-    ///
-    /// @param cellCount the number of alpha cell payloads
-    /// @param rows the alpha grid row count
-    /// @param columns the alpha grid column count
-    /// @param outputWidth the alpha grid output width
-    /// @param outputHeight the alpha grid output height
-    /// @throws AvifDecodeException if the alpha grid metadata is malformed
-    private static void validateAlphaGridParameters(
-            int cellCount,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight
-    ) throws AvifDecodeException {
-        if (rows <= 0 || columns <= 0) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.BMFF_PARSE_FAILED,
-                    "Alpha grid dimensions must be positive",
-                    null
-            );
-        }
-        if (outputWidth <= 0 || outputHeight <= 0) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.BMFF_PARSE_FAILED,
-                    "Alpha grid output dimensions must be positive",
-                    null
-            );
-        }
-        long expectedCellCount = (long) rows * columns;
-        if (expectedCellCount > Integer.MAX_VALUE || cellCount != (int) expectedCellCount) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.BMFF_PARSE_FAILED,
-                    "Alpha grid cell count does not match rows * columns",
-                    null
-            );
-        }
-    }
-
-    /// Validates decoded alpha grid cells before composition.
-    ///
-    /// @param alphaCells the decoded alpha cells
-    /// @param rows the alpha grid row count
-    /// @param columns the alpha grid column count
-    /// @param outputWidth the alpha grid output width
-    /// @param outputHeight the alpha grid output height
-    /// @throws AvifDecodeException if the decoded cells cannot cover the declared alpha grid
-    private static void validateDecodedAlphaGrid(
-            DecodedAlphaCell[] alphaCells,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight
-    ) throws AvifDecodeException {
-        int[] columnWidths = new int[columns];
-        int[] rowHeights = new int[rows];
-        for (int i = 0; i < alphaCells.length; i++) {
-            DecodedAlphaCell alphaCell = alphaCells[i];
-            DecodedFrame frame = alphaCell.frame;
-            DecodedPlane lumaPlane = alphaCell.planes.lumaPlane();
-            validateAlphaLumaPlane(lumaPlane, frame.width(), frame.height(), "Alpha grid cell " + i);
-            int row = i / columns;
-            int col = i % columns;
-            validateAlphaGridCellGeometry(
-                    frame.width(),
-                    frame.height(),
-                    columnWidths,
-                    rowHeights,
-                    row,
-                    col,
-                    "Alpha grid"
-            );
-        }
-        validateAlphaGridCoverage(columnWidths, rowHeights, "Alpha grid");
     }
 
     /// Validates one alpha luma plane against the expected decoded dimensions.
@@ -2188,65 +1991,6 @@ public final class AvifImageReader implements AutoCloseable {
             throw new AvifDecodeException(
                     AvifErrorCode.AV1_DECODE_FAILED,
                     label + " luma plane is smaller than the decoded alpha frame",
-                    null
-            );
-        }
-    }
-
-    /// Validates one alpha grid cell against the shared rectangular grid layout.
-    ///
-    /// @param cellWidth the decoded cell width
-    /// @param cellHeight the decoded cell height
-    /// @param columnWidths the expected width for each column, updated in place
-    /// @param rowHeights the expected height for each row, updated in place
-    /// @param row the cell row index
-    /// @param col the cell column index
-    /// @param label the diagnostic grid label
-    /// @throws AvifDecodeException if the cell layout is unsupported
-    private static void validateAlphaGridCellGeometry(
-            int cellWidth,
-            int cellHeight,
-            int[] columnWidths,
-            int[] rowHeights,
-            int row,
-            int col,
-            String label
-    ) throws AvifDecodeException {
-        if (columnWidths[col] == 0) {
-            columnWidths[col] = cellWidth;
-        } else if (columnWidths[col] != cellWidth) {
-            throw unsupported(label + " cell width mismatch in column " + col, null);
-        }
-        if (rowHeights[row] == 0) {
-            rowHeights[row] = cellHeight;
-        } else if (rowHeights[row] != cellHeight) {
-            throw unsupported(label + " cell height mismatch in row " + row, null);
-        }
-    }
-
-    /// Validates that decoded alpha grid cells expose a non-empty source layout.
-    ///
-    /// @param columnWidths the decoded width of each column
-    /// @param rowHeights the decoded height of each row
-    /// @param label the diagnostic grid label
-    /// @throws AvifDecodeException if the decoded cells cannot produce a source rectangle
-    private static void validateAlphaGridCoverage(
-            int[] columnWidths,
-            int[] rowHeights,
-            String label
-    ) throws AvifDecodeException {
-        int totalWidth = 0;
-        for (int width : columnWidths) {
-            totalWidth += width;
-        }
-        int totalHeight = 0;
-        for (int height : rowHeights) {
-            totalHeight += height;
-        }
-        if (totalWidth <= 0 || totalHeight <= 0) {
-            throw new AvifDecodeException(
-                    AvifErrorCode.AV1_DECODE_FAILED,
-                    label + " decoded cell coverage is empty",
                     null
             );
         }
@@ -2331,129 +2075,6 @@ public final class AvifImageReader implements AutoCloseable {
         return new AvifFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
     }
 
-    /// Combines alpha grid cells into an 8-bit color frame.
-    private static AvifFrame combineIntGridAlpha(
-            AvifFrame color,
-            DecodedAlphaCell[] alphaCells,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight,
-            int frameIndex,
-            boolean alphaPremultiplied
-    ) {
-        int[] combined = intBufferToArray(color.intPixelBuffer());
-        copyGridAlphaToIntPixels(combined, alphaCells, rows, columns, outputWidth, outputHeight);
-        if (alphaPremultiplied) {
-            unpremultiplyIntPixels(combined);
-        }
-        return new AvifFrame(outputWidth, outputHeight, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
-    }
-
-    /// Combines alpha grid cells into a 10/12-bit color frame.
-    private static AvifFrame combineLongGridAlpha(
-            AvifFrame color,
-            DecodedAlphaCell[] alphaCells,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight,
-            int frameIndex,
-            boolean alphaPremultiplied
-    ) {
-        long[] combined = longBufferToArray(color.longPixelBuffer());
-        copyGridAlphaToLongPixels(combined, alphaCells, rows, columns, outputWidth, outputHeight);
-        if (alphaPremultiplied) {
-            unpremultiplyLongPixels(combined);
-        }
-        return new AvifFrame(outputWidth, outputHeight, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
-    }
-
-    /// Copies alpha grid samples into packed 8-bit pixels.
-    private static void copyGridAlphaToIntPixels(
-            int[] pixels,
-            DecodedAlphaCell[] alphaCells,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight
-    ) {
-        int yOffset = 0;
-        for (int row = 0; row < rows; row++) {
-            int maxCellHeight = 0;
-            for (int col = 0; col < columns; col++) {
-                int cellIndex = row * columns + col;
-                DecodedAlphaCell alphaCell = alphaCells[cellIndex];
-                DecodedFrame alphaFrame = alphaCell.frame;
-                DecodedPlane alphaPlane = alphaCell.planes.lumaPlane();
-                int cellWidth = alphaFrame.width();
-                int cellHeight = alphaFrame.height();
-                maxCellHeight = Math.max(maxCellHeight, cellHeight);
-                int cellX = alphaGridCellX(alphaCells, row, col, columns);
-                int maxSample = alphaFrame.bitDepth().maxSampleValue();
-                for (int cy = 0; cy < cellHeight; cy++) {
-                    int destRow = yOffset + cy;
-                    if (destRow >= outputHeight) {
-                        break;
-                    }
-                    if (cellX >= outputWidth) {
-                        break;
-                    }
-                    int copyWidth = Math.min(cellWidth, outputWidth - cellX);
-                    int destBase = destRow * outputWidth + cellX;
-                    for (int cx = 0; cx < copyWidth; cx++) {
-                        int alpha8 = scaleSampleToByte(alphaPlane.sample(cx, cy), maxSample);
-                        pixels[destBase + cx] = (pixels[destBase + cx] & 0x00FFFFFF) | (alpha8 << 24);
-                    }
-                }
-            }
-            yOffset += maxCellHeight;
-        }
-    }
-
-    /// Copies alpha grid samples into packed 16-bit-per-channel pixels.
-    private static void copyGridAlphaToLongPixels(
-            long[] pixels,
-            DecodedAlphaCell[] alphaCells,
-            int rows,
-            int columns,
-            int outputWidth,
-            int outputHeight
-    ) {
-        int yOffset = 0;
-        for (int row = 0; row < rows; row++) {
-            int maxCellHeight = 0;
-            for (int col = 0; col < columns; col++) {
-                int cellIndex = row * columns + col;
-                DecodedAlphaCell alphaCell = alphaCells[cellIndex];
-                DecodedFrame alphaFrame = alphaCell.frame;
-                DecodedPlane alphaPlane = alphaCell.planes.lumaPlane();
-                int cellWidth = alphaFrame.width();
-                int cellHeight = alphaFrame.height();
-                maxCellHeight = Math.max(maxCellHeight, cellHeight);
-                int cellX = alphaGridCellX(alphaCells, row, col, columns);
-                int maxSample = alphaFrame.bitDepth().maxSampleValue();
-                for (int cy = 0; cy < cellHeight; cy++) {
-                    int destRow = yOffset + cy;
-                    if (destRow >= outputHeight) {
-                        break;
-                    }
-                    if (cellX >= outputWidth) {
-                        break;
-                    }
-                    int copyWidth = Math.min(cellWidth, outputWidth - cellX);
-                    int destBase = destRow * outputWidth + cellX;
-                    for (int cx = 0; cx < copyWidth; cx++) {
-                        long alpha16 = scaleSampleToWord(alphaPlane.sample(cx, cy), maxSample);
-                        pixels[destBase + cx] = (pixels[destBase + cx] & 0x0000FFFF_FFFFFFFFL)
-                                | ((alpha16 & 0xFFFFL) << 48);
-                    }
-                }
-            }
-            yOffset += maxCellHeight;
-        }
-    }
-
     /// Converts packed 8-bit ARGB pixels from premultiplied to straight alpha in place.
     ///
     /// @param pixels the pixels to convert
@@ -2507,21 +2128,6 @@ public final class AvifImageReader implements AutoCloseable {
         return value > maxSample ? maxSample : (int) value;
     }
 
-    /// Returns the x offset of one alpha grid cell.
-    ///
-    /// @param alphaCells the decoded alpha cells
-    /// @param row the grid row
-    /// @param col the grid column
-    /// @param columns the grid column count
-    /// @return the x offset in pixels
-    private static int alphaGridCellX(DecodedAlphaCell[] alphaCells, int row, int col, int columns) {
-        int cellX = 0;
-        for (int prevCol = 0; prevCol < col; prevCol++) {
-            cellX += alphaCells[row * columns + prevCol].frame.width();
-        }
-        return cellX;
-    }
-
     /// Scales a decoded alpha sample to an unsigned 8-bit channel.
     ///
     /// @param sample the decoded alpha sample
@@ -2546,22 +2152,23 @@ public final class AvifImageReader implements AutoCloseable {
         return ((long) sample * 65_535 + maxSample / 2) / maxSample;
     }
 
-    /// Decoded alpha cell with both converted frame metadata and raw decoded planes.
+    /// Raw decoded image planes and the active AV1 color configuration.
+    ///
+    /// @param planes the decoded raw planes
+    /// @param colorConfig the active AV1 sequence-header color configuration
     @NotNullByDefault
-    private static final class DecodedAlphaCell {
-        /// The decoded alpha frame metadata.
-        private final DecodedFrame frame;
-        /// The decoded alpha planes.
-        private final DecodedPlanes planes;
+    private record DecodedRawImage(AvifPlanes planes, SequenceHeader.ColorConfig colorConfig) {
+    }
 
-        /// Creates one decoded alpha cell.
-        ///
-        /// @param frame the decoded alpha frame metadata
-        /// @param planes the decoded alpha planes
-        private DecodedAlphaCell(DecodedFrame frame, DecodedPlanes planes) {
-            this.frame = Objects.requireNonNull(frame, "frame");
-            this.planes = Objects.requireNonNull(planes, "planes");
-        }
+    /// Reconstructed Sample Transform planes and the primary input's AV1 color configuration.
+    ///
+    /// @param planes the reconstructed planes
+    /// @param primaryColorConfig the primary input's AV1 sequence-header color configuration
+    @NotNullByDefault
+    private record DecodedSampleTransform(
+            AvifPlanes planes,
+            SequenceHeader.ColorConfig primaryColorConfig
+    ) {
     }
 
     /// Creates an unsupported-feature exception.
@@ -2571,6 +2178,14 @@ public final class AvifImageReader implements AutoCloseable {
     /// @return an unsupported-feature exception
     private static AvifDecodeException unsupported(String message, @Nullable Long offset) {
         return new AvifDecodeException(AvifErrorCode.UNSUPPORTED_FEATURE, message, offset);
+    }
+
+    /// Creates an invalid-grid exception.
+    ///
+    /// @param message the failure message
+    /// @return an invalid-grid exception
+    private static AvifDecodeException invalidImageGrid(String message) {
+        return new AvifDecodeException(AvifErrorCode.INVALID_IMAGE_GRID, message, null);
     }
 
     /// Creates an unsupported-feature exception for an unavailable CICP color conversion.
@@ -2588,15 +2203,19 @@ public final class AvifImageReader implements AutoCloseable {
         );
     }
 
-    /// Wraps one low-level AV1 decoding failure while preserving unsupported-feature classification.
+    /// Wraps one low-level AV1 decoding failure while preserving caller-relevant classification.
     ///
     /// @param exception the low-level decoding failure
     /// @return the corresponding AVIF decoding failure
     private static AvifDecodeException wrapAv1DecodeFailure(IOException exception) {
-        AvifErrorCode code = exception instanceof DecodeException decodeException
-                && decodeException.code() == DecodeErrorCode.UNSUPPORTED_FEATURE
-                ? AvifErrorCode.UNSUPPORTED_FEATURE
-                : AvifErrorCode.AV1_DECODE_FAILED;
+        AvifErrorCode code = AvifErrorCode.AV1_DECODE_FAILED;
+        if (exception instanceof DecodeException decodeException) {
+            code = switch (decodeException.code()) {
+                case UNSUPPORTED_FEATURE -> AvifErrorCode.UNSUPPORTED_FEATURE;
+                case FRAME_SIZE_LIMIT_EXCEEDED -> AvifErrorCode.FRAME_SIZE_LIMIT_EXCEEDED;
+                default -> AvifErrorCode.AV1_DECODE_FAILED;
+            };
+        }
         return new AvifDecodeException(
                 code,
                 exception.getMessage() != null ? exception.getMessage() : "AV1 decoding failed",

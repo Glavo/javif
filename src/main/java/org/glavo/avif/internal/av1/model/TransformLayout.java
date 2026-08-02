@@ -169,10 +169,7 @@ public final class TransformLayout {
     }
 
     /// Creates one decoded block-level transform layout whose exact visible pixel dimensions match
-    /// the current 4x4-grid coverage.
-    ///
-    /// This overload keeps older synthetic tests stable while the runtime decode path supplies
-    /// exact pixel-level clipping through the main constructor.
+    /// its visible 4x4-grid coverage and whose chroma layout contains one unit when present.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
     /// @param blockSize the coded block size that owns this transform layout
@@ -321,12 +318,11 @@ public final class TransformLayout {
         return uniformSize;
     }
 
-    /// Returns one legacy single-unit chroma layout for callers that have not yet supplied explicit
-    /// chroma units.
+    /// Returns a single-unit chroma layout when a chroma transform size is present.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
     /// @param chromaTransformSize the chroma transform size, or `null`
-    /// @return one legacy single-unit chroma layout
+    /// @return the single-unit chroma layout, or an empty array for monochrome input
     private static TransformUnit[] defaultChromaUnits(
             BlockPosition position,
             @Nullable TransformSize chromaTransformSize

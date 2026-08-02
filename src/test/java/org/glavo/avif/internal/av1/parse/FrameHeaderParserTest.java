@@ -138,6 +138,26 @@ final class FrameHeaderParserTest {
         assertFalse(header.filmGrainPresent());
     }
 
+    /// Verifies that translation global-motion parameters are decoded in their normative fixed-point domain.
+    ///
+    /// @throws IOException if the test payload cannot be parsed
+    @Test
+    void parsesInterFrameHeaderWithTranslationGlobalMotion() throws IOException {
+        FrameHeader header = new FrameHeaderParser().parse(
+                frameHeaderObu(interFrameHeaderPayloadWithTranslationGlobalMotion()),
+                fullInterSequenceHeader(),
+                false,
+                createInterReferenceFrames()
+        );
+
+        FrameHeader.GlobalMotionParams translatedLast = header.globalMotion(0);
+        assertEquals(FrameHeader.GlobalMotionType.TRANSLATION, translatedLast.type());
+        assertArrayEquals(new int[]{1 << 13, -(1 << 13), 1 << 16, 0, 0, 1 << 16}, translatedLast.matrix());
+        for (int referenceFrame = 1; referenceFrame < 7; referenceFrame++) {
+            assertEquals(FrameHeader.GlobalMotionType.IDENTITY, header.globalMotion(referenceFrame).type());
+        }
+    }
+
     /// Verifies that segmentation and loop-filter delta state can be inherited from the primary reference frame.
     ///
     /// @throws IOException if the test payload cannot be parsed
@@ -681,6 +701,34 @@ final class FrameHeaderParserTest {
     /// @return a standalone inter frame header payload
     private static byte[] interFrameHeaderPayload() {
         BitWriter writer = new BitWriter();
+        writeInterFrameHeaderBeforeGlobalMotion(writer);
+        writeIdentityGlobalMotion(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a standalone inter frame header payload with a translated LAST reference.
+    ///
+    /// @return a standalone inter frame header payload with translation global motion
+    private static byte[] interFrameHeaderPayloadWithTranslationGlobalMotion() {
+        BitWriter writer = new BitWriter();
+        writeInterFrameHeaderBeforeGlobalMotion(writer);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writeSignedSubexpNearZero(writer, 1);
+        writeSignedSubexpNearZero(writer, -1);
+        for (int referenceFrame = 1; referenceFrame < 7; referenceFrame++) {
+            writer.writeFlag(false);
+        }
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Writes the common inter frame-header fields that precede global-motion parameters.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeInterFrameHeaderBeforeGlobalMotion(BitWriter writer) {
         writer.writeFlag(false);
         writer.writeBits(1, 2);
         writer.writeFlag(true);
@@ -715,8 +763,6 @@ final class FrameHeaderParserTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
-        writer.writeTrailingBits();
-        return writer.toByteArray();
     }
 
     /// Creates a standalone inter frame header payload that inherits segmentation and loop-filter state from `primary_ref_frame = 0`.
@@ -777,6 +823,7 @@ final class FrameHeaderParserTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writeIdentityGlobalMotion(writer);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
@@ -946,6 +993,29 @@ final class FrameHeaderParserTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
+        writeIdentityGlobalMotion(writer);
+    }
+
+    /// Writes identity global-motion signaling for LAST through ALTREF.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeIdentityGlobalMotion(BitWriter writer) {
+        for (int referenceFrame = 0; referenceFrame < 7; referenceFrame++) {
+            writer.writeFlag(false);
+        }
+    }
+
+    /// Writes a signed subexponential value whose magnitude is at most three around a zero reference.
+    ///
+    /// @param writer the destination bit writer
+    /// @param value the signed value in `[-3, 3]`
+    private static void writeSignedSubexpNearZero(BitWriter writer, int value) {
+        if (value < -3 || value > 3) {
+            throw new IllegalArgumentException("value is outside the supported test range: " + value);
+        }
+        int recentered = value < 0 ? -2 * value - 1 : 2 * value;
+        writer.writeFlag(false);
+        writer.writeBits(recentered, 3);
     }
 
     /// Creates normalized film grain parameters for reference-copy tests.

@@ -84,6 +84,69 @@ final class YuvToRgbTransformTest {
         assertNotEquals(bt601.toOpaqueArgb(100, 90, 200), bt709.toOpaqueArgb(100, 90, 200));
     }
 
+    /// Verifies FCC matrix signaling selects its standardized luma coefficients.
+    @Test
+    void fccMatrixUsesStandardizedLumaCoefficients() {
+        YuvToRgbTransform transform =
+                YuvToRgbTransform.fromColorConfig(colorConfig(4, true, AvifPixelFormat.I444));
+
+        assertEquals(YuvToRgbTransform.FCC_FULL_RANGE.redCoefficientV(), transform.redCoefficientV());
+        assertEquals(YuvToRgbTransform.FCC_FULL_RANGE.greenCoefficientU(), transform.greenCoefficientU());
+        assertEquals(YuvToRgbTransform.FCC_FULL_RANGE.greenCoefficientV(), transform.greenCoefficientV());
+        assertEquals(YuvToRgbTransform.FCC_FULL_RANGE.blueCoefficientU(), transform.blueCoefficientU());
+    }
+
+    /// Verifies a Display-P3 chromaticity-derived matrix uses coefficients derived from its white point.
+    @Test
+    void chromaticityDerivedMatrixUsesSignaledDisplayP3Primaries() {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
+                colorConfig(12, 12, true, AvifPixelFormat.I444)
+        );
+
+        assertEquals(101_060, transform.redCoefficientV());
+        assertEquals(-13_832, transform.greenCoefficientU());
+        assertEquals(-33_452, transform.greenCoefficientV());
+        assertEquals(120_680, transform.blueCoefficientU());
+    }
+
+    /// Verifies the equal-depth `YCgCo` inverse reconstructs all three RGB channels.
+    @Test
+    void ycgcoMatrixReconstructsFullRangeRgb() {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
+                colorConfig(8, true, AvifPixelFormat.I444)
+        );
+
+        assertEquals(0xFFC8_6428, transform.toOpaqueArgb(110, 118, 208));
+        assertEquals(-65_536, transform.redCoefficientU());
+        assertEquals(65_536, transform.redCoefficientV());
+        assertEquals(-65_536, transform.blueCoefficientU());
+        assertEquals(-65_536, transform.blueCoefficientV());
+    }
+
+    /// Verifies limited-range `YCgCo` expands reconstructed component endpoints.
+    @Test
+    void ycgcoLimitedRangeExpandsComponentRange() {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
+                colorConfig(8, false, AvifPixelFormat.I444)
+        );
+
+        assertEquals(0xFF00_0000, transform.toOpaqueArgb(16, 128, 128));
+        assertEquals(0xFFFF_FFFF, transform.toOpaqueArgb(235, 128, 128));
+    }
+
+    /// Verifies high-bit-depth `YCgCo` uses the same reversible component relationships.
+    @Test
+    void ycgcoMatrixReconstructsHighBitDepthRgb() {
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
+                colorConfig(8, true, AvifPixelFormat.I444)
+        );
+
+        long pixel = transform.toOpaqueArgb64(440, 472, 832, 10);
+        assertEquals(51_249, (pixel >>> 32) & 0xFFFFL);
+        assertEquals(25_625, (pixel >>> 16) & 0xFFFFL);
+        assertEquals(10_250, pixel & 0xFFFFL);
+    }
+
     /// Verifies AV1 identity-matrix RGB signaling maps planes directly to RGB channels.
     @Test
     void identityMatrixMapsPlanesAsRgbSamples() {
@@ -128,11 +191,27 @@ final class YuvToRgbTransformTest {
             boolean fullRange,
             AvifPixelFormat pixelFormat
     ) {
+        return colorConfig(1, matrixCoefficients, fullRange, pixelFormat);
+    }
+
+    /// Creates one color configuration with explicit primary and matrix codes.
+    ///
+    /// @param colorPrimaries the AV1 color-primary code
+    /// @param matrixCoefficients the AV1 matrix coefficients code
+    /// @param fullRange whether samples are full-range
+    /// @param pixelFormat the decoded chroma layout
+    /// @return one AV1 color configuration
+    private static SequenceHeader.ColorConfig colorConfig(
+            int colorPrimaries,
+            int matrixCoefficients,
+            boolean fullRange,
+            AvifPixelFormat pixelFormat
+    ) {
         return new SequenceHeader.ColorConfig(
                 8,
                 pixelFormat == AvifPixelFormat.I400,
                 true,
-                1,
+                colorPrimaries,
                 13,
                 matrixCoefficients,
                 fullRange,

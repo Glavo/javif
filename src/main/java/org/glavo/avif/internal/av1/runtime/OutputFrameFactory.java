@@ -19,6 +19,7 @@ import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
+import org.glavo.avif.internal.av1.output.OutputFrameMetadata;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
@@ -97,19 +98,39 @@ public final class OutputFrameFactory {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
+        OutputFrameMetadata metadata = new OutputFrameMetadata(
+                checkedFrameHeader.frameType(),
+                visible,
+                presentationIndex,
+                checkedFrameHeader.temporalId(),
+                checkedFrameHeader.spatialId()
+        );
+        return createFrame(checkedDecodedPlanes, metadata, checkedTransform);
+    }
+
+    /// Creates one public decoded frame from planes, metadata, and a color transform.
+    ///
+    /// @param decodedPlanes the reconstructed planes to present
+    /// @param metadata the public output-frame metadata
+    /// @param transform the selected YUV-to-RGB output transform
+    /// @return one public decoded frame backed by the appropriate ARGB storage type
+    private static DecodedFrame createFrame(
+            DecodedPlanes decodedPlanes,
+            OutputFrameMetadata metadata,
+            YuvToRgbTransform transform
+    ) {
+        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
+        OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
+        YuvToRgbTransform checkedTransform = Objects.requireNonNull(transform, "transform");
         return switch (checkedDecodedPlanes.bitDepth()) {
             case 8 -> ArgbOutput.toOpaqueArgb8Frame(
                     checkedDecodedPlanes,
-                    checkedFrameHeader.frameType(),
-                    visible,
-                    presentationIndex,
+                    checkedMetadata,
                     checkedTransform
             );
             case 10, 12 -> ArgbOutput.toOpaqueArgbHighBitDepthFrame(
                     checkedDecodedPlanes,
-                    checkedFrameHeader.frameType(),
-                    visible,
-                    presentationIndex,
+                    checkedMetadata,
                     checkedTransform
             );
             default -> throw new IllegalArgumentException("Unsupported decoded bit depth: " + checkedDecodedPlanes.bitDepth());
@@ -118,17 +139,37 @@ public final class OutputFrameFactory {
 
     /// Creates one public `show_existing_frame` output from a stored reference surface.
     ///
+    /// Pixel data, color configuration, and frame type come from the referenced surface. Layer
+    /// identifiers come from the current show-existing-frame OBU that requests presentation.
+    ///
+    /// @param decodedPlanes the referenced planes after presentation-only filtering
     /// @param surfaceSnapshot the stored reference surface to present
+    /// @param outputRequestHeader the current show-existing-frame request header
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @return one public decoded frame backed by the appropriate ARGB storage type
-    public static DecodedFrame createExistingFrame(ReferenceSurfaceSnapshot surfaceSnapshot, long presentationIndex) {
+    public static DecodedFrame createExistingFrame(
+            DecodedPlanes decodedPlanes,
+            ReferenceSurfaceSnapshot surfaceSnapshot,
+            FrameHeader outputRequestHeader,
+            long presentationIndex
+    ) {
+        DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         ReferenceSurfaceSnapshot checkedSnapshot = Objects.requireNonNull(surfaceSnapshot, "surfaceSnapshot");
-        return createFrame(
-                checkedSnapshot.decodedPlanes(),
-                checkedSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig(),
-                checkedSnapshot.frameHeader(),
+        FrameHeader checkedOutputRequestHeader = Objects.requireNonNull(outputRequestHeader, "outputRequestHeader");
+        FrameHeader referencedFrameHeader = checkedSnapshot.frameHeader();
+        OutputFrameMetadata metadata = new OutputFrameMetadata(
+                referencedFrameHeader.frameType(),
                 true,
-                presentationIndex
+                presentationIndex,
+                checkedOutputRequestHeader.temporalId(),
+                checkedOutputRequestHeader.spatialId()
+        );
+        return createFrame(
+                checkedDecodedPlanes,
+                metadata,
+                YuvToRgbTransform.fromColorConfig(
+                        checkedSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+                )
         );
     }
 }

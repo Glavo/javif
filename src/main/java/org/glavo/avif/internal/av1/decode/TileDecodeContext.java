@@ -54,6 +54,9 @@ public final class TileDecodeContext {
     /// The tile-local temporal motion field being produced while decoding the current frame.
     private final TemporalMotionField decodedTemporalMotionField;
 
+    /// The immutable reference-frame motion-vector projection shared by the frame's tiles.
+    private final ReferenceMotionVectorProjection referenceMotionVectorProjection;
+
     /// The mutable tile-local block syntax state shared across superblocks.
     private final BlockSyntaxState blockSyntaxState;
 
@@ -111,6 +114,7 @@ public final class TileDecodeContext {
     /// @param msacDecoder the tile-local arithmetic decoder
     /// @param cdfContext the tile-local mutable CDF context
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
+    /// @param referenceMotionVectorProjection the immutable reference-frame motion-vector projection
     /// @param blockSyntaxState the mutable tile-local block syntax state shared across superblocks
     /// @param restorationUnitMap the tile-local loop-restoration units decoded from this tile
     /// @param tileIndex the zero-based tile index within the frame
@@ -135,6 +139,7 @@ public final class TileDecodeContext {
             MsacDecoder msacDecoder,
             CdfContext cdfContext,
             TemporalMotionField decodedTemporalMotionField,
+            ReferenceMotionVectorProjection referenceMotionVectorProjection,
             BlockSyntaxState blockSyntaxState,
             RestorationUnitMap restorationUnitMap,
             int tileIndex,
@@ -159,6 +164,10 @@ public final class TileDecodeContext {
         this.msacDecoder = Objects.requireNonNull(msacDecoder, "msacDecoder");
         this.cdfContext = Objects.requireNonNull(cdfContext, "cdfContext");
         this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
+        this.referenceMotionVectorProjection = Objects.requireNonNull(
+                referenceMotionVectorProjection,
+                "referenceMotionVectorProjection"
+        );
         this.blockSyntaxState = Objects.requireNonNull(blockSyntaxState, "blockSyntaxState");
         this.restorationUnitMap = Objects.requireNonNull(restorationUnitMap, "restorationUnitMap");
         this.tileIndex = tileIndex;
@@ -199,7 +208,35 @@ public final class TileDecodeContext {
     /// @return tile-local decode state for the selected tile
     public static TileDecodeContext create(FrameAssembly assembly, int tileIndex, CdfContext baseCdfContext) {
         FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
+        return create(
+                nonNullAssembly,
+                tileIndex,
+                baseCdfContext,
+                ReferenceMotionVectorProjection.create(nonNullAssembly, new FrameSyntaxDecodeResult[8])
+        );
+    }
+
+    /// Creates tile-local decode state with supplied entropy and temporal-projection state.
+    ///
+    /// The CDF context is copied for the tile. The immutable projection is shared without copying.
+    ///
+    /// @param assembly the frame assembly that owns the tile
+    /// @param tileIndex the zero-based tile index within the frame
+    /// @param baseCdfContext the base CDF context template to copy for this tile
+    /// @param referenceMotionVectorProjection the immutable current-frame temporal projection
+    /// @return tile-local decode state for the selected tile
+    static TileDecodeContext create(
+            FrameAssembly assembly,
+            int tileIndex,
+            CdfContext baseCdfContext,
+            ReferenceMotionVectorProjection referenceMotionVectorProjection
+    ) {
+        FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
         CdfContext copiedCdfContext = Objects.requireNonNull(baseCdfContext, "baseCdfContext").copy();
+        ReferenceMotionVectorProjection nonNullReferenceMotionVectorProjection = Objects.requireNonNull(
+                referenceMotionVectorProjection,
+                "referenceMotionVectorProjection"
+        );
         TileBitstream tileBitstream = nonNullAssembly.tileBitstream(tileIndex);
         SequenceHeader sequenceHeader = nonNullAssembly.sequenceHeader();
         FrameHeader frameHeader = nonNullAssembly.frameHeader();
@@ -239,6 +276,7 @@ public final class TileDecodeContext {
                 tileBitstream.openMsacDecoder(frameHeader.disableCdfUpdate()),
                 copiedCdfContext,
                 new TemporalMotionField(width8, height8),
+                nonNullReferenceMotionVectorProjection,
                 new BlockSyntaxState(frameHeader.quantization().baseQIndex()),
                 RestorationUnitMap.createEmpty(nonNullAssembly),
                 tileIndex,
@@ -313,6 +351,13 @@ public final class TileDecodeContext {
     /// @return the tile-local temporal motion field produced while decoding the current frame
     public TemporalMotionField decodedTemporalMotionField() {
         return decodedTemporalMotionField;
+    }
+
+    /// Returns the immutable reference-frame motion-vector projection for the current frame.
+    ///
+    /// @return the immutable reference-frame motion-vector projection for the current frame
+    ReferenceMotionVectorProjection referenceMotionVectorProjection() {
+        return referenceMotionVectorProjection;
     }
 
     /// Returns the mutable tile-local block syntax state shared across superblocks.

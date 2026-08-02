@@ -21,12 +21,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// One block-level residual layout produced after the current coefficient-side syntax pass.
-///
-/// The current implementation covers all-zero units plus the current two-dimensional luma
-/// coefficient syntax supported by `TileResidualSyntaxReader`. Chroma residual syntax is still
-/// introduced incrementally on top of this structure, but reconstruction-side callers may already
-/// populate chroma transform units through the stable block-level contract exposed here.
+/// Decoded block-level luma and chroma transform residual units in bitstream order.
 @NotNullByDefault
 public final class ResidualLayout {
     /// The local tile-relative luma-grid origin of the owning block.

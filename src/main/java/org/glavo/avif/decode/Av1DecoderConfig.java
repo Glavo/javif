@@ -35,12 +35,8 @@ public final class Av1DecoderConfig {
     private final DecodeFrameType decodeFrameType;
     /// The selected AV1 operating point.
     private final int operatingPoint;
-    /// Whether all spatial layers should be exposed when available.
-    private final boolean allLayers;
     /// The maximum decoded frame size in pixels, or `0` when unlimited.
     private final long frameSizeLimit;
-    /// The requested decoder worker count.
-    private final int threadCount;
 
     /// Creates a configuration from a validated builder.
     ///
@@ -51,9 +47,7 @@ public final class Av1DecoderConfig {
         this.outputInvisibleFrames = builder.outputInvisibleFrames;
         this.decodeFrameType = builder.decodeFrameType;
         this.operatingPoint = builder.operatingPoint;
-        this.allLayers = builder.allLayers;
         this.frameSizeLimit = builder.frameSizeLimit;
-        this.threadCount = builder.threadCount;
     }
 
     /// Creates a new mutable builder.
@@ -98,13 +92,6 @@ public final class Av1DecoderConfig {
         return operatingPoint;
     }
 
-    /// Returns whether all spatial layers should be exposed when available.
-    ///
-    /// @return whether all layers are enabled
-    public boolean allLayers() {
-        return allLayers;
-    }
-
     /// Returns the maximum decoded frame size in pixels.
     ///
     /// @return the frame size limit, or `0` when unlimited
@@ -112,11 +99,24 @@ public final class Av1DecoderConfig {
         return frameSizeLimit;
     }
 
-    /// Returns the requested decoder worker count.
+    /// Returns an equivalent configuration selecting the supplied operating point.
     ///
-    /// @return the requested worker count
-    public int threadCount() {
-        return threadCount;
+    /// This instance is returned when the requested value already matches its selection.
+    ///
+    /// @param value the operating-point index in `[0, 31]`
+    /// @return this configuration or an equivalent configuration with the requested selection
+    public Av1DecoderConfig withOperatingPoint(int value) {
+        if (value == operatingPoint) {
+            return this;
+        }
+        return builder()
+                .applyFilmGrain(applyFilmGrain)
+                .strictStdCompliance(strictStdCompliance)
+                .outputInvisibleFrames(outputInvisibleFrames)
+                .decodeFrameType(decodeFrameType)
+                .operatingPoint(value)
+                .frameSizeLimit(frameSizeLimit)
+                .build();
     }
 
     /// Mutable builder for `Av1DecoderConfig`.
@@ -132,12 +132,8 @@ public final class Av1DecoderConfig {
         private DecodeFrameType decodeFrameType = DecodeFrameType.ALL;
         /// The selected AV1 operating point.
         private int operatingPoint = 0;
-        /// Whether all spatial layers should be exposed when available.
-        private boolean allLayers = true;
         /// The maximum decoded frame size in pixels, or `0` when unlimited.
         private long frameSizeLimit = 0;
-        /// The requested decoder worker count.
-        private int threadCount = 1;
 
         /// Creates a builder with default settings.
         public Builder() {
@@ -188,30 +184,12 @@ public final class Av1DecoderConfig {
             return this;
         }
 
-        /// Sets whether all spatial layers should be exposed when available.
-        ///
-        /// @param value whether all spatial layers should be returned
-        /// @return this builder
-        public Builder allLayers(boolean value) {
-            this.allLayers = value;
-            return this;
-        }
-
         /// Sets the maximum decoded frame size in pixels.
         ///
         /// @param value the frame size limit, or `0` when unlimited
         /// @return this builder
         public Builder frameSizeLimit(long value) {
             this.frameSizeLimit = value;
-            return this;
-        }
-
-        /// Sets the requested decoder worker count.
-        ///
-        /// @param value the requested worker count
-        /// @return this builder
-        public Builder threadCount(int value) {
-            this.threadCount = value;
             return this;
         }
 
@@ -224,9 +202,6 @@ public final class Av1DecoderConfig {
             }
             if (frameSizeLimit < 0) {
                 throw new IllegalArgumentException("frameSizeLimit < 0: " + frameSizeLimit);
-            }
-            if (threadCount <= 0) {
-                throw new IllegalArgumentException("threadCount <= 0: " + threadCount);
             }
             return new Av1DecoderConfig(this);
         }

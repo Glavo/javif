@@ -25,7 +25,9 @@ public enum AvifBitDepth {
     /// Ten bits per decoded sample.
     TEN_BITS(10),
     /// Twelve bits per decoded sample.
-    TWELVE_BITS(12);
+    TWELVE_BITS(12),
+    /// Sixteen bits per reconstructed sample.
+    SIXTEEN_BITS(16);
 
     /// The decoded sample bit count.
     private final int bits;
@@ -60,9 +62,9 @@ public enum AvifBitDepth {
 
     /// Returns whether this is a high-bit-depth output path.
     ///
-    /// @return `true` for 10-bit or 12-bit output
+    /// @return `true` for 10-bit, 12-bit, or 16-bit output
     public boolean isHighBitDepth() {
-        return this == TEN_BITS || this == TWELVE_BITS;
+        return this != EIGHT_BITS;
     }
 
     /// Maps a numeric bit count to a supported decoded sample bit depth.
@@ -74,6 +76,7 @@ public enum AvifBitDepth {
             case 8 -> EIGHT_BITS;
             case 10 -> TEN_BITS;
             case 12 -> TWELVE_BITS;
+            case 16 -> SIXTEEN_BITS;
             default -> throw new IllegalArgumentException("Unsupported bit depth: " + bits);
         };
     }

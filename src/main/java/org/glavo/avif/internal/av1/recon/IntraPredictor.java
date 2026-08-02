@@ -21,12 +21,11 @@ import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
-/// Minimal intra predictor used by the first reconstruction-capable decode path.
+/// Reconstructs AV1 intra-predicted luma and chroma blocks.
 ///
-/// The current implementation supports the AV1 non-directional intra modes, directional intra
-/// prediction with signed `angle_delta`, luma filter-intra, and the current `I420` / `I422` /
-/// `I444` CFL chroma subset. It uses frame-edge midpoint samples when top or left neighbors are
-/// unavailable.
+/// This predictor implements non-directional modes, directional prediction with signed
+/// `angle_delta`, luma filter-intra, and CFL chroma prediction for `I420`, `I422`, and `I444`.
+/// Frame edges use midpoint samples when top or left neighbors are unavailable.
 @NotNullByDefault
 final class IntraPredictor {
     /// The AV1 directional base angles in `VERTICAL`-through-`VERTICAL_LEFT` order.
@@ -330,7 +329,7 @@ final class IntraPredictor {
                 y,
                 width,
                 height,
-                checkedPredictionMode(mode, angleDelta),
+                predictionMode(mode),
                 angleDelta,
                 intraEdgeFilterEnabled,
                 smoothEdgeReferences,
@@ -345,9 +344,8 @@ final class IntraPredictor {
 
     /// Reconstructs one luma filter-intra block directly into the destination plane.
     ///
-    /// The current implementation supports the AV1 recursive 4x2 filter-intra algorithm for the
-    /// full syntax-legal size range up to `32x32`, including visible right and bottom edge
-    /// clipping that leaves the final 4x2 prediction unit partially written.
+    /// Implements the AV1 recursive 4x2 filter-intra algorithm for the syntax-legal size range up
+    /// to `32x32`, including partially visible right and bottom prediction units.
     ///
     /// @param plane the mutable destination plane
     /// @param x the zero-based horizontal sample coordinate
@@ -397,7 +395,7 @@ final class IntraPredictor {
             throw new IllegalArgumentException("height <= 0: " + height);
         }
         if (width > 32 || height > 32) {
-            throw new IllegalStateException("filter_intra currently supports sizes up to 32x32: " + width + "x" + height);
+            throw new IllegalStateException("filter_intra requires block dimensions no larger than 32x32: " + width + "x" + height);
         }
 
         int defaultSample = 1 << (plane.bitDepth() - 1);
@@ -772,7 +770,7 @@ final class IntraPredictor {
                 y,
                 width,
                 height,
-                checkedPredictionMode(mode, angleDelta),
+                predictionMode(mode),
                 angleDelta,
                 intraEdgeFilterEnabled,
                 smoothEdgeReferences,
@@ -787,10 +785,8 @@ final class IntraPredictor {
 
     /// Reconstructs one CFL chroma block directly into the destination plane.
     ///
-    /// The current implementation consumes already reconstructed luma samples, including any luma
-    /// residuals that were applied before chroma prediction begins, and supports the current
-    /// `I420`, `I422`, and `I444` subsampling patterns through explicit horizontal and vertical
-    /// subsampling shifts.
+    /// The predictor consumes already reconstructed luma samples, including applied luma
+    /// residuals, and accepts the subsampling shifts used by `I420`, `I422`, and `I444`.
     ///
     /// @param chromaPlane the mutable chroma destination plane
     /// @param lumaPlane the already reconstructed luma plane
@@ -928,12 +924,11 @@ final class IntraPredictor {
         predictChromaCfl(chromaPlane, lumaPlane, chromaX, chromaY, lumaX, lumaY, width, height, alpha, 1, 1);
     }
 
-    /// Validates one luma prediction mode and maps it into the internal supported subset.
+    /// Maps one luma prediction mode to its internal prediction kernel.
     ///
     /// @param mode the luma intra prediction mode
-    /// @param angleDelta the signed directional angle delta
-    /// @return the internal supported prediction mode
-    private static PredictionMode checkedPredictionMode(LumaIntraPredictionMode mode, int angleDelta) {
+    /// @return the internal prediction mode
+    private static PredictionMode predictionMode(LumaIntraPredictionMode mode) {
         return switch (mode) {
             case DC -> PredictionMode.DC;
             case VERTICAL -> PredictionMode.VERTICAL;
@@ -951,12 +946,11 @@ final class IntraPredictor {
         };
     }
 
-    /// Validates one chroma prediction mode and maps it into the internal supported subset.
+    /// Maps one chroma prediction mode to its internal prediction kernel.
     ///
     /// @param mode the chroma intra prediction mode
-    /// @param angleDelta the signed directional angle delta
-    /// @return the internal supported prediction mode
-    private static PredictionMode checkedPredictionMode(UvIntraPredictionMode mode, int angleDelta) {
+    /// @return the internal prediction mode
+    private static PredictionMode predictionMode(UvIntraPredictionMode mode) {
         return switch (mode) {
             case DC -> PredictionMode.DC;
             case VERTICAL -> PredictionMode.VERTICAL;
@@ -975,14 +969,14 @@ final class IntraPredictor {
         };
     }
 
-    /// Reconstructs one supported intra-predicted block directly into the destination plane.
+    /// Reconstructs one intra-predicted block directly into the destination plane.
     ///
     /// @param plane the mutable destination plane
     /// @param x the zero-based horizontal sample coordinate
     /// @param y the zero-based vertical sample coordinate
     /// @param width the block width in samples
     /// @param height the block height in samples
-    /// @param mode the supported internal prediction mode
+    /// @param mode the internal prediction mode
     /// @param angleDelta the signed directional angle delta
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
@@ -1855,9 +1849,8 @@ final class IntraPredictor {
 
     /// Returns the signed CFL AC buffer for one subsampled chroma block.
     ///
-    /// The returned buffer has one entry per chroma sample in raster order. The current
-    /// implementation supports the same `I420`, `I422`, and `I444` subsampling patterns exposed by
-    /// the first reconstruction path.
+    /// The returned buffer has one entry per chroma sample in raster order and accepts the
+    /// subsampling shifts used by `I420`, `I422`, and `I444`.
     ///
     /// @param lumaPlane the already reconstructed luma plane
     /// @param lumaX the zero-based horizontal luma sample coordinate
@@ -2664,7 +2657,7 @@ final class IntraPredictor {
         return DIRECTIONAL_DERIVATIVES[halfAngleIndex];
     }
 
-    /// The internal prediction modes supported by the first reconstruction path.
+    /// Internal intra-prediction kernel identifiers.
     @NotNullByDefault
     private enum PredictionMode {
         /// DC prediction.

@@ -33,10 +33,8 @@ import java.util.Objects;
 
 /// Reader for block-level transform layouts that sit between block headers and coefficient syntax.
 ///
-/// The current implementation supports the uniform intra-like transform-size path, including
-/// switchable transform-depth symbols, explicit chroma transform-unit tiling, and lossless 4x4
-/// tiling, and it also covers switchable inter var-tx trees. Coefficient syntax is still out of
-/// scope.
+/// Handles uniform intra-like transform sizes, switchable transform-depth symbols, explicit chroma
+/// transform-unit tiling, lossless 4x4 tiling, and switchable inter variable-transform trees.
 @NotNullByDefault
 public final class TileTransformLayoutReader {
     /// The tile-local decode state that owns the active frame and sequence headers.

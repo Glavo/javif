@@ -38,14 +38,14 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FrameSyntaxDecoder`.
 @NotNullByDefault
 final class FrameSyntaxDecoderTest {
     /// One fixed inter-tile payload whose first block decodes as `skip = false` and `intra = false`.
-    private static final byte @Unmodifiable [] INTER_BLOCK_PAYLOAD = HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+    private static final byte @Unmodifiable [] INTER_BLOCK_PAYLOAD =
+            HexFixtureResources.readBytes("av1/fixtures/inter-zero-mv-8.hex");
 
     /// One fixed payload whose first skip decision changes when the skip CDF is inherited.
     private static final byte @Unmodifiable [] DIFFERENT_INHERITED_SKIP_PAYLOAD =
@@ -149,17 +149,16 @@ final class FrameSyntaxDecoderTest {
         assertTrue(seededSkip);
     }
 
-    /// Verifies that reference-frame motion vectors are rejected instead of being decoded with an
-    /// incomplete temporal projection model.
+    /// Verifies that a frame enabling reference-frame motion vectors reaches tile decoding even
+    /// when no populated runtime temporal source is available.
     @Test
-    void decodeFrameRejectsReferenceFrameMotionVectors() {
+    void decodeFrameAcceptsReferenceFrameMotionVectorsWithoutPopulatedSources() {
         FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 8, 8);
 
-        UnsupportedOperationException exception = assertThrows(
-                UnsupportedOperationException.class,
-                () -> new FrameSyntaxDecoder(null).decode(assembly)
-        );
-        assertEquals("Reference-frame motion-vector projection is not implemented", exception.getMessage());
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
+
+        assertEquals(1, result.tileCount());
+        assertEquals(BlockSize.SIZE_8X8, firstLeaf(result.tileRoots(0)).header().size());
     }
 
     /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.

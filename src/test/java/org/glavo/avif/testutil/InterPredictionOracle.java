@@ -5,19 +5,18 @@ import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
-/// Test-only oracle for the current inter-prediction subset supported by the reconstruction core.
+/// Test-only oracle for AV1 inter-prediction filters used by the reconstruction core.
 ///
-/// The implementation intentionally mirrors the current production contract without calling package-
-/// private reconstruction helpers, so unit and integration tests can assert exact pixel values for
-/// integer-copy, `BILINEAR`, and fixed `EIGHT_TAP_*` subpel prediction, including bit-depth-aware
-/// fixed-filter clipping.
+/// The implementation does not call package-private reconstruction helpers, so unit and integration
+/// tests can assert exact pixel values for integer-copy, `BILINEAR`, and fixed `EIGHT_TAP_*`
+/// subpel prediction, including bit-depth-aware fixed-filter clipping.
 @NotNullByDefault
 public final class InterPredictionOracle {
 
-    /// The number of taps in the current AV1 fixed inter filter.
+    /// The number of taps in an AV1 fixed inter filter.
     private static final int INTER_FILTER_TAP_COUNT = 8;
 
-    /// The center offset used by the current AV1 fixed inter filter.
+    /// The center offset used by an AV1 fixed inter filter.
     private static final int INTER_FILTER_START_OFFSET = 3;
 
     /// The filter coefficient normalization shift.
@@ -26,7 +25,7 @@ public final class InterPredictionOracle {
     /// The number of AV1 fixed-filter phases.
     private static final int INTER_FILTER_PHASES = 16;
 
-    /// The current regular eight-tap fixed-filter coefficients indexed by phase.
+    /// The regular eight-tap fixed-filter coefficients indexed by phase.
     private static final int @Unmodifiable [] @Unmodifiable [] REGULAR_SUBPEL_FILTERS = {
             {0, 1, -3, 63, 4, -1, 0, 0},
             {0, 1, -5, 61, 9, -2, 0, 0},
@@ -45,7 +44,7 @@ public final class InterPredictionOracle {
             {0, 0, -1, 4, 63, -3, 1, 0}
     };
 
-    /// The current smooth eight-tap fixed-filter coefficients indexed by phase.
+    /// The smooth eight-tap fixed-filter coefficients indexed by phase.
     private static final int @Unmodifiable [] @Unmodifiable [] SMOOTH_SUBPEL_FILTERS = {
             {0, 1, 14, 31, 17, 1, 0, 0},
             {0, 0, 13, 31, 18, 2, 0, 0},
@@ -64,7 +63,7 @@ public final class InterPredictionOracle {
             {0, 0, 1, 17, 31, 14, 1, 0}
     };
 
-    /// The current sharp eight-tap fixed-filter coefficients indexed by phase.
+    /// The sharp eight-tap fixed-filter coefficients indexed by phase.
     private static final int @Unmodifiable [] @Unmodifiable [] SHARP_SUBPEL_FILTERS = {
             {-1, 1, -3, 63, 4, -1, 1, 0},
             {-1, 3, -6, 62, 8, -3, 2, -1},
@@ -125,8 +124,7 @@ public final class InterPredictionOracle {
     private InterPredictionOracle() {
     }
 
-    /// Samples one rectangular reference-plane footprint using the current supported inter filter
-    /// subset.
+    /// Samples one rectangular reference-plane footprint with the supplied inter filter.
     ///
     /// @param referencePlane the immutable reference plane
     /// @param width the sampled block width in samples
@@ -166,8 +164,7 @@ public final class InterPredictionOracle {
         );
     }
 
-    /// Samples one rectangular reference-plane footprint using the current supported inter filter
-    /// subset and a caller-supplied output clipping range.
+    /// Samples one rectangular reference-plane footprint with a caller-supplied clipping range.
     ///
     /// @param referencePlane the immutable reference plane
     /// @param width the sampled block width in samples
@@ -366,8 +363,8 @@ public final class InterPredictionOracle {
                     clamp(sourceY0, 0, referencePlane.height() - 1)
             );
         }
-        if (!supportsFixedFractionalInterFilter(horizontalFilterMode)
-                || !supportsFixedFractionalInterFilter(verticalFilterMode)
+        if (!isConcreteInterpolationFilter(horizontalFilterMode)
+                || !isConcreteInterpolationFilter(verticalFilterMode)
                 || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
                 || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
             throw new IllegalArgumentException(
@@ -469,12 +466,11 @@ public final class InterPredictionOracle {
         };
     }
 
-    /// Returns whether one interpolation filter is currently supported for fixed fractional
-    /// prediction.
+    /// Returns whether one interpolation filter selects a concrete prediction kernel.
     ///
     /// @param filterMode the interpolation filter to inspect
-    /// @return whether the supplied interpolation filter is currently supported for fixed fractional prediction
-    private static boolean supportsFixedFractionalInterFilter(FrameHeader.InterpolationFilter filterMode) {
+    /// @return whether the supplied interpolation filter is concrete rather than switchable
+    private static boolean isConcreteInterpolationFilter(FrameHeader.InterpolationFilter filterMode) {
         return filterMode == FrameHeader.InterpolationFilter.BILINEAR
                 || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
                 || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
@@ -522,9 +518,9 @@ public final class InterPredictionOracle {
             int denominatorY
     ) {
         int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
-        int fractionY = Math.floorMod(sourceNumeratorY, denominatorY);
+        int fractionY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
         int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
-        int fractionX = Math.floorMod(sourceNumeratorX, denominatorX);
+        int fractionX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
         int clampedSourceX0 = clamp(sourceX0, 0, referencePlane.width() - 1);
         int clampedSourceY0 = clamp(sourceY0, 0, referencePlane.height() - 1);
         int clampedSourceX1 = clamp(sourceX0 + 1, 0, referencePlane.width() - 1);
@@ -535,9 +531,9 @@ public final class InterPredictionOracle {
                 referencePlane.sample(clampedSourceX0, clampedSourceY1),
                 referencePlane.sample(clampedSourceX1, clampedSourceY1),
                 fractionX,
-                denominatorX,
+                INTER_FILTER_PHASES,
                 fractionY,
-                denominatorY
+                INTER_FILTER_PHASES
         );
     }
 

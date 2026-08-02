@@ -68,10 +68,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Integration tests for the first-pixel `FrameReconstructor` path.
+/// Integration tests for `FrameReconstructor`.
 @NotNullByDefault
 final class FrameReconstructorIntegrationTest {
-    /// One fixed single-tile payload that stays inside the current first-pixel reconstruction subset.
+    /// One fixed single-tile opaque-gray key-frame payload.
     private static final byte @Unmodifiable [] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
@@ -84,7 +84,7 @@ final class FrameReconstructorIntegrationTest {
     /// One deterministic real inter tile payload whose first block uses one single reference and a
     /// zero motion vector.
     private static final byte @Unmodifiable [] BITSTREAM_DERIVED_INTER_PAYLOAD =
-            HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+            HexFixtureResources.readBytes("av1/fixtures/inter-zero-mv-8.hex");
 
     /// The generated named-fixture resource backing deterministic frame-reconstructor integration payloads.
     private static final String FRAME_RECONSTRUCTOR_FIXTURE_RESOURCE_PATH =
@@ -409,7 +409,7 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsBitstreamDerivedI420InterLeafWithBilinearSubpelPredictionFromStoredReferenceSurface() {
         assertBitstreamDerivedI420InterLeafWithSubpelPrediction(
-                new MotionVector(2, 2),
+                new MotionVector(4, 4),
                 FrameHeader.InterpolationFilter.BILINEAR
         );
     }
@@ -420,7 +420,7 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsBitstreamDerivedI420InterLeafWithRegularEightTapSubpelPredictionFromStoredReferenceSurface() {
         assertBitstreamDerivedI420InterLeafWithSubpelPrediction(
-                new MotionVector(3, 1),
+                new MotionVector(6, 2),
                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
         );
     }
@@ -431,7 +431,7 @@ final class FrameReconstructorIntegrationTest {
     @Test
     void reconstructsBitstreamDerivedI420InterLeafWithSmoothEightTapSubpelPredictionFromStoredReferenceSurface() {
         assertBitstreamDerivedI420InterLeafWithSubpelPrediction(
-                new MotionVector(2, 6),
+                new MotionVector(4, 12),
                 FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
         );
     }
@@ -440,7 +440,7 @@ final class FrameReconstructorIntegrationTest {
     /// then pass through normative horizontal super-resolution.
     @Test
     void reconstructsBitstreamDerivedI420InterLeafWithSuperResolutionFromStoredReferenceSurface() {
-        MotionVector motionVector = new MotionVector(2, 2);
+        MotionVector motionVector = new MotionVector(4, 4);
         FrameHeader.InterpolationFilter interpolationFilter = FrameHeader.InterpolationFilter.BILINEAR;
         FrameAssembly assembly = createSuperResolvedInterAssembly(
                 AvifPixelFormat.I420,
@@ -508,10 +508,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceLumaPlane,
                         visibleLumaWidth,
                         visibleLumaHeight,
-                        lumaOriginX * 4 + motionVector.columnQuarterPel(),
-                        lumaOriginY * 4 + motionVector.rowQuarterPel(),
-                        4,
-                        4,
+                        lumaOriginX * 8 + motionVector.columnEighthPel(),
+                        lumaOriginY * 8 + motionVector.rowEighthPel(),
+                        8,
+                        8,
                         visibleLumaWidth,
                         visibleLumaHeight,
                         interpolationFilter
@@ -525,10 +525,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceChromaUPlane,
                         visibleChromaWidth,
                         visibleChromaHeight,
-                        chromaOriginX * 8 + motionVector.columnQuarterPel(),
-                        chromaOriginY * 8 + motionVector.rowQuarterPel(),
-                        8,
-                        8,
+                        chromaOriginX * 16 + motionVector.columnEighthPel(),
+                        chromaOriginY * 16 + motionVector.rowEighthPel(),
+                        16,
+                        16,
                         visibleChromaWidth,
                         visibleChromaHeight,
                         interpolationFilter
@@ -542,10 +542,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceChromaVPlane,
                         visibleChromaWidth,
                         visibleChromaHeight,
-                        chromaOriginX * 8 + motionVector.columnQuarterPel(),
-                        chromaOriginY * 8 + motionVector.rowQuarterPel(),
-                        8,
-                        8,
+                        chromaOriginX * 16 + motionVector.columnEighthPel(),
+                        chromaOriginY * 16 + motionVector.rowEighthPel(),
+                        16,
+                        16,
                         visibleChromaWidth,
                         visibleChromaHeight,
                         interpolationFilter
@@ -570,7 +570,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticI420SingleReferenceInterLeafWithSwitchableDirectionalSubpelFilters() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_4X4;
-        MotionVector motionVector = new MotionVector(3, 1);
+        MotionVector motionVector = new MotionVector(6, 2);
         FrameHeader.InterpolationFilter horizontalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
         FrameHeader.InterpolationFilter verticalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP;
         TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
@@ -666,10 +666,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceLumaPlane,
                         4,
                         4,
-                        motionVector.columnQuarterPel(),
-                        motionVector.rowQuarterPel(),
-                        4,
-                        4,
+                        motionVector.columnEighthPel(),
+                        motionVector.rowEighthPel(),
+                        8,
+                        8,
                         4,
                         4,
                         horizontalInterpolationFilter,
@@ -684,10 +684,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceChromaUPlane,
                         2,
                         2,
-                        motionVector.columnQuarterPel(),
-                        motionVector.rowQuarterPel(),
-                        8,
-                        8,
+                        motionVector.columnEighthPel(),
+                        motionVector.rowEighthPel(),
+                        16,
+                        16,
                         2,
                         2,
                         horizontalInterpolationFilter,
@@ -702,10 +702,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceChromaVPlane,
                         2,
                         2,
-                        motionVector.columnQuarterPel(),
-                        motionVector.rowQuarterPel(),
-                        8,
-                        8,
+                        motionVector.columnEighthPel(),
+                        motionVector.rowEighthPel(),
+                        16,
+                        16,
                         2,
                         2,
                         horizontalInterpolationFilter,
@@ -720,7 +720,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticI420SingleReferenceInterLeafWithSuperResolution() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_4X4;
-        MotionVector motionVector = new MotionVector(2, 2);
+        MotionVector motionVector = new MotionVector(4, 4);
         TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
                 position,
@@ -788,7 +788,12 @@ final class FrameReconstructorIntegrationTest {
                 new TileGroupHeader(false, 0, 0, 1),
                 0,
                 0,
-                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+                new TileBitstream[]{new TileBitstream(
+                        0,
+                        BITSTREAM_DERIVED_INTER_PAYLOAD,
+                        0,
+                        BITSTREAM_DERIVED_INTER_PAYLOAD.length
+                )}
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
 
@@ -813,10 +818,10 @@ final class FrameReconstructorIntegrationTest {
                 referenceLumaPlane,
                 4,
                 4,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                4,
-                4,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                8,
+                8,
                 4,
                 4,
                 FrameHeader.InterpolationFilter.BILINEAR
@@ -825,10 +830,10 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaUPlane,
                 2,
                 2,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                8,
-                8,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                16,
+                16,
                 2,
                 2,
                 FrameHeader.InterpolationFilter.BILINEAR
@@ -837,10 +842,10 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane,
                 2,
                 2,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                8,
-                8,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                16,
+                16,
                 2,
                 2,
                 FrameHeader.InterpolationFilter.BILINEAR
@@ -881,7 +886,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticI420InterLeafWithSuperResolutionFromPostSuperResolutionStoredReferenceSurface() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_4X4;
-        MotionVector motionVector = new MotionVector(2, 2);
+        MotionVector motionVector = new MotionVector(4, 4);
         TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
                 position,
@@ -964,65 +969,65 @@ final class FrameReconstructorIntegrationTest {
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
-        int[][] codedLuma = expectedGeometryMappedPlaneBilinearly(
+        int[][] codedLuma = expectedScaledInterPlaneBilinearly(
                 referenceLumaPlane,
                 4,
                 4,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                4,
-                4
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                8,
+                8
         );
         int[][] naiveCodedLuma = InterPredictionOracle.sampleReferencePlaneBlock(
                 referenceLumaPlane,
                 4,
                 4,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                4,
-                4,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                8,
+                8,
                 4,
                 4,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        int[][] codedChromaU = expectedGeometryMappedPlaneBilinearly(
+        int[][] codedChromaU = expectedScaledInterPlaneBilinearly(
                 referenceChromaUPlane,
                 2,
                 2,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                8,
-                8
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                16,
+                16
         );
         int[][] naiveCodedChromaU = InterPredictionOracle.sampleReferencePlaneBlock(
                 referenceChromaUPlane,
                 2,
                 2,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                8,
-                8,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                16,
+                16,
                 2,
                 2,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        int[][] codedChromaV = expectedGeometryMappedPlaneBilinearly(
+        int[][] codedChromaV = expectedScaledInterPlaneBilinearly(
                 referenceChromaVPlane,
                 2,
                 2,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                8,
-                8
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                16,
+                16
         );
         int[][] naiveCodedChromaV = InterPredictionOracle.sampleReferencePlaneBlock(
                 referenceChromaVPlane,
                 2,
                 2,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                8,
-                8,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                16,
+                16,
                 2,
                 2,
                 FrameHeader.InterpolationFilter.BILINEAR
@@ -1048,57 +1053,104 @@ final class FrameReconstructorIntegrationTest {
         assertPlaneEquals(requirePlane(decodedPlanes.chromaVPlane()), expectedHorizontallyUpscaledBlock(codedChromaV, 4));
     }
 
-    /// Verifies that the same deterministic real inter tile payload now keeps its decoded residuals
-    /// through reconstruction instead of requiring zero-residual normalization.
+    /// Verifies that one entropy-decoded DC residual is applied after single-reference inter
+    /// prediction instead of being discarded at the inter reconstruction boundary.
     @Test
-    void reconstructsBitstreamDerivedI420InterLeafWithRealResidualOverlayFromStoredReferenceSurface() {
-        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I420, BITSTREAM_DERIVED_INTER_PAYLOAD, 64, 64, 0);
-        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
-        TilePartitionTreeReader.LeafNode decodedLeaf = firstLeaf(syntaxDecodeResult.tileRoots(0));
-
-        assertFalse(allResidualUnitsZero(decodedLeaf.residualLayout()));
-
+    void reconstructsBitstreamDerivedLumaResidualOverInterPrediction() {
+        TransformResidualUnit residualUnit = firstLeaf(
+                decodeMonochromeFourByFourFrame(findPayloadForDcOnlyResidual(BlockSize.SIZE_4X4)).tileRoots(0)
+        ).residualLayout().lumaUnits()[0];
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize blockSize = BlockSize.SIZE_4X4;
+        TransformSize transformSize = TransformSize.TX_4X4;
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader.BlockHeader(
+                position,
+                blockSize,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                -1,
+                SingleInterPredictionMode.GLOBALMV,
+                null,
+                -1,
+                InterMotionVector.resolved(MotionVector.zero()),
+                null,
+                false,
+                0,
+                -1,
+                0,
+                new int[4],
+                null,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TransformLayout transformLayout = new TransformLayout(
+                position,
+                blockSize,
+                blockSize.width4(),
+                blockSize.height4(),
+                transformSize,
+                null,
+                false,
+                new TransformUnit[]{new TransformUnit(position, transformSize)}
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                transformLayout,
+                createResidualLayout(position, blockSize, new TransformResidualUnit[]{residualUnit})
+        );
         TilePartitionTreeReader.LeafNode zeroResidualLeaf = new TilePartitionTreeReader.LeafNode(
-                decodedLeaf.header(),
-                decodedLeaf.transformLayout(),
+                header,
+                transformLayout,
                 createResidualLayout(
-                        decodedLeaf.header().position(),
-                        decodedLeaf.header().size(),
-                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().lumaUnits()),
-                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaUUnits()),
-                        copyResidualUnitsAsAllZero(decodedLeaf.residualLayout().chromaVUnits())
+                        position,
+                        blockSize,
+                        new TransformResidualUnit[]{createAllZeroResidualUnit(position, transformSize)}
                 )
         );
-        FrameSyntaxDecodeResult zeroResidualSyntaxDecodeResult = new FrameSyntaxDecodeResult(
-                syntaxDecodeResult.assembly(),
-                new TilePartitionTreeReader.Node[][]{{zeroResidualLeaf}},
-                syntaxDecodeResult.decodedTemporalMotionFields(),
-                syntaxDecodeResult.finalTileCdfContexts()
-        );
-
+        FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I400, new byte[0], 4, 4, 0);
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createStoredReferenceSurfaceSnapshot(
-                AvifPixelFormat.I420,
-                64,
-                64,
-                createGradientPlane(64, 64, 23, 2, 3),
-                createGradientPlane(32, 32, 87, 1, 5),
-                createGradientPlane(32, 32, 163, 3, 2)
+                AvifPixelFormat.I400,
+                4,
+                4,
+                createGradientPlane(4, 4, 31, 7, 9),
+                null,
+                null
         );
-
         FrameReconstructor reconstructor = new FrameReconstructor();
-        DecodedPlanes baselineDecodedPlanes = reconstructor.reconstruct(
-                zeroResidualSyntaxDecodeResult,
+        DecodedPlanes baseline = reconstructor.reconstruct(
+                createSyntheticResult(assembly, zeroResidualLeaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
-        DecodedPlanes residualDecodedPlanes = reconstructor.reconstruct(
-                syntaxDecodeResult,
+        DecodedPlanes reconstructed = reconstructor.reconstruct(
+                createSyntheticResult(assembly, residualLeaf),
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
         );
 
-        assertEquals(baselineDecodedPlanes.codedWidth(), residualDecodedPlanes.codedWidth());
-        assertEquals(baselineDecodedPlanes.codedHeight(), residualDecodedPlanes.codedHeight());
-        assertEquals(AvifPixelFormat.I420, residualDecodedPlanes.pixelFormat());
-        assertTrue(residualDecodedPlanes.hasChroma());
+        assertFalse(residualUnit.allZero());
+        assertEquals(0, residualUnit.endOfBlockIndex());
+        assertTrue(residualUnit.dcCoefficient() != 0);
+        assertFalse(reconstructed.hasChroma());
+        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+                baseline.lumaPlane(),
+                reconstructed.lumaPlane(),
+                Integer.signum(residualUnit.dcCoefficient())
+        );
     }
 
     /// Verifies that one synthetic monochrome `intrabc` leaf copies one earlier reconstructed
@@ -1109,7 +1161,7 @@ final class FrameReconstructorIntegrationTest {
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
                 AvifPixelFormat.I400,
-                new MotionVector(0, -32)
+                new MotionVector(0, -64)
         );
         FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I400, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
@@ -1144,7 +1196,7 @@ final class FrameReconstructorIntegrationTest {
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
                 AvifPixelFormat.I420,
-                new MotionVector(0, -32)
+                new MotionVector(0, -64)
         );
         FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I420, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
@@ -1203,7 +1255,7 @@ final class FrameReconstructorIntegrationTest {
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
                 AvifPixelFormat.I444,
-                new MotionVector(0, -32)
+                new MotionVector(0, -64)
         );
         FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I444, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
@@ -1262,7 +1314,7 @@ final class FrameReconstructorIntegrationTest {
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(2, 0),
                 AvifPixelFormat.I422,
-                new MotionVector(0, -32)
+                new MotionVector(0, -64)
         );
         FrameAssembly assembly = createInterAssembly(AvifPixelFormat.I422, new byte[0], 16, 8, 0);
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
@@ -1305,7 +1357,7 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticI420IntrabcLeafWithHalfPelBilinearChromaFromPreviouslyReconstructedSamples() {
         TilePartitionTreeReader.LeafNode sourceLeaf0 = createI420LeafWithChromaPalette();
         TilePartitionTreeReader.LeafNode sourceLeaf1 = createI420LeafWithChromaPalette(new BlockPosition(2, 0));
-        MotionVector motionVector = new MotionVector(0, -36);
+        MotionVector motionVector = new MotionVector(0, -72);
         TilePartitionTreeReader.LeafNode intrabcLeaf = createIntrabcLeaf(
                 new BlockPosition(4, 0),
                 AvifPixelFormat.I420,
@@ -1344,46 +1396,46 @@ final class FrameReconstructorIntegrationTest {
                 baselinePlanes.lumaPlane(),
                 visibleLumaWidth,
                 visibleLumaHeight,
-                lumaOriginX * 4 + motionVector.columnQuarterPel(),
-                lumaOriginY * 4 + motionVector.rowQuarterPel(),
-                4,
-                4
+                lumaOriginX * 8 + motionVector.columnEighthPel(),
+                lumaOriginY * 8 + motionVector.rowEighthPel(),
+                8,
+                8
         );
         int[][] expectedChromaUSamples = sampleReferencePlaneBlockBilinearly(
                 baselineChromaUPlane,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaOriginX * 8 + motionVector.columnQuarterPel(),
-                chromaOriginY * 8 + motionVector.rowQuarterPel(),
-                8,
-                8
+                chromaOriginX * 16 + motionVector.columnEighthPel(),
+                chromaOriginY * 16 + motionVector.rowEighthPel(),
+                16,
+                16
         );
         int[][] expectedChromaVSamples = sampleReferencePlaneBlockBilinearly(
                 baselineChromaVPlane,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaOriginX * 8 + motionVector.columnQuarterPel(),
-                chromaOriginY * 8 + motionVector.rowQuarterPel(),
-                8,
-                8
+                chromaOriginX * 16 + motionVector.columnEighthPel(),
+                chromaOriginY * 16 + motionVector.rowEighthPel(),
+                16,
+                16
         );
         int[][] integerAlignedChromaUSamples = sampleReferencePlaneBlockBilinearly(
                 baselineChromaUPlane,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaOriginX * 8 + motionVector.columnQuarterPel() - 4,
-                chromaOriginY * 8 + motionVector.rowQuarterPel(),
-                8,
-                8
+                chromaOriginX * 16 + motionVector.columnEighthPel() - 8,
+                chromaOriginY * 16 + motionVector.rowEighthPel(),
+                16,
+                16
         );
         int[][] integerAlignedChromaVSamples = sampleReferencePlaneBlockBilinearly(
                 baselineChromaVPlane,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaOriginX * 8 + motionVector.columnQuarterPel() - 4,
-                chromaOriginY * 8 + motionVector.rowQuarterPel(),
-                8,
-                8
+                chromaOriginX * 16 + motionVector.columnEighthPel() - 8,
+                chromaOriginY * 16 + motionVector.rowEighthPel(),
+                16,
+                16
         );
 
         assertEquals(AvifPixelFormat.I420, decodedPlanes.pixelFormat());
@@ -1481,10 +1533,10 @@ final class FrameReconstructorIntegrationTest {
                 baselinePlanes.lumaPlane(),
                 visibleLumaWidth,
                 visibleLumaHeight,
-                lumaOriginX * 4 + motionVector.columnQuarterPel(),
-                lumaOriginY * 4 + motionVector.rowQuarterPel(),
-                4,
-                4
+                lumaOriginX * 8 + motionVector.columnEighthPel(),
+                lumaOriginY * 8 + motionVector.rowEighthPel(),
+                8,
+                8
         );
 
         assertEquals(pixelFormat, zeroResidualPlanes.pixelFormat());
@@ -1500,14 +1552,14 @@ final class FrameReconstructorIntegrationTest {
             int chromaOriginY = lumaOriginY >> chromaSubsamplingY;
             int visibleChromaWidth = ceilDivideByPowerOfTwo(visibleLumaWidth, chromaSubsamplingX);
             int visibleChromaHeight = ceilDivideByPowerOfTwo(visibleLumaHeight, chromaSubsamplingY);
-            int chromaDenominatorX = 4 << chromaSubsamplingX;
-            int chromaDenominatorY = 4 << chromaSubsamplingY;
+            int chromaDenominatorX = 8 << chromaSubsamplingX;
+            int chromaDenominatorY = 8 << chromaSubsamplingY;
             int[][] expectedChromaUSamples = sampleReferencePlaneBlockBilinearly(
                     requirePlane(baselinePlanes.chromaUPlane()),
                     visibleChromaWidth,
                     visibleChromaHeight,
-                    chromaOriginX * chromaDenominatorX + motionVector.columnQuarterPel(),
-                    chromaOriginY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                    chromaOriginX * chromaDenominatorX + motionVector.columnEighthPel(),
+                    chromaOriginY * chromaDenominatorY + motionVector.rowEighthPel(),
                     chromaDenominatorX,
                     chromaDenominatorY
             );
@@ -1515,8 +1567,8 @@ final class FrameReconstructorIntegrationTest {
                     requirePlane(baselinePlanes.chromaVPlane()),
                     visibleChromaWidth,
                     visibleChromaHeight,
-                    chromaOriginX * chromaDenominatorX + motionVector.columnQuarterPel(),
-                    chromaOriginY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                    chromaOriginX * chromaDenominatorX + motionVector.columnEighthPel(),
+                    chromaOriginY * chromaDenominatorY + motionVector.rowEighthPel(),
                     chromaDenominatorX,
                     chromaDenominatorY
             );
@@ -1735,8 +1787,8 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(0, header.referenceFrame0());
         assertEquals(1, header.referenceFrame1());
         assertEquals(CompoundInterPredictionMode.NEWMV_NEWMV, header.compoundInterMode());
-        assertEquals(new MotionVector(8, -2), motionVector0.vector());
-        assertEquals(new MotionVector(0, 4), motionVector1.vector());
+        assertEquals(new MotionVector(12, 6), motionVector0.vector());
+        assertEquals(new MotionVector(12, 6), motionVector1.vector());
         assertTrue(motionVector0.resolved());
         assertTrue(motionVector1.resolved());
 
@@ -1798,10 +1850,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceLumaPlane0,
                                 blockSize.widthPixels(),
                                 blockSize.heightPixels(),
-                                lumaOriginX * 4 + motionVector0.vector().columnQuarterPel(),
-                                lumaOriginY * 4 + motionVector0.vector().rowQuarterPel(),
-                                4,
-                                4,
+                                lumaOriginX * 8 + motionVector0.vector().columnEighthPel(),
+                                lumaOriginY * 8 + motionVector0.vector().rowEighthPel(),
+                                8,
+                                8,
                                 blockSize.widthPixels(),
                                 blockSize.heightPixels(),
                                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
@@ -1810,10 +1862,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceLumaPlane1,
                                 blockSize.widthPixels(),
                                 blockSize.heightPixels(),
-                                lumaOriginX * 4 + motionVector1.vector().columnQuarterPel(),
-                                lumaOriginY * 4 + motionVector1.vector().rowQuarterPel(),
-                                4,
-                                4,
+                                lumaOriginX * 8 + motionVector1.vector().columnEighthPel(),
+                                lumaOriginY * 8 + motionVector1.vector().rowEighthPel(),
+                                8,
+                                8,
                                 blockSize.widthPixels(),
                                 blockSize.heightPixels(),
                                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
@@ -1828,8 +1880,8 @@ final class FrameReconstructorIntegrationTest {
     void reconstructsSyntheticI420CompoundInterLeafWithSwitchableDirectionalSubpelFilters() {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_4X4;
-        MotionVector motionVector0 = new MotionVector(3, 1);
-        MotionVector motionVector1 = new MotionVector(1, 3);
+        MotionVector motionVector0 = new MotionVector(6, 2);
+        MotionVector motionVector1 = new MotionVector(2, 6);
         FrameHeader.InterpolationFilter horizontalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH;
         FrameHeader.InterpolationFilter verticalInterpolationFilter = FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR;
         TransformSize lumaTransformSize = blockSize.maxLumaTransformSize();
@@ -1938,10 +1990,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceLumaPlane0,
                                 4,
                                 4,
-                                motionVector0.columnQuarterPel(),
-                                motionVector0.rowQuarterPel(),
-                                4,
-                                4,
+                                motionVector0.columnEighthPel(),
+                                motionVector0.rowEighthPel(),
+                                8,
+                                8,
                                 4,
                                 4,
                                 horizontalInterpolationFilter,
@@ -1951,10 +2003,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceLumaPlane1,
                                 4,
                                 4,
-                                motionVector1.columnQuarterPel(),
-                                motionVector1.rowQuarterPel(),
-                                4,
-                                4,
+                                motionVector1.columnEighthPel(),
+                                motionVector1.rowEighthPel(),
+                                8,
+                                8,
                                 4,
                                 4,
                                 horizontalInterpolationFilter,
@@ -1971,10 +2023,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceChromaUPlane0,
                                 2,
                                 2,
-                                motionVector0.columnQuarterPel(),
-                                motionVector0.rowQuarterPel(),
-                                8,
-                                8,
+                                motionVector0.columnEighthPel(),
+                                motionVector0.rowEighthPel(),
+                                16,
+                                16,
                                 2,
                                 2,
                                 horizontalInterpolationFilter,
@@ -1984,10 +2036,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceChromaUPlane1,
                                 2,
                                 2,
-                                motionVector1.columnQuarterPel(),
-                                motionVector1.rowQuarterPel(),
-                                8,
-                                8,
+                                motionVector1.columnEighthPel(),
+                                motionVector1.rowEighthPel(),
+                                16,
+                                16,
                                 2,
                                 2,
                                 horizontalInterpolationFilter,
@@ -2004,10 +2056,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceChromaVPlane0,
                                 2,
                                 2,
-                                motionVector0.columnQuarterPel(),
-                                motionVector0.rowQuarterPel(),
-                                8,
-                                8,
+                                motionVector0.columnEighthPel(),
+                                motionVector0.rowEighthPel(),
+                                16,
+                                16,
                                 2,
                                 2,
                                 horizontalInterpolationFilter,
@@ -2017,10 +2069,10 @@ final class FrameReconstructorIntegrationTest {
                                 referenceChromaVPlane1,
                                 2,
                                 2,
-                                motionVector1.columnQuarterPel(),
-                                motionVector1.rowQuarterPel(),
-                                8,
-                                8,
+                                motionVector1.columnEighthPel(),
+                                motionVector1.rowEighthPel(),
+                                16,
+                                16,
                                 2,
                                 2,
                                 horizontalInterpolationFilter,
@@ -4902,10 +4954,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceLumaPlane,
                         visibleLumaWidth,
                         visibleLumaHeight,
-                        lumaOriginX * 4 + subpelMotionVector.columnQuarterPel(),
-                        lumaOriginY * 4 + subpelMotionVector.rowQuarterPel(),
-                        4,
-                        4,
+                        lumaOriginX * 8 + subpelMotionVector.columnEighthPel(),
+                        lumaOriginY * 8 + subpelMotionVector.rowEighthPel(),
+                        8,
+                        8,
                         visibleLumaWidth,
                         visibleLumaHeight,
                         interpolationFilter
@@ -4919,10 +4971,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceChromaUPlane,
                         visibleChromaWidth,
                         visibleChromaHeight,
-                        chromaOriginX * 8 + subpelMotionVector.columnQuarterPel(),
-                        chromaOriginY * 8 + subpelMotionVector.rowQuarterPel(),
-                        8,
-                        8,
+                        chromaOriginX * 16 + subpelMotionVector.columnEighthPel(),
+                        chromaOriginY * 16 + subpelMotionVector.rowEighthPel(),
+                        16,
+                        16,
                         visibleChromaWidth,
                         visibleChromaHeight,
                         interpolationFilter
@@ -4936,10 +4988,10 @@ final class FrameReconstructorIntegrationTest {
                         referenceChromaVPlane,
                         visibleChromaWidth,
                         visibleChromaHeight,
-                        chromaOriginX * 8 + subpelMotionVector.columnQuarterPel(),
-                        chromaOriginY * 8 + subpelMotionVector.rowQuarterPel(),
-                        8,
-                        8,
+                        chromaOriginX * 16 + subpelMotionVector.columnEighthPel(),
+                        chromaOriginY * 16 + subpelMotionVector.rowEighthPel(),
+                        16,
+                        16,
                         visibleChromaWidth,
                         visibleChromaHeight,
                         interpolationFilter
@@ -5226,7 +5278,12 @@ final class FrameReconstructorIntegrationTest {
                 new TileGroupHeader(false, 0, 0, 1),
                 0,
                 0,
-                new TileBitstream[]{new TileBitstream(0, new byte[0], 0, 0)}
+                new TileBitstream[]{new TileBitstream(
+                        0,
+                        BITSTREAM_DERIVED_INTER_PAYLOAD,
+                        0,
+                        BITSTREAM_DERIVED_INTER_PAYLOAD.length
+                )}
         );
         return assembly;
     }
@@ -6637,8 +6694,16 @@ final class FrameReconstructorIntegrationTest {
                 header.drlIndex(),
                 InterMotionVector.resolved(motionVector),
                 header.motionVector1(),
+                header.motionMode(),
                 header.horizontalInterpolationFilter(),
                 header.verticalInterpolationFilter(),
+                header.compoundPredictionType(),
+                header.compoundMaskSign(),
+                header.compoundWedgeIndex(),
+                header.interIntra(),
+                header.interIntraMode(),
+                header.interIntraWedge(),
+                header.interIntraWedgeIndex(),
                 header.segmentPredicted(),
                 header.segmentId(),
                 header.cdefIndex(),
@@ -6844,141 +6909,109 @@ final class FrameReconstructorIntegrationTest {
         return Math.min(Math.abs(signedDcCoefficient), 63) | (signedDcCoefficient > 0 ? 0x80 : 0);
     }
 
-    /// Returns one coded-domain plane predicted from one stored post-super-resolution reference
-    /// plane using the current endpoint-preserving geometry remap plus bilinear interpolation.
+    /// Returns one coded-domain plane predicted from a differently sized stored reference with
+    /// AV1 scaled bilinear interpolation.
     ///
     /// @param referencePlane the stored reference plane in the post-super-resolution domain
-    /// @param destinationWidth the coded-domain destination width
-    /// @param destinationHeight the coded-domain destination height
-    /// @param sourceOffsetQuarterPelX the horizontal motion-vector offset in plane-local units
-    /// @param sourceOffsetQuarterPelY the vertical motion-vector offset in plane-local units
-    /// @param denominatorX the horizontal plane-local denominator
-    /// @param denominatorY the vertical plane-local denominator
-    /// @return one sampled reference-plane block in row-major order
-    private static int[][] sampleMappedReferencePlaneBlockBilinearly(
+    /// @param codedWidth the coded-domain destination width
+    /// @param codedHeight the coded-domain destination height
+    /// @param sourceOffsetEighthPelX the horizontal motion-vector offset in luma eighth-pel units
+    /// @param sourceOffsetEighthPelY the vertical motion-vector offset in luma eighth-pel units
+    /// @param denominatorX the plane-local horizontal denominator
+    /// @param denominatorY the plane-local vertical denominator
+    /// @return the predicted coded-domain plane raster
+    private static int[][] expectedScaledInterPlaneBilinearly(
             DecodedPlane referencePlane,
-            int destinationWidth,
-            int destinationHeight,
-            int sourceOffsetQuarterPelX,
-            int sourceOffsetQuarterPelY,
+            int codedWidth,
+            int codedHeight,
+            int sourceOffsetEighthPelX,
+            int sourceOffsetEighthPelY,
             int denominatorX,
             int denominatorY
     ) {
-        int[][] samples = new int[destinationHeight][destinationWidth];
-        for (int y = 0; y < destinationHeight; y++) {
-            int mappedSourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
-                    y,
-                    destinationHeight,
-                    referencePlane.height(),
-                    denominatorY
-            ) + sourceOffsetQuarterPelY;
-            for (int x = 0; x < destinationWidth; x++) {
-                int mappedSourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
+        int[][] predicted = new int[codedHeight][codedWidth];
+        boolean scaled = referencePlane.width() != codedWidth || referencePlane.height() != codedHeight;
+        int horizontalScale = expectedReferenceScaleFactor(referencePlane.width(), codedWidth);
+        int verticalScale = expectedReferenceScaleFactor(referencePlane.height(), codedHeight);
+        for (int y = 0; y < codedHeight; y++) {
+            for (int x = 0; x < codedWidth; x++) {
+                int sourceNumeratorX = scaled
+                        ? expectedScaledReferenceNumerator(
+                        0,
                         x,
-                        destinationWidth,
-                        referencePlane.width(),
-                        denominatorX
-                ) + sourceOffsetQuarterPelX;
-                samples[y][x] = sampleReferencePlaneValueBilinearly(
-                        referencePlane,
-                        mappedSourceNumeratorX,
-                        mappedSourceNumeratorY,
+                        sourceOffsetEighthPelX,
                         denominatorX,
-                        denominatorY
-                );
+                        horizontalScale
+                )
+                        : x * denominatorX + sourceOffsetEighthPelX;
+                int sourceNumeratorY = scaled
+                        ? expectedScaledReferenceNumerator(
+                        0,
+                        y,
+                        sourceOffsetEighthPelY,
+                        denominatorY,
+                        verticalScale
+                )
+                        : y * denominatorY + sourceOffsetEighthPelY;
+                predicted[y][x] = InterPredictionOracle.sampleReferencePlaneBlock(
+                        referencePlane,
+                        1,
+                        1,
+                        sourceNumeratorX,
+                        sourceNumeratorY,
+                        scaled ? 1 << 10 : denominatorX,
+                        scaled ? 1 << 10 : denominatorY,
+                        codedWidth,
+                        codedHeight,
+                        FrameHeader.InterpolationFilter.BILINEAR
+                )[0][0];
             }
         }
-        return samples;
+        return predicted;
     }
 
-    /// Alias kept for older geometry-mapped super-resolution integration tests.
+    /// Returns the expected Q10 source coordinate for AV1 scaled inter prediction.
     ///
-    /// @param referencePlane the stored reference plane in the post-super-resolution domain
-    /// @param destinationWidth the coded-domain destination width
-    /// @param destinationHeight the coded-domain destination height
-    /// @param sourceOffsetQuarterPelX the horizontal motion-vector offset in plane-local units
-    /// @param sourceOffsetQuarterPelY the vertical motion-vector offset in plane-local units
-    /// @param denominatorX the horizontal plane-local denominator
-    /// @param denominatorY the vertical plane-local denominator
-    /// @return one sampled reference-plane block in row-major order
-    private static int[][] expectedGeometryMappedPlaneBilinearly(
-            DecodedPlane referencePlane,
-            int destinationWidth,
-            int destinationHeight,
-            int sourceOffsetQuarterPelX,
-            int sourceOffsetQuarterPelY,
-            int denominatorX,
-            int denominatorY
+    /// @param destinationOrigin the block origin in plane samples
+    /// @param sampleOffset the block-local sample offset
+    /// @param motionVectorEighthPel the motion-vector component in luma eighth-pel units
+    /// @param planeDenominator the plane-local denominator in luma eighth-pel units
+    /// @param scaleFactor the Q14 reference scale factor
+    /// @return the expected Q10 source coordinate
+    private static int expectedScaledReferenceNumerator(
+            int destinationOrigin,
+            int sampleOffset,
+            int motionVectorEighthPel,
+            int planeDenominator,
+            int scaleFactor
     ) {
-        return sampleMappedReferencePlaneBlockBilinearly(
-                referencePlane,
-                destinationWidth,
-                destinationHeight,
-                sourceOffsetQuarterPelX,
-                sourceOffsetQuarterPelY,
-                denominatorX,
-                denominatorY
-        );
+        long originalPosition = (long) destinationOrigin * 16
+                + (long) motionVectorEighthPel * (16 / planeDenominator);
+        long scaledPosition = originalPosition * scaleFactor + (long) (scaleFactor - (1 << 14)) * 8;
+        int blockStart = expectedSignedRoundShift(scaledPosition, 8) + 32;
+        int step = (scaleFactor + 8) >> 4;
+        return Math.toIntExact((long) blockStart + (long) sampleOffset * step);
     }
 
-    /// Samples one reference-plane value bilinearly at one plane-local source numerator.
+    /// Returns the expected Q14 reference scale factor.
     ///
-    /// @param referencePlane the immutable reference plane
-    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
-    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
-    /// @param denominatorX the horizontal interpolation denominator
-    /// @param denominatorY the vertical interpolation denominator
-    /// @return one bilinearly interpolated unsigned sample
-    private static int sampleReferencePlaneValueBilinearly(
-            DecodedPlane referencePlane,
-            int sourceNumeratorX,
-            int sourceNumeratorY,
-            int denominatorX,
-            int denominatorY
-    ) {
-        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
-        int fractionY = Math.floorMod(sourceNumeratorY, denominatorY);
-        int clampedSourceY0 = Math.max(0, Math.min(sourceY0, referencePlane.height() - 1));
-        int clampedSourceY1 = Math.max(0, Math.min(sourceY0 + 1, referencePlane.height() - 1));
-        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
-        int fractionX = Math.floorMod(sourceNumeratorX, denominatorX);
-        int clampedSourceX0 = Math.max(0, Math.min(sourceX0, referencePlane.width() - 1));
-        int clampedSourceX1 = Math.max(0, Math.min(sourceX0 + 1, referencePlane.width() - 1));
-        return bilinearInterpolate(
-                referencePlane.sample(clampedSourceX0, clampedSourceY0),
-                referencePlane.sample(clampedSourceX1, clampedSourceY0),
-                referencePlane.sample(clampedSourceX0, clampedSourceY1),
-                referencePlane.sample(clampedSourceX1, clampedSourceY1),
-                fractionX,
-                denominatorX,
-                fractionY,
-                denominatorY
-        );
+    /// @param referenceExtent the stored reference extent
+    /// @param currentExtent the current coded-frame extent
+    /// @return the expected Q14 scale factor
+    private static int expectedReferenceScaleFactor(int referenceExtent, int currentExtent) {
+        return Math.toIntExact((((long) referenceExtent << 14) + (currentExtent >> 1)) / currentExtent);
     }
 
-    /// Maps one coded-domain destination coordinate into the stored reference-plane numerator
-    /// domain using the current endpoint-preserving linear transform.
+    /// Rounds one signed test-oracle value by an arithmetic right shift.
     ///
-    /// @param destinationCoordinate the zero-based destination-plane coordinate
-    /// @param destinationExtent the destination-plane extent in samples
-    /// @param referenceExtent the reference-plane extent in samples
-    /// @param denominator the plane-local interpolation denominator
-    /// @return the mapped source numerator in plane-local sample units
-    private static int mapDestinationCoordinateToReferenceNumerator(
-            int destinationCoordinate,
-            int destinationExtent,
-            int referenceExtent,
-            int denominator
-    ) {
-        if (destinationExtent == referenceExtent) {
-            return destinationCoordinate * denominator;
-        }
-        if (destinationExtent == 1 || referenceExtent == 1) {
-            return 0;
-        }
-        long numerator = (long) destinationCoordinate * (referenceExtent - 1) * denominator;
-        long divisor = destinationExtent - 1L;
-        return (int) ((numerator + (divisor >> 1)) / divisor);
+    /// @param value the signed value
+    /// @param bits the number of low bits to discard
+    /// @return the symmetrically rounded value
+    private static int expectedSignedRoundShift(long value, int bits) {
+        long offset = 1L << (bits - 1);
+        return value >= 0
+                ? Math.toIntExact((value + offset) >> bits)
+                : Math.toIntExact(-(((-value) + offset) >> bits));
     }
 
     /// Small MSB-first bit writer used to build AV1 test payloads.

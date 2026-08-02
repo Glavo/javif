@@ -77,10 +77,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for `Av1ImageReader`.
 @NotNullByDefault
 final class Av1ImageReaderTest {
-    /// One fixed single-tile payload that stays inside the current first-pixel reconstruction subset.
+    /// One fixed single-tile opaque-gray key-frame payload.
     ///
     /// This payload decodes as one reduced still-picture key frame whose luma and chroma blocks are
-    /// fully intra-predicted with zero residuals, so the current reader can return a stable opaque
+    /// fully intra-predicted with zero residuals, so the reader returns a stable opaque
     /// gray `DecodedFrame` without relying on runtime brute-force search.
     private static final byte @Unmodifiable [] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
@@ -105,7 +105,7 @@ final class Av1ImageReaderTest {
     /// One deterministic real inter tile payload whose first decoded block uses one stored
     /// reference surface with a zero motion vector.
     private static final byte @Unmodifiable [] INTER_BLOCK_TILE_PAYLOAD =
-            HexFixtureResources.readBytes("av1/fixtures/all-zero-8.hex");
+            HexFixtureResources.readBytes("av1/fixtures/inter-zero-mv-8.hex");
 
     /// The generated named-fixture resource backing deterministic tile-block-header payloads.
     private static final String TILE_BLOCK_HEADER_FIXTURE_RESOURCE_PATH =
@@ -407,7 +407,7 @@ final class Av1ImageReaderTest {
         assertSupportedStillPictureRoundTripWithAdditionalChromaLayout(AvifPixelFormat.I444, true);
     }
 
-    /// Verifies that the current still-picture first-pixel path also succeeds for parsed
+    /// Verifies that parsed still pictures decode successfully for
     /// `10-bit` and `12-bit` combined streams across all supported public chroma layouts and
     /// returns `DecodedFrame`.
     ///
@@ -422,7 +422,7 @@ final class Av1ImageReaderTest {
         assertSupportedHighBitDepthStillPictureRoundTrip(AvifPixelFormat.I444, 12, true);
     }
 
-    /// Verifies that the high-bit-depth still-picture first-pixel path also succeeds through
+    /// Verifies that high-bit-depth still pictures decode successfully through
     /// standalone frame assembly across all supported public chroma layouts.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
@@ -522,8 +522,8 @@ final class Av1ImageReaderTest {
         });
     }
 
-    /// Verifies that `readAllFrames()` preserves the current supported first-pixel combined
-    /// still-picture success path across all buffered-input adapters.
+    /// Verifies that `readAllFrames()` decodes a combined still picture across all buffered-input
+    /// adapters.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
@@ -724,24 +724,24 @@ final class Av1ImageReaderTest {
         assertDirectParsedPaletteStillPictureRoundTrip(AvifPixelFormat.I444, true);
     }
 
-    /// Verifies that one standalone real parsed inter frame with reference-frame motion vectors is
-    /// rejected instead of using an incomplete projection model.
+    /// Verifies that one standalone real parsed inter frame reconstructs with projected
+    /// reference-frame motion vectors.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameRejectsStandaloneRealParsedInterFrameWithReferenceFrameMotionVectors()
+    void readFrameReturnsStandaloneRealParsedInterFrameWithReferenceFrameMotionVectors()
             throws IOException {
-        assertRealParsedInterFrameRejectsUnsupportedReferenceMotionVectors(false);
+        assertRealParsedInterFrameWithReferenceMotionVectorsRoundTrip(false);
     }
 
-    /// Verifies that one combined real parsed inter frame with reference-frame motion vectors is
-    /// rejected instead of using an incomplete projection model.
+    /// Verifies that one combined real parsed inter frame reconstructs with projected
+    /// reference-frame motion vectors.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameRejectsCombinedRealParsedInterFrameWithReferenceFrameMotionVectors()
+    void readFrameReturnsCombinedRealParsedInterFrameWithReferenceFrameMotionVectors()
             throws IOException {
-        assertRealParsedInterFrameRejectsUnsupportedReferenceMotionVectors(true);
+        assertRealParsedInterFrameWithReferenceMotionVectorsRoundTrip(true);
     }
 
     /// Verifies that one standalone real parsed inter frame reconstructs through the public reader
@@ -882,8 +882,8 @@ final class Av1ImageReaderTest {
         assertEquals("show_existing_frame references a frame slot that has not been populated", exception.getMessage());
     }
 
-    /// Verifies that one standalone `show_existing_frame` header reuses the currently supported
-    /// opaque gray still-picture fixture through the public reader.
+    /// Verifies that one standalone `show_existing_frame` header reuses an opaque gray reference
+    /// surface through the public reader.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
@@ -907,8 +907,34 @@ final class Av1ImageReaderTest {
         });
     }
 
-    /// Verifies that one combined `FRAME` `show_existing_frame` also reuses the currently
-    /// supported legacy directional still-picture fixture through the public reader.
+    /// Verifies that show-existing output uses the current OBU's layer identifiers.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void readFrameUsesCurrentLayerIdsForShowExistingFrame() throws IOException {
+        byte[] stream = concat(
+                obu(1, fullSequenceHeaderPayload()),
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                obu(3, 5, 3, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            DecodedFrame referencedFrame = reader.readFrame();
+            assertNotNull(referencedFrame);
+            assertEquals(0, referencedFrame.temporalId());
+            assertEquals(0, referencedFrame.spatialId());
+
+            DecodedFrame existingFrame = reader.readFrame();
+            assertNotNull(existingFrame);
+            assertEquals(referencedFrame.frameType(), existingFrame.frameType());
+            assertEquals(5, existingFrame.temporalId());
+            assertEquals(3, existingFrame.spatialId());
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that one combined `FRAME` `show_existing_frame` also reuses a directional
+    /// still-picture reference surface through the public reader.
     ///
     /// @throws IOException if the reader cannot consume the test stream
     @Test
@@ -1302,36 +1328,6 @@ final class Av1ImageReaderTest {
         assertStoredShowExistingFrameIsSuppressedByDecodeFrameType(referenceState, config);
     }
 
-    /// Verifies that `show_existing_frame` fails with one stable not-implemented boundary when the
-    /// referenced slot has syntax state but no reconstructed reference surface yet.
-    @Test
-    void readFrameRejectsShowExistingFrameWithoutReconstructedReferenceSurface() throws Exception {
-        InjectedReferenceState referenceState = captureReferenceStateFromSupportedStillPicture();
-        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
-
-        try (Av1ImageReader reader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
-        )) {
-            injectShowExistingReferenceState(
-                    reader,
-                    new InjectedReferenceState(
-                            referenceState.sequenceHeader(),
-                            referenceState.frameHeader(),
-                            referenceState.syntaxResult(),
-                            null
-                    )
-            );
-
-            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(DecodeErrorCode.NOT_IMPLEMENTED, exception.code());
-            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-            assertEquals(
-                    "show_existing_frame output currently requires a reconstructed reference surface",
-                    exception.getMessage()
-            );
-        }
-    }
-
     /// Verifies that combined `FRAME` OBUs reject trailing tile data when `show_existing_frame` is set.
     @Test
     void readFrameRejectsCombinedShowExistingFrameWithTrailingTileData() {
@@ -1354,7 +1350,7 @@ final class Av1ImageReaderTest {
     /// Verifies that the reader exposes the supplied immutable configuration.
     @Test
     void configReturnsSuppliedConfiguration() {
-        Av1DecoderConfig config = Av1DecoderConfig.builder().threadCount(2).build();
+        Av1DecoderConfig config = Av1DecoderConfig.builder().applyFilmGrain(false).build();
         try (Av1ImageReader reader = Av1ImageReader.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN)),
                 config
@@ -1499,8 +1495,8 @@ final class Av1ImageReaderTest {
 
     /// Creates injected reference-slot state for the real parsed inter-frame success path.
     ///
-    /// Slot `0` carries one populated reconstructed surface while the remaining parser-visible
-    /// slots provide only the order-hint and frame-size metadata needed by the parsed inter frame.
+    /// Every parser-visible slot carries complete reference state; slot `0` is the surface sampled
+    /// by the parsed inter frame.
     ///
     /// @return injected reference-slot state for the real parsed inter-frame success path
     private static InjectedReferenceState[] createInterReferenceStatesForRealParsedInterFrame() {
@@ -1510,8 +1506,8 @@ final class Av1ImageReaderTest {
     /// Creates injected reference-slot state for the real parsed inter-frame success path in the
     /// requested public chroma layout.
     ///
-    /// Slot `0` carries one populated reconstructed surface while the remaining parser-visible
-    /// slots provide only the order-hint and frame-size metadata needed by the parsed inter frame.
+    /// Every parser-visible slot carries complete reference state; slot `0` is the surface sampled
+    /// by the parsed inter frame.
     ///
     /// @param pixelFormat the parsed chroma layout exposed by the inter sequence and stored surfaces
     /// @return injected reference-slot state for the requested parsed inter-frame success path
@@ -1525,14 +1521,11 @@ final class Av1ImageReaderTest {
             FrameHeader referenceFrameHeader = referenceFrameHeaders[i];
             FrameSyntaxDecodeResult syntaxResult =
                     createSyntheticStoredReferenceSyntaxResult(sequenceHeader, referenceFrameHeader);
-            @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot = null;
-            if (i == 0) {
-                referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
-                        referenceFrameHeader,
-                        syntaxResult,
-                        createGradientInterReferenceDecodedPlanes(referenceFrameHeader, pixelFormat)
-                );
-            }
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot = new ReferenceSurfaceSnapshot(
+                    referenceFrameHeader,
+                    syntaxResult,
+                    createGradientInterReferenceDecodedPlanes(referenceFrameHeader, pixelFormat)
+            );
             referenceStates[i] = new InjectedReferenceState(
                     sequenceHeader,
                     referenceFrameHeader,
@@ -1556,8 +1549,6 @@ final class Av1ImageReaderTest {
             reader.injectReferenceStateForTest(
                     i,
                     referenceState.sequenceHeader(),
-                    referenceState.frameHeader(),
-                    referenceState.syntaxResult(),
                     referenceState.referenceSurfaceSnapshot()
             );
         }
@@ -1907,8 +1898,8 @@ final class Av1ImageReaderTest {
         return segments;
     }
 
-    /// Creates one synthetic two-tile stored reference slot that reuses the real current supported
-    /// opaque gray still-picture surface.
+    /// Creates one synthetic two-tile stored reference slot that reuses a decoded opaque-gray
+    /// still-picture surface.
     ///
     /// The widened syntax result keeps the decoded surface unchanged while exercising public-reader
     /// output against `tileCount == 2`.
@@ -2064,7 +2055,7 @@ final class Av1ImageReaderTest {
     }
 
     /// Creates one synthetic stored reference slot whose frame header carries minimal explicit film
-    /// grain while reusing the current supported still-picture surface.
+    /// grain while reusing a decoded still-picture surface.
     ///
     /// @return one synthetic stored reference slot whose referenced frame carries film grain
     /// @throws Exception if the base still-picture metadata cannot be captured
@@ -2375,12 +2366,12 @@ final class Av1ImageReaderTest {
         });
     }
 
-    /// Asserts that one real parsed inter frame with reference-frame motion vectors is rejected
-    /// after the required parser-visible reference state has been injected.
+    /// Asserts that one real parsed inter frame reconstructs with projected motion vectors after
+    /// the required parser-visible reference state has been injected.
     ///
     /// @param combined whether the inter frame is carried by one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
-    private static void assertRealParsedInterFrameRejectsUnsupportedReferenceMotionVectors(
+    private static void assertRealParsedInterFrameWithReferenceMotionVectorsRoundTrip(
             boolean combined
     ) throws IOException {
         InjectedReferenceState[] referenceStates = createInterReferenceStatesForRealParsedInterFrame();
@@ -2399,18 +2390,23 @@ final class Av1ImageReaderTest {
         assertAcrossBufferedInputs(stream, reader -> {
             injectInterReferenceStates(reader, referenceStates);
 
-            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(DecodeErrorCode.UNSUPPORTED_FEATURE, exception.code());
-            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
-            assertEquals(
-                    "Reference-frame motion-vector projection is not implemented",
-                    exception.getMessage()
+            ReferenceSurfaceSnapshot[] referenceSurfaceSlots = new ReferenceSurfaceSnapshot[referenceStates.length];
+            referenceSurfaceSlots[0] = primaryReferenceSurfaceSnapshot;
+            DecodedFrame decodedFrame = reader.readFrame();
+            FrameSyntaxDecodeResult syntaxResult = Objects.requireNonNull(
+                    reader.lastFrameSyntaxDecodeResult(),
+                    "syntax result"
             );
-            assertTrue(exception.getCause() instanceof UnsupportedOperationException);
-            assertNull(reader.lastFrameSyntaxDecodeResult());
-            assertSame(primaryReferenceState.frameHeader(), reader.referenceFrameHeader(0));
-            assertSame(primaryReferenceState.syntaxResult(), reader.referenceFrameSyntaxResult(0));
-            assertSame(primaryReferenceSurfaceSnapshot, reader.referenceSurfaceSnapshot(0));
+            ReferenceSurfaceSnapshot expectedOutputSnapshot = new ReferenceSurfaceSnapshot(
+                    syntaxResult.assembly().frameHeader(),
+                    syntaxResult,
+                    new FrameReconstructor().reconstruct(syntaxResult, referenceSurfaceSlots)
+            );
+
+            assertTrue(syntaxResult.assembly().frameHeader().useReferenceFrameMotionVectors());
+            assertFirstDecodedLeafIsInter(syntaxResult);
+            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 0);
+            assertNull(reader.readFrame());
         });
     }
 
@@ -3101,8 +3097,6 @@ final class Av1ImageReaderTest {
         reader.injectReferenceStateForTest(
                 0,
                 referenceState.sequenceHeader(),
-                referenceState.frameHeader(),
-                referenceState.syntaxResult(),
                 referenceState.referenceSurfaceSnapshot()
         );
     }
@@ -3600,10 +3594,10 @@ final class Av1ImageReaderTest {
                 lumaY,
                 visibleLumaWidth,
                 visibleLumaHeight,
-                lumaX * 4 + motionVector.columnQuarterPel(),
-                lumaY * 4 + motionVector.rowQuarterPel(),
-                4,
-                4
+                lumaX * 8 + motionVector.columnEighthPel(),
+                lumaY * 8 + motionVector.rowEighthPel(),
+                8,
+                8
         );
 
         if (!intrabcLeaf.header().hasChroma()) {
@@ -3615,8 +3609,8 @@ final class Av1ImageReaderTest {
         int chromaY = lumaY >> chromaSubsamplingY;
         int visibleChromaWidth = ceilDivideByPowerOfTwo(visibleLumaWidth, chromaSubsamplingX);
         int visibleChromaHeight = ceilDivideByPowerOfTwo(visibleLumaHeight, chromaSubsamplingY);
-        int chromaDenominatorX = 4 << chromaSubsamplingX;
-        int chromaDenominatorY = 4 << chromaSubsamplingY;
+        int chromaDenominatorX = 8 << chromaSubsamplingX;
+        int chromaDenominatorY = 8 << chromaSubsamplingY;
         assertPlaneBlockMatchesBilinearSample(
                 Objects.requireNonNull(reconstructedPlanes.chromaUPlane(), "chromaUPlane"),
                 Objects.requireNonNull(baselinePlanes.chromaUPlane(), "baselineChromaUPlane"),
@@ -3624,8 +3618,8 @@ final class Av1ImageReaderTest {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaX * chromaDenominatorX + motionVector.columnQuarterPel(),
-                chromaY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                chromaX * chromaDenominatorX + motionVector.columnEighthPel(),
+                chromaY * chromaDenominatorY + motionVector.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY
         );
@@ -3636,8 +3630,8 @@ final class Av1ImageReaderTest {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaX * chromaDenominatorX + motionVector.columnQuarterPel(),
-                chromaY * chromaDenominatorY + motionVector.rowQuarterPel(),
+                chromaX * chromaDenominatorX + motionVector.columnEighthPel(),
+                chromaY * chromaDenominatorY + motionVector.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY
         );
@@ -4620,10 +4614,10 @@ final class Av1ImageReaderTest {
         return new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
     }
 
-    /// Creates repeated tile payloads using the deterministic supported first-pixel fixture.
+    /// Creates repeated tile payloads using the deterministic single-tile fixture.
     ///
     /// @param tileCount the number of tile payload copies to create
-    /// @return repeated tile payloads using the deterministic supported first-pixel fixture
+    /// @return repeated tile payloads using the deterministic single-tile fixture
     private static byte[][] repeatedTilePayloads(int tileCount) {
         byte[][] payloads = new byte[tileCount][];
         for (int i = 0; i < tileCount; i++) {
@@ -4789,6 +4783,7 @@ final class Av1ImageReaderTest {
         writer.writeFlag(true);
         writer.writeFlag(true);
         writer.writeFlag(false);
+        writeIdentityGlobalMotion(writer);
     }
 
     /// Writes one inter frame-header syntax block that parses using only the reference headers
@@ -4825,6 +4820,18 @@ final class Av1ImageReaderTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writeIdentityGlobalMotion(writer);
+    }
+
+    /// Writes identity global-motion signaling for LAST through ALTREF.
+    ///
+    /// @param writer the destination bit writer
+    private static void writeIdentityGlobalMotion(BitWriter writer) {
+        for (int referenceFrame = 0; referenceFrame < 7; referenceFrame++) {
+            writer.writeFlag(false);
+        }
     }
 
     /// Writes one non-reduced still-picture-compatible key frame header syntax without standalone
@@ -5170,31 +5177,30 @@ final class Av1ImageReaderTest {
         /// The sequence header that enables `show_existing_frame` parsing.
         private final SequenceHeader sequenceHeader;
 
-        /// The stored frame header for the referenced slot.
-        private final FrameHeader frameHeader;
-
-        /// The stored structural syntax result for the referenced slot.
-        private final FrameSyntaxDecodeResult syntaxResult;
-
-        /// The stored reconstructed reference surface snapshot, or `null`.
-        private final @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot;
+        /// The complete stored reference state.
+        private final ReferenceSurfaceSnapshot referenceSurfaceSnapshot;
 
         /// Creates one injected reference-slot state.
         ///
         /// @param sequenceHeader the sequence header that enables `show_existing_frame` parsing
         /// @param frameHeader the stored frame header for the referenced slot
         /// @param syntaxResult the stored structural syntax result for the referenced slot
-        /// @param referenceSurfaceSnapshot the stored reconstructed reference surface snapshot, or `null`
+        /// @param referenceSurfaceSnapshot the complete stored reference state
         private InjectedReferenceState(
                 SequenceHeader sequenceHeader,
                 FrameHeader frameHeader,
                 FrameSyntaxDecodeResult syntaxResult,
-                @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot
+                ReferenceSurfaceSnapshot referenceSurfaceSnapshot
         ) {
-            this.sequenceHeader = sequenceHeader;
-            this.frameHeader = frameHeader;
-            this.syntaxResult = syntaxResult;
-            this.referenceSurfaceSnapshot = referenceSurfaceSnapshot;
+            this.sequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
+            this.referenceSurfaceSnapshot = Objects.requireNonNull(
+                    referenceSurfaceSnapshot,
+                    "referenceSurfaceSnapshot"
+            );
+            if (frameHeader != referenceSurfaceSnapshot.frameHeader()
+                    || syntaxResult != referenceSurfaceSnapshot.frameSyntaxDecodeResult()) {
+                throw new IllegalArgumentException("Injected reference state components must describe one snapshot");
+            }
         }
 
         /// Returns the sequence header that enables `show_existing_frame` parsing.
@@ -5208,20 +5214,20 @@ final class Av1ImageReaderTest {
         ///
         /// @return the stored frame header for the referenced slot
         private FrameHeader frameHeader() {
-            return frameHeader;
+            return referenceSurfaceSnapshot.frameHeader();
         }
 
         /// Returns the stored structural syntax result for the referenced slot.
         ///
         /// @return the stored structural syntax result for the referenced slot
         private FrameSyntaxDecodeResult syntaxResult() {
-            return syntaxResult;
+            return referenceSurfaceSnapshot.frameSyntaxDecodeResult();
         }
 
-        /// Returns the stored reconstructed reference surface snapshot, or `null`.
+        /// Returns the complete stored reference state.
         ///
-        /// @return the stored reconstructed reference surface snapshot, or `null`
-        private @Nullable ReferenceSurfaceSnapshot referenceSurfaceSnapshot() {
+        /// @return the complete stored reference state
+        private ReferenceSurfaceSnapshot referenceSurfaceSnapshot() {
             return referenceSurfaceSnapshot;
         }
     }

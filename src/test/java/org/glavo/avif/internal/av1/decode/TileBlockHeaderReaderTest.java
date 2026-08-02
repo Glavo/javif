@@ -41,6 +41,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -131,7 +133,7 @@ final class TileBlockHeaderReaderTest {
         CdfContext oracleCdf = CdfContext.createDefault();
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-        boolean expectedIntra = !expectedSkip && oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        boolean expectedIntra = !oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
         LumaIntraPredictionMode expectedYMode = expectedIntra
                 ? LumaIntraPredictionMode.fromSymbolIndex(oracleDecoder.decodeSymbolAdapt(oracleCdf.mutableYModeCdf(BlockSize.SIZE_16X16.yModeSizeContext()), 12))
                 : null;
@@ -229,9 +231,9 @@ final class TileBlockHeaderReaderTest {
         assertArrayEquals(first.deltaLfValues(), second.deltaLfValues());
     }
 
-    /// Verifies that skipped inter blocks do not consume an intra/inter decision or intra syntax.
+    /// Verifies that the skip flag does not suppress the intra/inter decision.
     @Test
-    void readsSkippedInterBlockWithoutIntraSyntax() {
+    void readsSkippedInterBlockWithInterDecision() {
         byte[] payload = findPayloadForSkippedInterBlock();
         TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
@@ -240,14 +242,14 @@ final class TileBlockHeaderReaderTest {
         CdfContext oracleCdf = CdfContext.createDefault();
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-        boolean intraIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        boolean expectedIntra = !oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
         assertTrue(expectedSkip);
-        assertTrue(intraIfConsumed);
+        assertFalse(expectedIntra);
 
         TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_16X16, neighborContext);
 
         assertTrue(header.skip());
-        assertFalse(header.intra());
+        assertEquals(expectedIntra, header.intra());
         assertFalse(header.useIntrabc());
         assertNull(header.yMode());
         assertNull(header.uvMode());
@@ -332,7 +334,7 @@ final class TileBlockHeaderReaderTest {
         CdfContext oracleCdf = CdfContext.createDefault();
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-        boolean expectedIntra = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        boolean expectedIntra = !oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
         boolean expectedCompound = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
         assertFalse(expectedSkip);
         assertFalse(expectedIntra);
@@ -376,7 +378,7 @@ final class TileBlockHeaderReaderTest {
         CdfContext oracleCdf = CdfContext.createDefault();
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
-        boolean expectedIntra = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
+        boolean expectedIntra = !oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
         boolean expectedCompound = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableCompoundReferenceCdf(2));
         assertFalse(expectedSkip);
         assertFalse(expectedIntra);
@@ -529,6 +531,52 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.uvMode());
     }
 
+    /// Verifies that segment-level `GLOBALMV` evaluates translation parameters and integer precision.
+    @Test
+    void readsTranslatedGlobalMotionSegmentBlockHeader() {
+        byte[] payload = findPayloadForInterBlockWithoutSkipOrIntra();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, true);
+        TileDecodeContext baseContext = createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                createFixedSegmentationInfo(segments),
+                false,
+                false
+        );
+        FrameHeader.GlobalMotionParams[] globalMotionParameters = new FrameHeader.GlobalMotionParams[7];
+        Arrays.fill(globalMotionParameters, FrameHeader.GlobalMotionParams.identity());
+        globalMotionParameters[0] = new FrameHeader.GlobalMotionParams(
+                FrameHeader.GlobalMotionType.TRANSLATION,
+                new int[]{10 << 13, -13 << 13, 1 << 16, 0, 0, 1 << 16}
+        );
+        FrameAssembly assembly = new FrameAssembly(
+                baseContext.sequenceHeader(),
+                baseContext.frameHeader().withGlobalMotionParameters(globalMotionParameters),
+                0,
+                0
+        );
+        assembly.addTileGroup(
+                new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
+                new TileGroupHeader(false, 0, 0, 1),
+                0,
+                0,
+                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+        );
+        TileDecodeContext tileContext = TileDecodeContext.create(assembly, 0);
+
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader(tileContext).read(
+                new BlockPosition(0, 0),
+                BlockSize.SIZE_16X16,
+                BlockNeighborContext.create(tileContext)
+        );
+
+        assertEquals(SingleInterPredictionMode.GLOBALMV, header.singleInterMode());
+        assertEquals(InterMotionVector.resolved(new MotionVector(8, -16)), header.motionVector0());
+    }
+
     /// Verifies that a `NEWMV` single-reference inter block decodes `inter_mode + drl + mv_residual`.
     @Test
     void readsSingleInterModeBlockHeader() {
@@ -584,6 +632,26 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
+    }
+
+    /// Verifies that warped-motion scaling compares current coded dimensions with the stored
+    /// reference surface dimensions and ignores render-size hints.
+    @Test
+    void detectsScaledReferenceFramesForMotionModeSyntax() {
+        FrameHeader.FrameSize currentFrameSize = new FrameHeader.FrameSize(64, 80, 64, 123, 456);
+
+        assertFalse(TileBlockHeaderReader.referenceFrameIsScaled(
+                currentFrameSize,
+                new FrameHeader.FrameSize(48, 64, 64, 5, 7)
+        ));
+        assertTrue(TileBlockHeaderReader.referenceFrameIsScaled(
+                currentFrameSize,
+                new FrameHeader.FrameSize(64, 80, 64, 123, 456)
+        ));
+        assertTrue(TileBlockHeaderReader.referenceFrameIsScaled(
+                currentFrameSize,
+                new FrameHeader.FrameSize(64, 64, 48, 123, 456)
+        ));
     }
 
     /// Verifies that a `NEWMV_NEWMV` compound inter block decodes `comp_inter_mode + drl + mv_residual`.
@@ -1747,7 +1815,7 @@ final class TileBlockHeaderReaderTest {
     /// @param predictor the predictor that the residual is added to
     /// @param allowHighPrecisionMotionVectors whether the active frame allows high-precision motion vectors
     /// @param forceIntegerMotionVectors whether the active frame forces integer motion vectors
-    /// @return the decoded motion vector in quarter-pel units
+    /// @return the decoded motion vector in eighth-pel units
     private static MotionVector decodeMotionVectorResidual(
             MsacDecoder decoder,
             CdfContext cdfContext,
@@ -1757,15 +1825,15 @@ final class TileBlockHeaderReaderTest {
     ) {
         int motionVectorPrecision = (allowHighPrecisionMotionVectors ? 1 : 0) - (forceIntegerMotionVectors ? 1 : 0);
         int motionVectorJoint = decoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorJointCdf(), 3);
-        int rowQuarterPel = predictor.rowQuarterPel();
-        int columnQuarterPel = predictor.columnQuarterPel();
+        int rowEighthPel = predictor.rowEighthPel();
+        int columnEighthPel = predictor.columnEighthPel();
         if ((motionVectorJoint & 2) != 0) {
-            rowQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 0, motionVectorPrecision);
+            rowEighthPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 0, motionVectorPrecision);
         }
         if ((motionVectorJoint & 1) != 0) {
-            columnQuarterPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 1, motionVectorPrecision);
+            columnEighthPel += decodeMotionVectorComponentDiff(decoder, cdfContext, 1, motionVectorPrecision);
         }
-        return new MotionVector(rowQuarterPel, columnQuarterPel);
+        return new MotionVector(rowEighthPel, columnEighthPel);
     }
 
     /// Decodes one signed delta value with the same syntax as `TileSyntaxReader`.
@@ -1795,7 +1863,7 @@ final class TileBlockHeaderReaderTest {
     /// @param cdfContext the oracle CDF context
     /// @param component the zero-based motion-vector component index, where `0` is vertical and `1` is horizontal
     /// @param motionVectorPrecision the active motion-vector precision mode
-    /// @return the decoded signed motion-vector component residual in quarter-pel units
+    /// @return the decoded signed motion-vector component residual in eighth-pel units
     private static int decodeMotionVectorComponentDiff(
             MsacDecoder decoder,
             CdfContext cdfContext,

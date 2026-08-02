@@ -15,40 +15,47 @@
  */
 package org.glavo.avif;
 
+import org.glavo.avif.internal.color.CicpColorPrimaries;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 /// Pure-Java CICP transfer-function and RGB-primary conversion helpers.
 ///
-/// The helper intentionally covers the common AVIF signaling used by libavif fixtures while
-/// keeping ICC handling out of runtime transforms. Missing or unspecified signaling uses
-/// BT.709/sRGB defaults; unsupported explicit signaling is rejected.
+/// The helper covers every CICP transfer characteristic defined for normalized non-negative
+/// channels and the RGB primary sets described by [CicpColorPrimaries]. Missing or unspecified
+/// signaling uses BT.709/sRGB defaults; reserved or unknown explicit signaling is rejected.
 @NotNullByDefault
 final class AvifCicpColorTransforms {
     /// BT.709/sRGB color primaries.
     private static final int PRIMARIES_BT709 = 1;
     /// Unspecified CICP color primaries.
     private static final int PRIMARIES_UNSPECIFIED = 2;
-    /// BT.470 System M color primaries.
-    private static final int PRIMARIES_BT470M = 4;
-    /// BT.470 System B/G color primaries.
-    private static final int PRIMARIES_BT470BG = 5;
-    /// SMPTE 170M color primaries.
-    private static final int PRIMARIES_SMPTE170M = 6;
-    /// SMPTE 240M color primaries.
-    private static final int PRIMARIES_SMPTE240M = 7;
-    /// BT.2020 color primaries.
-    private static final int PRIMARIES_BT2020 = 9;
-    /// SMPTE RP 431-2 P3 color primaries.
-    private static final int PRIMARIES_SMPTE431 = 11;
-    /// SMPTE EG 432-1 Display P3 color primaries.
-    private static final int PRIMARIES_SMPTE432 = 12;
+    /// SMPTE ST 428 CIE XYZ color coordinates.
+    private static final int PRIMARIES_XYZ = 10;
     /// Unspecified CICP transfer characteristics.
     private static final int TRANSFER_UNSPECIFIED = 2;
     /// sRGB transfer characteristics.
     private static final int TRANSFER_SRGB = 13;
     /// Linear transfer characteristics.
     private static final int TRANSFER_LINEAR = 8;
+    /// H.273 BT.709-family transfer-function scale.
+    private static final double BT709_ALPHA = 1.099296826809442;
+    /// H.273 BT.709-family linear-light threshold.
+    private static final double BT709_BETA = 0.018053968510807;
+    /// H.273 BT.709-family encoded threshold.
+    private static final double BT709_ENCODED_THRESHOLD = 4.5 * BT709_BETA;
+    /// H.273 SMPTE 240M transfer-function scale.
+    private static final double SMPTE240_ALPHA = 1.111572195921731;
+    /// H.273 SMPTE 240M linear-light threshold.
+    private static final double SMPTE240_BETA = 0.022821585529445;
+    /// H.273 SMPTE 240M encoded threshold.
+    private static final double SMPTE240_ENCODED_THRESHOLD = 4.0 * SMPTE240_BETA;
+    /// Lower linear-light endpoint represented by transfer characteristic 9.
+    private static final double LOG100_LINEAR_THRESHOLD = 0.01;
+    /// Lower linear-light endpoint represented by transfer characteristic 10.
+    private static final double LOG316_LINEAR_THRESHOLD = Math.sqrt(10.0) / 1000.0;
+    /// SMPTE ST 428 reference-output scale from H.273.
+    private static final double SMPTE428_ENCODE_SCALE = 48.0 / 52.37;
     /// SMPTE ST 2084 perceptual quantizer transfer characteristics.
     private static final int TRANSFER_PQ = 16;
     /// ARIB STD-B67 hybrid log-gamma transfer characteristics.
@@ -95,10 +102,14 @@ final class AvifCicpColorTransforms {
         int transferCharacteristics = transferCharacteristics(colorInfo);
         return switch (transferCharacteristics) {
             case TRANSFER_LINEAR -> clamped;
-            case 1, 6, 14, 15 -> bt709ToLinear(clamped);
+            case 1, 6, 11, 12, 14, 15 -> bt709ToLinear(clamped);
             case 4 -> Math.pow(clamped, 2.2);
             case 5 -> Math.pow(clamped, 2.8);
+            case 7 -> smpte240ToLinear(clamped);
+            case 9 -> logarithmicToLinear(clamped, 2.0);
+            case 10 -> logarithmicToLinear(clamped, 2.5);
             case TRANSFER_PQ -> pqToLinear(clamped);
+            case 17 -> smpte428ToLinear(clamped);
             case TRANSFER_HLG -> hlgToLinear(clamped);
             case TRANSFER_SRGB -> srgbToLinear(clamped);
             default -> throw new UnsupportedOperationException(
@@ -118,10 +129,14 @@ final class AvifCicpColorTransforms {
         int transferCharacteristics = transferCharacteristics(colorInfo);
         return switch (transferCharacteristics) {
             case TRANSFER_LINEAR -> clamped;
-            case 1, 6, 14, 15 -> linearToBt709(clamped);
+            case 1, 6, 11, 12, 14, 15 -> linearToBt709(clamped);
             case 4 -> Math.pow(clamped, 1.0 / 2.2);
             case 5 -> Math.pow(clamped, 1.0 / 2.8);
+            case 7 -> linearToSmpte240(clamped);
+            case 9 -> linearToLogarithmic(clamped, LOG100_LINEAR_THRESHOLD, 2.0);
+            case 10 -> linearToLogarithmic(clamped, LOG316_LINEAR_THRESHOLD, 2.5);
             case TRANSFER_PQ -> linearToPq(clamped);
+            case 17 -> linearToSmpte428(clamped);
             case TRANSFER_HLG -> linearToHlg(clamped);
             case TRANSFER_SRGB -> linearToSrgb(clamped);
             default -> throw new UnsupportedOperationException(
@@ -140,15 +155,13 @@ final class AvifCicpColorTransforms {
     static RgbMatrix conversionMatrix(@Nullable AvifColorInfo sourceInfo, @Nullable AvifColorInfo targetInfo) {
         int sourcePrimaries = colorPrimaries(sourceInfo);
         int targetPrimaries = colorPrimaries(targetInfo);
-        Primaries source = requirePrimaries(sourcePrimaries);
-        Primaries target = requirePrimaries(targetPrimaries);
-        if (sourcePrimaries == targetPrimaries) {
-            return IDENTITY;
-        }
-        @Nullable RgbMatrix sourceToXyz = source.rgbToXyzMatrix();
-        @Nullable RgbMatrix targetToXyz = target.rgbToXyzMatrix();
+        @Nullable RgbMatrix sourceToXyz = primarySetToXyzMatrix(sourcePrimaries);
+        @Nullable RgbMatrix targetToXyz = primarySetToXyzMatrix(targetPrimaries);
         if (sourceToXyz == null || targetToXyz == null) {
             throw new IllegalStateException("Supported CICP primaries produced a singular RGB conversion matrix");
+        }
+        if (sourcePrimaries == targetPrimaries) {
+            return IDENTITY;
         }
         @Nullable RgbMatrix xyzToTarget = targetToXyz.inverse();
         if (xyzToTarget == null) {
@@ -211,30 +224,77 @@ final class AvifCicpColorTransforms {
     /// @param colorPrimaries the effective CICP color primaries value
     /// @return the matching primary definition
     /// @throws UnsupportedOperationException if the explicit primary set is unsupported
-    private static Primaries requirePrimaries(int colorPrimaries) {
-        @Nullable Primaries result = primaries(colorPrimaries);
+    private static CicpColorPrimaries.Definition requirePrimaries(int colorPrimaries) {
+        @Nullable CicpColorPrimaries.Definition result = CicpColorPrimaries.find(colorPrimaries);
         if (result == null) {
             throw new UnsupportedOperationException("Unsupported CICP color primaries: " + colorPrimaries);
         }
         return result;
     }
 
-    /// Returns primaries chromaticities for one CICP code.
+    /// Builds a primary-coordinate-set-to-XYZ matrix for one supported CICP code.
     ///
-    /// @param colorPrimaries the CICP color primaries value
-    /// @return the primaries definition, or `null` when unsupported
-    private static @Nullable Primaries primaries(int colorPrimaries) {
-        return switch (colorPrimaries) {
-            case PRIMARIES_BT709 -> new Primaries(0.640, 0.330, 0.300, 0.600, 0.150, 0.060, 0.3127, 0.3290);
-            case PRIMARIES_BT470M -> new Primaries(0.670, 0.330, 0.210, 0.710, 0.140, 0.080, 0.3100, 0.3160);
-            case PRIMARIES_BT470BG -> new Primaries(0.640, 0.330, 0.290, 0.600, 0.150, 0.060, 0.3127, 0.3290);
-            case PRIMARIES_SMPTE170M -> new Primaries(0.630, 0.340, 0.310, 0.595, 0.155, 0.070, 0.3127, 0.3290);
-            case PRIMARIES_SMPTE240M -> new Primaries(0.630, 0.340, 0.310, 0.595, 0.155, 0.070, 0.3127, 0.3290);
-            case PRIMARIES_BT2020 -> new Primaries(0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290);
-            case PRIMARIES_SMPTE431 -> new Primaries(0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3140, 0.3510);
-            case PRIMARIES_SMPTE432 -> new Primaries(0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290);
-            default -> null;
+    /// CICP code `10` already labels its three channels as CIE XYZ and therefore uses the identity
+    /// matrix. Other supported codes are conventional RGB primary definitions.
+    ///
+    /// @param colorPrimaries the effective CICP color-primary value
+    /// @return the coordinate-set-to-XYZ matrix, or `null` when the definition is singular
+    /// @throws UnsupportedOperationException if the explicit primary set is unsupported
+    private static @Nullable RgbMatrix primarySetToXyzMatrix(int colorPrimaries) {
+        if (colorPrimaries == PRIMARIES_XYZ) {
+            return IDENTITY;
+        }
+        return rgbToXyzMatrix(requirePrimaries(colorPrimaries));
+    }
+
+    /// Computes an RGB-to-XYZ matrix for one primary definition.
+    ///
+    /// @param primaries the primary and white-point chromaticities
+    /// @return the RGB-to-XYZ matrix, or `null` when the chromaticities are singular
+    private static @Nullable RgbMatrix rgbToXyzMatrix(CicpColorPrimaries.Definition primaries) {
+        double redZ = 1.0 - primaries.redX() - primaries.redY();
+        double greenZ = 1.0 - primaries.greenX() - primaries.greenY();
+        double blueZ = 1.0 - primaries.blueX() - primaries.blueY();
+        double whiteZ = 1.0 - primaries.whiteX() - primaries.whiteY();
+        if (primaries.redY() == 0.0
+                || primaries.greenY() == 0.0
+                || primaries.blueY() == 0.0
+                || primaries.whiteY() == 0.0) {
+            return null;
+        }
+        RgbMatrix matrix = new RgbMatrix(
+                primaries.redX() / primaries.redY(),
+                primaries.greenX() / primaries.greenY(),
+                primaries.blueX() / primaries.blueY(),
+                1.0, 1.0, 1.0,
+                redZ / primaries.redY(),
+                greenZ / primaries.greenY(),
+                blueZ / primaries.blueY()
+        );
+        @Nullable RgbMatrix inverse = matrix.inverse();
+        if (inverse == null) {
+            return null;
+        }
+        double[] white = {
+                primaries.whiteX() / primaries.whiteY(),
+                1.0,
+                whiteZ / primaries.whiteY()
         };
+        inverse.apply(white);
+        double redScale = white[0];
+        double greenScale = white[1];
+        double blueScale = white[2];
+        return new RgbMatrix(
+                redScale * primaries.redX() / primaries.redY(),
+                greenScale * primaries.greenX() / primaries.greenY(),
+                blueScale * primaries.blueX() / primaries.blueY(),
+                redScale,
+                greenScale,
+                blueScale,
+                redScale * redZ / primaries.redY(),
+                greenScale * greenZ / primaries.greenY(),
+                blueScale * blueZ / primaries.blueY()
+        );
     }
 
     /// Converts an sRGB gamma-encoded sample to linear light.
@@ -264,10 +324,10 @@ final class AvifCicpColorTransforms {
     /// @param value the normalized gamma-encoded sample
     /// @return the normalized linear-light sample
     private static double bt709ToLinear(double value) {
-        if (value < 0.081) {
+        if (value < BT709_ENCODED_THRESHOLD) {
             return value / 4.5;
         }
-        return Math.pow((value + 0.099) / 1.099, 1.0 / 0.45);
+        return Math.pow((value + BT709_ALPHA - 1.0) / BT709_ALPHA, 1.0 / 0.45);
     }
 
     /// Converts a linear-light sample to BT.709-family gamma encoding.
@@ -275,10 +335,76 @@ final class AvifCicpColorTransforms {
     /// @param value the normalized linear-light sample
     /// @return the normalized gamma-encoded sample
     private static double linearToBt709(double value) {
-        if (value < 0.018) {
+        if (value < BT709_BETA) {
             return value * 4.5;
         }
-        return 1.099 * Math.pow(value, 0.45) - 0.099;
+        return BT709_ALPHA * Math.pow(value, 0.45) - (BT709_ALPHA - 1.0);
+    }
+
+    /// Converts a SMPTE 240M gamma-encoded sample to linear light.
+    ///
+    /// @param value the normalized gamma-encoded sample
+    /// @return the normalized linear-light sample
+    private static double smpte240ToLinear(double value) {
+        if (value < SMPTE240_ENCODED_THRESHOLD) {
+            return value / 4.0;
+        }
+        return Math.pow((value + SMPTE240_ALPHA - 1.0) / SMPTE240_ALPHA, 1.0 / 0.45);
+    }
+
+    /// Converts a linear-light sample to SMPTE 240M gamma encoding.
+    ///
+    /// @param value the normalized linear-light sample
+    /// @return the normalized gamma-encoded sample
+    private static double linearToSmpte240(double value) {
+        if (value < SMPTE240_BETA) {
+            return value * 4.0;
+        }
+        return SMPTE240_ALPHA * Math.pow(value, 0.45) - (SMPTE240_ALPHA - 1.0);
+    }
+
+    /// Converts a logarithmically encoded sample to linear light.
+    ///
+    /// Encoded black represents an interval of linear-light values. This inverse selects zero,
+    /// the lower endpoint of that interval, so exact black remains black.
+    ///
+    /// @param value the normalized logarithmically encoded sample
+    /// @param divisor the base-10 logarithm divisor from H.273
+    /// @return the normalized linear-light sample
+    private static double logarithmicToLinear(double value, double divisor) {
+        if (value <= 0.0) {
+            return 0.0;
+        }
+        return Math.pow(10.0, divisor * (value - 1.0));
+    }
+
+    /// Converts a linear-light sample to logarithmic encoding.
+    ///
+    /// @param value the normalized linear-light sample
+    /// @param threshold the inclusive lower endpoint of the logarithmic segment
+    /// @param divisor the base-10 logarithm divisor from H.273
+    /// @return the normalized logarithmically encoded sample
+    private static double linearToLogarithmic(double value, double threshold, double divisor) {
+        if (value <= threshold) {
+            return 0.0;
+        }
+        return 1.0 + Math.log10(value) / divisor;
+    }
+
+    /// Converts a SMPTE ST 428 gamma-encoded sample to normalized output light.
+    ///
+    /// @param value the normalized gamma-encoded sample
+    /// @return the normalized linear-light sample
+    private static double smpte428ToLinear(double value) {
+        return Math.pow(value, 2.6) / SMPTE428_ENCODE_SCALE;
+    }
+
+    /// Converts normalized output light to SMPTE ST 428 gamma encoding.
+    ///
+    /// @param value the normalized linear-light sample
+    /// @return the normalized gamma-encoded sample
+    private static double linearToSmpte428(double value) {
+        return Math.pow(SMPTE428_ENCODE_SCALE * value, 1.0 / 2.6);
     }
 
     /// Converts a PQ-encoded sample to normalized linear light.
@@ -437,56 +563,4 @@ final class AvifCicpColorTransforms {
         }
     }
 
-    /// RGB primary chromaticities and white point.
-    ///
-    /// @param redX red primary x chromaticity
-    /// @param redY red primary y chromaticity
-    /// @param greenX green primary x chromaticity
-    /// @param greenY green primary y chromaticity
-    /// @param blueX blue primary x chromaticity
-    /// @param blueY blue primary y chromaticity
-    /// @param whiteX white point x chromaticity
-    /// @param whiteY white point y chromaticity
-    private record Primaries(
-            double redX,
-            double redY,
-            double greenX,
-            double greenY,
-            double blueX,
-            double blueY,
-            double whiteX,
-            double whiteY
-    ) {
-        /// Computes the RGB-to-XYZ matrix for these primaries.
-        ///
-        /// @return the RGB-to-XYZ matrix, or `null` when chromaticities are singular
-        private @Nullable RgbMatrix rgbToXyzMatrix() {
-            double redZ = 1.0 - redX - redY;
-            double greenZ = 1.0 - greenX - greenY;
-            double blueZ = 1.0 - blueX - blueY;
-            double whiteZ = 1.0 - whiteX - whiteY;
-            if (redY == 0.0 || greenY == 0.0 || blueY == 0.0 || whiteY == 0.0) {
-                return null;
-            }
-            RgbMatrix matrix = new RgbMatrix(
-                    redX / redY, greenX / greenY, blueX / blueY,
-                    1.0, 1.0, 1.0,
-                    redZ / redY, greenZ / greenY, blueZ / blueY
-            );
-            @Nullable RgbMatrix inverse = matrix.inverse();
-            if (inverse == null) {
-                return null;
-            }
-            double[] white = { whiteX / whiteY, 1.0, whiteZ / whiteY };
-            inverse.apply(white);
-            double redScale = white[0];
-            double greenScale = white[1];
-            double blueScale = white[2];
-            return new RgbMatrix(
-                    redScale * redX / redY, greenScale * greenX / greenY, blueScale * blueX / blueY,
-                    redScale, greenScale, blueScale,
-                    redScale * redZ / redY, greenScale * greenZ / greenY, blueScale * blueZ / blueY
-            );
-        }
-    }
 }

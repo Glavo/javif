@@ -41,22 +41,15 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
-/// Minimal frame reconstructor used by the first pixel-producing AV1 decode path.
+/// Reconstructs decoded AV1 frame syntax into luma and chroma sample planes.
 ///
-/// The current implementation is intentionally narrow. It reconstructs only the current `8-bit`,
-/// `10-bit`, and `12-bit` key/intra subset plus a first single-reference, inter-intra, average-compound, and same-frame
-/// `intrabc` subset with the current fixed-filter subpel prediction path over the current serial tile traversal,
-/// `I400`, `I420`, `I422`, or `I444` chroma layout,
-/// non-directional and directional intra prediction, filter-intra luma prediction, the current
-/// `I420` / `I422` / `I444` CFL chroma subset, parsed and synthetic luma/chroma palette paths, a
-/// normative horizontal super-resolution upscaling path for key/intra frames plus the current
-/// inter/reference prediction subset including OBMC and local warped single-reference prediction,
-/// and a minimal luma/chroma residual subset including clipped frame-fringe chroma footprints,
-/// explicit transform-type residual reconstruction for the currently modeled square and
-/// rectangular transform sizes whose axes stay within `64` samples, and bit-depth preserving inter
-/// subpel filtering for stored reference surfaces.
+/// Reconstruction supports AV1's 8-, 10-, and 12-bit monochrome and 4:2:0, 4:2:2, and 4:4:4
+/// layouts. The pipeline covers intra, inter, compound, inter-intra, `intrabc`, OBMC, warped-motion,
+/// palette, residual, super-resolution, and stored-reference prediction paths before frame-level
+/// postprocessing is applied by the caller.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// The number of coefficients in one 8-tap interpolation kernel.
@@ -73,6 +66,19 @@ public final class FrameReconstructor {
 
     /// The supported AV1 fractional phases for fixed interpolation filters.
     private static final int INTER_FILTER_PHASES = 16;
+
+    /// The fixed-point precision of an AV1 reference-frame scale factor.
+    private static final int REFERENCE_SCALE_BITS = 14;
+
+    /// The identity AV1 reference-frame scale factor.
+    private static final int REFERENCE_SCALE_IDENTITY = 1 << REFERENCE_SCALE_BITS;
+
+    /// The fixed-point precision of scaled inter-prediction source coordinates.
+    private static final int SCALED_INTER_SUBPEL_BITS = 10;
+
+    /// The identity reference geometry used by same-frame `intrabc` prediction.
+    private static final ReferenceScale IDENTITY_REFERENCE_SCALE =
+            new ReferenceScale(REFERENCE_SCALE_IDENTITY, REFERENCE_SCALE_IDENTITY, false);
 
     /// The number of coefficients in one normative super-resolution filter.
     private static final int SUPERRES_FILTER_TAP_COUNT = 8;
@@ -120,9 +126,6 @@ public final class FrameReconstructor {
             }
     };
 
-    /// The maximum number of causal motion-vector samples used for one local warped model.
-    private static final int LOCAL_WARP_SAMPLE_CAPACITY = 8;
-
     /// Tile-local sample boundaries for luma and chroma prediction references.
     ///
     /// @param lumaStartX the first luma sample column available to this tile
@@ -142,6 +145,18 @@ public final class FrameReconstructor {
             int chromaStartY,
             int chromaEndX,
             int chromaEndY
+    ) {
+    }
+
+    /// AV1 fixed-point scale factors for one stored reference surface.
+    ///
+    /// @param horizontalFactor the Q14 horizontal reference scale factor
+    /// @param verticalFactor the Q14 vertical reference scale factor
+    /// @param scaled whether either reference-frame dimension differs from the current coded frame
+    private record ReferenceScale(
+            int horizontalFactor,
+            int verticalFactor,
+            boolean scaled
     ) {
     }
 
@@ -337,7 +352,7 @@ public final class FrameReconstructor {
         FrameHeader.FrameSize frameSize = frameHeader.frameSize();
         AvifPixelFormat pixelFormat = sequenceHeader.colorConfig().pixelFormat();
 
-        requireSupportedSequence(sequenceHeader, frameHeader, checkedSyntaxDecodeResult);
+        validateFrameConfiguration(sequenceHeader, frameHeader);
 
         int alignedLumaWidth = alignedLumaDimension(frameSize.codedWidth());
         int alignedLumaHeight = alignedLumaDimension(frameSize.height());
@@ -479,21 +494,19 @@ public final class FrameReconstructor {
         );
     }
 
-    /// Validates that the sequence and frame stay within the current reconstruction subset.
+    /// Validates the sequence and frame configuration used for pixel reconstruction.
     ///
     /// @param sequenceHeader the active sequence header
     /// @param frameHeader the active frame header
-    /// @param syntaxDecodeResult the structural frame result being reconstructed
-    private static void requireSupportedSequence(
+    private static void validateFrameConfiguration(
             SequenceHeader sequenceHeader,
-            FrameHeader frameHeader,
-            FrameSyntaxDecodeResult syntaxDecodeResult
+            FrameHeader frameHeader
     ) {
         if (sequenceHeader.colorConfig().bitDepth() != 8
                 && sequenceHeader.colorConfig().bitDepth() != 10
                 && sequenceHeader.colorConfig().bitDepth() != 12) {
             throw new IllegalStateException(
-                    "Pixel reconstruction currently requires 8-bit, 10-bit, or 12-bit samples: "
+                    "Pixel reconstruction requires 8-bit, 10-bit, or 12-bit samples: "
                             + sequenceHeader.colorConfig().bitDepth()
             );
         }
@@ -502,7 +515,7 @@ public final class FrameReconstructor {
                 && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I422
                 && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I444) {
             throw new IllegalStateException(
-                    "Pixel reconstruction currently supports only I400/I420/I422/I444: "
+                    "Pixel reconstruction requires an I400, I420, I422, or I444 pixel format: "
                             + sequenceHeader.colorConfig().pixelFormat()
             );
         }
@@ -511,18 +524,19 @@ public final class FrameReconstructor {
                 return;
             }
             throw new IllegalStateException(
-                    "Pixel reconstruction currently supports only key/intra/inter/switch frames: "
+                    "Pixel reconstruction requires a key, intra, inter, or switch frame: "
                             + frameHeader.frameType()
             );
         }
     }
 
-    /// Creates one mutable chroma plane for the current supported pixel format, or `null`.
+    /// Creates one mutable chroma plane for the supplied pixel format, or `null` for monochrome.
     ///
     /// @param pixelFormat the active decoded chroma layout
-    /// @param frameSize the frame dimensions and render size
+    /// @param alignedLumaWidth the aligned luma-plane width in samples
+    /// @param alignedLumaHeight the aligned luma-plane height in samples
     /// @param bitDepth the decoded sample bit depth
-    /// @return one mutable chroma plane for the current supported pixel format, or `null`
+    /// @return one mutable chroma plane for the supplied pixel format, or `null` for monochrome
     private static @Nullable MutablePlaneBuffer createChromaPlane(
             AvifPixelFormat pixelFormat,
             int alignedLumaWidth,
@@ -658,6 +672,12 @@ public final class FrameReconstructor {
         /// The leaf nodes indexed by 4x4 position.
         private final TilePartitionTreeReader.LeafNode[] leaves;
 
+        /// The partition traversal order of each mapped 4x4 position.
+        private final int[] decodeOrders;
+
+        /// The traversal order assigned to the next leaf.
+        private int nextDecodeOrder;
+
         /// Creates one decoded block map.
         ///
         /// @param width4 the frame width rounded up to 4x4 units
@@ -672,6 +692,8 @@ public final class FrameReconstructor {
             this.width4 = width4;
             this.height4 = height4;
             this.leaves = new TilePartitionTreeReader.LeafNode[Math.multiplyExact(width4, height4)];
+            this.decodeOrders = new int[this.leaves.length];
+            Arrays.fill(this.decodeOrders, -1);
         }
 
         /// Creates one decoded block map from decoded tile partition roots.
@@ -714,11 +736,14 @@ public final class FrameReconstructor {
         /// @param leafNode the decoded partition leaf
         private void addLeaf(TilePartitionTreeReader.LeafNode leafNode) {
             TileBlockHeaderReader.BlockHeader header = Objects.requireNonNull(leafNode, "leafNode").header();
+            int decodeOrder = nextDecodeOrder++;
             int endX4 = Math.min(width4, header.position().x4() + header.size().width4());
             int endY4 = Math.min(height4, header.position().y4() + header.size().height4());
             for (int y4 = Math.max(0, header.position().y4()); y4 < endY4; y4++) {
                 for (int x4 = Math.max(0, header.position().x4()); x4 < endX4; x4++) {
-                    leaves[y4 * width4 + x4] = leafNode;
+                    int index = y4 * width4 + x4;
+                    leaves[index] = leafNode;
+                    decodeOrders[index] = decodeOrder;
                 }
             }
         }
@@ -733,6 +758,22 @@ public final class FrameReconstructor {
                 return null;
             }
             return leaves[y4 * width4 + x4];
+        }
+
+        /// Returns whether one candidate leaf precedes the current leaf in partition traversal.
+        ///
+        /// @param candidate the candidate causal leaf
+        /// @param current the current leaf
+        /// @return whether the candidate was decoded before the current leaf
+        public boolean isCausal(
+                TilePartitionTreeReader.LeafNode candidate,
+                TilePartitionTreeReader.LeafNode current
+        ) {
+            TileBlockHeaderReader.BlockHeader candidateHeader = Objects.requireNonNull(candidate, "candidate").header();
+            TileBlockHeaderReader.BlockHeader currentHeader = Objects.requireNonNull(current, "current").header();
+            int candidateIndex = candidateHeader.position().y4() * width4 + candidateHeader.position().x4();
+            int currentIndex = currentHeader.position().y4() * width4 + currentHeader.position().x4();
+            return decodeOrders[candidateIndex] >= 0 && decodeOrders[candidateIndex] < decodeOrders[currentIndex];
         }
 
         /// Returns the decoded leaf that owns one chroma-grid position.
@@ -768,126 +809,6 @@ public final class FrameReconstructor {
                 }
             }
             return null;
-        }
-    }
-
-    /// One causal neighbor sample used to estimate a local warped affine motion model.
-    @NotNullByDefault
-    private static final class LocalWarpSample {
-        /// The decoded neighbor block that produced this sample.
-        private final TileBlockHeaderReader.BlockHeader header;
-
-        /// The sample X position in luma destination coordinates.
-        private final double destinationX;
-
-        /// The sample Y position in luma destination coordinates.
-        private final double destinationY;
-
-        /// The sample horizontal motion delta relative to the current block, in quarter-pel units.
-        private final int columnDeltaQuarterPel;
-
-        /// The sample vertical motion delta relative to the current block, in quarter-pel units.
-        private final int rowDeltaQuarterPel;
-
-        /// Creates one causal neighbor sample used for local warped motion estimation.
-        ///
-        /// @param header the decoded neighbor block that produced this sample
-        /// @param destinationX the sample X position in luma destination coordinates
-        /// @param destinationY the sample Y position in luma destination coordinates
-        /// @param columnDeltaQuarterPel the horizontal motion delta relative to the current block
-        /// @param rowDeltaQuarterPel the vertical motion delta relative to the current block
-        private LocalWarpSample(
-                TileBlockHeaderReader.BlockHeader header,
-                double destinationX,
-                double destinationY,
-                int columnDeltaQuarterPel,
-                int rowDeltaQuarterPel
-        ) {
-            this.header = Objects.requireNonNull(header, "header");
-            this.destinationX = destinationX;
-            this.destinationY = destinationY;
-            this.columnDeltaQuarterPel = columnDeltaQuarterPel;
-            this.rowDeltaQuarterPel = rowDeltaQuarterPel;
-        }
-    }
-
-    /// One affine local warped motion model estimated from causal same-reference motion samples.
-    @NotNullByDefault
-    private static final class LocalWarpModel {
-        /// The current block center X in luma destination coordinates.
-        private final double centerX;
-
-        /// The current block center Y in luma destination coordinates.
-        private final double centerY;
-
-        /// The base horizontal motion-vector component in quarter-pel units.
-        private final int baseColumnQuarterPel;
-
-        /// The base vertical motion-vector component in quarter-pel units.
-        private final int baseRowQuarterPel;
-
-        /// The horizontal motion derivative by luma X coordinate, in quarter-pel units per pixel.
-        private final double columnDx;
-
-        /// The horizontal motion derivative by luma Y coordinate, in quarter-pel units per pixel.
-        private final double columnDy;
-
-        /// The vertical motion derivative by luma X coordinate, in quarter-pel units per pixel.
-        private final double rowDx;
-
-        /// The vertical motion derivative by luma Y coordinate, in quarter-pel units per pixel.
-        private final double rowDy;
-
-        /// Creates one affine local warped motion model.
-        ///
-        /// @param centerX the current block center X in luma destination coordinates
-        /// @param centerY the current block center Y in luma destination coordinates
-        /// @param baseColumnQuarterPel the base horizontal motion-vector component
-        /// @param baseRowQuarterPel the base vertical motion-vector component
-        /// @param columnDx the horizontal motion derivative by luma X coordinate
-        /// @param columnDy the horizontal motion derivative by luma Y coordinate
-        /// @param rowDx the vertical motion derivative by luma X coordinate
-        /// @param rowDy the vertical motion derivative by luma Y coordinate
-        private LocalWarpModel(
-                double centerX,
-                double centerY,
-                int baseColumnQuarterPel,
-                int baseRowQuarterPel,
-                double columnDx,
-                double columnDy,
-                double rowDx,
-                double rowDy
-        ) {
-            this.centerX = centerX;
-            this.centerY = centerY;
-            this.baseColumnQuarterPel = baseColumnQuarterPel;
-            this.baseRowQuarterPel = baseRowQuarterPel;
-            this.columnDx = columnDx;
-            this.columnDy = columnDy;
-            this.rowDx = rowDx;
-            this.rowDy = rowDy;
-        }
-
-        /// Returns the horizontal source offset for one luma-domain destination sample.
-        ///
-        /// @param lumaX the destination X coordinate in luma samples
-        /// @param lumaY the destination Y coordinate in luma samples
-        /// @return the horizontal source offset in quarter-pel units
-        public int columnOffsetQuarterPel(double lumaX, double lumaY) {
-            double dx = lumaX - centerX;
-            double dy = lumaY - centerY;
-            return baseColumnQuarterPel + (int) Math.round(dx * columnDx + dy * columnDy);
-        }
-
-        /// Returns the vertical source offset for one luma-domain destination sample.
-        ///
-        /// @param lumaX the destination X coordinate in luma samples
-        /// @param lumaY the destination Y coordinate in luma samples
-        /// @return the vertical source offset in quarter-pel units
-        public int rowOffsetQuarterPel(double lumaX, double lumaY) {
-            double dx = lumaX - centerX;
-            double dy = lumaY - centerY;
-            return baseRowQuarterPel + (int) Math.round(dx * rowDx + dy * rowDy);
         }
     }
 
@@ -1099,7 +1020,7 @@ public final class FrameReconstructor {
         TileBlockHeaderReader.BlockHeader header = leafNode.header();
         TransformLayout transformLayout = leafNode.transformLayout();
         ResidualLayout residualLayout = leafNode.residualLayout();
-        requireSupportedLeaf(
+        validateLeaf(
                 header,
                 transformLayout,
                 residualLayout,
@@ -1360,14 +1281,16 @@ public final class FrameReconstructor {
                 || mode == UvIntraPredictionMode.SMOOTH_HORIZONTAL;
     }
 
-    /// Validates that one partition-tree leaf lies inside the current reconstruction subset.
+    /// Validates one decoded partition-tree leaf before pixel reconstruction.
     ///
     /// @param header the decoded block header
     /// @param transformLayout the decoded block transform layout
     /// @param residualLayout the decoded block residual layout
     /// @param pixelFormat the active decoded chroma layout
     /// @param bitDepth the decoded sample bit depth of the current frame
-    private static void requireSupportedLeaf(
+    /// @param frameHeader the frame header that owns the block
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    private static void validateLeaf(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             ResidualLayout residualLayout,
@@ -1383,11 +1306,6 @@ public final class FrameReconstructor {
             if (header.compoundReference()) {
                 throw new IllegalStateException("intrabc reconstruction does not support compound references");
             }
-            requireSupportedIntrabcMotionVector(
-                    header.motionVector0().vector(),
-                    pixelFormat,
-                    header.hasChroma()
-            );
         }
         if (header.hasChroma() && pixelFormat == AvifPixelFormat.I400) {
             throw new IllegalStateException("Monochrome reconstruction encountered a block with chroma samples");
@@ -1422,7 +1340,7 @@ public final class FrameReconstructor {
                 }
             }
             if (header.yPaletteSize() != 0 || header.uvPaletteSize() != 0) {
-                throw new IllegalStateException("Inter palette reconstruction is not implemented yet");
+                throw new IllegalStateException("Inter blocks must not carry palette syntax");
             }
             if (header.interIntra() && !InterIntraMasks.supportsInterIntra(header.size())) {
                 throw new IllegalStateException("Inter-intra reconstruction encountered an unsupported block size");
@@ -1443,26 +1361,10 @@ public final class FrameReconstructor {
                         header.referenceFrame1()
                 );
             }
-            requireSupportedInterMotionVector(
-                    header.motionVector0().vector(),
-                    pixelFormat,
-                    header.hasChroma(),
-                    resolveHorizontalInterpolationFilter(header, frameHeader),
-                    resolveVerticalInterpolationFilter(header, frameHeader)
-            );
-            if (header.compoundReference()) {
-                requireSupportedInterMotionVector(
-                        Objects.requireNonNull(header.motionVector1(), "header.motionVector1()").vector(),
-                        pixelFormat,
-                        header.hasChroma(),
-                        resolveHorizontalInterpolationFilter(header, frameHeader),
-                        resolveVerticalInterpolationFilter(header, frameHeader)
-                );
-            }
         }
     }
 
-    /// Reconstructs the currently supported inter prediction subset.
+    /// Reconstructs the inter prediction for one decoded block.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -1517,7 +1419,8 @@ public final class FrameReconstructor {
                         frameLumaWidth,
                         frameLumaHeight,
                         referenceSurfaceSnapshots,
-                        decodedBlockMap
+                        decodedBlockMap,
+                        tileBounds
                 );
             } else {
                 reconstructSingleReferenceInterPrediction(
@@ -1530,7 +1433,8 @@ public final class FrameReconstructor {
                         frameHeader,
                         frameLumaWidth,
                         frameLumaHeight,
-                        referenceSurfaceSnapshots
+                        referenceSurfaceSnapshots,
+                        decodedBlockMap
                 );
             }
             if (header.interIntra()) {
@@ -1553,8 +1457,6 @@ public final class FrameReconstructor {
                         transformLayout,
                         pixelFormat,
                         frameHeader,
-                        frameLumaWidth,
-                        frameLumaHeight,
                         referenceSurfaceSnapshots,
                         decodedBlockMap
                 );
@@ -1581,8 +1483,6 @@ public final class FrameReconstructor {
             TransformLayout transformLayout,
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
-            int frameLumaWidth,
-            int frameLumaHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1602,8 +1502,6 @@ public final class FrameReconstructor {
                 0,
                 frameHeader,
                 pixelFormat,
-                frameLumaWidth,
-                frameLumaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1619,8 +1517,6 @@ public final class FrameReconstructor {
                 0,
                 frameHeader,
                 pixelFormat,
-                frameLumaWidth,
-                frameLumaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1635,8 +1531,6 @@ public final class FrameReconstructor {
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
-        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
-        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         applyObmcAboveNeighbors(
                 chromaUPlane,
                 ChromaPlane.U,
@@ -1649,8 +1543,6 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
-                frameChromaWidth,
-                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1666,8 +1558,6 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
-                frameChromaWidth,
-                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1683,8 +1573,6 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
-                frameChromaWidth,
-                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1700,8 +1588,6 @@ public final class FrameReconstructor {
                 chromaSubsamplingY,
                 frameHeader,
                 pixelFormat,
-                frameChromaWidth,
-                frameChromaHeight,
                 referenceSurfaceSnapshots,
                 decodedBlockMap
         );
@@ -1734,14 +1620,17 @@ public final class FrameReconstructor {
             int subsamplingY,
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
-            int framePlaneWidth,
-            int framePlaneHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
         int blockX4 = header.position().x4();
         int blockY4 = header.position().y4();
         if (blockY4 <= 0 || visibleWidth <= 0 || visibleHeight <= 0) {
+            return;
+        }
+        if (chromaPlane != null
+                && header.size().width4() * (4 >> subsamplingX)
+                + header.size().height4() * (4 >> subsamplingY) < 16) {
             return;
         }
         int lumaOverlap = Math.min(header.size().heightPixels(), 64) >> 1;
@@ -1753,17 +1642,21 @@ public final class FrameReconstructor {
         int endX4 = blockX4 + header.size().width4();
         int scanX4 = blockX4;
         while (scanX4 < endX4 && processed < maxNeighbors) {
-            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(scanX4, blockY4 - 1);
+            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(scanX4 + 1, blockY4 - 1);
             if (neighbor == null) {
                 scanX4 += 2;
                 continue;
             }
             TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
-            int nextX4 = Math.min(endX4, neighborHeader.position().x4() + neighborHeader.size().width4());
+            int step4 = Math.max(2, Math.min(16, neighborHeader.size().width4()));
             if (isObmcNeighbor(neighborHeader)) {
                 int relativeLumaX = Math.max(0, scanX4 - blockX4) << 2;
                 int planeRelativeX = relativeLumaX >> subsamplingX;
-                int planeWidth = Math.min(visibleWidth - planeRelativeX, Math.max(1, ((nextX4 - scanX4) << 2) >> subsamplingX));
+                int overlapWidth4 = Math.min(step4, header.size().width4());
+                int planeWidth = Math.min(
+                        visibleWidth - planeRelativeX,
+                        Math.max(1, (overlapWidth4 << 2) >> subsamplingX)
+                );
                 if (planeWidth > 0) {
                     blendObmcRegion(
                             destinationPlane,
@@ -1777,14 +1670,12 @@ public final class FrameReconstructor {
                             true,
                             frameHeader,
                             pixelFormat,
-                            framePlaneWidth,
-                            framePlaneHeight,
                             referenceSurfaceSnapshots
                     );
                     processed++;
                 }
             }
-            scanX4 = Math.max(scanX4 + 1, nextX4);
+            scanX4 += step4;
         }
     }
 
@@ -1815,8 +1706,6 @@ public final class FrameReconstructor {
             int subsamplingY,
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
-            int framePlaneWidth,
-            int framePlaneHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
@@ -1834,17 +1723,21 @@ public final class FrameReconstructor {
         int endY4 = blockY4 + header.size().height4();
         int scanY4 = blockY4;
         while (scanY4 < endY4 && processed < maxNeighbors) {
-            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(blockX4 - 1, scanY4);
+            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(blockX4 - 1, scanY4 + 1);
             if (neighbor == null) {
                 scanY4 += 2;
                 continue;
             }
             TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
-            int nextY4 = Math.min(endY4, neighborHeader.position().y4() + neighborHeader.size().height4());
+            int step4 = Math.max(2, Math.min(16, neighborHeader.size().height4()));
             if (isObmcNeighbor(neighborHeader)) {
                 int relativeLumaY = Math.max(0, scanY4 - blockY4) << 2;
                 int planeRelativeY = relativeLumaY >> subsamplingY;
-                int planeHeight = Math.min(visibleHeight - planeRelativeY, Math.max(1, ((nextY4 - scanY4) << 2) >> subsamplingY));
+                int overlapHeight4 = Math.min(step4, header.size().height4());
+                int planeHeight = Math.min(
+                        visibleHeight - planeRelativeY,
+                        Math.max(1, (overlapHeight4 << 2) >> subsamplingY)
+                );
                 if (planeHeight > 0) {
                     blendObmcRegion(
                             destinationPlane,
@@ -1858,14 +1751,12 @@ public final class FrameReconstructor {
                             false,
                             frameHeader,
                             pixelFormat,
-                            framePlaneWidth,
-                            framePlaneHeight,
                             referenceSurfaceSnapshots
                     );
                     processed++;
                 }
             }
-            scanY4 = Math.max(scanY4 + 1, nextY4);
+            scanY4 += step4;
         }
     }
 
@@ -1895,8 +1786,6 @@ public final class FrameReconstructor {
             boolean above,
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
-            int framePlaneWidth,
-            int framePlaneHeight,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
@@ -1921,22 +1810,28 @@ public final class FrameReconstructor {
             );
         }
         MotionVector motionVector = Objects.requireNonNull(neighborHeader.motionVector0(), "neighborHeader.motionVector0()").vector();
-        int denominatorX = chromaPlane == null ? 4 : 4 << chromaSubsamplingX(pixelFormat);
-        int denominatorY = chromaPlane == null ? 4 : 4 << chromaSubsamplingY(pixelFormat);
+        int denominatorX = chromaPlane == null ? 8 : 8 << chromaSubsamplingX(pixelFormat);
+        int denominatorY = chromaPlane == null ? 8 : 8 << chromaSubsamplingY(pixelFormat);
         FrameHeader.InterpolationFilter horizontalFilter = resolveHorizontalInterpolationFilter(neighborHeader, frameHeader);
         FrameHeader.InterpolationFilter verticalFilter = resolveVerticalInterpolationFilter(neighborHeader, frameHeader);
+        ReferenceScale referenceScale = referenceScale(
+                frameHeader.frameSize().codedWidth(),
+                frameHeader.frameSize().height(),
+                referenceSurfaceSnapshot
+        );
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int predictor = sampleInterPlaneValue(
                         referencePlane,
-                        destinationX + x,
-                        destinationY + y,
-                        framePlaneWidth,
-                        framePlaneHeight,
-                        motionVector.columnQuarterPel(),
-                        motionVector.rowQuarterPel(),
+                        destinationX,
+                        destinationY,
+                        x,
+                        y,
+                        motionVector.columnEighthPel(),
+                        motionVector.rowEighthPel(),
                         denominatorX,
                         denominatorY,
+                        referenceScale,
                         width,
                         height,
                         horizontalFilter,
@@ -2000,8 +1895,7 @@ public final class FrameReconstructor {
         };
     }
 
-    /// Reconstructs the current minimal `intrabc` subset by sampling already reconstructed samples
-    /// from the current frame with one resolved motion vector.
+    /// Reconstructs an `intrabc` block from already reconstructed samples in the current frame.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -2032,10 +1926,11 @@ public final class FrameReconstructor {
                 lumaY,
                 visibleLumaWidth,
                 visibleLumaHeight,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                4,
-                4,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                8,
+                8,
+                IDENTITY_REFERENCE_SCALE,
                 visibleLumaWidth,
                 visibleLumaHeight,
                 FrameHeader.InterpolationFilter.BILINEAR,
@@ -2052,8 +1947,8 @@ public final class FrameReconstructor {
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
-        int chromaDenominatorX = 4 << chromaSubsamplingX;
-        int chromaDenominatorY = 4 << chromaSubsamplingY;
+        int chromaDenominatorX = 8 << chromaSubsamplingX;
+        int chromaDenominatorY = 8 << chromaSubsamplingY;
         DecodedPlane chromaUSnapshot = chromaUPlane.toDecodedPlane();
         DecodedPlane chromaVSnapshot = chromaVPlane.toDecodedPlane();
         reconstructInterPlanePrediction(
@@ -2065,10 +1960,11 @@ public final class FrameReconstructor {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY,
+                IDENTITY_REFERENCE_SCALE,
                 visibleChromaWidth,
                 visibleChromaHeight,
                 FrameHeader.InterpolationFilter.BILINEAR,
@@ -2083,10 +1979,11 @@ public final class FrameReconstructor {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY,
+                IDENTITY_REFERENCE_SCALE,
                 visibleChromaWidth,
                 visibleChromaHeight,
                 FrameHeader.InterpolationFilter.BILINEAR,
@@ -2094,7 +1991,7 @@ public final class FrameReconstructor {
         );
     }
 
-    /// Reconstructs the currently supported single-reference inter prediction subset.
+    /// Reconstructs single-reference inter prediction for one decoded block.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -2104,118 +2001,8 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used for sub-8x8 chroma motion derivation
     private static void reconstructSingleReferenceInterPrediction(
-            MutablePlaneBuffer lumaPlane,
-            @Nullable MutablePlaneBuffer chromaUPlane,
-            @Nullable MutablePlaneBuffer chromaVPlane,
-            TileBlockHeaderReader.BlockHeader header,
-            TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
-            FrameHeader frameHeader,
-            int frameLumaWidth,
-            int frameLumaHeight,
-            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
-    ) {
-        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
-                requireReferenceSurfaceSnapshot(
-                        referenceSurfaceSnapshots,
-                        frameHeader,
-                        pixelFormat,
-                        lumaPlane.bitDepth(),
-                        header.referenceFrame0()
-                );
-        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
-        MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
-        FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
-        FrameHeader.InterpolationFilter verticalInterpolationFilter = resolveVerticalInterpolationFilter(header, frameHeader);
-        int lumaX = header.position().x4() << 2;
-        int lumaY = header.position().y4() << 2;
-        int visibleLumaWidth = transformLayout.visibleWidthPixels();
-        int visibleLumaHeight = transformLayout.visibleHeightPixels();
-        reconstructInterPlanePrediction(
-                lumaPlane,
-                referencePlanes.lumaPlane(),
-                frameLumaWidth,
-                frameLumaHeight,
-                lumaX,
-                lumaY,
-                visibleLumaWidth,
-                visibleLumaHeight,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                4,
-                4,
-                visibleLumaWidth,
-                visibleLumaHeight,
-                horizontalInterpolationFilter,
-                verticalInterpolationFilter
-        );
-
-        if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
-            return;
-        }
-
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
-        int chromaX = chromaBlockX(header, chromaSubsamplingX);
-        int chromaY = chromaBlockY(header, chromaSubsamplingY);
-        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
-        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
-        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
-        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
-        int chromaDenominatorX = 4 << chromaSubsamplingX;
-        int chromaDenominatorY = 4 << chromaSubsamplingY;
-
-        reconstructInterPlanePrediction(
-                chromaUPlane,
-                Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
-                frameChromaWidth,
-                frameChromaHeight,
-                chromaX,
-                chromaY,
-                visibleChromaWidth,
-                visibleChromaHeight,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                chromaDenominatorX,
-                chromaDenominatorY,
-                visibleChromaWidth,
-                visibleChromaHeight,
-                horizontalInterpolationFilter,
-                verticalInterpolationFilter
-        );
-        reconstructInterPlanePrediction(
-                chromaVPlane,
-                Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
-                frameChromaWidth,
-                frameChromaHeight,
-                chromaX,
-                chromaY,
-                visibleChromaWidth,
-                visibleChromaHeight,
-                motionVector.columnQuarterPel(),
-                motionVector.rowQuarterPel(),
-                chromaDenominatorX,
-                chromaDenominatorY,
-                visibleChromaWidth,
-                visibleChromaHeight,
-                horizontalInterpolationFilter,
-                verticalInterpolationFilter
-        );
-    }
-
-    /// Reconstructs a single-reference inter predictor using an affine local warped motion model.
-    ///
-    /// @param lumaPlane the mutable luma destination plane
-    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
-    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
-    /// @param header the decoded block header that owns the inter state
-    /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
-    /// @param frameHeader the frame header that owns the block
-    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
-    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
-    private static void reconstructLocalWarpedInterPrediction(
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
@@ -2235,16 +2022,17 @@ public final class FrameReconstructor {
                         pixelFormat,
                         lumaPlane.bitDepth(),
                         header.referenceFrame0()
-                );
+        );
         DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        ReferenceScale referenceScale = referenceScale(frameLumaWidth, frameLumaHeight, referenceSurfaceSnapshot);
+        MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         FrameHeader.InterpolationFilter horizontalInterpolationFilter = resolveHorizontalInterpolationFilter(header, frameHeader);
         FrameHeader.InterpolationFilter verticalInterpolationFilter = resolveVerticalInterpolationFilter(header, frameHeader);
-        LocalWarpModel model = estimateLocalWarpModel(header, decodedBlockMap);
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
-        reconstructLocalWarpedPlanePrediction(
+        reconstructInterPlanePrediction(
                 lumaPlane,
                 referencePlanes.lumaPlane(),
                 frameLumaWidth,
@@ -2253,15 +2041,15 @@ public final class FrameReconstructor {
                 lumaY,
                 visibleLumaWidth,
                 visibleLumaHeight,
-                0,
-                0,
-                4,
-                4,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                8,
+                8,
+                referenceScale,
                 visibleLumaWidth,
                 visibleLumaHeight,
                 horizontalInterpolationFilter,
-                verticalInterpolationFilter,
-                model
+                verticalInterpolationFilter
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -2276,10 +2064,26 @@ public final class FrameReconstructor {
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
         int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
-        int chromaDenominatorX = 4 << chromaSubsamplingX;
-        int chromaDenominatorY = 4 << chromaSubsamplingY;
+        int chromaDenominatorX = 8 << chromaSubsamplingX;
+        int chromaDenominatorY = 8 << chromaSubsamplingY;
 
-        reconstructLocalWarpedPlanePrediction(
+        if (reconstructSub8x8ChromaInterPrediction(
+                chromaUPlane,
+                chromaVPlane,
+                header,
+                pixelFormat,
+                frameHeader,
+                frameChromaWidth,
+                frameChromaHeight,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                referenceSurfaceSnapshots,
+                decodedBlockMap
+        )) {
+            return;
+        }
+
+        reconstructInterPlanePrediction(
                 chromaUPlane,
                 Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
                 frameChromaWidth,
@@ -2288,17 +2092,17 @@ public final class FrameReconstructor {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaSubsamplingX,
-                chromaSubsamplingY,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY,
+                referenceScale,
                 visibleChromaWidth,
                 visibleChromaHeight,
                 horizontalInterpolationFilter,
-                verticalInterpolationFilter,
-                model
+                verticalInterpolationFilter
         );
-        reconstructLocalWarpedPlanePrediction(
+        reconstructInterPlanePrediction(
                 chromaVPlane,
                 Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
                 frameChromaWidth,
@@ -2307,317 +2111,711 @@ public final class FrameReconstructor {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                chromaSubsamplingX,
-                chromaSubsamplingY,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY,
+                referenceScale,
                 visibleChromaWidth,
                 visibleChromaHeight,
                 horizontalInterpolationFilter,
-                verticalInterpolationFilter,
-                model
+                verticalInterpolationFilter
         );
     }
 
-    /// Reconstructs one plane through a local warped affine motion model.
+    /// Reconstructs a shared sub-8x8 chroma footprint from its causal luma-block motion vectors.
     ///
-    /// @param destinationPlane the mutable destination plane
-    /// @param referencePlane the immutable reference plane
-    /// @param destinationX the zero-based horizontal destination coordinate
-    /// @param destinationY the zero-based vertical destination coordinate
-    /// @param width the predicted width in plane samples
-    /// @param height the predicted height in plane samples
-    /// @param subsamplingX the horizontal luma-to-plane subsampling shift
-    /// @param subsamplingY the vertical luma-to-plane subsampling shift
-    /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
-    /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
-    /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
-    /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
-    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
-    /// @param verticalFilterMode the effective vertical interpolation filter mode
-    /// @param model the affine local warped motion model
-    private static void reconstructLocalWarpedPlanePrediction(
-            MutablePlaneBuffer destinationPlane,
-            DecodedPlane referencePlane,
-            int framePlaneWidth,
-            int framePlaneHeight,
+    /// AV1 divides an otherwise shared 8x8-luma chroma footprint into two or four prediction
+    /// regions when every required causal luma block is inter-coded. If any required neighbor
+    /// cannot supply an inter predictor, the caller must use the current block for the complete
+    /// chroma footprint instead.
+    ///
+    /// @param chromaUPlane the mutable chroma U destination plane
+    /// @param chromaVPlane the mutable chroma V destination plane
+    /// @param header the current decoded block header
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param frameChromaWidth the current frame chroma width in samples
+    /// @param frameChromaHeight the current frame chroma height in samples
+    /// @param visibleChromaWidth the visible shared chroma-footprint width
+    /// @param visibleChromaHeight the visible shared chroma-footprint height
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used to resolve causal luma blocks
+    /// @return whether sub-8x8 chroma derivation reconstructed the footprint
+    private static boolean reconstructSub8x8ChromaInterPrediction(
+            MutablePlaneBuffer chromaUPlane,
+            MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            AvifPixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            int frameChromaWidth,
+            int frameChromaHeight,
+            int visibleChromaWidth,
+            int visibleChromaHeight,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        int subsamplingX = chromaSubsamplingX(pixelFormat);
+        int subsamplingY = chromaSubsamplingY(pixelFormat);
+        boolean splitHorizontally = subsamplingX == 1 && header.size().width4() == 1;
+        boolean splitVertically = subsamplingY == 1 && header.size().height4() == 1;
+        if (!splitHorizontally && !splitVertically) {
+            return false;
+        }
+
+        int x4 = header.position().x4();
+        int y4 = header.position().y4();
+        @Nullable TileBlockHeaderReader.BlockHeader leftHeader = splitHorizontally
+                ? interHeaderAt(decodedBlockMap, x4 - 1, y4)
+                : null;
+        @Nullable TileBlockHeaderReader.BlockHeader aboveHeader = splitVertically
+                ? interHeaderAt(decodedBlockMap, x4, y4 - 1)
+                : null;
+        @Nullable TileBlockHeaderReader.BlockHeader aboveLeftHeader = splitHorizontally && splitVertically
+                ? interHeaderAt(decodedBlockMap, x4 - 1, y4 - 1)
+                : null;
+        if ((splitHorizontally && leftHeader == null)
+                || (splitVertically && aboveHeader == null)
+                || (splitHorizontally && splitVertically && aboveLeftHeader == null)) {
+            return false;
+        }
+
+        int chromaX = chromaBlockX(header, subsamplingX);
+        int chromaY = chromaBlockY(header, subsamplingY);
+        int regionWidth = header.size().width4() * (4 >> subsamplingX);
+        int regionHeight = header.size().height4() * (4 >> subsamplingY);
+        int currentOffsetX = splitHorizontally ? regionWidth : 0;
+        int currentOffsetY = splitVertically ? regionHeight : 0;
+
+        if (aboveLeftHeader != null) {
+            reconstructSub8x8ChromaRegion(
+                    chromaUPlane,
+                    chromaVPlane,
+                    aboveLeftHeader,
+                    pixelFormat,
+                    frameHeader,
+                    frameChromaWidth,
+                    frameChromaHeight,
+                    chromaX,
+                    chromaY,
+                    Math.min(regionWidth, visibleChromaWidth),
+                    Math.min(regionHeight, visibleChromaHeight),
+                    referenceSurfaceSnapshots
+            );
+        }
+        if (leftHeader != null) {
+            reconstructSub8x8ChromaRegion(
+                    chromaUPlane,
+                    chromaVPlane,
+                    leftHeader,
+                    pixelFormat,
+                    frameHeader,
+                    frameChromaWidth,
+                    frameChromaHeight,
+                    chromaX,
+                    chromaY + currentOffsetY,
+                    Math.min(regionWidth, visibleChromaWidth),
+                    Math.min(regionHeight, visibleChromaHeight - currentOffsetY),
+                    referenceSurfaceSnapshots
+            );
+        }
+        if (aboveHeader != null) {
+            reconstructSub8x8ChromaRegion(
+                    chromaUPlane,
+                    chromaVPlane,
+                    aboveHeader,
+                    pixelFormat,
+                    frameHeader,
+                    frameChromaWidth,
+                    frameChromaHeight,
+                    chromaX + currentOffsetX,
+                    chromaY,
+                    Math.min(regionWidth, visibleChromaWidth - currentOffsetX),
+                    Math.min(regionHeight, visibleChromaHeight),
+                    referenceSurfaceSnapshots
+            );
+        }
+        reconstructSub8x8ChromaRegion(
+                chromaUPlane,
+                chromaVPlane,
+                header,
+                pixelFormat,
+                frameHeader,
+                frameChromaWidth,
+                frameChromaHeight,
+                chromaX + currentOffsetX,
+                chromaY + currentOffsetY,
+                Math.min(regionWidth, visibleChromaWidth - currentOffsetX),
+                Math.min(regionHeight, visibleChromaHeight - currentOffsetY),
+                referenceSurfaceSnapshots
+        );
+        return true;
+    }
+
+    /// Returns the inter block header covering one decoded luma coordinate, or `null`.
+    ///
+    /// @param decodedBlockMap the decoded leaf map to query
+    /// @param x4 the tile-relative luma X coordinate in 4x4 units
+    /// @param y4 the tile-relative luma Y coordinate in 4x4 units
+    /// @return the usable inter block header, or `null`
+    private static @Nullable TileBlockHeaderReader.BlockHeader interHeaderAt(
+            DecodedBlockMap decodedBlockMap,
+            int x4,
+            int y4
+    ) {
+        if (x4 < 0 || y4 < 0) {
+            return null;
+        }
+        @Nullable TilePartitionTreeReader.LeafNode leafNode = decodedBlockMap.leafAt(x4, y4);
+        if (leafNode == null) {
+            return null;
+        }
+        TileBlockHeaderReader.BlockHeader header = leafNode.header();
+        return isObmcNeighbor(header) ? header : null;
+    }
+
+    /// Reconstructs one sub-8x8 chroma prediction region from a luma block's primary reference.
+    ///
+    /// Empty regions at a cropped frame edge are ignored.
+    ///
+    /// @param chromaUPlane the mutable chroma U destination plane
+    /// @param chromaVPlane the mutable chroma V destination plane
+    /// @param sourceHeader the luma block header supplying the reference and motion vector
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param frameChromaWidth the current frame chroma width in samples
+    /// @param frameChromaHeight the current frame chroma height in samples
+    /// @param destinationX the chroma-plane destination X coordinate
+    /// @param destinationY the chroma-plane destination Y coordinate
+    /// @param width the visible region width in chroma samples
+    /// @param height the visible region height in chroma samples
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    private static void reconstructSub8x8ChromaRegion(
+            MutablePlaneBuffer chromaUPlane,
+            MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader sourceHeader,
+            AvifPixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            int frameChromaWidth,
+            int frameChromaHeight,
             int destinationX,
             int destinationY,
             int width,
             int height,
-            int subsamplingX,
-            int subsamplingY,
-            int denominatorX,
-            int denominatorY,
-            int widthForFilterSelection,
-            int heightForFilterSelection,
-            FrameHeader.InterpolationFilter horizontalFilterMode,
-            FrameHeader.InterpolationFilter verticalFilterMode,
-            LocalWarpModel model
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
-        for (int y = 0; y < height; y++) {
-            int planeY = destinationY + y;
-            int lumaY = planeY << subsamplingY;
-            for (int x = 0; x < width; x++) {
-                int planeX = destinationX + x;
-                int lumaX = planeX << subsamplingX;
-                int mappedPlaneX = Math.min(planeX, framePlaneWidth - 1);
-                int mappedPlaneY = Math.min(planeY, framePlaneHeight - 1);
-                int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
-                        mappedPlaneX,
-                        framePlaneWidth,
-                        referencePlane.width(),
-                        denominatorX
-                ) + model.columnOffsetQuarterPel(lumaX, lumaY);
-                int sourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
-                        mappedPlaneY,
-                        framePlaneHeight,
-                        referencePlane.height(),
-                        denominatorY
-                ) + model.rowOffsetQuarterPel(lumaX, lumaY);
-                int sample;
-                if (Math.floorMod(sourceNumeratorX, denominatorX) == 0
-                        && Math.floorMod(sourceNumeratorY, denominatorY) == 0) {
-                    sample = referencePlane.sample(
-                            clamp(sourceNumeratorX / denominatorX, 0, referencePlane.width() - 1),
-                            clamp(sourceNumeratorY / denominatorY, 0, referencePlane.height() - 1)
-                    );
-                } else {
-                    sample = filteredInterpolateAt(
-                            referencePlane,
-                            sourceNumeratorX,
-                            sourceNumeratorY,
-                            denominatorX,
-                            denominatorY,
-                            widthForFilterSelection,
-                            heightForFilterSelection,
-                            horizontalFilterMode,
-                            verticalFilterMode,
-                            destinationPlane.maxSampleValue()
-                    );
-                }
-                destinationPlane.setSample(planeX, planeY, sample);
-            }
+        if (width <= 0 || height <= 0) {
+            return;
         }
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
+                referenceSurfaceSnapshots,
+                frameHeader,
+                pixelFormat,
+                chromaUPlane.bitDepth(),
+                sourceHeader.referenceFrame0()
+        );
+        MotionVector motionVector = Objects.requireNonNull(
+                sourceHeader.motionVector0(),
+                "sourceHeader.motionVector0()"
+        ).vector();
+        int subsamplingX = chromaSubsamplingX(pixelFormat);
+        int subsamplingY = chromaSubsamplingY(pixelFormat);
+        int denominatorX = 8 << subsamplingX;
+        int denominatorY = 8 << subsamplingY;
+        FrameHeader.InterpolationFilter horizontalFilter = resolveHorizontalInterpolationFilter(sourceHeader, frameHeader);
+        FrameHeader.InterpolationFilter verticalFilter = resolveVerticalInterpolationFilter(sourceHeader, frameHeader);
+        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        ReferenceScale referenceScale = referenceScale(
+                frameHeader.frameSize().codedWidth(),
+                frameHeader.frameSize().height(),
+                referenceSurfaceSnapshot
+        );
+        reconstructInterPlanePrediction(
+                chromaUPlane,
+                Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
+                destinationX,
+                destinationY,
+                width,
+                height,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                denominatorX,
+                denominatorY,
+                referenceScale,
+                width,
+                height,
+                horizontalFilter,
+                verticalFilter
+        );
+        reconstructInterPlanePrediction(
+                chromaVPlane,
+                Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
+                frameChromaWidth,
+                frameChromaHeight,
+                destinationX,
+                destinationY,
+                width,
+                height,
+                motionVector.columnEighthPel(),
+                motionVector.rowEighthPel(),
+                denominatorX,
+                denominatorY,
+                referenceScale,
+                width,
+                height,
+                horizontalFilter,
+                verticalFilter
+        );
+    }
+
+    /// Reconstructs a single-reference inter predictor using an affine local warped motion model.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the inter state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
+    /// @param tileBounds the tile-local boundaries that constrain causal sample lookup
+    private static void reconstructLocalWarpedInterPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            AvifPixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            int frameLumaWidth,
+            int frameLumaHeight,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
+    ) {
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
+                requireReferenceSurfaceSnapshot(
+                        referenceSurfaceSnapshots,
+                        frameHeader,
+                        pixelFormat,
+                        lumaPlane.bitDepth(),
+                        header.referenceFrame0()
+        );
+        DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
+        WarpedMotion.Model model = estimateLocalWarpModel(header, decodedBlockMap, tileBounds);
+        if (!model.affine()) {
+            reconstructSingleReferenceInterPrediction(
+                    lumaPlane,
+                    chromaUPlane,
+                    chromaVPlane,
+                    header,
+                    transformLayout,
+                    pixelFormat,
+                    frameHeader,
+                    frameLumaWidth,
+                    frameLumaHeight,
+                    referenceSurfaceSnapshots,
+                    decodedBlockMap
+            );
+            return;
+        }
+        int lumaX = header.position().x4() << 2;
+        int lumaY = header.position().y4() << 2;
+        int visibleLumaWidth = transformLayout.visibleWidthPixels();
+        int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        WarpedMotion.predictPlane(
+                lumaPlane,
+                referencePlanes.lumaPlane(),
+                lumaX,
+                lumaY,
+                visibleLumaWidth,
+                visibleLumaHeight,
+                header.size().widthPixels(),
+                header.size().heightPixels(),
+                header.position().x4(),
+                header.position().y4(),
+                0,
+                0,
+                model
+        );
+
+        if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
+            return;
+        }
+
+        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaX = chromaBlockX(header, chromaSubsamplingX);
+        int chromaY = chromaBlockY(header, chromaSubsamplingY);
+        int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
+        int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
+        int codedChromaWidth = codedChromaBlockWidth(header, chromaSubsamplingX);
+        int codedChromaHeight = codedChromaBlockHeight(header, chromaSubsamplingY);
+
+        WarpedMotion.predictPlane(
+                chromaUPlane,
+                Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                codedChromaWidth,
+                codedChromaHeight,
+                header.position().x4(),
+                header.position().y4(),
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                model
+        );
+        WarpedMotion.predictPlane(
+                chromaVPlane,
+                Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
+                chromaX,
+                chromaY,
+                visibleChromaWidth,
+                visibleChromaHeight,
+                codedChromaWidth,
+                codedChromaHeight,
+                header.position().x4(),
+                header.position().y4(),
+                chromaSubsamplingX,
+                chromaSubsamplingY,
+                model
+        );
     }
 
     /// Estimates one local warped affine motion model from causal same-reference neighbors.
     ///
     /// @param header the decoded current block header
     /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
+    /// @param tileBounds the tile-local boundaries that constrain neighbor lookup
     /// @return one local warped affine motion model for the current block
-    private static LocalWarpModel estimateLocalWarpModel(
+    private static WarpedMotion.Model estimateLocalWarpModel(
             TileBlockHeaderReader.BlockHeader header,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         MotionVector baseMotionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
-        double centerX = blockCenterCoordinate(header.position().x4(), header.size().widthPixels());
-        double centerY = blockCenterCoordinate(header.position().y4(), header.size().heightPixels());
-        LocalWarpSample[] samples = new LocalWarpSample[LOCAL_WARP_SAMPLE_CAPACITY];
-        int sampleCount = collectLocalWarpAboveSamples(header, decodedBlockMap, baseMotionVector, samples, 0);
-        sampleCount = collectLocalWarpLeftSamples(header, decodedBlockMap, baseMotionVector, samples, sampleCount);
-
-        double a00 = 0.0;
-        double a01 = 0.0;
-        double a11 = 0.0;
-        double columnB0 = 0.0;
-        double columnB1 = 0.0;
-        double rowB0 = 0.0;
-        double rowB1 = 0.0;
-        for (int i = 0; i < sampleCount; i++) {
-            LocalWarpSample sample = Objects.requireNonNull(samples[i], "samples[i]");
-            double dx = sample.destinationX - centerX;
-            double dy = sample.destinationY - centerY;
-            a00 += dx * dx;
-            a01 += dx * dy;
-            a11 += dy * dy;
-            columnB0 += dx * sample.columnDeltaQuarterPel;
-            columnB1 += dy * sample.columnDeltaQuarterPel;
-            rowB0 += dx * sample.rowDeltaQuarterPel;
-            rowB1 += dy * sample.rowDeltaQuarterPel;
-        }
-
-        double columnDx = 0.0;
-        double columnDy = 0.0;
-        double rowDx = 0.0;
-        double rowDy = 0.0;
-        double determinant = a00 * a11 - a01 * a01;
-        if (Math.abs(determinant) > 0.000001) {
-            columnDx = (columnB0 * a11 - columnB1 * a01) / determinant;
-            columnDy = (a00 * columnB1 - a01 * columnB0) / determinant;
-            rowDx = (rowB0 * a11 - rowB1 * a01) / determinant;
-            rowDy = (a00 * rowB1 - a01 * rowB0) / determinant;
-        } else {
-            double denominator = a00 + a11;
-            if (denominator > 0.000001) {
-                columnDx = columnB0 / denominator;
-                columnDy = columnB1 / denominator;
-                rowDx = rowB0 / denominator;
-                rowDy = rowB1 / denominator;
-            }
-        }
-
-        return new LocalWarpModel(
-                centerX,
-                centerY,
-                baseMotionVector.columnQuarterPel(),
-                baseMotionVector.rowQuarterPel(),
-                columnDx,
-                columnDy,
-                rowDx,
-                rowDy
+        int blockX4 = header.position().x4();
+        int blockY4 = header.position().y4();
+        int blockWidth4 = header.size().width4();
+        int blockHeight4 = header.size().height4();
+        int tileStartX4 = tileBounds.lumaStartX() >> 2;
+        int tileStartY4 = tileBounds.lumaStartY() >> 2;
+        int tileEndX4 = tileBounds.lumaEndX() >> 2;
+        int tileEndY4 = tileBounds.lumaEndY() >> 2;
+        int visibleWidth4 = Math.min(blockWidth4, tileEndX4 - blockX4);
+        int visibleHeight4 = Math.min(blockHeight4, tileEndY4 - blockY4);
+        TilePartitionTreeReader.LeafNode currentLeaf = Objects.requireNonNull(
+                decodedBlockMap.leafAt(blockX4, blockY4),
+                "currentLeaf"
+        );
+        long[] masks = findLocalWarpSampleMasks(
+                header,
+                currentLeaf,
+                decodedBlockMap,
+                blockX4,
+                blockY4,
+                blockWidth4,
+                blockHeight4,
+                visibleWidth4,
+                visibleHeight4,
+                tileStartX4,
+                tileStartY4,
+                tileEndX4
+        );
+        WarpedMotion.Sample[] samples = new WarpedMotion.Sample[WarpedMotion.SAMPLE_CAPACITY];
+        int sampleCount = collectLocalWarpSamples(
+                header,
+                decodedBlockMap,
+                blockX4,
+                blockY4,
+                blockWidth4,
+                masks,
+                samples
+        );
+        return WarpedMotion.derive(
+                samples,
+                sampleCount,
+                blockWidth4,
+                blockHeight4,
+                baseMotionVector,
+                blockX4,
+                blockY4
         );
     }
 
-    /// Collects compatible above-neighbor samples for local warped motion estimation.
+    /// Finds the projectable local-warp neighbor masks in AV1 top/left edge order.
     ///
-    /// @param header the decoded current block header
-    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
-    /// @param baseMotionVector the current block primary motion vector
-    /// @param samples the destination local-warp sample array
-    /// @param sampleCount the number of valid samples already present
-    /// @return the updated number of valid samples
-    private static int collectLocalWarpAboveSamples(
-            TileBlockHeaderReader.BlockHeader header,
-            DecodedBlockMap decodedBlockMap,
-            MotionVector baseMotionVector,
-            LocalWarpSample[] samples,
-            int sampleCount
-    ) {
-        int blockX4 = header.position().x4();
-        int blockY4 = header.position().y4();
-        if (blockY4 <= 0) {
-            return sampleCount;
-        }
-        int endX4 = blockX4 + header.size().width4();
-        int scanX4 = blockX4;
-        while (scanX4 < endX4 && sampleCount < samples.length) {
-            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(scanX4, blockY4 - 1);
-            if (neighbor == null) {
-                scanX4 += 2;
-                continue;
-            }
-            TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
-            int nextX4 = Math.min(endX4, neighborHeader.position().x4() + neighborHeader.size().width4());
-            sampleCount = appendLocalWarpSample(header, neighborHeader, baseMotionVector, samples, sampleCount);
-            scanX4 = Math.max(scanX4 + 1, nextX4);
-        }
-        return sampleCount;
-    }
-
-    /// Collects compatible left-neighbor samples for local warped motion estimation.
-    ///
-    /// @param header the decoded current block header
-    /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
-    /// @param baseMotionVector the current block primary motion vector
-    /// @param samples the destination local-warp sample array
-    /// @param sampleCount the number of valid samples already present
-    /// @return the updated number of valid samples
-    private static int collectLocalWarpLeftSamples(
-            TileBlockHeaderReader.BlockHeader header,
-            DecodedBlockMap decodedBlockMap,
-            MotionVector baseMotionVector,
-            LocalWarpSample[] samples,
-            int sampleCount
-    ) {
-        int blockX4 = header.position().x4();
-        int blockY4 = header.position().y4();
-        if (blockX4 <= 0) {
-            return sampleCount;
-        }
-        int endY4 = blockY4 + header.size().height4();
-        int scanY4 = blockY4;
-        while (scanY4 < endY4 && sampleCount < samples.length) {
-            @Nullable TilePartitionTreeReader.LeafNode neighbor = decodedBlockMap.leafAt(blockX4 - 1, scanY4);
-            if (neighbor == null) {
-                scanY4 += 2;
-                continue;
-            }
-            TileBlockHeaderReader.BlockHeader neighborHeader = neighbor.header();
-            int nextY4 = Math.min(endY4, neighborHeader.position().y4() + neighborHeader.size().height4());
-            sampleCount = appendLocalWarpSample(header, neighborHeader, baseMotionVector, samples, sampleCount);
-            scanY4 = Math.max(scanY4 + 1, nextY4);
-        }
-        return sampleCount;
-    }
-
-    /// Appends one compatible local-warp sample if the neighbor is eligible and not already used.
-    ///
-    /// @param currentHeader the decoded current block header
-    /// @param neighborHeader the decoded causal neighbor block header
-    /// @param baseMotionVector the current block primary motion vector
-    /// @param samples the destination local-warp sample array
-    /// @param sampleCount the number of valid samples already present
-    /// @return the updated number of valid samples
-    private static int appendLocalWarpSample(
+    /// @param currentHeader the current block header
+    /// @param currentLeaf the current partition leaf
+    /// @param decodedBlockMap the decoded leaf map
+    /// @param blockX4 the current block X origin
+    /// @param blockY4 the current block Y origin
+    /// @param blockWidth4 the current block width
+    /// @param blockHeight4 the current block height
+    /// @param visibleWidth4 the visible block width
+    /// @param visibleHeight4 the visible block height
+    /// @param tileStartX4 the tile X origin
+    /// @param tileStartY4 the tile Y origin
+    /// @param tileEndX4 the exclusive tile X boundary
+    /// @return the top and left masks
+    private static long[] findLocalWarpSampleMasks(
             TileBlockHeaderReader.BlockHeader currentHeader,
-            TileBlockHeaderReader.BlockHeader neighborHeader,
-            MotionVector baseMotionVector,
-            LocalWarpSample[] samples,
-            int sampleCount
+            TilePartitionTreeReader.LeafNode currentLeaf,
+            DecodedBlockMap decodedBlockMap,
+            int blockX4,
+            int blockY4,
+            int blockWidth4,
+            int blockHeight4,
+            int visibleWidth4,
+            int visibleHeight4,
+            int tileStartX4,
+            int tileStartY4,
+            int tileEndX4
     ) {
-        if (sampleCount >= samples.length
-                || !isLocalWarpReferenceNeighbor(currentHeader, neighborHeader)
-                || containsLocalWarpSample(samples, sampleCount, neighborHeader)) {
-            return sampleCount;
-        }
-        MotionVector neighborMotionVector =
-                Objects.requireNonNull(neighborHeader.motionVector0(), "neighborHeader.motionVector0()").vector();
-        samples[sampleCount] = new LocalWarpSample(
-                neighborHeader,
-                blockCenterCoordinate(neighborHeader.position().x4(), neighborHeader.size().widthPixels()),
-                blockCenterCoordinate(neighborHeader.position().y4(), neighborHeader.size().heightPixels()),
-                neighborMotionVector.columnQuarterPel() - baseMotionVector.columnQuarterPel(),
-                neighborMotionVector.rowQuarterPel() - baseMotionVector.rowQuarterPel()
-        );
-        return sampleCount + 1;
-    }
+        long topMask = 0;
+        long leftMask = 0;
+        int count = 0;
+        boolean haveTop = blockY4 > tileStartY4;
+        boolean haveLeft = blockX4 > tileStartX4;
+        boolean haveTopLeft = haveTop && haveLeft;
+        boolean haveTopRight = Math.max(blockWidth4, blockHeight4) < 32
+                && haveTop
+                && blockX4 + blockWidth4 < tileEndX4;
 
-    /// Returns whether the local-warp sample array already contains one neighbor header.
-    ///
-    /// @param samples the local-warp sample array
-    /// @param sampleCount the number of valid samples already present
-    /// @param header the neighbor header to search for
-    /// @return whether the local-warp sample array already contains one neighbor header
-    private static boolean containsLocalWarpSample(
-            LocalWarpSample[] samples,
-            int sampleCount,
-            TileBlockHeaderReader.BlockHeader header
-    ) {
-        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
-        for (int i = 0; i < sampleCount; i++) {
-            if (Objects.requireNonNull(samples[i], "samples[i]").header == nonNullHeader) {
-                return true;
+        if (haveTop) {
+            TilePartitionTreeReader.LeafNode directTop = Objects.requireNonNull(
+                    decodedBlockMap.leafAt(blockX4, blockY4 - 1),
+                    "directTop"
+            );
+            if (isLocalWarpReferenceNeighbor(currentHeader, directTop.header())) {
+                topMask |= 1;
+                count = 1;
+            }
+            int aboveWidth4 = directTop.header().size().width4();
+            if (aboveWidth4 >= blockWidth4) {
+                int offset = blockX4 & (aboveWidth4 - 1);
+                if (offset != 0) {
+                    haveTopLeft = false;
+                }
+                if (aboveWidth4 - offset > blockWidth4) {
+                    haveTopRight = false;
+                }
+            } else {
+                long mask = 1L << aboveWidth4;
+                for (int x = aboveWidth4; x < visibleWidth4; ) {
+                    TilePartitionTreeReader.LeafNode neighbor = Objects.requireNonNull(
+                            decodedBlockMap.leafAt(blockX4 + x, blockY4 - 1),
+                            "topNeighbor"
+                    );
+                    if (isLocalWarpReferenceNeighbor(currentHeader, neighbor.header())) {
+                        topMask |= mask;
+                        if (++count >= WarpedMotion.SAMPLE_CAPACITY) {
+                            return new long[]{topMask, leftMask};
+                        }
+                    }
+                    aboveWidth4 = neighbor.header().size().width4();
+                    x += aboveWidth4;
+                    mask <<= aboveWidth4;
+                }
             }
         }
-        return false;
+        if (haveLeft) {
+            TilePartitionTreeReader.LeafNode directLeft = Objects.requireNonNull(
+                    decodedBlockMap.leafAt(blockX4 - 1, blockY4),
+                    "directLeft"
+            );
+            if (isLocalWarpReferenceNeighbor(currentHeader, directLeft.header())) {
+                leftMask |= 1;
+                if (++count >= WarpedMotion.SAMPLE_CAPACITY) {
+                    return new long[]{topMask, leftMask};
+                }
+            }
+            int leftHeight4 = directLeft.header().size().height4();
+            if (leftHeight4 >= blockHeight4) {
+                if ((blockY4 & (leftHeight4 - 1)) != 0) {
+                    haveTopLeft = false;
+                }
+            } else {
+                long mask = 1L << leftHeight4;
+                for (int y = leftHeight4; y < visibleHeight4; ) {
+                    TilePartitionTreeReader.LeafNode neighbor = Objects.requireNonNull(
+                            decodedBlockMap.leafAt(blockX4 - 1, blockY4 + y),
+                            "leftNeighbor"
+                    );
+                    if (isLocalWarpReferenceNeighbor(currentHeader, neighbor.header())) {
+                        leftMask |= mask;
+                        if (++count >= WarpedMotion.SAMPLE_CAPACITY) {
+                            return new long[]{topMask, leftMask};
+                        }
+                    }
+                    leftHeight4 = neighbor.header().size().height4();
+                    y += leftHeight4;
+                    mask <<= leftHeight4;
+                }
+            }
+        }
+        if (haveTopLeft) {
+            @Nullable TilePartitionTreeReader.LeafNode topLeft = decodedBlockMap.leafAt(blockX4 - 1, blockY4 - 1);
+            if (topLeft != null && isLocalWarpReferenceNeighbor(currentHeader, topLeft.header())) {
+                leftMask |= 1L << 32;
+                if (++count >= WarpedMotion.SAMPLE_CAPACITY) {
+                    return new long[]{topMask, leftMask};
+                }
+            }
+        }
+        if (haveTopRight) {
+            @Nullable TilePartitionTreeReader.LeafNode topRight = decodedBlockMap.leafAt(
+                    blockX4 + blockWidth4,
+                    blockY4 - 1
+            );
+            if (topRight != null
+                    && decodedBlockMap.isCausal(topRight, currentLeaf)
+                    && isLocalWarpReferenceNeighbor(currentHeader, topRight.header())) {
+                topMask |= 1L << 32;
+            }
+        }
+        return new long[]{topMask, leftMask};
     }
 
-    /// Returns whether one neighbor can provide a local-warp motion sample for the current block.
+    /// Converts top and left projectable masks into affine motion samples.
     ///
-    /// @param currentHeader the decoded current block header
-    /// @param neighborHeader the decoded causal neighbor block header
-    /// @return whether one neighbor can provide a local-warp motion sample for the current block
+    /// @param currentHeader the current block header
+    /// @param decodedBlockMap the decoded leaf map
+    /// @param blockX4 the current block X origin
+    /// @param blockY4 the current block Y origin
+    /// @param blockWidth4 the current block width
+    /// @param masks the top and left projectable masks
+    /// @param samples the destination sample array
+    /// @return the populated sample count
+    private static int collectLocalWarpSamples(
+            TileBlockHeaderReader.BlockHeader currentHeader,
+            DecodedBlockMap decodedBlockMap,
+            int blockX4,
+            int blockY4,
+            int blockWidth4,
+            long[] masks,
+            WarpedMotion.Sample[] samples
+    ) {
+        long topMask = masks[0];
+        long leftMask = masks[1];
+        int count = 0;
+        if ((topMask & 0xFFFF_FFFFL) == 1 && (leftMask >>> 32) == 0) {
+            TileBlockHeaderReader.BlockHeader neighbor = Objects.requireNonNull(
+                    decodedBlockMap.leafAt(blockX4, blockY4 - 1),
+                    "directTop"
+            ).header();
+            int offset = blockX4 & (neighbor.size().width4() - 1);
+            samples[count++] = localWarpSample(-offset, 0, 1, -1, neighbor);
+        } else {
+            int offset = 0;
+            int mask = (int) topMask;
+            while (count < samples.length && mask != 0) {
+                int trailingZeros = Integer.numberOfTrailingZeros(mask);
+                offset += trailingZeros;
+                mask >>>= trailingZeros;
+                TileBlockHeaderReader.BlockHeader neighbor = Objects.requireNonNull(
+                        decodedBlockMap.leafAt(blockX4 + offset, blockY4 - 1),
+                        "topNeighbor"
+                ).header();
+                samples[count++] = localWarpSample(offset, 0, 1, -1, neighbor);
+                mask &= ~1;
+            }
+        }
+        if (count < samples.length && leftMask == 1) {
+            TileBlockHeaderReader.BlockHeader directLeft = Objects.requireNonNull(
+                    decodedBlockMap.leafAt(blockX4 - 1, blockY4),
+                    "directLeft"
+            ).header();
+            int offset = blockY4 & (directLeft.size().height4() - 1);
+            TileBlockHeaderReader.BlockHeader neighbor = Objects.requireNonNull(
+                    decodedBlockMap.leafAt(blockX4 - 1, blockY4 - offset),
+                    "alignedLeft"
+            ).header();
+            samples[count++] = localWarpSample(0, -offset, -1, 1, neighbor);
+        } else {
+            int offset = 0;
+            int mask = (int) leftMask;
+            while (count < samples.length && mask != 0) {
+                int trailingZeros = Integer.numberOfTrailingZeros(mask);
+                offset += trailingZeros;
+                mask >>>= trailingZeros;
+                TileBlockHeaderReader.BlockHeader neighbor = Objects.requireNonNull(
+                        decodedBlockMap.leafAt(blockX4 - 1, blockY4 + offset),
+                        "leftNeighbor"
+                ).header();
+                samples[count++] = localWarpSample(0, offset, -1, 1, neighbor);
+                mask &= ~1;
+            }
+        }
+        if (count < samples.length && (leftMask >>> 32) != 0) {
+            TileBlockHeaderReader.BlockHeader neighbor = Objects.requireNonNull(
+                    decodedBlockMap.leafAt(blockX4 - 1, blockY4 - 1),
+                    "topLeft"
+            ).header();
+            samples[count++] = localWarpSample(0, 0, -1, -1, neighbor);
+        }
+        if (count < samples.length && (topMask >>> 32) != 0) {
+            TileBlockHeaderReader.BlockHeader neighbor = Objects.requireNonNull(
+                    decodedBlockMap.leafAt(blockX4 + blockWidth4, blockY4 - 1),
+                    "topRight"
+            ).header();
+            samples[count++] = localWarpSample(blockWidth4, 0, 1, -1, neighbor);
+        }
+        if (count == 0) {
+            throw new IllegalStateException("Local warped motion requires at least one projectable sample");
+        }
+        return count;
+    }
+
+    /// Creates one affine sample from a causal neighbor block.
+    ///
+    /// @param deltaX4 the neighbor center offset X in 4x4 units
+    /// @param deltaY4 the neighbor center offset Y in 4x4 units
+    /// @param widthSign the signed neighbor-width contribution
+    /// @param heightSign the signed neighbor-height contribution
+    /// @param neighborHeader the projectable neighbor header
+    /// @return one affine projection sample
+    private static WarpedMotion.Sample localWarpSample(
+            int deltaX4,
+            int deltaY4,
+            int widthSign,
+            int heightSign,
+            TileBlockHeaderReader.BlockHeader neighborHeader
+    ) {
+        MotionVector motionVector = Objects.requireNonNull(
+                neighborHeader.motionVector0(),
+                "neighborHeader.motionVector0()"
+        ).vector();
+        int sourceX = 16 * (2 * deltaX4 + widthSign * neighborHeader.size().width4()) - 8;
+        int sourceY = 16 * (2 * deltaY4 + heightSign * neighborHeader.size().height4()) - 8;
+        return new WarpedMotion.Sample(
+                sourceX,
+                sourceY,
+                sourceX + motionVector.columnEighthPel(),
+                sourceY + motionVector.rowEighthPel()
+        );
+    }
+
+    /// Returns whether one neighbor supplies a compatible single-reference motion vector.
+    ///
+    /// @param currentHeader the current block header
+    /// @param neighborHeader the candidate neighbor header
+    /// @return whether the neighbor is projectable for local warped motion
     private static boolean isLocalWarpReferenceNeighbor(
             TileBlockHeaderReader.BlockHeader currentHeader,
             TileBlockHeaderReader.BlockHeader neighborHeader
     ) {
-        TileBlockHeaderReader.BlockHeader nonNullNeighborHeader = Objects.requireNonNull(neighborHeader, "neighborHeader");
-        return !nonNullNeighborHeader.intra()
-                && !nonNullNeighborHeader.useIntrabc()
-                && !nonNullNeighborHeader.compoundReference()
-                && nonNullNeighborHeader.referenceFrame0() == currentHeader.referenceFrame0()
-                && nonNullNeighborHeader.motionVector0() != null
-                && nonNullNeighborHeader.motionVector0().resolved();
-    }
-
-    /// Returns the luma-domain center coordinate for one block axis.
-    ///
-    /// @param origin4 the block origin in 4x4 units
-    /// @param sizePixels the block size in luma samples on the same axis
-    /// @return the luma-domain center coordinate for one block axis
-    private static double blockCenterCoordinate(int origin4, int sizePixels) {
-        return (origin4 << 2) + sizePixels * 0.5 - 0.5;
+        TileBlockHeaderReader.BlockHeader checkedNeighbor = Objects.requireNonNull(neighborHeader, "neighborHeader");
+        return !checkedNeighbor.intra()
+                && !checkedNeighbor.useIntrabc()
+                && !checkedNeighbor.compoundReference()
+                && checkedNeighbor.referenceFrame0() == currentHeader.referenceFrame0()
+                && checkedNeighbor.motionVector0() != null;
     }
 
     /// Applies AV1 inter-intra blending to the already built single-reference inter predictor.
@@ -2796,9 +2994,8 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Reconstructs the currently supported compound-reference inter prediction subset by averaging
-    /// or masked-blending the two predicted reference surfaces after each one has been sampled
-    /// with the current integer-copy or fixed-filter subpel path.
+    /// Reconstructs compound-reference inter prediction by averaging or masked-blending two
+    /// independently sampled reference surfaces.
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param chromaUPlane the mutable chroma U destination plane, or `null`
@@ -2840,6 +3037,8 @@ public final class FrameReconstructor {
                 );
         DecodedPlanes referencePlanes0 = referenceSurfaceSnapshot0.decodedPlanes();
         DecodedPlanes referencePlanes1 = referenceSurfaceSnapshot1.decodedPlanes();
+        ReferenceScale referenceScale0 = referenceScale(frameLumaWidth, frameLumaHeight, referenceSurfaceSnapshot0);
+        ReferenceScale referenceScale1 = referenceScale(frameLumaWidth, frameLumaHeight, referenceSurfaceSnapshot1);
         MotionVector motionVector0 = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
         MotionVector motionVector1 = Objects.requireNonNull(header.motionVector1(), "header.motionVector1()").vector();
         CompoundPredictionType compoundPredictionType =
@@ -2866,18 +3065,18 @@ public final class FrameReconstructor {
                 lumaPlane,
                 referencePlanes0.lumaPlane(),
                 referencePlanes1.lumaPlane(),
-                frameLumaWidth,
-                frameLumaHeight,
                 lumaX,
                 lumaY,
                 visibleLumaWidth,
                 visibleLumaHeight,
-                motionVector0.columnQuarterPel(),
-                motionVector0.rowQuarterPel(),
-                motionVector1.columnQuarterPel(),
-                motionVector1.rowQuarterPel(),
-                4,
-                4,
+                motionVector0.columnEighthPel(),
+                motionVector0.rowEighthPel(),
+                motionVector1.columnEighthPel(),
+                motionVector1.rowEighthPel(),
+                8,
+                8,
+                referenceScale0,
+                referenceScale1,
                 visibleLumaWidth,
                 visibleLumaHeight,
                 horizontalInterpolationFilter,
@@ -2905,27 +3104,25 @@ public final class FrameReconstructor {
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
-        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
-        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
-        int chromaDenominatorX = 4 << chromaSubsamplingX;
-        int chromaDenominatorY = 4 << chromaSubsamplingY;
+        int chromaDenominatorX = 8 << chromaSubsamplingX;
+        int chromaDenominatorY = 8 << chromaSubsamplingY;
 
         reconstructCompoundInterPlanePrediction(
                 chromaUPlane,
                 Objects.requireNonNull(referencePlanes0.chromaUPlane(), "referencePlanes0.chromaUPlane()"),
                 Objects.requireNonNull(referencePlanes1.chromaUPlane(), "referencePlanes1.chromaUPlane()"),
-                frameChromaWidth,
-                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                motionVector0.columnQuarterPel(),
-                motionVector0.rowQuarterPel(),
-                motionVector1.columnQuarterPel(),
-                motionVector1.rowQuarterPel(),
+                motionVector0.columnEighthPel(),
+                motionVector0.rowEighthPel(),
+                motionVector1.columnEighthPel(),
+                motionVector1.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY,
+                referenceScale0,
+                referenceScale1,
                 visibleChromaWidth,
                 visibleChromaHeight,
                 horizontalInterpolationFilter,
@@ -2946,18 +3143,18 @@ public final class FrameReconstructor {
                 chromaVPlane,
                 Objects.requireNonNull(referencePlanes0.chromaVPlane(), "referencePlanes0.chromaVPlane()"),
                 Objects.requireNonNull(referencePlanes1.chromaVPlane(), "referencePlanes1.chromaVPlane()"),
-                frameChromaWidth,
-                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
-                motionVector0.columnQuarterPel(),
-                motionVector0.rowQuarterPel(),
-                motionVector1.columnQuarterPel(),
-                motionVector1.rowQuarterPel(),
+                motionVector0.columnEighthPel(),
+                motionVector0.rowEighthPel(),
+                motionVector1.columnEighthPel(),
+                motionVector1.rowEighthPel(),
                 chromaDenominatorX,
                 chromaDenominatorY,
+                referenceScale0,
+                referenceScale1,
                 visibleChromaWidth,
                 visibleChromaHeight,
                 horizontalInterpolationFilter,
@@ -2976,24 +3173,24 @@ public final class FrameReconstructor {
         );
     }
 
-    /// Reconstructs one inter-predicted plane using either integer-copy or the current fixed AV1
-    /// subpel filter depending on the supplied motion-vector alignment.
+    /// Reconstructs one inter-predicted plane using AV1 reference scaling and subpel filtering.
     ///
-    /// When the stored reference plane already lives in a different post-super-resolution domain,
-    /// the current implementation first maps destination-plane sample coordinates into the
-    /// reference-plane domain with one deterministic linear endpoint-preserving transform, then
-    /// applies the existing integer-copy or fixed-filter sampling path.
+    /// Same-size integer-aligned predictions use a direct copy. Differently sized reference frames
+    /// use the normative Q14 scale factors and Q10 per-sample stepping before interpolation.
     ///
     /// @param destinationPlane the mutable destination plane
     /// @param referencePlane the immutable reference plane
+    /// @param framePlaneWidth the current coded-frame width in samples for this plane
+    /// @param framePlaneHeight the current coded-frame height in samples for this plane
     /// @param destinationX the zero-based horizontal destination coordinate
     /// @param destinationY the zero-based vertical destination coordinate
     /// @param width the copied width in samples
     /// @param height the copied height in samples
-    /// @param sourceOffsetQuarterPelX the signed horizontal motion-vector component in luma quarter-pel units
-    /// @param sourceOffsetQuarterPelY the signed vertical motion-vector component in luma quarter-pel units
-    /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
-    /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @param sourceOffsetEighthPelX the signed horizontal motion-vector component in luma eighth-pel units
+    /// @param sourceOffsetEighthPelY the signed vertical motion-vector component in luma eighth-pel units
+    /// @param denominatorX the plane-local horizontal denominator expressed in luma eighth-pel units
+    /// @param denominatorY the plane-local vertical denominator expressed in luma eighth-pel units
+    /// @param referenceScale the scale factors derived from the current and reference luma dimensions
     /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter mode
@@ -3007,26 +3204,29 @@ public final class FrameReconstructor {
             int destinationY,
             int width,
             int height,
-            int sourceOffsetQuarterPelX,
-            int sourceOffsetQuarterPelY,
+            int sourceOffsetEighthPelX,
+            int sourceOffsetEighthPelY,
             int denominatorX,
             int denominatorY,
+            ReferenceScale referenceScale,
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
             FrameHeader.InterpolationFilter verticalFilterMode
     ) {
-        if (framePlaneWidth == referencePlane.width()
+        ReferenceScale nonNullReferenceScale = Objects.requireNonNull(referenceScale, "referenceScale");
+        if (!nonNullReferenceScale.scaled()
+                && framePlaneWidth == referencePlane.width()
                 && framePlaneHeight == referencePlane.height()
-                && Math.floorMod(sourceOffsetQuarterPelX, denominatorX) == 0
-                && Math.floorMod(sourceOffsetQuarterPelY, denominatorY) == 0) {
+                && Math.floorMod(sourceOffsetEighthPelX, denominatorX) == 0
+                && Math.floorMod(sourceOffsetEighthPelY, denominatorY) == 0) {
             copyReferencePlaneBlock(
                     destinationPlane,
                     referencePlane,
                     destinationX,
                     destinationY,
-                    destinationX + sourceOffsetQuarterPelX / denominatorX,
-                    destinationY + sourceOffsetQuarterPelY / denominatorY,
+                    destinationX + sourceOffsetEighthPelX / denominatorX,
+                    destinationY + sourceOffsetEighthPelY / denominatorY,
                     width,
                     height
             );
@@ -3040,14 +3240,15 @@ public final class FrameReconstructor {
                         destinationY + y,
                         sampleInterPlaneValue(
                                 referencePlane,
-                                destinationX + x,
-                                destinationY + y,
-                                framePlaneWidth,
-                                framePlaneHeight,
-                                sourceOffsetQuarterPelX,
-                                sourceOffsetQuarterPelY,
+                                destinationX,
+                                destinationY,
+                                x,
+                                y,
+                                sourceOffsetEighthPelX,
+                                sourceOffsetEighthPelY,
                                 denominatorX,
                                 denominatorY,
+                                nonNullReferenceScale,
                                 widthForFilterSelection,
                                 heightForFilterSelection,
                                 horizontalFilterMode,
@@ -3069,12 +3270,14 @@ public final class FrameReconstructor {
     /// @param destinationY the zero-based vertical destination coordinate
     /// @param width the copied width in samples
     /// @param height the copied height in samples
-    /// @param sourceOffsetQuarterPelX0 the primary signed horizontal motion-vector component in luma quarter-pel units
-    /// @param sourceOffsetQuarterPelY0 the primary signed vertical motion-vector component in luma quarter-pel units
-    /// @param sourceOffsetQuarterPelX1 the secondary signed horizontal motion-vector component in luma quarter-pel units
-    /// @param sourceOffsetQuarterPelY1 the secondary signed vertical motion-vector component in luma quarter-pel units
-    /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
-    /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @param sourceOffsetEighthPelX0 the primary signed horizontal motion-vector component in luma eighth-pel units
+    /// @param sourceOffsetEighthPelY0 the primary signed vertical motion-vector component in luma eighth-pel units
+    /// @param sourceOffsetEighthPelX1 the secondary signed horizontal motion-vector component in luma eighth-pel units
+    /// @param sourceOffsetEighthPelY1 the secondary signed vertical motion-vector component in luma eighth-pel units
+    /// @param denominatorX the plane-local horizontal denominator expressed in luma eighth-pel units
+    /// @param denominatorY the plane-local vertical denominator expressed in luma eighth-pel units
+    /// @param referenceScale0 the primary reference scale factors
+    /// @param referenceScale1 the secondary reference scale factors
     /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter mode
@@ -3094,18 +3297,18 @@ public final class FrameReconstructor {
             MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane0,
             DecodedPlane referencePlane1,
-            int framePlaneWidth,
-            int framePlaneHeight,
             int destinationX,
             int destinationY,
             int width,
             int height,
-            int sourceOffsetQuarterPelX0,
-            int sourceOffsetQuarterPelY0,
-            int sourceOffsetQuarterPelX1,
-            int sourceOffsetQuarterPelY1,
+            int sourceOffsetEighthPelX0,
+            int sourceOffsetEighthPelY0,
+            int sourceOffsetEighthPelX1,
+            int sourceOffsetEighthPelY1,
             int denominatorX,
             int denominatorY,
+            ReferenceScale referenceScale0,
+            ReferenceScale referenceScale1,
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
@@ -3124,18 +3327,21 @@ public final class FrameReconstructor {
     ) {
         CompoundPredictionType nonNullCompoundPredictionType =
                 Objects.requireNonNull(compoundPredictionType, "compoundPredictionType");
+        ReferenceScale nonNullReferenceScale0 = Objects.requireNonNull(referenceScale0, "referenceScale0");
+        ReferenceScale nonNullReferenceScale1 = Objects.requireNonNull(referenceScale1, "referenceScale1");
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int sample0 = sampleInterPlaneValue(
                         referencePlane0,
-                        destinationX + x,
-                        destinationY + y,
-                        framePlaneWidth,
-                        framePlaneHeight,
-                        sourceOffsetQuarterPelX0,
-                        sourceOffsetQuarterPelY0,
+                        destinationX,
+                        destinationY,
+                        x,
+                        y,
+                        sourceOffsetEighthPelX0,
+                        sourceOffsetEighthPelY0,
                         denominatorX,
                         denominatorY,
+                        nonNullReferenceScale0,
                         widthForFilterSelection,
                         heightForFilterSelection,
                         horizontalFilterMode,
@@ -3144,14 +3350,15 @@ public final class FrameReconstructor {
                 );
                 int sample1 = sampleInterPlaneValue(
                         referencePlane1,
-                        destinationX + x,
-                        destinationY + y,
-                        framePlaneWidth,
-                        framePlaneHeight,
-                        sourceOffsetQuarterPelX1,
-                        sourceOffsetQuarterPelY1,
+                        destinationX,
+                        destinationY,
+                        x,
+                        y,
+                        sourceOffsetEighthPelX1,
+                        sourceOffsetEighthPelY1,
                         denominatorX,
                         denominatorY,
+                        nonNullReferenceScale1,
                         widthForFilterSelection,
                         heightForFilterSelection,
                         horizontalFilterMode,
@@ -3195,16 +3402,18 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Returns one inter-predicted plane sample using either integer-copy or the current fixed AV1
-    /// subpel filter depending on the supplied motion-vector alignment.
+    /// Returns one inter-predicted plane sample at a block-local destination offset.
     ///
     /// @param referencePlane the immutable reference plane
-    /// @param destinationX the zero-based horizontal destination coordinate
-    /// @param destinationY the zero-based vertical destination coordinate
-    /// @param sourceOffsetQuarterPelX the signed horizontal motion-vector component in luma quarter-pel units
-    /// @param sourceOffsetQuarterPelY the signed vertical motion-vector component in luma quarter-pel units
-    /// @param denominatorX the plane-local horizontal denominator expressed in luma quarter-pel units
-    /// @param denominatorY the plane-local vertical denominator expressed in luma quarter-pel units
+    /// @param destinationX the zero-based horizontal prediction origin
+    /// @param destinationY the zero-based vertical prediction origin
+    /// @param sampleX the block-local horizontal sample offset
+    /// @param sampleY the block-local vertical sample offset
+    /// @param sourceOffsetEighthPelX the signed horizontal motion-vector component in luma eighth-pel units
+    /// @param sourceOffsetEighthPelY the signed vertical motion-vector component in luma eighth-pel units
+    /// @param denominatorX the plane-local horizontal denominator expressed in luma eighth-pel units
+    /// @param denominatorY the plane-local vertical denominator expressed in luma eighth-pel units
+    /// @param referenceScale the scale factors derived from the current and reference luma dimensions
     /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter mode
@@ -3215,45 +3424,60 @@ public final class FrameReconstructor {
             DecodedPlane referencePlane,
             int destinationX,
             int destinationY,
-            int destinationPlaneWidth,
-            int destinationPlaneHeight,
-            int sourceOffsetQuarterPelX,
-            int sourceOffsetQuarterPelY,
+            int sampleX,
+            int sampleY,
+            int sourceOffsetEighthPelX,
+            int sourceOffsetEighthPelY,
             int denominatorX,
             int denominatorY,
+            ReferenceScale referenceScale,
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
             FrameHeader.InterpolationFilter verticalFilterMode,
             int maximumSampleValue
     ) {
-        int mappedDestinationX = Math.min(destinationX, destinationPlaneWidth - 1);
-        int mappedDestinationY = Math.min(destinationY, destinationPlaneHeight - 1);
-        int sourceNumeratorX = mapDestinationCoordinateToReferenceNumerator(
-                mappedDestinationX,
-                destinationPlaneWidth,
-                referencePlane.width(),
-                denominatorX
-        ) + sourceOffsetQuarterPelX;
-        int sourceNumeratorY = mapDestinationCoordinateToReferenceNumerator(
-                mappedDestinationY,
-                destinationPlaneHeight,
-                referencePlane.height(),
-                denominatorY
-        ) + sourceOffsetQuarterPelY;
-        if (Math.floorMod(sourceNumeratorX, denominatorX) == 0
-                && Math.floorMod(sourceNumeratorY, denominatorY) == 0) {
+        ReferenceScale nonNullReferenceScale = Objects.requireNonNull(referenceScale, "referenceScale");
+        int sourceNumeratorX;
+        int sourceNumeratorY;
+        int interpolationDenominatorX;
+        int interpolationDenominatorY;
+        if (nonNullReferenceScale.scaled()) {
+            sourceNumeratorX = scaledReferenceSourceNumerator(
+                    destinationX,
+                    sampleX,
+                    sourceOffsetEighthPelX,
+                    denominatorX,
+                    nonNullReferenceScale.horizontalFactor()
+            );
+            sourceNumeratorY = scaledReferenceSourceNumerator(
+                    destinationY,
+                    sampleY,
+                    sourceOffsetEighthPelY,
+                    denominatorY,
+                    nonNullReferenceScale.verticalFactor()
+            );
+            interpolationDenominatorX = 1 << SCALED_INTER_SUBPEL_BITS;
+            interpolationDenominatorY = 1 << SCALED_INTER_SUBPEL_BITS;
+        } else {
+            sourceNumeratorX = (destinationX + sampleX) * denominatorX + sourceOffsetEighthPelX;
+            sourceNumeratorY = (destinationY + sampleY) * denominatorY + sourceOffsetEighthPelY;
+            interpolationDenominatorX = denominatorX;
+            interpolationDenominatorY = denominatorY;
+        }
+        if (Math.floorMod(sourceNumeratorX, interpolationDenominatorX) == 0
+                && Math.floorMod(sourceNumeratorY, interpolationDenominatorY) == 0) {
             return referencePlane.sample(
-                    clamp(sourceNumeratorX / denominatorX, 0, referencePlane.width() - 1),
-                    clamp(sourceNumeratorY / denominatorY, 0, referencePlane.height() - 1)
+                    clamp(Math.floorDiv(sourceNumeratorX, interpolationDenominatorX), 0, referencePlane.width() - 1),
+                    clamp(Math.floorDiv(sourceNumeratorY, interpolationDenominatorY), 0, referencePlane.height() - 1)
             );
         }
         return filteredInterpolateAt(
                 referencePlane,
                 sourceNumeratorX,
                 sourceNumeratorY,
-                denominatorX,
-                denominatorY,
+                interpolationDenominatorX,
+                interpolationDenominatorY,
                 widthForFilterSelection,
                 heightForFilterSelection,
                 horizontalFilterMode,
@@ -3326,12 +3550,12 @@ public final class FrameReconstructor {
                 && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
             return bilinearInterpolateAt(referencePlane, sourceNumeratorX, sourceNumeratorY, denominatorX, denominatorY);
         }
-        if (!supportsFixedFractionalInterFilter(horizontalFilterMode)
-                || !supportsFixedFractionalInterFilter(verticalFilterMode)
+        if (!isConcreteInterpolationFilter(horizontalFilterMode)
+                || !isConcreteInterpolationFilter(verticalFilterMode)
                 || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
                 || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
             throw new IllegalStateException(
-                    "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
+                    "Inter reconstruction requires resolved matching BILINEAR or EIGHT_TAP_* filters"
             );
         }
 
@@ -3399,11 +3623,11 @@ public final class FrameReconstructor {
             int denominatorY
     ) {
         int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
-        int fractionY = Math.floorMod(sourceNumeratorY, denominatorY);
+        int fractionY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
         int clampedSourceY0 = clamp(sourceY0, 0, referencePlane.height() - 1);
         int clampedSourceY1 = clamp(sourceY0 + 1, 0, referencePlane.height() - 1);
         int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
-        int fractionX = Math.floorMod(sourceNumeratorX, denominatorX);
+        int fractionX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
         int clampedSourceX0 = clamp(sourceX0, 0, referencePlane.width() - 1);
         int clampedSourceX1 = clamp(sourceX0 + 1, 0, referencePlane.width() - 1);
         return bilinearInterpolate(
@@ -3412,9 +3636,9 @@ public final class FrameReconstructor {
                 referencePlane.sample(clampedSourceX0, clampedSourceY1),
                 referencePlane.sample(clampedSourceX1, clampedSourceY1),
                 fractionX,
-                denominatorX,
+                INTER_FILTER_PHASES,
                 fractionY,
-                denominatorY
+                INTER_FILTER_PHASES
         );
     }
 
@@ -3481,46 +3705,76 @@ public final class FrameReconstructor {
             case EIGHT_TAP_SMOOTH -> (axisSize <= 4 ? SMALL_SMOOTH_SUBPEL_FILTERS : SMOOTH_SUBPEL_FILTERS)[phase - 1];
             case EIGHT_TAP_SHARP -> SHARP_SUBPEL_FILTERS[phase - 1];
             default -> throw new IllegalStateException(
-                    "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
+                    "AV1 fixed-filter selection requires an EIGHT_TAP_REGULAR, EIGHT_TAP_SMOOTH, or EIGHT_TAP_SHARP filter"
             );
         };
     }
 
-    /// Maps one destination-plane sample coordinate into the current reference-plane numerator
-    /// domain.
+    /// Returns AV1 reference scale factors for one current/reference frame pair.
     ///
-    /// The mapping preserves both plane endpoints and uses one rounded linear transform before the
-    /// destination frame's normative super-resolution pass runs.
-    ///
-    /// @param destinationCoordinate the zero-based destination-plane coordinate
-    /// @param destinationExtent the destination-plane extent in samples
-    /// @param referenceExtent the reference-plane extent in samples
-    /// @param denominator the plane-local interpolation denominator
-    /// @return the mapped source numerator in plane-local sample units
-    private static int mapDestinationCoordinateToReferenceNumerator(
-            int destinationCoordinate,
-            int destinationExtent,
-            int referenceExtent,
-            int denominator
+    /// @param currentWidth the current coded luma width
+    /// @param currentHeight the current coded luma height
+    /// @param referenceSurfaceSnapshot the stored reference surface
+    /// @return the fixed-point reference scale factors
+    private static ReferenceScale referenceScale(
+            int currentWidth,
+            int currentHeight,
+            ReferenceSurfaceSnapshot referenceSurfaceSnapshot
     ) {
-        if (destinationExtent <= 0) {
-            throw new IllegalStateException("Destination plane extent must be positive");
+        ReferenceSurfaceSnapshot nonNullSnapshot =
+                Objects.requireNonNull(referenceSurfaceSnapshot, "referenceSurfaceSnapshot");
+        FrameHeader.FrameSize referenceSize = nonNullSnapshot.frameHeader().frameSize();
+        int referenceWidth = referenceSize.upscaledWidth();
+        int referenceHeight = referenceSize.height();
+        return new ReferenceScale(
+                referenceScaleFactor(referenceWidth, currentWidth),
+                referenceScaleFactor(referenceHeight, currentHeight),
+                referenceWidth != currentWidth || referenceHeight != currentHeight
+        );
+    }
+
+    /// Returns one AV1 Q14 reference scale factor.
+    ///
+    /// @param referenceExtent the stored reference luma extent
+    /// @param currentExtent the current coded luma extent
+    /// @return the rounded Q14 scale factor
+    private static int referenceScaleFactor(int referenceExtent, int currentExtent) {
+        if (referenceExtent <= 0 || currentExtent <= 0) {
+            throw new IllegalStateException("Reference scaling requires positive frame dimensions");
         }
-        if (referenceExtent <= 0) {
-            throw new IllegalStateException("Reference plane extent must be positive");
+        return Math.toIntExact(
+                (((long) referenceExtent << REFERENCE_SCALE_BITS) + (currentExtent >> 1)) / currentExtent
+        );
+    }
+
+    /// Returns one Q10 source coordinate for scaled AV1 inter prediction.
+    ///
+    /// The block origin uses AV1's signed center-offset scale formula. Subsequent samples advance by
+    /// the rounded Q10 scale step, matching the scaled motion-compensation process.
+    ///
+    /// @param destinationOrigin the prediction origin in plane samples
+    /// @param sampleOffset the block-local sample offset
+    /// @param motionVectorEighthPel the motion-vector component in luma eighth-pel units
+    /// @param planeDenominator the plane-local denominator in luma eighth-pel units
+    /// @param scaleFactor the Q14 luma-domain reference scale factor
+    /// @return the scaled source coordinate in Q10 plane-sample units
+    private static int scaledReferenceSourceNumerator(
+            int destinationOrigin,
+            int sampleOffset,
+            int motionVectorEighthPel,
+            int planeDenominator,
+            int scaleFactor
+    ) {
+        if (planeDenominator != 8 && planeDenominator != 16) {
+            throw new IllegalStateException("Unexpected inter-prediction plane denominator: " + planeDenominator);
         }
-        if (destinationCoordinate < 0 || destinationCoordinate >= destinationExtent) {
-            throw new IllegalStateException("Destination coordinate lies outside the current plane extent");
-        }
-        if (destinationExtent == referenceExtent) {
-            return destinationCoordinate * denominator;
-        }
-        if (destinationExtent == 1 || referenceExtent == 1) {
-            return 0;
-        }
-        long numerator = (long) destinationCoordinate * (referenceExtent - 1) * denominator;
-        long divisor = destinationExtent - 1L;
-        return (int) ((numerator + (divisor >> 1)) / divisor);
+        long originalPosition = (long) destinationOrigin * 16
+                + (long) motionVectorEighthPel * (16 / planeDenominator);
+        long scaledPosition = originalPosition * scaleFactor
+                + (long) (scaleFactor - REFERENCE_SCALE_IDENTITY) * 8;
+        int blockStart = roundShiftSigned(scaledPosition, 8) + 32;
+        int step = (scaleFactor + 8) >> 4;
+        return Math.toIntExact((long) blockStart + (long) sampleOffset * step);
     }
 
     /// Returns the normalized AV1 subpel phase for the supplied plane-local fraction.
@@ -3548,12 +3802,11 @@ public final class FrameReconstructor {
         return (int) -(((-value) + roundingOffset) >> bits);
     }
 
-    /// Returns whether one frame-level interpolation filter is currently supported for fractional
-    /// inter reconstruction.
+    /// Returns whether one interpolation filter is resolved to a concrete prediction kernel.
     ///
-    /// @param filterMode the frame-level interpolation filter mode
-    /// @return whether one frame-level interpolation filter is currently supported for fractional inter reconstruction
-    private static boolean supportsFixedFractionalInterFilter(FrameHeader.InterpolationFilter filterMode) {
+    /// @param filterMode the interpolation filter mode
+    /// @return whether the filter is concrete rather than switchable
+    private static boolean isConcreteInterpolationFilter(FrameHeader.InterpolationFilter filterMode) {
         return filterMode == FrameHeader.InterpolationFilter.BILINEAR
                 || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
                 || filterMode == FrameHeader.InterpolationFilter.EIGHT_TAP_SMOOTH
@@ -3591,11 +3844,11 @@ public final class FrameReconstructor {
         return (int) ((weightedSum + (denominator >> 1)) / denominator);
     }
 
-    /// Returns the current simple average-compound sample.
+    /// Returns one simple average-compound sample.
     ///
     /// @param primarySample the primary predicted sample
     /// @param secondarySample the secondary predicted sample
-    /// @return the current simple average-compound sample
+    /// @return the averaged compound sample
     private static int averageCompoundSamples(int primarySample, int secondarySample) {
         return (primarySample + secondarySample + 1) >> 1;
     }
@@ -3790,8 +4043,8 @@ public final class FrameReconstructor {
             return frameHeader.subpelFilterMode();
         }
         @Nullable FrameHeader.InterpolationFilter interpolationFilter = header.horizontalInterpolationFilter();
-        if (interpolationFilter == null) {
-            throw new IllegalStateException("Inter reconstruction requires decoded switchable interpolation filters");
+        if (interpolationFilter == null || !isConcreteInterpolationFilter(interpolationFilter)) {
+            throw new IllegalStateException("Inter reconstruction requires a resolved horizontal interpolation filter");
         }
         return interpolationFilter;
     }
@@ -3809,8 +4062,8 @@ public final class FrameReconstructor {
             return frameHeader.subpelFilterMode();
         }
         @Nullable FrameHeader.InterpolationFilter interpolationFilter = header.verticalInterpolationFilter();
-        if (interpolationFilter == null) {
-            throw new IllegalStateException("Inter reconstruction requires decoded switchable interpolation filters");
+        if (interpolationFilter == null || !isConcreteInterpolationFilter(interpolationFilter)) {
+            throw new IllegalStateException("Inter reconstruction requires a resolved vertical interpolation filter");
         }
         return interpolationFilter;
     }
@@ -3847,74 +4100,15 @@ public final class FrameReconstructor {
         DecodedPlanes referencePlanes = referenceSurfaceSnapshot.decodedPlanes();
         if (referencePlanes.bitDepth() != bitDepth) {
             throw new IllegalStateException(
-                    "Inter reconstruction currently requires one stored reference surface whose bit depth matches the current frame"
+                    "Inter reconstruction requires a stored reference surface whose bit depth matches the current frame"
             );
         }
         if (referencePlanes.pixelFormat() != pixelFormat) {
             throw new IllegalStateException(
-                    "Inter reconstruction currently requires matching reference pixel format: " + pixelFormat
+                    "Inter reconstruction requires matching reference pixel format: " + pixelFormat
             );
         }
         return referenceSurfaceSnapshot;
-    }
-
-    /// Validates that one inter motion vector stays inside the current single-reference
-    /// reconstruction subset.
-    ///
-    /// @param motionVector the inter motion vector chosen for the block
-    /// @param pixelFormat the active decoded chroma layout
-    /// @param hasChroma whether the block carries chroma samples
-    /// @param horizontalInterpolationFilter the effective horizontal interpolation filter mode
-    /// @param verticalInterpolationFilter the effective vertical interpolation filter mode
-    private static void requireSupportedInterMotionVector(
-            MotionVector motionVector,
-            AvifPixelFormat pixelFormat,
-            boolean hasChroma,
-            FrameHeader.InterpolationFilter horizontalInterpolationFilter,
-            FrameHeader.InterpolationFilter verticalInterpolationFilter
-    ) {
-        MotionVector checkedMotionVector = Objects.requireNonNull(motionVector, "motionVector");
-        boolean lumaFractional = (checkedMotionVector.rowQuarterPel() & 0x03) != 0
-                || (checkedMotionVector.columnQuarterPel() & 0x03) != 0;
-        if (!hasChroma || pixelFormat == AvifPixelFormat.I400) {
-            if (lumaFractional
-                    && (!supportsFixedFractionalInterFilter(horizontalInterpolationFilter)
-                    || !supportsFixedFractionalInterFilter(verticalInterpolationFilter))) {
-                throw new IllegalStateException(
-                        "Inter reconstruction currently supports fractional luma motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters"
-                );
-            }
-            return;
-        }
-
-        int chromaHorizontalAlignment = 4 << chromaSubsamplingX(pixelFormat);
-        int chromaVerticalAlignment = 4 << chromaSubsamplingY(pixelFormat);
-        boolean chromaFractional = Math.floorMod(checkedMotionVector.columnQuarterPel(), chromaHorizontalAlignment) != 0
-                || Math.floorMod(checkedMotionVector.rowQuarterPel(), chromaVerticalAlignment) != 0;
-        if ((lumaFractional || chromaFractional)
-                && (!supportsFixedFractionalInterFilter(horizontalInterpolationFilter)
-                || !supportsFixedFractionalInterFilter(verticalInterpolationFilter))) {
-            throw new IllegalStateException(
-                    "Inter reconstruction currently supports fractional motion vectors only with fixed BILINEAR or EIGHT_TAP_* filters for "
-                            + pixelFormat
-            );
-        }
-    }
-
-    /// Validates that one `intrabc` motion vector stays inside the current same-frame copy subset.
-    ///
-    /// The current implementation now uses the same-frame `BILINEAR` subset for luma and chroma,
-    /// so any plane-local quarter-pel numerator is accepted as long as the motion vector exists.
-    ///
-    /// @param motionVector the resolved `intrabc` motion vector chosen for the block
-    /// @param pixelFormat the active decoded chroma layout
-    /// @param hasChroma whether the block carries chroma samples
-    private static void requireSupportedIntrabcMotionVector(
-            MotionVector motionVector,
-            AvifPixelFormat pixelFormat,
-            boolean hasChroma
-    ) {
-        Objects.requireNonNull(motionVector, "motionVector");
     }
 
     /// Reconstructs one luma palette block directly into the destination plane.
@@ -3950,9 +4144,8 @@ public final class FrameReconstructor {
 
     /// Reconstructs one chroma palette block directly into the destination planes.
     ///
-    /// The current reconstruction subset mirrors the packed chroma palette-map geometry exposed by
-    /// `TileBlockHeaderReader`, then writes only the exact visible chroma footprint into the output
-    /// planes for the current `I420`, `I422`, and `I444` palette paths.
+    /// Packed palette indices follow the geometry exposed by `TileBlockHeaderReader`; only the
+    /// visible `I420`, `I422`, or `I444` chroma footprint is written to the output planes.
     ///
     /// @param chromaUPlane the mutable chroma U destination plane
     /// @param chromaVPlane the mutable chroma V destination plane

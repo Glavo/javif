@@ -77,6 +77,38 @@ final class DecodedPlanesArgbIntOutputTest {
         assertFrameMetadata(frame, planes);
     }
 
+    /// Verifies that AV1 render hints neither crop nor resample decoded output pixels.
+    @Test
+    void ignoresRenderSizeHintWhenConvertingDecodedPlanes() {
+        DecodedPlanes planes = new DecodedPlanes(
+                8,
+                AvifPixelFormat.I400,
+                3,
+                2,
+                7,
+                5,
+                plane(3, 2, 3, 0, 64, 255, 12, 128, 200),
+                null,
+                null
+        );
+
+        DecodedFrame frame = convert(planes);
+
+        assertEquals(3, frame.width());
+        assertEquals(2, frame.height());
+        assertArrayEquals(
+                new int[]{
+                        0xFF000000,
+                        0xFF404040,
+                        0xFFFFFFFF,
+                        0xFF0C0C0C,
+                        0xFF808080,
+                        0xFFC8C8C8
+                },
+                frame.intPixels()
+        );
+    }
+
     /// Verifies that high-bit-depth planes can be reduced directly into opaque 8-bit ARGB output.
     @Test
     void convertsTenBitI400SamplesIntoOpaqueArgbPixels() {
@@ -251,8 +283,8 @@ final class DecodedPlanesArgbIntOutputTest {
     /// @param frame the frame to validate
     /// @param planes the source decoded planes
     private static void assertFrameMetadata(DecodedFrame frame, DecodedPlanes planes) {
-        assertEquals(planes.renderWidth(), frame.width());
-        assertEquals(planes.renderHeight(), frame.height());
+        assertEquals(planes.codedWidth(), frame.width());
+        assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
         assertEquals(planes.pixelFormat(), frame.pixelFormat());
         assertEquals(TEST_FRAME_TYPE, frame.frameType());

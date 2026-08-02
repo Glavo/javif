@@ -28,12 +28,10 @@ public enum DecodeErrorCode {
     INVALID_LEB128,
     /// The AV1 bitstream violates structural constraints.
     INVALID_BITSTREAM,
-    /// The input uses a valid AV1 feature that is not implemented yet.
+    /// The input uses a valid AV1 feature that this decoder does not support.
     UNSUPPORTED_FEATURE,
     /// The configured frame size limit was exceeded.
     FRAME_SIZE_LIMIT_EXCEEDED,
     /// The decoder state machine reached an invalid state.
-    STATE_VIOLATION,
-    /// The requested decode path is not implemented yet.
-    NOT_IMPLEMENTED
+    STATE_VIOLATION
 }

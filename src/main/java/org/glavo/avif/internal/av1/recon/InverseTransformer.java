@@ -1074,9 +1074,8 @@ final class InverseTransformer {
 
     /// Reconstructs one one-dimensional `DCT_64` vector with the staged AOM reference schedule.
     ///
-    /// This mirrors `av1_idct64()` stage-for-stage so the `TX_64X64` path matches the FFmpeg and
-    /// libaom residual reconstruction pipeline instead of relying on the earlier incomplete
-    /// odd-branch port.
+    /// This follows `av1_idct64()` stage-for-stage, including its fixed-point rounding and clipping
+    /// schedule.
     ///
     /// @param input the dequantized `DCT_64` input vector
     /// @param output the reconstructed output vector
@@ -2148,7 +2147,7 @@ final class InverseTransformer {
         return new ClipRange(minimum, -minimum - 1);
     }
 
-    /// Returns the checked transform area for the current supported subset.
+    /// Returns the transform area in samples.
     ///
     /// @param transformSize the transform size to validate
     /// @return the transform area in samples

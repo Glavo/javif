@@ -543,14 +543,14 @@ public final class TilePartitionTreeReader {
         /// The decoded block-level transform layout.
         private final TransformLayout transformLayout;
 
-        /// The decoded first-pass block-level residual layout.
+        /// The decoded block-level residual layout.
         private final ResidualLayout residualLayout;
 
         /// Creates one partition tree leaf.
         ///
         /// @param header the decoded leaf block header
         /// @param transformLayout the decoded block-level transform layout
-        /// @param residualLayout the decoded first-pass block-level residual layout
+        /// @param residualLayout the decoded block-level residual layout
         public LeafNode(
                 TileBlockHeaderReader.BlockHeader header,
                 TransformLayout transformLayout,
@@ -575,9 +575,9 @@ public final class TilePartitionTreeReader {
             return transformLayout;
         }
 
-        /// Returns the decoded first-pass block-level residual layout.
+        /// Returns the decoded block-level residual layout.
         ///
-        /// @return the decoded first-pass block-level residual layout
+        /// @return the decoded block-level residual layout
         public ResidualLayout residualLayout() {
             return residualLayout;
         }

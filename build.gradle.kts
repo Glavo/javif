@@ -1,5 +1,3 @@
-import org.gradle.kotlin.dsl.attributes
-
 plugins {
     id("java-library")
     id("jacoco")
@@ -23,44 +21,7 @@ repositories {
     mavenCentral()
 }
 
-val viewerRuntime = configurations.create("viewerRuntime") {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-}
-
 dependencies {
-    val osName = System.getProperty("os.name").lowercase()
-    val osArch = System.getProperty("os.arch").lowercase()
-
-    val javafxVersion = "21.0.10"
-    val javafxOS = when {
-        osName.contains("win") -> "win"
-        osName.contains("mac") -> "mac"
-        osName.contains("linux") -> "linux"
-        else -> null
-    }
-    val javafxArch = when (osArch) {
-        "amd64", "x86-64", "x64" -> ""
-        "aarch64", "arm64" -> "-aarch64"
-        else -> null
-    }
-
-    fun javafx(module: String) {
-        if (javafxOS != null && javafxArch != null) {
-            val notation = "org.openjfx:javafx-$module:$javafxVersion:${javafxOS}${javafxArch}"
-
-            compileOnly(notation)
-            testCompileOnly(notation)
-            testRuntimeOnly(notation)
-            add(viewerRuntime.name, notation)
-        }
-    }
-
-    javafx("base")
-    javafx("controls")
-    javafx("graphics")
-    javafx("swing") // For Benchmark
-
     compileOnlyApi("org.jetbrains:annotations:26.1.0")
 
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
@@ -74,39 +35,14 @@ tasks.withType<JavaCompile> {
     options.release.set(17)
 }
 
-val mainClassName = "org.glavo.avif.javafx.AvifViewerApp"
-
-tasks.jar {
-    manifest.attributes(
-        "Main-Class" to mainClassName,
-    )
-}
-
-tasks.register<JavaExec>("run") {
-    group = "application"
-    description = "Runs the JavaFX AVIF viewer."
-    dependsOn(tasks.classes)
-    classpath(sourceSets["main"].runtimeClasspath, viewerRuntime)
-    mainClass.set(mainClassName)
-
-    if (this.javaVersion >= JavaVersion.VERSION_25) {
-        jvmArgs("--enable-native-access=javafx.graphics")
-    }
-}
-
 tasks.test {
     useJUnitPlatform()
     systemProperty(
         "org.bytedeco.javacpp.cachedir",
         layout.buildDirectory.dir("javacpp-cache").get().asFile.absolutePath,
     )
-
-    if (this.javaVersion >= JavaVersion.VERSION_25) {
-        jvmArgs("--enable-native-access=javafx.graphics")
-    }
 }
 
-val dav1dCommit = "c5726277ffa8764665ea08f865e46912a41f2309"
 val libavifCommit = "b54eac58daf563e9150cc6abce7631ac71b999aa"
 val libavifZip = layout.buildDirectory.file("downloads/libavif-$libavifCommit.zip")
 val linkUAvifSampleImagesCommit = "c666a368b73006246694919b5dbcc078317af6cc"
@@ -187,7 +123,6 @@ tasks.withType<Javadoc> {
         it.jFlags!!.addAll(listOf("-Duser.language=en", "-Duser.country=", "-Duser.variant="))
 
         it.encoding("UTF-8")
-        it.addStringOption("link", "https://docs.oracle.com/en/java/javase/25/docs/api/")
         it.addBooleanOption("html5", true)
         it.addStringOption("Xdoclint:none", "-quiet")
 

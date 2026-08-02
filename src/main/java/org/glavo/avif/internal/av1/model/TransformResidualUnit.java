@@ -21,12 +21,11 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// One transform residual unit after the current coefficient-side syntax pass.
+/// One decoded transform residual unit.
 ///
 /// Coefficients are stored as signed transform-domain levels in natural raster order under the
-/// explicit transform type carried by this unit. The current implementation fully decodes the
-/// modeled luma and chroma residual paths, including multi-coefficient larger-transform units that
-/// use coefficient-neighbor token contexts matching the AV1 entropy syntax.
+/// explicit transform type carried by this unit. The metadata also retains the visible write-back
+/// rectangle and coefficient-neighbor context produced by AV1 entropy decoding.
 @NotNullByDefault
 public final class TransformResidualUnit {
     /// The tile-relative block origin of this transform residual unit in luma 4x4 units.

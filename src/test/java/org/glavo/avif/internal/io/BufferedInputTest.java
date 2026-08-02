@@ -208,6 +208,53 @@ final class BufferedInputTest {
         }
     }
 
+    /// Verifies exact current-unit boundaries for bounded source adapters.
+    ///
+    /// @throws IOException if the test input cannot be read
+    @Test
+    void reportsCurrentUnitRemainingForBoundedSources() throws IOException {
+        try (BufferedInput input = new BufferedInput.OfByteBuffer(
+                ByteBuffer.wrap(new byte[]{1, 2, 3}).order(ByteOrder.LITTLE_ENDIAN)
+        )) {
+            assertEquals(3L, input.currentUnitRemaining());
+            input.readByte();
+            assertEquals(2L, input.currentUnitRemaining());
+        }
+
+        ByteBuffer first = ByteBuffer.wrap(new byte[]{1}).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer second = ByteBuffer.wrap(new byte[]{2, 3, 4}).order(ByteOrder.LITTLE_ENDIAN);
+        try (BufferedInput input = new BufferedInput.OfByteBuffers(new ByteBuffer[]{first, second})) {
+            assertEquals(1L, input.currentUnitRemaining());
+            input.readUnsignedShortLE();
+            assertEquals(2L, input.currentUnitRemaining());
+            input.readByte();
+            assertEquals(1L, input.currentUnitRemaining());
+        }
+
+        try (BufferedInput input = new BufferedInput.OfByteChannel(
+                new MemorySeekableByteChannel(new byte[]{1, 2, 3, 4})
+        )) {
+            assertEquals(4L, input.currentUnitRemaining());
+            input.readByte();
+            assertEquals(3L, input.currentUnitRemaining());
+        }
+    }
+
+    /// Verifies that source adapters without external framing report an unknown boundary.
+    ///
+    /// @throws IOException if the test input cannot be read
+    @Test
+    void reportsUnknownCurrentUnitForUnboundedSources() throws IOException {
+        try (BufferedInput input = new BufferedInput.OfInputStream(new ChunkedInputStream(sampleBytes(), 2))) {
+            assertEquals(-1L, input.currentUnitRemaining());
+        }
+        try (BufferedInput input = new BufferedInput.OfByteChannel(
+                new ChunkedReadableByteChannel(sampleBytes(), 2)
+        )) {
+            assertEquals(-1L, input.currentUnitRemaining());
+        }
+    }
+
     /// Verifies that negative arguments are rejected.
     @Test
     void negativeArgumentsAreRejected() {

@@ -172,7 +172,7 @@ final class LumaDequantizerTest {
         assertArrayEquals(expected, dequantized);
     }
 
-    /// Verifies that unsupported bit depths still fail fast in the current subset.
+    /// Verifies that unsupported bit depths fail fast.
     @Test
     void rejectsUnsupportedBitDepths() {
         int[] coefficients = new int[16];

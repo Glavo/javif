@@ -36,13 +36,15 @@ final class OutputFrameFactoryTest {
     @Test
     void createFrameReturnsDecodedFrameForEightBitPlanes() {
         DecodedPlanes decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 73);
-        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x01);
+        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(3, 2, FrameType.KEY, true, 0x01);
 
         DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, frameHeader, false, 5L);
 
         assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
         assertEquals(1, frame.intPixels().length);
         assertTrue(frame.intPixelBuffer().isReadOnly());
+        assertEquals(3, frame.temporalId());
+        assertEquals(2, frame.spatialId());
         assertFrameMetadata(frame, 8, AvifPixelFormat.I400, FrameType.KEY, false, 5L);
     }
 
@@ -109,12 +111,26 @@ final class OutputFrameFactoryTest {
                 12,
                 3072
         );
+        FrameHeader outputRequestHeader = RuntimeTestFixtures.createFrameHeader(
+                5,
+                3,
+                FrameType.INTER,
+                true,
+                0
+        );
 
-        DecodedFrame frame = OutputFrameFactory.createExistingFrame(surfaceSnapshot, 12L);
+        DecodedFrame frame = OutputFrameFactory.createExistingFrame(
+                surfaceSnapshot.decodedPlanes(),
+                surfaceSnapshot,
+                outputRequestHeader,
+                12L
+        );
 
         assertTrue(frame.bitDepth().isHighBitDepth());
         assertEquals(1, frame.longPixels().length);
         assertTrue(frame.longPixelBuffer().isReadOnly());
+        assertEquals(5, frame.temporalId());
+        assertEquals(3, frame.spatialId());
         assertFrameMetadata(frame, 12, AvifPixelFormat.I400, FrameType.SWITCH, true, 12L);
     }
 

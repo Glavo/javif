@@ -15,9 +15,6 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder.ArgbImage;
 import org.glavo.avif.testutil.FFmpegAvifReferenceDecoder.SourcePlanes;
@@ -26,7 +23,6 @@ import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
@@ -53,9 +49,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class LibavifFFmpegAvifReferenceTest {
     /// The copied libavif test data resource root.
     private static final String TEST_DATA_ROOT = "libavif-test-data";
-    /// The fixture whose explicit CICP matrix is not implemented by javif's RGB output path.
-    private static final String UNSUPPORTED_CICP_MATRIX_RESOURCE =
-            "libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif";
+    /// The fixture for which FFmpeg exposes an untransformed 12-bit input instead of the 16-bit derived image.
+    private static final String FFMPEG_SAMPLE_TRANSFORM_FALLBACK_RESOURCE =
+            "libavif-test-data/weld_sato_12B_8B_q0.avif";
     /// AVIF resources whose FFmpeg first-frame pixel comparison currently passes.
     private static final FFmpegPixelReference @Unmodifiable [] ENABLED_PIXEL_REFERENCE_RESOURCES = new FFmpegPixelReference[]{
             rgbPixelReference("libavif-test-data/abc_color_irot_alpha_NOirot.avif", PixelTolerance.bounded(16, 0.0, 6.0, 8.0)),
@@ -70,6 +66,12 @@ final class LibavifFFmpegAvifReferenceTest {
             rgbPixelReference("libavif-test-data/color_grid_gainmap_different_grid.avif", PixelTolerance.perPixelDelta(1)),
             rgbPixelReference("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", PixelTolerance.bounded(3, 0.0, 3.0, 3.0)),
+            rgbPixelReference("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif",
+                    PixelTolerance.bounded(3, 0.0, 0.05, 0.25)),
+            pixelReference("libavif-test-data/colors-animated-8bpc-audio.avif", PixelTolerance.perPixelDelta(1)),
+            pixelReference("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif",
+                    PixelTolerance.bounded(3, 0.0, 0.05, 0.25)),
+            pixelReference("libavif-test-data/colors-animated-8bpc.avif", PixelTolerance.perPixelDelta(1)),
             pixelReference("libavif-test-data/colors_hdr_p3.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_rec2020.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/colors_hdr_srgb.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
@@ -84,6 +86,8 @@ final class LibavifFFmpegAvifReferenceTest {
             rgbPixelReference("libavif-test-data/draw_points_idat.avif", PixelTolerance.perPixelDelta(8)),
             rgbPixelReference("libavif-test-data/draw_points_idat_metasize0.avif", PixelTolerance.perPixelDelta(8)),
             pixelReference("libavif-test-data/extended_pixi.avif", PixelTolerance.perPixelDelta(1)),
+            pixelReference("libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif",
+                    PixelTolerance.bounded(8, 0.0, 2.2, 2.7)),
             pixelReference("libavif-test-data/io/kodim03_yuv420_8bpc.avif",
                     PixelTolerance.bounded(16, 0.0, 1.3, 1.5)),
             pixelReference("libavif-test-data/io/kodim23_yuv420_8bpc.avif",
@@ -99,11 +103,15 @@ final class LibavifFFmpegAvifReferenceTest {
             pixelReference("libavif-test-data/seine_sdr_gainmap_notmapbrand.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/seine_sdr_gainmap_srgb.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/seine_sdr_gainmap_srgb_icc.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
+            pixelReference("libavif-test-data/sofa_grid1x5_420.avif", PixelTolerance.bounded(4, 0.0, 1.1, 1.2)),
+            pixelReference("libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif",
+                    PixelTolerance.bounded(4, 0.0, 1.1, 1.2)),
+            pixelReference("libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif",
+                    PixelTolerance.bounded(4, 0.0, 1.1, 1.2)),
             rgbPixelReference("libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif", PixelTolerance.perPixelDelta(1)),
             rgbPixelReference("libavif-test-data/unsupported_gainmap_minimum_version.avif", PixelTolerance.perPixelDelta(1)),
             rgbPixelReference("libavif-test-data/unsupported_gainmap_version.avif", PixelTolerance.perPixelDelta(1)),
             rgbPixelReference("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif", PixelTolerance.perPixelDelta(1)),
-            pixelReference("libavif-test-data/weld_sato_12B_8B_q0.avif", PixelTolerance.bounded(1, 0.0, 0.75, 0.9)),
             pixelReference("libavif-test-data/white_1x1.avif", PixelTolerance.perPixelDelta(0)),
     };
     /// AVIF resources whose raw decoded planes match FFmpeg source planes within explicit bounds.
@@ -165,7 +173,6 @@ final class LibavifFFmpegAvifReferenceTest {
             sourcePlaneReference("libavif-test-data/unsupported_gainmap_minimum_version.avif"),
             sourcePlaneReference("libavif-test-data/unsupported_gainmap_version.avif"),
             sourcePlaneReference("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif"),
-            sourcePlaneReference("libavif-test-data/weld_sato_12B_8B_q0.avif"),
             sourcePlaneReference("libavif-test-data/white_1x1.avif"),
     };
     /// AVIF resources whose source metadata comparison against FFmpeg currently passes.
@@ -221,7 +228,6 @@ final class LibavifFFmpegAvifReferenceTest {
             "libavif-test-data/unsupported_gainmap_minimum_version.avif",
             "libavif-test-data/unsupported_gainmap_version.avif",
             "libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif",
-            "libavif-test-data/weld_sato_12B_8B_q0.avif",
             "libavif-test-data/white_1x1.avif",
     };
     /// AVIF resources that javif can parse but FFmpeg cannot currently expose as an oracle.
@@ -355,8 +361,9 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
     private static void assertFFmpegReferenceCase(FFmpegReferenceCase reference)
             throws IOException, URISyntaxException {
-        if (reference.disabledReason() != null) {
-            Assumptions.assumeTrue(false, reference.disabledReason());
+        if (isFFmpegSampleTransformFallback(reference.resourceName())) {
+            assertFFmpegSampleTransformFallback(reference.resourceName());
+            return;
         }
         if (isUnsupportedFFmpegReference(reference.resourceName())) {
             assertFFmpegArgbReferenceUnsupported(reference.resourceName());
@@ -364,7 +371,7 @@ final class LibavifFFmpegAvifReferenceTest {
         }
         @Nullable FFmpegPixelReference pixelReference = pixelReference(reference.resourceName());
         if (pixelReference == null) {
-            Assumptions.assumeTrue(false, "Pending FFmpeg first-frame pixel parity for this fixture.");
+            throw new AssertionError("Missing FFmpeg pixel reference: " + reference.resourceName());
         }
         assertFirstFrameMatchesFFmpegReference(reference, pixelReference);
     }
@@ -376,23 +383,16 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
     private static void assertFFmpegMetadataReferenceCase(FFmpegReferenceCase reference)
             throws IOException, URISyntaxException {
-        if (reference.disabledReason() != null) {
-            Assumptions.assumeTrue(false, reference.disabledReason());
+        if (isFFmpegSampleTransformFallback(reference.resourceName())) {
+            assertFFmpegSampleTransformFallback(reference.resourceName());
+            return;
         }
         if (isUnsupportedFFmpegReference(reference.resourceName())) {
             assertFFmpegArgbReferenceUnsupported(reference.resourceName());
             return;
         }
-        if (UNSUPPORTED_CICP_MATRIX_RESOURCE.equals(reference.resourceName())) {
-            ArgbImage expected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(reference.resourceName());
-            try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.resourceName()))) {
-                assertImageInfoMatchesFFmpegMetadata(reader.info(), expected);
-                assertUnsupportedCicpMatrix(assertThrows(AvifDecodeException.class, reader::readFrame));
-            }
-            return;
-        }
         if (!isEnabledMetadataReference(reference.resourceName())) {
-            Assumptions.assumeTrue(false, "Pending FFmpeg source metadata parity for this fixture.");
+            throw new AssertionError("Missing FFmpeg metadata reference: " + reference.resourceName());
         }
         assertFirstFrameMetadataMatchesFFmpegReference(reference);
     }
@@ -404,25 +404,17 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
     private static void assertFFmpegSourcePlaneReferenceCase(FFmpegReferenceCase reference)
             throws IOException, URISyntaxException {
-        if (reference.disabledReason() != null) {
-            Assumptions.assumeTrue(false, reference.disabledReason());
+        if (isFFmpegSampleTransformFallback(reference.resourceName())) {
+            assertFFmpegSampleTransformFallback(reference.resourceName());
+            return;
         }
         if (isUnsupportedFFmpegReference(reference.resourceName())) {
             assertFFmpegSourcePlaneReferenceUnsupported(reference.resourceName());
             return;
         }
-        if (UNSUPPORTED_CICP_MATRIX_RESOURCE.equals(reference.resourceName())) {
-            try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.resourceName()))) {
-                assertUnsupportedCicpMatrix(assertThrows(
-                        AvifDecodeException.class,
-                        () -> reader.readRawColorPlanes(0)
-                ));
-            }
-            return;
-        }
         @Nullable SourcePlaneReference sourcePlaneReference = enabledSourcePlaneReference(reference.resourceName());
         if (sourcePlaneReference == null) {
-            Assumptions.assumeTrue(false, "Pending FFmpeg source-plane parity for this fixture.");
+            throw new AssertionError("Missing FFmpeg source-plane reference: " + reference.resourceName());
         }
         assertFirstFrameSourcePlanesMatchFFmpegReference(reference, sourcePlaneReference);
     }
@@ -449,17 +441,28 @@ final class LibavifFFmpegAvifReferenceTest {
         assertTrue(exception.getMessage().contains(resourceName));
     }
 
-    /// Asserts javif's explicit unsupported-feature result for CICP matrix coefficients 12.
+    /// Asserts FFmpeg's known Sample Transform fallback while verifying javif exposes the derived image.
     ///
-    /// @param exception the javif decoding failure to inspect
-    private static void assertUnsupportedCicpMatrix(AvifDecodeException exception) {
-        assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code());
-        assertEquals("Unsupported CICP matrix coefficients: 12", exception.getMessage());
+    /// @param resourceName the Sample Transform AVIF resource name
+    /// @throws IOException if the resource cannot be read or decoded
+    /// @throws URISyntaxException if the FFmpeg reference resource cannot be resolved
+    private static void assertFFmpegSampleTransformFallback(String resourceName)
+            throws IOException, URISyntaxException {
+        SourcePlanes fallback = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
+        assertEquals(AvifBitDepth.TWELVE_BITS, fallback.sourceMetadata().bitDepth());
+        assertEquals(AvifPixelFormat.I444, fallback.sourceMetadata().pixelFormat());
 
-        assertTrue(exception.getCause() instanceof DecodeException);
-        DecodeException decodeException = (DecodeException) exception.getCause();
-        assertEquals(DecodeErrorCode.UNSUPPORTED_FEATURE, decodeException.code());
-        assertEquals(DecodeStage.OUTPUT_CONVERSION, decodeException.stage());
+        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
+            assertEquals(fallback.width(), reader.info().width());
+            assertEquals(fallback.height(), reader.info().height());
+            assertEquals(AvifBitDepth.SIXTEEN_BITS, reader.info().bitDepth());
+            assertEquals(fallback.sourceMetadata().pixelFormat(), reader.info().pixelFormat());
+
+            AvifPlanes derived = reader.readRawColorPlanes(0);
+            assertEquals(AvifBitDepth.SIXTEEN_BITS, derived.bitDepth());
+            assertEquals(fallback.width(), derived.codedWidth());
+            assertEquals(fallback.height(), derived.codedHeight());
+        }
     }
 
     /// Asserts that javif and FFmpeg render the first frame of one AVIF resource within tolerance.
@@ -822,6 +825,14 @@ final class LibavifFFmpegAvifReferenceTest {
         return Arrays.asList(UNSUPPORTED_FFMPEG_REFERENCE_RESOURCES).contains(resourceName);
     }
 
+    /// Returns whether FFmpeg exposes an untransformed input for one Sample Transform resource.
+    ///
+    /// @param resourceName the AVIF resource name
+    /// @return whether FFmpeg cannot serve as a final-image oracle for the resource
+    private static boolean isFFmpegSampleTransformFallback(String resourceName) {
+        return FFMPEG_SAMPLE_TRANSFORM_FALLBACK_RESOURCE.equals(resourceName);
+    }
+
     /// Returns the configured FFmpeg source-plane comparison settings for one reference case.
     ///
     /// @param resourceName the AVIF resource name
@@ -848,16 +859,7 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @param resourceName the AVIF resource name
     /// @return the reference case
     private static FFmpegReferenceCase reference(String resourceName) {
-        return new FFmpegReferenceCase(resourceName, null);
-    }
-
-    /// Creates a disabled FFmpeg reference case.
-    ///
-    /// @param resourceName the AVIF resource name
-    /// @param disabledReason the disabled reason
-    /// @return the reference case
-    private static FFmpegReferenceCase disabledReference(String resourceName, String disabledReason) {
-        return new FFmpegReferenceCase(resourceName, disabledReason);
+        return new FFmpegReferenceCase(resourceName);
     }
 
     /// Creates an enabled FFmpeg pixel reference case.
@@ -998,8 +1000,7 @@ final class LibavifFFmpegAvifReferenceTest {
     /// FFmpeg reference expectation for one libavif AVIF fixture.
     ///
     /// @param resourceName the AVIF resource name
-    /// @param disabledReason the disabled reason, or `null` when enabled
     @NotNullByDefault
-    private record FFmpegReferenceCase(String resourceName, @Nullable String disabledReason) {
+    private record FFmpegReferenceCase(String resourceName) {
     }
 }

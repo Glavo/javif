@@ -25,7 +25,7 @@ import java.util.Objects;
 ///
 /// This contract sits between reconstruction and public output conversion. Stored planes represent
 /// the post-filter, post-super-resolution, pre-grain image state in the current stored-surface
-/// domain.
+/// domain. The render dimensions are AV1 display hints and do not alter the stored plane dimensions.
 @NotNullByDefault
 public final class DecodedPlanes {
     /// The decoded bit depth.
@@ -77,7 +77,7 @@ public final class DecodedPlanes {
             @Nullable DecodedPlane chromaUPlane,
             @Nullable DecodedPlane chromaVPlane
     ) {
-        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
+        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12 && bitDepth != 16) {
             throw new IllegalArgumentException("Unsupported bitDepth: " + bitDepth);
         }
         if (codedWidth <= 0) {

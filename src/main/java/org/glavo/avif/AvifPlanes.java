@@ -25,7 +25,8 @@ import java.util.Objects;
 /// Immutable raw decoded AVIF color planes.
 ///
 /// These planes expose the decoded AV1 color image before AVIF auxiliary alpha composition and
-/// AVIF item transforms such as `clap`, `irot`, and `imir` are applied.
+/// AVIF item transforms such as `clap`, `irot`, and `imir` are applied. The render dimensions retain
+/// the AV1 display hint; they do not crop or resample the stored planes.
 @NotNullByDefault
 public final class AvifPlanes {
     /// The decoded sample bit depth.

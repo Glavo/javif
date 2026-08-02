@@ -23,76 +23,54 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/// Mutable runtime reference-slot state used by `Av1ImageReader`.
+/// Mutable runtime storage for one atomically refreshed AV1 reference slot.
 ///
-/// A slot may carry structural syntax state, a reconstructed surface, or both. Structural state is
-/// refreshed independently from reconstructed surfaces so unsupported pixel paths can still preserve
-/// parser/runtime inheritance state.
+/// A populated slot always retains its frame header, structural syntax state, and reconstructed
+/// post-filter surface in one [ReferenceSurfaceSnapshot].
 @NotNullByDefault
 public final class RuntimeReferenceSlot {
-    /// The frame header currently stored in this reference slot, or `null` when empty.
-    private @Nullable FrameHeader frameHeader;
-
-    /// The structural frame-syntax result currently stored in this reference slot, or `null`.
-    private @Nullable FrameSyntaxDecodeResult syntaxResult;
-
-    /// The reconstructed reference surface currently stored in this reference slot, or `null`.
-    private @Nullable ReferenceSurfaceSnapshot surfaceSnapshot;
+    /// The complete stored reference state, or `null` when the slot is empty.
+    private @Nullable ReferenceSurfaceSnapshot snapshot;
 
     /// Clears the slot completely.
     public void clear() {
-        frameHeader = null;
-        syntaxResult = null;
-        surfaceSnapshot = null;
+        snapshot = null;
     }
 
-    /// Stores refreshed structural syntax state into this slot.
+    /// Atomically replaces the complete state stored in this slot.
     ///
-    /// @param frameHeader the frame header that owns the stored syntax state
-    /// @param syntaxResult the structural syntax state to store
-    public void refreshSyntax(FrameHeader frameHeader, FrameSyntaxDecodeResult syntaxResult) {
-        this.frameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
-        this.syntaxResult = Objects.requireNonNull(syntaxResult, "syntaxResult");
+    /// @param snapshot the reconstructed reference state to store
+    public void refresh(ReferenceSurfaceSnapshot snapshot) {
+        this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     }
 
-    /// Stores one reconstructed reference surface into this slot.
+    /// Returns the frame header stored in this slot.
     ///
-    /// The slot may already contain structural state from an earlier unsupported pixel path. The
-    /// stored surface always supersedes any older surface snapshot.
-    ///
-    /// @param surfaceSnapshot the reconstructed reference surface to store
-    public void refreshSurface(ReferenceSurfaceSnapshot surfaceSnapshot) {
-        ReferenceSurfaceSnapshot checkedSnapshot = Objects.requireNonNull(surfaceSnapshot, "surfaceSnapshot");
-        frameHeader = checkedSnapshot.frameHeader();
-        syntaxResult = checkedSnapshot.frameSyntaxDecodeResult();
-        this.surfaceSnapshot = checkedSnapshot;
-    }
-
-    /// Returns the frame header currently stored in this slot, or `null` when empty.
-    ///
-    /// @return the frame header currently stored in this slot, or `null`
+    /// @return the stored frame header, or `null` when empty
     public @Nullable FrameHeader frameHeader() {
-        return frameHeader;
+        ReferenceSurfaceSnapshot current = snapshot;
+        return current != null ? current.frameHeader() : null;
     }
 
-    /// Returns the structural frame-syntax result currently stored in this slot, or `null`.
+    /// Returns the structural frame-syntax result stored in this slot.
     ///
-    /// @return the structural frame-syntax result currently stored in this slot, or `null`
+    /// @return the stored structural syntax state, or `null` when empty
     public @Nullable FrameSyntaxDecodeResult syntaxResult() {
-        return syntaxResult;
+        ReferenceSurfaceSnapshot current = snapshot;
+        return current != null ? current.frameSyntaxDecodeResult() : null;
     }
 
-    /// Returns the reconstructed reference surface currently stored in this slot, or `null`.
+    /// Returns the complete reference surface snapshot stored in this slot.
     ///
-    /// @return the reconstructed reference surface currently stored in this slot, or `null`
+    /// @return the stored reference state, or `null` when empty
     public @Nullable ReferenceSurfaceSnapshot surfaceSnapshot() {
-        return surfaceSnapshot;
+        return snapshot;
     }
 
-    /// Returns whether this slot currently carries structural syntax state.
+    /// Returns whether this slot contains complete reference state.
     ///
-    /// @return whether this slot currently carries structural syntax state
-    public boolean hasSyntaxState() {
-        return frameHeader != null && syntaxResult != null;
+    /// @return whether this slot is populated
+    public boolean isPopulated() {
+        return snapshot != null;
     }
 }

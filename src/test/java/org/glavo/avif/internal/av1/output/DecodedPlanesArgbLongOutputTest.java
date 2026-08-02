@@ -188,8 +188,8 @@ final class DecodedPlanesArgbLongOutputTest {
     /// @param frame the frame to validate
     /// @param planes the source decoded planes
     private static void assertFrameMetadata(DecodedFrame frame, DecodedPlanes planes) {
-        assertEquals(planes.renderWidth(), frame.width());
-        assertEquals(planes.renderHeight(), frame.height());
+        assertEquals(planes.codedWidth(), frame.width());
+        assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
         assertEquals(planes.pixelFormat(), frame.pixelFormat());
         assertEquals(TEST_FRAME_TYPE, frame.frameType());
