@@ -144,8 +144,6 @@ public final class Av1ImageReader implements AutoCloseable {
                 SequenceHeader parsedSequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
                 validateSelectedOperatingPoint(parsedSequenceHeader, packet);
                 sequenceHeader = parsedSequenceHeader;
-                clearReferenceSlots();
-                lastFrameSyntaxDecodeResult = null;
                 continue;
             }
             if (!matchesSelectedOperatingPoint(packet)) {
@@ -639,6 +637,7 @@ public final class Av1ImageReader implements AutoCloseable {
     /// `null` when current public filtering suppresses presentation.
     ///
     /// The output reuses the reconstructed surface atomically stored with the slot's syntax state.
+    /// Showing a stored key frame refreshes every reference slot before presentation filtering.
     ///
     /// @param packet the source OBU packet that requested `show_existing_frame`
     /// @param outputRequestHeader the current show-existing-frame request header
@@ -653,13 +652,14 @@ public final class Av1ImageReader implements AutoCloseable {
         RuntimeReferenceSlot slot = referenceSlots[existingFrameIndex];
         lastFrameSyntaxDecodeResult = slot.syntaxResult();
         FrameHeader referencedFrameHeader = Objects.requireNonNull(slot.frameHeader(), "referencedFrameHeader");
-        if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
-            return null;
-        }
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(
                 slot.surfaceSnapshot(),
                 "populated reference slot"
         );
+        refreshReferenceState(outputRequestHeader, referenceSurfaceSnapshot);
+        if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
+            return null;
+        }
         DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
         lastPlanes = presentationPlanes;
         DecodedFrame outputFrame;
@@ -811,9 +811,13 @@ public final class Av1ImageReader implements AutoCloseable {
             return syntaxDecodeResult;
         }
 
-        CdfContext[] storedTileCdfContexts = cdfReferenceResult != null
-                ? cdfReferenceResult.finalTileCdfContexts()
-                : defaultTileCdfContexts(syntaxDecodeResult.tileCount());
+        CdfContext storedFrameCdfContext = cdfReferenceResult != null
+                ? cdfReferenceResult.contextUpdateTileCdfContext()
+                : CdfContext.createDefault(frameHeader.quantization().baseQIndex());
+        CdfContext[] storedTileCdfContexts = repeatTileCdfContext(
+                storedFrameCdfContext,
+                syntaxDecodeResult.tileCount()
+        );
         return syntaxDecodeResult.withFinalTileCdfContexts(storedTileCdfContexts);
     }
 
@@ -836,14 +840,16 @@ public final class Av1ImageReader implements AutoCloseable {
         }
     }
 
-    /// Creates default tile-local CDF contexts for the supplied tile count.
+    /// Creates independent copies of one saved frame CDF context for every current tile.
     ///
+    /// @param frameCdfContext the saved frame CDF context to repeat
     /// @param tileCount the number of tiles in the frame
-    /// @return default tile-local CDF contexts for the supplied tile count
-    private static CdfContext[] defaultTileCdfContexts(int tileCount) {
+    /// @return repeated tile-local CDF contexts for the supplied tile count
+    private static CdfContext[] repeatTileCdfContext(CdfContext frameCdfContext, int tileCount) {
+        CdfContext checkedFrameCdfContext = Objects.requireNonNull(frameCdfContext, "frameCdfContext");
         CdfContext[] contexts = new CdfContext[tileCount];
         for (int i = 0; i < tileCount; i++) {
-            contexts[i] = CdfContext.createDefault();
+            contexts[i] = checkedFrameCdfContext.copy();
         }
         return contexts;
     }
@@ -858,13 +864,6 @@ public final class Av1ImageReader implements AutoCloseable {
             slots[i] = new RuntimeReferenceSlot();
         }
         return slots;
-    }
-
-    /// Clears all runtime reference slots.
-    private void clearReferenceSlots() {
-        for (RuntimeReferenceSlot referenceSlot : referenceSlots) {
-            referenceSlot.clear();
-        }
     }
 
     /// Returns the current reference-frame headers as one parser-facing slot array snapshot.

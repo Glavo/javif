@@ -237,6 +237,9 @@ tasks.register<Test>("argonAv1Test") {
         "org.glavo.avif.argon.archive",
         argonAv1Zip.get().asFile.absolutePath,
     )
+    providers.gradleProperty("argonAv1Case").orNull?.let { selectedCase ->
+        systemProperty("org.glavo.avif.argon.case", selectedCase)
+    }
 }
 
 tasks.processTestResources {

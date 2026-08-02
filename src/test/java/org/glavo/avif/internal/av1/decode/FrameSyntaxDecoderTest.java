@@ -149,6 +149,48 @@ final class FrameSyntaxDecoderTest {
         assertTrue(seededSkip);
     }
 
+    /// Verifies that a current tile inherits the single CDF context selected by the reference
+    /// frame's `context_update_tile_id`, even when the two frames have different tile counts.
+    @Test
+    void decodeFrameSeedsTileSyntaxFromReferenceContextUpdateTile() {
+        CdfContext unselectedCdf = CdfContext.createDefault();
+        CdfContext selectedCdf = CdfContext.createDefault();
+        selectedCdf.mutableSkipCdf(0)[0] = 32000;
+        FrameAssembly referenceAssembly = createAssembly(
+                FrameType.INTER,
+                new byte[][]{new byte[0], new byte[0]},
+                false,
+                128,
+                64,
+                noRestoration(),
+                twoColumnTiling(1)
+        );
+        FrameSyntaxDecodeResult referenceResult = new FrameSyntaxDecodeResult(
+                referenceAssembly,
+                new TilePartitionTreeReader.Node[][]{
+                        new TilePartitionTreeReader.Node[0],
+                        new TilePartitionTreeReader.Node[0]
+                },
+                new TileDecodeContext.TemporalMotionField[]{
+                        new TileDecodeContext.TemporalMotionField(1, 1),
+                        new TileDecodeContext.TemporalMotionField(1, 1)
+                },
+                new CdfContext[]{unselectedCdf, selectedCdf}
+        );
+        FrameAssembly currentAssembly = createAssembly(
+                FrameType.INTER,
+                DIFFERENT_INHERITED_SKIP_PAYLOAD,
+                false,
+                8,
+                8
+        );
+
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(referenceResult).decode(currentAssembly);
+
+        assertEquals(32000, referenceResult.contextUpdateTileCdfContext().mutableSkipCdf(0)[0]);
+        assertTrue(firstLeaf(result.tileRoots(0)).header().skip());
+    }
+
     /// Verifies that a frame enabling reference-frame motion vectors reaches tile decoding even
     /// when no populated runtime temporal source is available.
     @Test
@@ -231,6 +273,50 @@ final class FrameSyntaxDecoderTest {
             int codedHeight,
             FrameHeader.RestorationInfo restoration
     ) {
+        return createAssembly(
+                frameType,
+                new byte[][]{payload},
+                useReferenceFrameMotionVectors,
+                codedWidth,
+                codedHeight,
+                restoration,
+                new FrameHeader.TilingInfo(
+                        true,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1,
+                        new int[]{0, 1},
+                        new int[]{0, 1},
+                        0
+                )
+        );
+    }
+
+    /// Creates a synthetic frame assembly with an explicit tile layout and payload per tile.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param tilePayloads the collected entropy payload for each tile in raster order
+    /// @param useReferenceFrameMotionVectors whether temporal motion vectors are enabled
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param restoration the frame-level loop-restoration configuration
+    /// @param tiling the explicit tile layout
+    /// @return a synthetic frame assembly used by structural frame-decoder tests
+    private static FrameAssembly createAssembly(
+            FrameType frameType,
+            byte[][] tilePayloads,
+            boolean useReferenceFrameMotionVectors,
+            int codedWidth,
+            int codedHeight,
+            FrameHeader.RestorationInfo restoration,
+            FrameHeader.TilingInfo tiling
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 codedWidth,
@@ -308,21 +394,7 @@ final class FrameSyntaxDecoderTest {
                 false,
                 useReferenceFrameMotionVectors,
                 true,
-                new FrameHeader.TilingInfo(
-                        true,
-                        0,
-                        0,
-                        0,
-                        0,
-                        1,
-                        0,
-                        0,
-                        0,
-                        1,
-                        new int[]{0, 1},
-                        new int[]{0, 1},
-                        0
-                ),
+                tiling,
                 new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),
                 new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
                 new FrameHeader.DeltaInfo(false, 0, false, 0, false),
@@ -349,14 +421,46 @@ final class FrameSyntaxDecoderTest {
                 false
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        TileBitstream[] tileBitstreams = new TileBitstream[tilePayloads.length];
+        for (int tileIndex = 0; tileIndex < tilePayloads.length; tileIndex++) {
+            byte[] tilePayload = tilePayloads[tileIndex];
+            tileBitstreams[tileIndex] = new TileBitstream(
+                    tileIndex,
+                    tilePayload,
+                    0,
+                    tilePayload.length
+            );
+        }
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
-                new TileGroupHeader(false, 0, 0, 1),
+                new TileGroupHeader(false, 0, tilePayloads.length - 1, tilePayloads.length),
                 0,
                 0,
-                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+                tileBitstreams
         );
         return assembly;
+    }
+
+    /// Creates a two-column, one-row tile layout with an explicit context-update tile.
+    ///
+    /// @param updateTileIndex the tile whose final CDF state is saved for future frames
+    /// @return the synthetic two-column tile layout
+    private static FrameHeader.TilingInfo twoColumnTiling(int updateTileIndex) {
+        return new FrameHeader.TilingInfo(
+                true,
+                1,
+                0,
+                1,
+                1,
+                2,
+                0,
+                0,
+                0,
+                1,
+                new int[]{0, 1, 2},
+                new int[]{0, 1},
+                updateTileIndex
+        );
     }
 
     /// Creates disabled frame-level loop-restoration state.

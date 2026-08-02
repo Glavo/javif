@@ -527,6 +527,38 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(MotionVector.zero()), provisionalContext.motionVectorCandidate(1).motionVector0());
     }
 
+    /// Verifies real reference candidates are clamped to the extended coded-frame boundary.
+    @Test
+    void provisionalInterModeContextsClampReferenceCandidatesAtFrameBoundary() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(14, 12),
+                BlockSize.SIZE_8X8,
+                0,
+                null,
+                InterMotionVector.resolved(new MotionVector(300, 300))
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(
+                        new BlockPosition(14, 14),
+                        BlockSize.SIZE_8X8,
+                        false,
+                        0,
+                        -1
+                );
+
+        assertEquals(1, provisionalContext.candidateCount());
+        assertEquals(
+                InterMotionVector.resolved(new MotionVector(192, 192)),
+                provisionalContext.motionVectorCandidate(0).motionVector0()
+        );
+        assertEquals(
+                InterMotionVector.predicted(MotionVector.zero()),
+                provisionalContext.motionVectorCandidate(1).motionVector0()
+        );
+    }
+
     /// Verifies that top-left spatial neighbors contribute to the provisional `refmvs` stack.
     @Test
     void provisionalInterModeContextsIncludeTopLeftMatches() {

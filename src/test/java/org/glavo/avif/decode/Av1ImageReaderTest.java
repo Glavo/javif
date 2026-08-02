@@ -354,10 +354,10 @@ final class Av1ImageReaderTest {
         }
     }
 
-    /// Verifies that a new sequence header clears previously stored structural reference-frame
-    /// state even when the earlier frame already reconstructed successfully.
+    /// Verifies that a repeated sequence header preserves previously stored structural
+    /// reference-frame state after the earlier frame reconstructed successfully.
     @Test
-    void readFrameClearsReferenceStateOnSequenceResetAfterCurrentDecodeBoundary() throws IOException {
+    void readFramePreservesReferenceStateAcrossRepeatedSequenceHeaderAfterCurrentDecodeBoundary() throws IOException {
         byte[] stream = concat(
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload()),
@@ -370,12 +370,12 @@ final class Av1ImageReaderTest {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
             assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(firstSyntaxResult);
 
             assertNull(reader.readFrame());
-            assertNull(reader.lastFrameSyntaxDecodeResult());
-            for (int i = 0; i < 8; i++) {
-                assertNull(reader.referenceFrameSyntaxResult(i));
-            }
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertReferenceStateStoredForLastSyntaxResult(reader);
         }
     }
 
@@ -478,9 +478,11 @@ final class Av1ImageReaderTest {
             assertNotNull(firstSyntaxResult);
             assertTrue(firstSyntaxResult.assembly().frameHeader().superResolution().enabled());
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            FrameSyntaxDecodeResult storedSyntaxResult =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
 
             assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 1);
-            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         });
@@ -509,6 +511,8 @@ final class Av1ImageReaderTest {
             assertActivePostfilterSuperResolvedHeader(firstFrameHeader);
             assertDecodedActiveWienerRestorationUnit(firstSyntaxResult);
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            FrameSyntaxDecodeResult storedSyntaxResult =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
 
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface");
@@ -516,7 +520,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame reusedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 1);
-            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         });
@@ -901,11 +905,65 @@ final class Av1ImageReaderTest {
             DecodedPlanes firstPlanes = reader.lastPlanes();
             assertNotNull(firstPlanes);
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            FrameSyntaxDecodeResult storedSyntaxResult =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
 
             assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
-            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertSame(firstPlanes, reader.lastPlanes());
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that showing a key frame reloads its complete state and refreshes every reference
+    /// slot before subsequent frame parsing.
+    ///
+    /// @throws Exception if the stored key-frame state cannot be captured or read
+    @Test
+    void showExistingKeyFrameRefreshesEveryReferenceSlot() throws Exception {
+        InjectedReferenceState referenceState = captureReferenceStateFromSupportedStillPicture();
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            injectShowExistingReferenceState(reader, referenceState);
+
+            assertNotNull(reader.readFrame());
+            for (int i = 0; i < 8; i++) {
+                assertSame(referenceState.frameHeader(), reader.referenceFrameHeader(i));
+                assertSame(referenceState.syntaxResult(), reader.referenceFrameSyntaxResult(i));
+                assertSame(referenceState.referenceSurfaceSnapshot(), reader.referenceSurfaceSnapshot(i));
+            }
+            assertNull(reader.readFrame());
+        });
+    }
+
+    /// Verifies that a repeated sequence header within one coded video sequence preserves the
+    /// reference surface required by a following `show_existing_frame` header.
+    ///
+    /// @throws IOException if one buffered-input adapter cannot consume the test stream
+    @Test
+    void repeatedSequenceHeaderPreservesShowExistingReferenceSurface() throws IOException {
+        byte[] sequenceHeader = obu(1, fullSequenceHeaderPayload());
+        byte[] stream = concat(
+                sequenceHeader,
+                obu(6, fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD)),
+                sequenceHeader,
+                obu(3, showExistingFrameHeaderPayload(0))
+        );
+
+        assertAcrossBufferedInputs(stream, reader -> {
+            assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
+            FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
+            assertNotNull(firstSyntaxResult);
+            DecodedPlanes firstPlanes = reader.lastPlanes();
+            assertNotNull(firstPlanes);
+            FrameSyntaxDecodeResult storedSyntaxResult =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
+
+            assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
+            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(firstPlanes, reader.lastPlanes());
             assertNull(reader.readFrame());
         });
     }
@@ -957,9 +1015,11 @@ final class Av1ImageReaderTest {
             assertNotNull(firstSyntaxResult);
             assertLegacyDirectionalLeafDecoded(firstSyntaxResult);
             assertReferenceStateStoredForLastSyntaxResult(reader);
+            FrameSyntaxDecodeResult storedSyntaxResult =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
 
             assertFullRangeOpaqueDirectionalStillPictureFrame(reader.readFrame(), 1);
-            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());

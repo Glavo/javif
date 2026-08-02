@@ -17,6 +17,7 @@ package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1DecoderConfig;
 import org.glavo.avif.decode.Av1ImageReader;
+import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
@@ -59,6 +60,9 @@ final class ArgonAv1CorpusTest {
     /// System property that identifies the downloaded Argon Streams ZIP.
     private static final String ARCHIVE_PROPERTY = "org.glavo.avif.argon.archive";
 
+    /// Optional system property that selects one `category/stream.obu` case or `all` for diagnosis.
+    private static final String CASE_PROPERTY = "org.glavo.avif.argon.case";
+
     /// Root directory stored in the Argon Streams 2.1.1 ZIP.
     private static final String ARCHIVE_ROOT =
             "argon_coveragetool_av1_base_and_extended_profiles_v2.1/";
@@ -81,6 +85,7 @@ final class ArgonAv1CorpusTest {
             new CorpusCase("profile0_not_annexb", "test12144.obu"),
             new CorpusCase("profile0_not_annexb", "test12153.obu"),
             new CorpusCase("profile0_not_annexb", "test12184.obu"),
+            new CorpusCase("profile0_not_annexb", "test12207.obu"),
             new CorpusCase("profile0_not_annexb", "test12259.obu"),
             new CorpusCase("profile1_not_annexb", "test8650.obu"),
             new CorpusCase("profile1_not_annexb", "test8660.obu"),
@@ -114,13 +119,38 @@ final class ArgonAv1CorpusTest {
     /// Returns reference-output checks for the supported low-overhead streams in all AV1 profiles.
     ///
     /// @return the dynamic reference-output tests
+    /// @throws IOException if the diagnostic `all` selector cannot inspect the archive
     @TestFactory
-    Stream<DynamicTest> supportedLowOverheadStreamsMatchReferenceYuvDigests() {
-        return REFERENCE_CASES.stream()
+    Stream<DynamicTest> supportedLowOverheadStreamsMatchReferenceYuvDigests() throws IOException {
+        return selectedReferenceCases().stream()
                 .map(testCase -> DynamicTest.dynamicTest(
                         testCase.category() + "/" + testCase.streamName(),
                         () -> assertReferenceDigest(testCase)
                 ));
+    }
+
+    /// Returns the regular regression cases, all regular low-overhead streams, or one explicitly
+    /// selected diagnostic case.
+    ///
+    /// @return the immutable selected cases
+    /// @throws IOException if the diagnostic `all` selector cannot inspect the archive
+    private static @Unmodifiable List<CorpusCase> selectedReferenceCases() throws IOException {
+        @Nullable String selectedCase = System.getProperty(CASE_PROPERTY);
+        if (selectedCase == null) {
+            return REFERENCE_CASES;
+        }
+        if (selectedCase.equals("all")) {
+            try (ZipFile archive = new ZipFile(archivePath().toFile())) {
+                return archive.stream()
+                        .map(ZipEntry::getName)
+                        .filter(name -> name.endsWith(".obu"))
+                        .filter(name -> LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
+                        .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
+                        .sorted((left, right) -> left.selector().compareTo(right.selector()))
+                        .toList();
+            }
+        }
+        return List.of(CorpusCase.parse(selectedCase));
     }
 
     /// Decodes one selected stream and compares all visible pre-grain YUV planes with Argon's MD5.
@@ -139,17 +169,25 @@ final class ArgonAv1CorpusTest {
                     .build();
 
             int frameCount = 0;
-            try (Av1ImageReader reader = Av1ImageReader.open(
-                    new BufferedInput.OfInputStream(archive.getInputStream(streamEntry)),
-                    config
-            )) {
-                @Nullable DecodedFrame frame;
-                while ((frame = reader.readFrame()) != null) {
-                    @Nullable DecodedPlanes decodedPlanes = reader.lastPlanes();
-                    assertNotNull(decodedPlanes, streamPath + " frame " + frameCount);
-                    updateYuvDigest(actualDigest, Objects.requireNonNull(decodedPlanes));
-                    frameCount++;
+            try {
+                try (Av1ImageReader reader = Av1ImageReader.open(
+                        new BufferedInput.OfInputStream(archive.getInputStream(streamEntry)),
+                        config
+                )) {
+                    @Nullable DecodedFrame frame;
+                    while ((frame = reader.readFrame()) != null) {
+                        @Nullable DecodedPlanes decodedPlanes = reader.lastPlanes();
+                        assertNotNull(decodedPlanes, streamPath + " frame " + frameCount);
+                        updateYuvDigest(actualDigest, Objects.requireNonNull(decodedPlanes));
+                        frameCount++;
+                    }
                 }
+            } catch (DecodeException exception) {
+                throw new AssertionError(
+                        streamPath + " failed at OBU " + exception.obuIndex()
+                                + " (offset " + exception.streamOffset() + ", stage " + exception.stage() + ")",
+                        exception
+                );
             }
 
             assertTrue(frameCount > 0, () -> streamPath + " produced no visible frames");
@@ -237,11 +275,33 @@ final class ArgonAv1CorpusTest {
     /// @param streamName the stream file name
     @NotNullByDefault
     private record CorpusCase(String category, String streamName) {
+        /// Parses one `category/stream.obu` diagnostic selector.
+        ///
+        /// @param value the selector to parse
+        /// @return the parsed corpus case
+        private static CorpusCase parse(String value) {
+            int separator = value.indexOf('/');
+            if (separator <= 0
+                    || separator != value.lastIndexOf('/')
+                    || !value.endsWith(".obu")
+                    || separator == value.length() - 1) {
+                throw new IllegalArgumentException("Invalid Argon AV1 case: " + value);
+            }
+            return new CorpusCase(value.substring(0, separator), value.substring(separator + 1));
+        }
+
         /// Returns the stream file name without its `.obu` suffix.
         ///
         /// @return the stream base name
         private String baseName() {
             return streamName.substring(0, streamName.length() - ".obu".length());
+        }
+
+        /// Returns the canonical diagnostic selector for this case.
+        ///
+        /// @return the `category/stream.obu` selector
+        private String selector() {
+            return category + "/" + streamName;
         }
     }
 }

@@ -51,6 +51,9 @@ final class ReferenceMotionVectorProjection {
     /// The current-reference distances indexed in internal LAST..ALTREF order.
     private final int @Unmodifiable [] referenceToCurrentDistances;
 
+    /// The future-reference sign biases indexed in internal LAST..ALTREF order.
+    private final boolean @Unmodifiable [] referenceSignBiases;
+
     /// The projected temporal blocks indexed in frame-relative 8x8 units.
     private final @Nullable ProjectedTemporalBlock @Unmodifiable [] blocks;
 
@@ -60,18 +63,21 @@ final class ReferenceMotionVectorProjection {
     /// @param width8 the projected field width in 8x8 units
     /// @param height8 the projected field height in 8x8 units
     /// @param referenceToCurrentDistances the current-reference distances in LAST..ALTREF order
+    /// @param referenceSignBiases the future-reference sign biases in LAST..ALTREF order
     /// @param blocks the projected temporal blocks in row-major order
     private ReferenceMotionVectorProjection(
             FrameHeader frameHeader,
             int width8,
             int height8,
             int[] referenceToCurrentDistances,
+            boolean[] referenceSignBiases,
             @Nullable ProjectedTemporalBlock[] blocks
     ) {
         this.frameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         this.width8 = width8;
         this.height8 = height8;
         this.referenceToCurrentDistances = referenceToCurrentDistances.clone();
+        this.referenceSignBiases = referenceSignBiases.clone();
         this.blocks = blocks.clone();
     }
 
@@ -101,6 +107,7 @@ final class ReferenceMotionVectorProjection {
         int height8 = (currentHeader.frameSize().height() + 7) >> 3;
         int orderHintBits = nonNullAssembly.sequenceHeader().features().orderHintBits();
         int[] referenceDistances = new int[7];
+        boolean[] referenceSignBiases = new boolean[7];
         for (int referenceFrame = 0; referenceFrame < referenceDistances.length; referenceFrame++) {
             @Nullable FrameHeader referenceHeader = nonNullAssembly.referenceFrameHeader(referenceFrame);
             if (referenceHeader != null) {
@@ -108,6 +115,11 @@ final class ReferenceMotionVectorProjection {
                         orderHintDifference(orderHintBits, currentHeader.frameOffset(), referenceHeader.frameOffset()),
                         -31,
                         31
+                );
+                referenceSignBiases[referenceFrame] = hasFutureSignBias(
+                        orderHintBits,
+                        referenceHeader.frameOffset(),
+                        currentHeader.frameOffset()
                 );
             }
         }
@@ -118,6 +130,7 @@ final class ReferenceMotionVectorProjection {
                 width8,
                 height8,
                 referenceDistances,
+                referenceSignBiases,
                 blocks
         );
         if (!currentHeader.useReferenceFrameMotionVectors() || orderHintBits == 0) {
@@ -136,7 +149,14 @@ final class ReferenceMotionVectorProjection {
                 result.projectSource(nonNullAssembly, sourceResult, sourceReference, orderHintBits, blocks);
             }
         }
-        return new ReferenceMotionVectorProjection(currentHeader, width8, height8, referenceDistances, blocks);
+        return new ReferenceMotionVectorProjection(
+                currentHeader,
+                width8,
+                height8,
+                referenceDistances,
+                referenceSignBiases,
+                blocks
+        );
     }
 
     /// Returns whether at least one temporal source was projected at the supplied coordinate.
@@ -163,9 +183,21 @@ final class ReferenceMotionVectorProjection {
     /// @param referenceFrame the current reference in internal LAST..ALTREF order
     /// @return whether the supplied reference has future-frame sign bias
     boolean signBias(int referenceFrame) {
-        return referenceToCurrentDistances[
-                Objects.checkIndex(referenceFrame, referenceToCurrentDistances.length)
-                ] < 0;
+        return referenceSignBiases[Objects.checkIndex(referenceFrame, referenceSignBiases.length)];
+    }
+
+    /// Returns the sign bias obtained from one reference-to-current order-hint difference.
+    ///
+    /// Computing the reference-to-current direction directly is required when the two offsets are
+    /// exactly half of the modular order-hint range apart; reversing and negating the operands is
+    /// not equivalent at that boundary.
+    ///
+    /// @param orderHintBits the number of order-hint bits
+    /// @param referenceOffset the reference frame order hint
+    /// @param currentOffset the current frame order hint
+    /// @return whether the reference lies in the positive future direction
+    static boolean hasFutureSignBias(int orderHintBits, int referenceOffset, int currentOffset) {
+        return orderHintDifference(orderHintBits, referenceOffset, currentOffset) > 0;
     }
 
     /// Returns the projected predictor for one current reference at an 8x8 coordinate, or `null`.

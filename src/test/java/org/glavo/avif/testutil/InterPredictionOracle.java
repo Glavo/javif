@@ -351,7 +351,14 @@ public final class InterPredictionOracle {
         }
         if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
                 && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
-            return bilinearInterpolateAt(referencePlane, sourceNumeratorX, sourceNumeratorY, denominatorX, denominatorY);
+            return bilinearInterpolateAt(
+                    referencePlane,
+                    sourceNumeratorX,
+                    sourceNumeratorY,
+                    denominatorX,
+                    denominatorY,
+                    maximumSampleValue
+            );
         }
         int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
         int phaseY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
@@ -378,26 +385,29 @@ public final class InterPredictionOracle {
         int @org.jetbrains.annotations.Nullable [] verticalFilter = phaseY == 0
                 ? null
                 : selectSubpelFilter(verticalFilterMode, phaseY, heightForFilterSelection);
+        int intermediateBits = interPredictionIntermediateBits(maximumSampleValue);
 
         if (verticalFilter == null) {
             long filtered = horizontalInterpolate(referencePlane, sourceX0, sourceY0, horizontalFilter);
-            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, maximumSampleValue);
+            int intermediate = roundShift(filtered, INTER_FILTER_BITS - intermediateBits);
+            return clamp(roundShift(intermediate, intermediateBits), 0, maximumSampleValue);
         }
         if (horizontalFilter == null) {
             long filtered = verticalInterpolate(referencePlane, sourceX0, sourceY0, verticalFilter);
-            return clamp(roundShiftSigned(filtered, INTER_FILTER_BITS), 0, maximumSampleValue);
+            return clamp(roundShift(filtered, INTER_FILTER_BITS), 0, maximumSampleValue);
         }
 
-        long[] horizontallyFilteredRows = new long[INTER_FILTER_TAP_COUNT];
+        int[] horizontallyFilteredRows = new int[INTER_FILTER_TAP_COUNT];
         for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
             int sourceY = clamp(sourceY0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.height() - 1);
-            horizontallyFilteredRows[tapIndex] = horizontalInterpolate(referencePlane, sourceX0, sourceY, horizontalFilter);
+            long filtered = horizontalInterpolate(referencePlane, sourceX0, sourceY, horizontalFilter);
+            horizontallyFilteredRows[tapIndex] = roundShift(filtered, INTER_FILTER_BITS - intermediateBits);
         }
         long combined = 0;
         for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
             combined += (long) verticalFilter[tapIndex] * horizontallyFilteredRows[tapIndex];
         }
-        return clamp(roundShiftSigned(combined, INTER_FILTER_BITS * 2), 0, maximumSampleValue);
+        return clamp(roundShift(combined, INTER_FILTER_BITS + intermediateBits), 0, maximumSampleValue);
     }
 
     /// Applies one horizontal AV1 fixed filter at one source location.
@@ -459,7 +469,8 @@ public final class InterPredictionOracle {
         return switch (filterMode) {
             case EIGHT_TAP_REGULAR -> (axisSize <= 4 ? SMALL_REGULAR_SUBPEL_FILTERS : REGULAR_SUBPEL_FILTERS)[phase - 1];
             case EIGHT_TAP_SMOOTH -> (axisSize <= 4 ? SMALL_SMOOTH_SUBPEL_FILTERS : SMOOTH_SUBPEL_FILTERS)[phase - 1];
-            case EIGHT_TAP_SHARP -> SHARP_SUBPEL_FILTERS[phase - 1];
+            case EIGHT_TAP_SHARP ->
+                    (axisSize <= 4 ? SMALL_REGULAR_SUBPEL_FILTERS : SHARP_SUBPEL_FILTERS)[phase - 1];
             default -> throw new IllegalArgumentException(
                     "InterPredictionOracle supports only BILINEAR and fixed EIGHT_TAP_* filters"
             );
@@ -489,17 +500,31 @@ public final class InterPredictionOracle {
         return Math.multiplyExact(fraction, INTER_FILTER_PHASES) / denominator;
     }
 
-    /// Rounds one signed filtered value by one arithmetic right shift.
+    /// Returns the number of fractional bits retained between horizontal and vertical inter
+    /// filtering for the supplied decoded sample range.
+    ///
+    /// @param maximumSampleValue the maximum legal sample value for the decoded bit depth
+    /// @return `4` for 8- and 10-bit samples, or `2` for 12-bit samples
+    private static int interPredictionIntermediateBits(int maximumSampleValue) {
+        return switch (maximumSampleValue) {
+            case 255, 1023 -> 4;
+            case 4095 -> 2;
+            default -> throw new IllegalArgumentException(
+                    "Unsupported AV1 inter-prediction sample range: " + maximumSampleValue
+            );
+        };
+    }
+
+    /// Applies AV1 `Round2` to one filtered value using an arithmetic right shift.
     ///
     /// @param value the signed value to round
-    /// @param bits the number of low bits to discard
+    /// @param bits the number of low bits to discard, including zero
     /// @return the rounded signed value
-    private static int roundShiftSigned(long value, int bits) {
-        long roundingOffset = 1L << (bits - 1);
-        if (value >= 0) {
-            return (int) ((value + roundingOffset) >> bits);
+    private static int roundShift(long value, int bits) {
+        if (bits == 0) {
+            return Math.toIntExact(value);
         }
-        return (int) -(((-value) + roundingOffset) >> bits);
+        return Math.toIntExact((value + (1L << (bits - 1))) >> bits);
     }
 
     /// Returns one bilinearly interpolated unsigned sample at one plane-local source numerator.
@@ -509,13 +534,15 @@ public final class InterPredictionOracle {
     /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
     /// @param denominatorX the horizontal interpolation denominator
     /// @param denominatorY the vertical interpolation denominator
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
     /// @return one bilinearly interpolated unsigned sample
     private static int bilinearInterpolateAt(
             DecodedPlane referencePlane,
             int sourceNumeratorX,
             int sourceNumeratorY,
             int denominatorX,
-            int denominatorY
+            int denominatorY,
+            int maximumSampleValue
     ) {
         int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
         int fractionY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
@@ -525,47 +552,44 @@ public final class InterPredictionOracle {
         int clampedSourceY0 = clamp(sourceY0, 0, referencePlane.height() - 1);
         int clampedSourceX1 = clamp(sourceX0 + 1, 0, referencePlane.width() - 1);
         int clampedSourceY1 = clamp(sourceY0 + 1, 0, referencePlane.height() - 1);
-        return bilinearInterpolate(
-                referencePlane.sample(clampedSourceX0, clampedSourceY0),
-                referencePlane.sample(clampedSourceX1, clampedSourceY0),
-                referencePlane.sample(clampedSourceX0, clampedSourceY1),
-                referencePlane.sample(clampedSourceX1, clampedSourceY1),
-                fractionX,
-                INTER_FILTER_PHASES,
-                fractionY,
-                INTER_FILTER_PHASES
+        int topLeft = referencePlane.sample(clampedSourceX0, clampedSourceY0);
+        int topRight = referencePlane.sample(clampedSourceX1, clampedSourceY0);
+        int bottomLeft = referencePlane.sample(clampedSourceX0, clampedSourceY1);
+        int bottomRight = referencePlane.sample(clampedSourceX1, clampedSourceY1);
+        if (fractionY == 0) {
+            int intermediateBits = interPredictionIntermediateBits(maximumSampleValue);
+            int horizontal = roundShift(
+                    bilinearFilterSum(topLeft, topRight, fractionX),
+                    4 - intermediateBits
+            );
+            return clamp(roundShift(horizontal, intermediateBits), 0, maximumSampleValue);
+        }
+        if (fractionX == 0) {
+            return clamp(
+                    roundShift(bilinearFilterSum(topLeft, bottomLeft, fractionY), 4),
+                    0,
+                    maximumSampleValue
+            );
+        }
+
+        int intermediateBits = interPredictionIntermediateBits(maximumSampleValue);
+        int top = roundShift(bilinearFilterSum(topLeft, topRight, fractionX), 4 - intermediateBits);
+        int bottom = roundShift(bilinearFilterSum(bottomLeft, bottomRight, fractionX), 4 - intermediateBits);
+        return clamp(
+                roundShift(bilinearFilterSum(top, bottom, fractionY), 4 + intermediateBits),
+                0,
+                maximumSampleValue
         );
     }
 
-    /// Returns one bilinearly interpolated unsigned sample.
+    /// Returns one unnormalized AV1 bilinear-filter sum.
     ///
-    /// @param topLeft the top-left source sample
-    /// @param topRight the top-right source sample
-    /// @param bottomLeft the bottom-left source sample
-    /// @param bottomRight the bottom-right source sample
-    /// @param fractionX the horizontal source fraction in `[0, denominatorX)`
-    /// @param denominatorX the horizontal interpolation denominator
-    /// @param fractionY the vertical source fraction in `[0, denominatorY)`
-    /// @param denominatorY the vertical interpolation denominator
-    /// @return one bilinearly interpolated unsigned sample
-    private static int bilinearInterpolate(
-            int topLeft,
-            int topRight,
-            int bottomLeft,
-            int bottomRight,
-            int fractionX,
-            int denominatorX,
-            int fractionY,
-            int denominatorY
-    ) {
-        int inverseFractionX = denominatorX - fractionX;
-        int inverseFractionY = denominatorY - fractionY;
-        long denominator = (long) denominatorX * denominatorY;
-        long weightedSum = (long) inverseFractionX * inverseFractionY * topLeft
-                + (long) fractionX * inverseFractionY * topRight
-                + (long) inverseFractionX * fractionY * bottomLeft
-                + (long) fractionX * fractionY * bottomRight;
-        return (int) ((weightedSum + (denominator >> 1)) / denominator);
+    /// @param first the sample at the integer source position
+    /// @param second the sample one position after the integer source position
+    /// @param phase the subpel phase in `[0, 15]`
+    /// @return the filtered sum with four fractional bits
+    private static int bilinearFilterSum(int first, int second, int phase) {
+        return 16 * first + phase * (second - first);
     }
 
     /// Clamps one signed value into one inclusive integer range.

@@ -3419,6 +3419,110 @@ final class FrameReconstructorTest {
         assertPlaneBlockFilled(planes.lumaPlane(), 0, 4, 4, 4, 0);
     }
 
+    /// Verifies that two-axis fixed-filter prediction rounds after each normative filtering stage.
+    @Test
+    void reconstructsFixedFilterInterPredictionWithNormativeTwoStageRounding() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        MotionVector motionVector = new MotionVector(29, 26);
+        int[][] lumaSamples = {
+                {60, 117, 48, 189, 183, 30, 52, 120},
+                {134, 178, 180, 27, 145, 201, 118, 114},
+                {3, 87, 251, 107, 232, 170, 189, 99},
+                {63, 38, 46, 37, 18, 94, 132, 85},
+                {76, 150, 201, 120, 82, 208, 198, 219},
+                {176, 221, 182, 237, 74, 41, 227, 234},
+                {227, 57, 133, 225, 0, 3, 159, 111},
+                {89, 156, 166, 198, 116, 247, 37, 196}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                lumaSamples,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I400,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertEquals(48, planes.lumaPlane().sample(0, 0));
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                0,
+                0,
+                InterPredictionOracle.sampleReferencePlaneBlock(
+                        createDecodedPlane(lumaSamples),
+                        8,
+                        8,
+                        motionVector.columnEighthPel(),
+                        motionVector.rowEighthPel(),
+                        8,
+                        8,
+                        8,
+                        8,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+                )
+        );
+    }
+
+    /// Verifies that sharp inter filtering uses the normative reduced-width regular kernel when the
+    /// sampled axis is no wider than four pixels.
+    @Test
+    void reconstructsNarrowSharpInterPredictionWithReducedWidthRegularFilter() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(0, 25);
+        int[][] lumaSamples = {
+                {128, 255, 128, 128, 128, 128, 128, 128},
+                {128, 255, 128, 128, 128, 128, 128, 128},
+                {128, 255, 128, 128, 128, 128, 128, 128},
+                {128, 255, 128, 128, 128, 128, 128, 128},
+                {128, 255, 128, 128, 128, 128, 128, 128},
+                {128, 255, 128, 128, 128, 128, 128, 128},
+                {128, 255, 128, 128, 128, 128, 128, 128},
+                {128, 255, 128, 128, 128, 128, 128, 128}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                lumaSamples,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I400,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertEquals(128, planes.lumaPlane().sample(0, 0));
+    }
+
     /// Verifies that fixed-filter inter prediction preserves `10-bit` samples instead of clipping
     /// the subpel result to the `8-bit` range.
     @Test
@@ -3483,6 +3587,52 @@ final class FrameReconstructorTest {
                 )
         );
         assertTrue(planes.lumaPlane().sample(0, 0) > 255);
+    }
+
+    /// Verifies that 12-bit bilinear prediction preserves the normative horizontal intermediate
+    /// precision before vertical filtering.
+    @Test
+    void reconstructsTwelveBitBilinearInterPredictionWithNormativeTwoStageRounding() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_4X4;
+        MotionVector motionVector = new MotionVector(6, 5);
+        int[][] lumaSamples = {
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 1, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0}
+        };
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                12,
+                lumaSamples,
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(position, size, false, 0, motionVector),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createHighBitInterFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I400,
+                        12,
+                        8,
+                        8,
+                        0,
+                        FrameHeader.InterpolationFilter.BILINEAR,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertEquals(1, planes.lumaPlane().sample(0, 0));
     }
 
     /// Verifies smooth eight-tap luma and chroma sampling for one `I420` inter block.

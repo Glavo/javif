@@ -41,6 +41,12 @@ public final class BlockNeighborContext {
     /// The maximum number of provisional motion-vector candidate entries retained locally.
     private static final int PROVISIONAL_CANDIDATE_CAPACITY = 8;
 
+    /// The frame-border extension allowed for reference motion vectors in eighth-pel units.
+    private static final int REFERENCE_MOTION_VECTOR_BORDER = 16 * 8;
+
+    /// The number of eighth-pel motion-vector units represented by one 4x4 coding unit.
+    private static final int MOTION_VECTOR_UNITS_PER_4X4 = 4 * 8;
+
     /// The AV1 coefficient-context byte that marks one transform block as all-zero.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
 
@@ -85,6 +91,12 @@ public final class BlockNeighborContext {
 
     /// The tile height rounded up to 4x4 units.
     private final int tileHeight4;
+
+    /// The coded frame width rounded up to 4x4 units on the 8x8 motion-vector grid.
+    private final int frameWidth4;
+
+    /// The coded frame height rounded up to 4x4 units on the 8x8 motion-vector grid.
+    private final int frameHeight4;
 
     /// The horizontal chroma subsampling shift, or `0` when chroma uses full horizontal resolution.
     private final int chromaSubsamplingX;
@@ -249,6 +261,8 @@ public final class BlockNeighborContext {
     ///
     /// @param tileWidth4 the tile width rounded up to 4x4 units
     /// @param tileHeight4 the tile height rounded up to 4x4 units
+    /// @param frameWidth4 the coded frame width rounded up to 4x4 units on the 8x8 grid
+    /// @param frameHeight4 the coded frame height rounded up to 4x4 units on the 8x8 grid
     /// @param chromaSubsamplingX the horizontal chroma subsampling shift
     /// @param chromaSubsamplingY the vertical chroma subsampling shift
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
@@ -305,6 +319,8 @@ public final class BlockNeighborContext {
     private BlockNeighborContext(
             int tileWidth4,
             int tileHeight4,
+            int frameWidth4,
+            int frameHeight4,
             int chromaSubsamplingX,
             int chromaSubsamplingY,
             TileDecodeContext.TemporalMotionField decodedTemporalMotionField,
@@ -361,6 +377,8 @@ public final class BlockNeighborContext {
     ) {
         this.tileWidth4 = tileWidth4;
         this.tileHeight4 = tileHeight4;
+        this.frameWidth4 = frameWidth4;
+        this.frameHeight4 = frameHeight4;
         this.chromaSubsamplingX = chromaSubsamplingX;
         this.chromaSubsamplingY = chromaSubsamplingY;
         this.decodedTemporalMotionField = Objects.requireNonNull(decodedTemporalMotionField, "decodedTemporalMotionField");
@@ -463,6 +481,8 @@ public final class BlockNeighborContext {
         TileDecodeContext nonNullTileContext = Objects.requireNonNull(tileContext, "tileContext");
         int tileWidth4 = nonNullTileContext.codedWidth4();
         int tileHeight4 = nonNullTileContext.codedHeight4();
+        int frameWidth4 = ((nonNullTileContext.frameHeader().frameSize().codedWidth() + 7) >> 3) << 1;
+        int frameHeight4 = ((nonNullTileContext.frameHeader().frameSize().height() + 7) >> 3) << 1;
         int tileWidth8 = (tileWidth4 + 1) >> 1;
         int tileHeight8 = (tileHeight4 + 1) >> 1;
         int chromaSubsamplingX = chromaSubsamplingX(nonNullTileContext.sequenceHeader().colorConfig().pixelFormat());
@@ -528,6 +548,8 @@ public final class BlockNeighborContext {
         return new BlockNeighborContext(
                 tileWidth4,
                 tileHeight4,
+                frameWidth4,
+                frameHeight4,
                 chromaSubsamplingX,
                 chromaSubsamplingY,
                 nonNullTileContext.decodedTemporalMotionField(),
@@ -1230,6 +1252,40 @@ public final class BlockNeighborContext {
             );
         }
         int syntaxCandidateCount = candidateCount;
+        int frameX4 = (tileStartX8 << 1) + x4;
+        int frameY4 = (tileStartY8 << 1) + y4;
+        int minimumColumn = -(frameX4 + blockWidth4) * MOTION_VECTOR_UNITS_PER_4X4
+                - REFERENCE_MOTION_VECTOR_BORDER;
+        int maximumColumn = (frameWidth4 - frameX4) * MOTION_VECTOR_UNITS_PER_4X4
+                + REFERENCE_MOTION_VECTOR_BORDER;
+        int minimumRow = -(frameY4 + blockHeight4) * MOTION_VECTOR_UNITS_PER_4X4
+                - REFERENCE_MOTION_VECTOR_BORDER;
+        int maximumRow = (frameHeight4 - frameY4) * MOTION_VECTOR_UNITS_PER_4X4
+                + REFERENCE_MOTION_VECTOR_BORDER;
+        for (int index = 0; index < candidateCount; index++) {
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate = candidates[index];
+            @Nullable InterMotionVector secondaryMotionVector = candidate.motionVector1();
+            candidates[index] = new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                    candidate.weight(),
+                    clampReferenceMotionVector(
+                            candidate.motionVector0(),
+                            minimumRow,
+                            maximumRow,
+                            minimumColumn,
+                            maximumColumn
+                    ),
+                    secondaryMotionVector == null
+                            ? null
+                            : clampReferenceMotionVector(
+                                    secondaryMotionVector,
+                                    minimumRow,
+                                    maximumRow,
+                                    minimumColumn,
+                                    maximumColumn
+                            ),
+                    candidate.synthetic()
+            );
+        }
         while (candidateCount < 2) {
             candidates[candidateCount++] = new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
                     2,
@@ -1255,6 +1311,31 @@ public final class BlockNeighborContext {
                 syntaxCandidateCount,
                 Arrays.copyOf(candidates, candidateCount)
         );
+    }
+
+    /// Clamps one candidate component to AV1's extended frame boundary.
+    ///
+    /// @param motionVector the candidate component and its resolved state
+    /// @param minimumRow the inclusive minimum row component in eighth-pel units
+    /// @param maximumRow the inclusive maximum row component in eighth-pel units
+    /// @param minimumColumn the inclusive minimum column component in eighth-pel units
+    /// @param maximumColumn the inclusive maximum column component in eighth-pel units
+    /// @return the original component when already in range, or a state-preserving clamped component
+    private static InterMotionVector clampReferenceMotionVector(
+            InterMotionVector motionVector,
+            int minimumRow,
+            int maximumRow,
+            int minimumColumn,
+            int maximumColumn
+    ) {
+        InterMotionVector nonNullMotionVector = Objects.requireNonNull(motionVector, "motionVector");
+        MotionVector vector = nonNullMotionVector.vector();
+        int row = Math.max(minimumRow, Math.min(maximumRow, vector.rowEighthPel()));
+        int column = Math.max(minimumColumn, Math.min(maximumColumn, vector.columnEighthPel()));
+        if (row == vector.rowEighthPel() && column == vector.columnEighthPel()) {
+            return nonNullMotionVector;
+        }
+        return new InterMotionVector(new MotionVector(row, column), nonNullMotionVector.resolved());
     }
 
     /// Completes a short compound-reference candidate stack from direct-edge neighbors.

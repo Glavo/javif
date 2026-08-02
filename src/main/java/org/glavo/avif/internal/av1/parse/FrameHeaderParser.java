@@ -229,17 +229,25 @@ public final class FrameHeaderParser {
         }
         if (showExistingFrame) {
             existingFrameIndex = readInt(reader, 3);
+            @Nullable FrameHeader existingFrameHeader = referenceFrameHeaders[existingFrameIndex];
             if (sequenceHeader.timingInfo().decoderModelInfoPresent()
                     && !sequenceHeader.timingInfo().equalPictureInterval()) {
                 framePresentationDelay = readLong(reader, sequenceHeader.timingInfo().framePresentationDelayLength());
             }
             if (sequenceHeader.frameIdNumbersPresent()) {
                 frameId = readLong(reader, sequenceHeader.frameIdBits());
-                FrameHeader existingFrameHeader = referenceFrameHeaders[existingFrameIndex];
                 if (existingFrameHeader != null && existingFrameHeader.frameId() != frameId) {
                     fail("show_existing_frame frame id does not match the referenced slot");
                 }
             }
+
+            FrameType existingFrameType = existingFrameHeader != null
+                    ? existingFrameHeader.frameType()
+                    : FrameType.INTER;
+            int existingRefreshFrameFlags = existingFrameType == FrameType.KEY ? 0xFF : 0;
+            FrameHeader.FilmGrainParams existingFilmGrain = existingFrameHeader != null
+                    ? existingFrameHeader.filmGrain()
+                    : FrameHeader.FilmGrainParams.disabled();
 
             return new FrameHeader(
                     temporalId,
@@ -248,7 +256,7 @@ public final class FrameHeaderParser {
                     existingFrameIndex,
                     frameId,
                     framePresentationDelay,
-                    FrameType.INTER,
+                    existingFrameType,
                     false,
                     true,
                     false,
@@ -258,7 +266,7 @@ public final class FrameHeaderParser {
                     false,
                     PRIMARY_REF_NONE,
                     0,
-                    0,
+                    existingRefreshFrameFlags,
                     new FrameHeader.FrameSize(0, 0, 0, 0, 0),
                     new FrameHeader.SuperResolutionInfo(false, 8),
                     false,
@@ -281,7 +289,7 @@ public final class FrameHeaderParser {
                     ),
                     FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                     false,
-                    false
+                    existingFilmGrain
             );
         }
 
@@ -430,7 +438,7 @@ public final class FrameHeaderParser {
             }
         }
 
-        boolean refreshContext = true;
+        boolean refreshContext = false;
         if (!sequenceHeader.reducedStillPictureHeader() && !disableCdfUpdate) {
             refreshContext = !reader.readFlag();
         }

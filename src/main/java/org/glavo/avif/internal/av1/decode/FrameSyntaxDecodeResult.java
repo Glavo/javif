@@ -245,6 +245,16 @@ public final class FrameSyntaxDecodeResult {
         return finalTileCdfContexts[checkedTileIndex(tileIndex)].copy();
     }
 
+    /// Returns the final CDF context selected by `context_update_tile_id`.
+    ///
+    /// This is the single frame context saved for later `primary_ref_frame` inheritance when the
+    /// frame-end CDF update is enabled.
+    ///
+    /// @return a snapshot of the selected frame-end CDF context
+    public CdfContext contextUpdateTileCdfContext() {
+        return finalTileCdfContext(assembly.frameHeader().tiling().updateTileIndex());
+    }
+
     /// Returns a copy of this structural frame-decode result with replaced final tile-local CDF contexts.
     ///
     /// Partition trees and decoded temporal motion fields are preserved while the supplied tile-local

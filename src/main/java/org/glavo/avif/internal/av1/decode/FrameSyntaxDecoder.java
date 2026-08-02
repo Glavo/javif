@@ -26,7 +26,7 @@ import java.util.Objects;
 /// Structural frame decoder that expands every tile into partition trees and saved motion-vector fields.
 @NotNullByDefault
 public final class FrameSyntaxDecoder {
-    /// The optional reference-frame syntax result that provides tile-local base CDF contexts.
+    /// The optional reference-frame syntax result that provides the inherited frame CDF context.
     private final @Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult;
 
     /// The reference-frame syntax snapshots indexed by runtime reference slot.
@@ -34,14 +34,14 @@ public final class FrameSyntaxDecoder {
 
     /// Creates one structural frame decoder.
     ///
-    /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides tile-local base CDF contexts
+    /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides the inherited frame CDF context
     public FrameSyntaxDecoder(@Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult) {
         this(referenceCdfFrameSyntaxResult, new FrameSyntaxDecodeResult[8]);
     }
 
     /// Creates one structural frame decoder with runtime reference syntax snapshots.
     ///
-    /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides tile-local base CDF contexts
+    /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides the inherited frame CDF context
     /// @param referenceFrameSyntaxResults the syntax snapshots indexed by runtime reference slot
     public FrameSyntaxDecoder(
             @Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult,
@@ -75,11 +75,13 @@ public final class FrameSyntaxDecoder {
                 new TileDecodeContext.TemporalMotionField[tileCount];
         CdfContext[] finalTileCdfContexts = new CdfContext[tileCount];
         RestorationUnitMap restorationUnitMap = RestorationUnitMap.createEmpty(nonNullAssembly);
+        @Nullable CdfContext inheritedCdfContext = referenceCdfContext();
         for (int tileIndex = 0; tileIndex < tileCount; tileIndex++) {
             TileDecodeContext tileContext = createTileContext(
                     nonNullAssembly,
                     tileIndex,
-                    referenceMotionVectorProjection
+                    referenceMotionVectorProjection,
+                    inheritedCdfContext
             );
             TilePartitionTreeReader treeReader = new TilePartitionTreeReader(tileContext);
             tileRoots[tileIndex] = treeReader.readTile();
@@ -101,27 +103,29 @@ public final class FrameSyntaxDecoder {
     /// @param assembly the completed frame assembly that owns the tile
     /// @param tileIndex the zero-based tile index in frame order
     /// @param referenceMotionVectorProjection the immutable current-frame temporal projection
+    /// @param inheritedCdfContext the inherited frame CDF context, or `null` to use defaults
     /// @return one tile-local decode context
     private TileDecodeContext createTileContext(
             FrameAssembly assembly,
             int tileIndex,
-            ReferenceMotionVectorProjection referenceMotionVectorProjection
+            ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            @Nullable CdfContext inheritedCdfContext
     ) {
-        @Nullable CdfContext baseCdfContext = referenceCdfContext(tileIndex);
+        @Nullable CdfContext baseCdfContext = inheritedCdfContext;
         if (baseCdfContext == null) {
             baseCdfContext = CdfContext.createDefault(assembly.frameHeader().quantization().baseQIndex());
         }
         return TileDecodeContext.create(assembly, tileIndex, baseCdfContext, referenceMotionVectorProjection);
     }
 
-    /// Returns the reference tile-local CDF context for one tile, or `null` when no compatible context exists.
+    /// Returns the single frame CDF context selected by the reference frame, or `null` when no
+    /// reference context exists.
     ///
-    /// @param tileIndex the zero-based tile index in frame order
-    /// @return the reference tile-local CDF context for one tile, or `null`
-    private @Nullable CdfContext referenceCdfContext(int tileIndex) {
-        if (referenceCdfFrameSyntaxResult == null || tileIndex >= referenceCdfFrameSyntaxResult.tileCount()) {
+    /// @return the inherited frame CDF context, or `null`
+    private @Nullable CdfContext referenceCdfContext() {
+        if (referenceCdfFrameSyntaxResult == null) {
             return null;
         }
-        return referenceCdfFrameSyntaxResult.finalTileCdfContext(tileIndex);
+        return referenceCdfFrameSyntaxResult.contextUpdateTileCdfContext();
     }
 }

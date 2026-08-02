@@ -67,7 +67,7 @@ final class FrameHeaderParserTest {
         assertFalse(header.superResolution().enabled());
         assertEquals(8, header.superResolution().widthScaleDenominator());
         assertFalse(header.allowIntrabc());
-        assertTrue(header.refreshContext());
+        assertFalse(header.refreshContext());
 
         assertTrue(header.tiling().uniform());
         assertEquals(1, header.tiling().columns());
@@ -85,6 +85,35 @@ final class FrameHeaderParserTest {
         assertEquals(FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY, header.transformMode());
         assertFalse(header.reducedTransformSet());
         assertFalse(header.filmGrainPresent());
+    }
+
+    /// Verifies that showing a stored key frame restores its frame type and refreshes every
+    /// reference slot as required by the uncompressed-header process.
+    ///
+    /// @throws IOException if the test payload cannot be parsed
+    @Test
+    void parsesShowExistingKeyFrameHeaderWithFullReferenceRefresh() throws IOException {
+        FrameHeader[] references = new FrameHeader[8];
+        references[0] = createReferenceFrameHeader(
+                FrameType.KEY,
+                9,
+                64,
+                64,
+                66,
+                68
+        );
+
+        FrameHeader header = new FrameHeaderParser().parse(
+                frameHeaderObu(showExistingFrameHeaderPayload(0)),
+                fullInterSequenceHeader(),
+                false,
+                references
+        );
+
+        assertTrue(header.showExistingFrame());
+        assertEquals(0, header.existingFrameIndex());
+        assertEquals(FrameType.KEY, header.frameType());
+        assertEquals(0xFF, header.refreshFrameFlags());
     }
 
     /// Verifies that an enabled segmentation feature remains active when its signed data is zero.
@@ -152,7 +181,7 @@ final class FrameHeaderParserTest {
         assertEquals(FrameHeader.InterpolationFilter.SWITCHABLE, header.subpelFilterMode());
         assertTrue(header.switchableMotionMode());
         assertTrue(header.useReferenceFrameMotionVectors());
-        assertTrue(header.refreshContext());
+        assertFalse(header.refreshContext());
         assertTrue(header.switchableCompoundReferences());
         assertTrue(header.skipModeAllowed());
         assertTrue(header.skipModeEnabled());
@@ -679,6 +708,36 @@ final class FrameHeaderParserTest {
         );
     }
 
+    /// Creates a refreshed reference-frame header with an explicit frame type.
+    ///
+    /// @param frameType the stored AV1 frame type
+    /// @param frameOffset the order hint stored in the refreshed reference
+    /// @param upscaledWidth the frame width before super-resolution downscaling
+    /// @param height the frame height
+    /// @param renderWidth the render width
+    /// @param renderHeight the render height
+    /// @return a refreshed reference-frame header
+    private static FrameHeader createReferenceFrameHeader(
+            FrameType frameType,
+            int frameOffset,
+            int upscaledWidth,
+            int height,
+            int renderWidth,
+            int renderHeight
+    ) {
+        return createReferenceFrameHeader(
+                frameType,
+                frameOffset,
+                upscaledWidth,
+                height,
+                renderWidth,
+                renderHeight,
+                new FrameHeader.SegmentationInfo(false, false, false, false, defaultSegments(), new boolean[8], new int[8]),
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
+                FrameHeader.FilmGrainParams.disabled()
+        );
+    }
+
     /// Creates a refreshed reference-frame header with deterministic geometry and explicit inherited parser state.
     ///
     /// @param frameOffset the order hint stored in the refreshed reference
@@ -731,6 +790,43 @@ final class FrameHeaderParserTest {
             FrameHeader.LoopFilterInfo loopFilter,
             FrameHeader.FilmGrainParams filmGrain
     ) {
+        return createReferenceFrameHeader(
+                FrameType.INTER,
+                frameOffset,
+                upscaledWidth,
+                height,
+                renderWidth,
+                renderHeight,
+                segmentation,
+                loopFilter,
+                filmGrain
+        );
+    }
+
+    /// Creates a refreshed reference-frame header with explicit frame type, geometry, inherited
+    /// parser state, and film grain.
+    ///
+    /// @param frameType the stored AV1 frame type
+    /// @param frameOffset the order hint stored in the refreshed reference
+    /// @param upscaledWidth the frame width before super-resolution downscaling
+    /// @param height the frame height
+    /// @param renderWidth the render width
+    /// @param renderHeight the render height
+    /// @param segmentation the segmentation state stored in the refreshed reference
+    /// @param loopFilter the loop-filter state stored in the refreshed reference
+    /// @param filmGrain the normalized film grain state stored in the refreshed reference
+    /// @return a refreshed reference-frame header
+    private static FrameHeader createReferenceFrameHeader(
+            FrameType frameType,
+            int frameOffset,
+            int upscaledWidth,
+            int height,
+            int renderWidth,
+            int renderHeight,
+            FrameHeader.SegmentationInfo segmentation,
+            FrameHeader.LoopFilterInfo loopFilter,
+            FrameHeader.FilmGrainParams filmGrain
+    ) {
         return new FrameHeader(
                 0,
                 0,
@@ -738,7 +834,7 @@ final class FrameHeaderParserTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                frameType,
                 true,
                 true,
                 false,
@@ -793,6 +889,18 @@ final class FrameHeaderParserTest {
         BitWriter writer = new BitWriter();
         writeInterFrameHeaderBeforeGlobalMotion(writer);
         writeIdentityGlobalMotion(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a standalone show-existing-frame header payload.
+    ///
+    /// @param existingFrameIndex the reference slot to display
+    /// @return a standalone show-existing-frame header payload
+    private static byte[] showExistingFrameHeaderPayload(int existingFrameIndex) {
+        BitWriter writer = new BitWriter();
+        writer.writeFlag(true);
+        writer.writeBits(existingFrameIndex, 3);
         writer.writeTrailingBits();
         return writer.toByteArray();
     }
