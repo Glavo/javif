@@ -110,6 +110,12 @@ public final class BlockNeighborContext {
     /// The current frame's immutable projected reference motion field.
     private final ReferenceMotionVectorProjection referenceMotionVectorProjection;
 
+    /// The mutable current-frame segment identifiers shared by all tiles.
+    private final SegmentIdMap currentSegmentIdMap;
+
+    /// Whether decoded block segment identifiers replace the current map footprint.
+    private final boolean updateSegmentIdMap;
+
     /// The tile's frame-relative horizontal origin in 8x8 units.
     private final int tileStartX8;
 
@@ -197,12 +203,6 @@ public final class BlockNeighborContext {
     /// The left-edge segmentation-prediction flags indexed in 4x4 units.
     private final byte[] leftSegmentPredicted;
 
-    /// The above-edge segment identifiers indexed in 4x4 units.
-    private final byte[] aboveSegmentId;
-
-    /// The left-edge segment identifiers indexed in 4x4 units.
-    private final byte[] leftSegmentId;
-
     /// The above-edge luma palette sizes indexed in 4x4 units.
     private final byte[] abovePaletteSize;
 
@@ -267,6 +267,8 @@ public final class BlockNeighborContext {
     /// @param chromaSubsamplingY the vertical chroma subsampling shift
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
     /// @param referenceMotionVectorProjection the current frame's immutable projected reference motion field
+    /// @param currentSegmentIdMap the mutable current-frame segment identifiers
+    /// @param updateSegmentIdMap whether decoded block identifiers replace their map footprint
     /// @param tileStartX8 the tile's frame-relative horizontal origin in 8x8 units
     /// @param tileStartY8 the tile's frame-relative vertical origin in 8x8 units
     /// @param storedBlocks the stored decoded block map indexed in tile-relative 4x4 units
@@ -296,8 +298,6 @@ public final class BlockNeighborContext {
     /// @param leftInterpolationFilterVertical the left-edge vertical switchable interpolation-filter symbols indexed in 4x4 units
     /// @param aboveSegmentPredicted the above-edge segmentation-prediction flags indexed in 4x4 units
     /// @param leftSegmentPredicted the left-edge segmentation-prediction flags indexed in 4x4 units
-    /// @param aboveSegmentId the above-edge segment identifiers indexed in 4x4 units
-    /// @param leftSegmentId the left-edge segment identifiers indexed in 4x4 units
     /// @param abovePaletteSize the above-edge luma palette sizes indexed in 4x4 units
     /// @param leftPaletteSize the left-edge luma palette sizes indexed in 4x4 units
     /// @param aboveChromaPaletteSize the above-edge chroma palette sizes indexed in 4x4 units
@@ -325,6 +325,8 @@ public final class BlockNeighborContext {
             int chromaSubsamplingY,
             TileDecodeContext.TemporalMotionField decodedTemporalMotionField,
             ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            SegmentIdMap currentSegmentIdMap,
+            boolean updateSegmentIdMap,
             int tileStartX8,
             int tileStartY8,
             StoredBlock[] storedBlocks,
@@ -354,8 +356,6 @@ public final class BlockNeighborContext {
             byte[] leftInterpolationFilterVertical,
             byte[] aboveSegmentPredicted,
             byte[] leftSegmentPredicted,
-            byte[] aboveSegmentId,
-            byte[] leftSegmentId,
             byte[] abovePaletteSize,
             byte[] leftPaletteSize,
             byte[] aboveChromaPaletteSize,
@@ -386,6 +386,8 @@ public final class BlockNeighborContext {
                 referenceMotionVectorProjection,
                 "referenceMotionVectorProjection"
         );
+        this.currentSegmentIdMap = Objects.requireNonNull(currentSegmentIdMap, "currentSegmentIdMap");
+        this.updateSegmentIdMap = updateSegmentIdMap;
         this.tileStartX8 = tileStartX8;
         this.tileStartY8 = tileStartY8;
         this.storedBlocks = Objects.requireNonNull(storedBlocks, "storedBlocks");
@@ -433,8 +435,6 @@ public final class BlockNeighborContext {
         );
         this.aboveSegmentPredicted = Objects.requireNonNull(aboveSegmentPredicted, "aboveSegmentPredicted");
         this.leftSegmentPredicted = Objects.requireNonNull(leftSegmentPredicted, "leftSegmentPredicted");
-        this.aboveSegmentId = Objects.requireNonNull(aboveSegmentId, "aboveSegmentId");
-        this.leftSegmentId = Objects.requireNonNull(leftSegmentId, "leftSegmentId");
         this.abovePaletteSize = Objects.requireNonNull(abovePaletteSize, "abovePaletteSize");
         this.leftPaletteSize = Objects.requireNonNull(leftPaletteSize, "leftPaletteSize");
         this.aboveChromaPaletteSize = Objects.requireNonNull(aboveChromaPaletteSize, "aboveChromaPaletteSize");
@@ -554,6 +554,9 @@ public final class BlockNeighborContext {
                 chromaSubsamplingY,
                 nonNullTileContext.decodedTemporalMotionField(),
                 nonNullTileContext.referenceMotionVectorProjection(),
+                nonNullTileContext.currentSegmentIdMap(),
+                nonNullTileContext.frameHeader().segmentation().enabled()
+                        && nonNullTileContext.frameHeader().segmentation().updateMap(),
                 nonNullTileContext.startX() >> 3,
                 nonNullTileContext.startY() >> 3,
                 new StoredBlock[tileWidth4 * tileHeight4],
@@ -581,8 +584,6 @@ public final class BlockNeighborContext {
                 leftInterpolationFilterHorizontal,
                 aboveInterpolationFilterVertical,
                 leftInterpolationFilterVertical,
-                new byte[tileWidth4],
-                new byte[tileHeight4],
                 new byte[tileWidth4],
                 new byte[tileHeight4],
                 new byte[tileWidth4],
@@ -1800,13 +1801,12 @@ public final class BlockNeighborContext {
         boolean haveLeft = hasLeftNeighbor(nonNullPosition);
         int x4 = nonNullPosition.x4();
         int y4 = nonNullPosition.y4();
+        int frameX4 = (tileStartX8 << 1) + x4;
+        int frameY4 = (tileStartY8 << 1) + y4;
         if (haveLeft && haveTop) {
-            // Left/above predictions follow the rolling edge state. Only the top-left sample needs
-            // the stored block map because the above-edge row may already reflect the current row's
-            // immediate left block.
-            int left = leftSegmentId[y4] & 0xFF;
-            int above = aboveSegmentId[x4] & 0xFF;
-            int aboveLeft = storedSegmentIdOrZero(x4 - 1, y4 - 1);
+            int left = currentSegmentIdMap.getOrZero(frameX4 - 1, frameY4);
+            int above = currentSegmentIdMap.getOrZero(frameX4, frameY4 - 1);
+            int aboveLeft = currentSegmentIdMap.getOrZero(frameX4 - 1, frameY4 - 1);
             int context;
             if (left == above && aboveLeft == left) {
                 context = 2;
@@ -1819,28 +1819,11 @@ public final class BlockNeighborContext {
         }
 
         int predictedSegmentId = haveLeft
-                ? leftSegmentId[y4] & 0xFF
+                ? currentSegmentIdMap.getOrZero(frameX4 - 1, frameY4)
                 : haveTop
-                ? aboveSegmentId[x4] & 0xFF
+                ? currentSegmentIdMap.getOrZero(frameX4, frameY4 - 1)
                 : 0;
         return new SegmentPrediction(predictedSegmentId, 0);
-    }
-
-    /// Returns the decoded segment id at one already-decoded 4x4 coordinate, or zero when unavailable.
-    ///
-    /// Spatial segment prediction uses the full current segment map. This accessor avoids using the
-    /// rolling above-edge arrays for the top-left sample because they may already contain the block
-    /// immediately to the left in the current row.
-    ///
-    /// @param x4 the tile-relative X coordinate in 4x4 units
-    /// @param y4 the tile-relative Y coordinate in 4x4 units
-    /// @return the stored segment id, or zero when no decoded block covers the coordinate
-    private int storedSegmentIdOrZero(int x4, int y4) {
-        if (x4 < 0 || x4 >= tileWidth4 || y4 < 0 || y4 >= tileHeight4) {
-            return 0;
-        }
-        @Nullable StoredBlock storedBlock = storedBlockAt(x4, y4);
-        return storedBlock != null ? storedBlock.segmentId() : 0;
     }
 
     /// Returns the above-edge luma palette size for the supplied X coordinate in 4x4 units.
@@ -2540,6 +2523,15 @@ public final class BlockNeighborContext {
                 motionVector1,
                 usesNewMotionVector != 0
         );
+        if (updateSegmentIdMap) {
+            currentSegmentIdMap.fill(
+                    (tileStartX8 << 1) + position.x4(),
+                    (tileStartY8 << 1) + position.y4(),
+                    size.width4(),
+                    size.height4(),
+                    segmentId & 0xFF
+            );
+        }
         for (int x4 = position.x4(); x4 < endX4; x4++) {
             aboveIntra[x4] = intra;
             aboveSkip[x4] = skip;
@@ -2554,7 +2546,6 @@ public final class BlockNeighborContext {
             aboveInterpolationFilterHorizontal[x4] = horizontalInterpolationFilter;
             aboveInterpolationFilterVertical[x4] = verticalInterpolationFilter;
             aboveSegmentPredicted[x4] = segmentPredicted;
-            aboveSegmentId[x4] = segmentId;
             abovePaletteSize[x4] = paletteSize;
             aboveChromaPaletteSize[x4] = chromaPaletteSize;
             Arrays.fill(abovePaletteEntries[0][x4], 0);
@@ -2579,7 +2570,6 @@ public final class BlockNeighborContext {
             leftInterpolationFilterHorizontal[y4] = horizontalInterpolationFilter;
             leftInterpolationFilterVertical[y4] = verticalInterpolationFilter;
             leftSegmentPredicted[y4] = segmentPredicted;
-            leftSegmentId[y4] = segmentId;
             leftPaletteSize[y4] = paletteSize;
             leftChromaPaletteSize[y4] = chromaPaletteSize;
             Arrays.fill(leftPaletteEntries[0][y4], 0);

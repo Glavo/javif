@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
+import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -70,6 +71,12 @@ public final class FrameSyntaxDecoder {
         int tileCount = nonNullAssembly.totalTiles();
         ReferenceMotionVectorProjection referenceMotionVectorProjection =
                 ReferenceMotionVectorProjection.create(nonNullAssembly, referenceFrameSyntaxResults);
+        @Nullable SegmentIdMap referenceSegmentIdMap = referenceSegmentIdMap(nonNullAssembly);
+        SegmentIdMap currentSegmentIdMap = SegmentIdMap.create(nonNullAssembly);
+        FrameHeader.SegmentationInfo segmentation = nonNullAssembly.frameHeader().segmentation();
+        if (segmentation.enabled() && !segmentation.updateMap() && referenceSegmentIdMap != null) {
+            currentSegmentIdMap.copyFrom(referenceSegmentIdMap);
+        }
         TilePartitionTreeReader.Node[][] tileRoots = new TilePartitionTreeReader.Node[tileCount][];
         TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields =
                 new TileDecodeContext.TemporalMotionField[tileCount];
@@ -81,6 +88,8 @@ public final class FrameSyntaxDecoder {
                     nonNullAssembly,
                     tileIndex,
                     referenceMotionVectorProjection,
+                    currentSegmentIdMap,
+                    referenceSegmentIdMap,
                     inheritedCdfContext
             );
             TilePartitionTreeReader treeReader = new TilePartitionTreeReader(tileContext);
@@ -94,7 +103,8 @@ public final class FrameSyntaxDecoder {
                 tileRoots,
                 decodedTemporalMotionFields,
                 restorationUnitMap,
-                finalTileCdfContexts
+                finalTileCdfContexts,
+                currentSegmentIdMap
         );
     }
 
@@ -103,19 +113,65 @@ public final class FrameSyntaxDecoder {
     /// @param assembly the completed frame assembly that owns the tile
     /// @param tileIndex the zero-based tile index in frame order
     /// @param referenceMotionVectorProjection the immutable current-frame temporal projection
+    /// @param currentSegmentIdMap the mutable current-frame segment-id map shared by all tiles
+    /// @param referenceSegmentIdMap the immutable primary-reference segment-id map, or `null`
     /// @param inheritedCdfContext the inherited frame CDF context, or `null` to use defaults
     /// @return one tile-local decode context
     private TileDecodeContext createTileContext(
             FrameAssembly assembly,
             int tileIndex,
             ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            SegmentIdMap currentSegmentIdMap,
+            @Nullable SegmentIdMap referenceSegmentIdMap,
             @Nullable CdfContext inheritedCdfContext
     ) {
         @Nullable CdfContext baseCdfContext = inheritedCdfContext;
         if (baseCdfContext == null) {
             baseCdfContext = CdfContext.createDefault(assembly.frameHeader().quantization().baseQIndex());
         }
-        return TileDecodeContext.create(assembly, tileIndex, baseCdfContext, referenceMotionVectorProjection);
+        return TileDecodeContext.create(
+                assembly,
+                tileIndex,
+                baseCdfContext,
+                referenceMotionVectorProjection,
+                currentSegmentIdMap,
+                referenceSegmentIdMap
+        );
+    }
+
+    /// Returns the compatible primary-reference segment-id map required by the current frame.
+    ///
+    /// AV1 temporal segmentation prediction and non-updating segmentation maps use the syntax
+    /// snapshot selected by `primary_ref_frame`. A map from differently sized coded dimensions is
+    /// not compatible and is treated as absent.
+    ///
+    /// @param assembly the current completed frame assembly
+    /// @return an independent compatible reference map, or `null`
+    private @Nullable SegmentIdMap referenceSegmentIdMap(FrameAssembly assembly) {
+        FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
+        FrameHeader frameHeader = nonNullAssembly.frameHeader();
+        FrameHeader.SegmentationInfo segmentation = frameHeader.segmentation();
+        if (!segmentation.enabled() || (segmentation.updateMap() && !segmentation.temporalUpdate())) {
+            return null;
+        }
+
+        int primaryRefFrame = frameHeader.primaryRefFrame();
+        if (primaryRefFrame < 0 || primaryRefFrame >= 7) {
+            return null;
+        }
+        int primarySlot = frameHeader.referenceFrameIndex(primaryRefFrame);
+        if (primarySlot < 0 || primarySlot >= referenceFrameSyntaxResults.length) {
+            return null;
+        }
+        @Nullable FrameSyntaxDecodeResult referenceResult = referenceFrameSyntaxResults[primarySlot];
+        if (referenceResult == null) {
+            return null;
+        }
+
+        SegmentIdMap referenceMap = referenceResult.segmentIdMap();
+        int width4 = ((frameHeader.frameSize().codedWidth() + 7) >> 3) << 1;
+        int height4 = ((frameHeader.frameSize().height() + 7) >> 3) << 1;
+        return referenceMap.hasDimensions(width4, height4) ? referenceMap : null;
     }
 
     /// Returns the single frame CDF context selected by the reference frame, or `null` when no

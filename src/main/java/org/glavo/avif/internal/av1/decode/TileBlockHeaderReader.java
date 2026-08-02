@@ -137,10 +137,18 @@ public final class TileBlockHeaderReader {
         boolean hasChroma = hasChroma(nonNullPosition, nonNullSize);
         int segmentId = 0;
         boolean segmentPredicted = false;
-        if (segmentation.enabled() && segmentation.updateMap() && segmentation.preskip()) {
-            SegmentReadResult segmentReadResult = readSegmentIdBeforeSkip(nonNullPosition, nonNullNeighborContext);
-            segmentId = segmentReadResult.segmentId();
-            segmentPredicted = segmentReadResult.segmentPredicted();
+        if (segmentation.enabled()) {
+            if (!segmentation.updateMap()) {
+                segmentId = tileContext.referenceSegmentId(nonNullPosition, nonNullSize);
+            } else if (segmentation.preskip()) {
+                SegmentReadResult segmentReadResult = readSegmentIdBeforeSkip(
+                        nonNullPosition,
+                        nonNullSize,
+                        nonNullNeighborContext
+                );
+                segmentId = segmentReadResult.segmentId();
+                segmentPredicted = segmentReadResult.segmentPredicted();
+            }
         }
 
         @Nullable FrameHeader.SegmentData segmentDataBeforeSkip =
@@ -158,7 +166,12 @@ public final class TileBlockHeaderReader {
         }
         FrameHeader.SegmentData segmentData;
         if (segmentation.enabled() && segmentation.updateMap() && !segmentation.preskip()) {
-            SegmentReadResult segmentReadResult = readSegmentIdAfterSkip(nonNullPosition, nonNullNeighborContext, skip);
+            SegmentReadResult segmentReadResult = readSegmentIdAfterSkip(
+                    nonNullPosition,
+                    nonNullSize,
+                    nonNullNeighborContext,
+                    skip
+            );
             segmentId = segmentReadResult.segmentId();
             segmentPredicted = segmentReadResult.segmentPredicted();
             segmentData = segmentation.segment(segmentId);
@@ -1860,21 +1873,26 @@ public final class TileBlockHeaderReader {
     /// Reads a segment identifier from the preskip portion of the block header.
     ///
     /// @param position the local tile-relative block origin
+    /// @param size the current block size
     /// @param neighborContext the mutable neighbor context that supplies syntax contexts
     /// @return the decoded preskip segment identifier
-    private SegmentReadResult readSegmentIdBeforeSkip(BlockPosition position, BlockNeighborContext neighborContext) {
+    private SegmentReadResult readSegmentIdBeforeSkip(
+            BlockPosition position,
+            BlockSize size,
+            BlockNeighborContext neighborContext
+    ) {
         FrameHeader.SegmentationInfo segmentation = tileContext.frameHeader().segmentation();
-        if (!segmentation.enabled() || !segmentation.updateMap()) {
+        if (!segmentation.enabled()) {
             return new SegmentReadResult(false, 0);
+        }
+        if (!segmentation.updateMap()) {
+            return new SegmentReadResult(false, tileContext.referenceSegmentId(position, size));
         }
         BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
         if (segmentation.temporalUpdate()) {
             boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
             if (segmentPredicted) {
-                return new SegmentReadResult(
-                        true,
-                        validSegmentIdOrZero(prediction.predictedSegmentId(), segmentation.lastActiveSegmentId())
-                );
+                return new SegmentReadResult(true, tileContext.referenceSegmentId(position, size));
             }
         }
 
@@ -1885,32 +1903,31 @@ public final class TileBlockHeaderReader {
     /// Reads a segment identifier from the postskip portion of the block header.
     ///
     /// @param position the local tile-relative block origin
+    /// @param size the current block size
     /// @param neighborContext the mutable neighbor context that supplies syntax contexts
     /// @param skip whether the current block already decoded as skipped
     /// @return the decoded postskip segment identifier
     private SegmentReadResult readSegmentIdAfterSkip(
             BlockPosition position,
+            BlockSize size,
             BlockNeighborContext neighborContext,
             boolean skip
     ) {
         FrameHeader.SegmentationInfo segmentation = tileContext.frameHeader().segmentation();
-        if (!segmentation.enabled() || !segmentation.updateMap()) {
+        if (!segmentation.enabled()) {
             return new SegmentReadResult(false, 0);
+        }
+        if (!segmentation.updateMap()) {
+            return new SegmentReadResult(false, tileContext.referenceSegmentId(position, size));
         }
         BlockNeighborContext.SegmentPrediction prediction = neighborContext.currentSegmentPrediction(position);
         if (skip) {
-            return new SegmentReadResult(
-                    false,
-                    validSegmentIdOrZero(prediction.predictedSegmentId(), segmentation.lastActiveSegmentId())
-            );
+            return new SegmentReadResult(false, prediction.predictedSegmentId());
         }
         if (segmentation.temporalUpdate()) {
             boolean segmentPredicted = syntaxReader.readSegmentPredictionFlag(neighborContext.segmentPredictionContext(position));
             if (segmentPredicted) {
-                return new SegmentReadResult(
-                        true,
-                        validSegmentIdOrZero(prediction.predictedSegmentId(), segmentation.lastActiveSegmentId())
-                );
+                return new SegmentReadResult(true, tileContext.referenceSegmentId(position, size));
             }
         }
         int segmentId = decodeSegmentId(prediction, segmentation.lastActiveSegmentId());

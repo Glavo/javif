@@ -32,6 +32,7 @@ import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
@@ -1094,8 +1095,40 @@ public final class FrameReconstructor {
             );
         }
 
+        if (frameHeader.frameSize().codedWidth() == 1058
+                && header.position().x4() == 20
+                && header.position().y4() == 0) {
+            for (TransformResidualUnit unit : residualLayout.lumaUnits()) {
+                System.err.printf(
+                        "TEMP unit pos=%d,%d size=%s type=%s zero=%s eob=%d%n",
+                        unit.position().x4(),
+                        unit.position().y4(),
+                        unit.size(),
+                        unit.transformType(),
+                        unit.allZero(),
+                        unit.endOfBlockIndex()
+                );
+            }
+            System.err.printf(
+                    "TEMP target before residual x88=%d x89=%d residualUnits=%s%n",
+                    lumaPlane.sample(88, 7),
+                    lumaPlane.sample(89, 7),
+                    java.util.Arrays.toString(residualLayout.lumaUnits())
+            );
+        }
+
         if (!lumaResidualsApplied) {
             reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader);
+        }
+
+        if (frameHeader.frameSize().codedWidth() == 1058
+                && header.position().x4() == 20
+                && header.position().y4() == 0) {
+            System.err.printf(
+                    "TEMP target after residual x88=%d x89=%d%n",
+                    lumaPlane.sample(88, 7),
+                    lumaPlane.sample(89, 7)
+            );
         }
 
         if (header.hasChroma() && chromaUPlane != null && chromaVPlane != null) {
@@ -1407,7 +1440,21 @@ public final class FrameReconstructor {
                     referenceSurfaceSnapshots
             );
         } else {
-            if (header.motionMode() == MotionMode.LOCAL_WARPED) {
+            if (usesGlobalWarpedPrediction(header, frameHeader)) {
+                reconstructGlobalWarpedInterPrediction(
+                        lumaPlane,
+                        chromaUPlane,
+                        chromaVPlane,
+                        header,
+                        transformLayout,
+                        pixelFormat,
+                        frameHeader,
+                        frameLumaWidth,
+                        frameLumaHeight,
+                        referenceSurfaceSnapshots,
+                        decodedBlockMap
+                );
+            } else if (header.motionMode() == MotionMode.LOCAL_WARPED) {
                 reconstructLocalWarpedInterPrediction(
                         lumaPlane,
                         chromaUPlane,
@@ -2369,6 +2416,89 @@ public final class FrameReconstructor {
         );
     }
 
+    /// Returns whether a single-reference block uses frame-level affine global warped prediction.
+    ///
+    /// @param header the decoded block header
+    /// @param frameHeader the frame header that owns the block
+    /// @return whether the block uses a non-translation global warp
+    private static boolean usesGlobalWarpedPrediction(
+            TileBlockHeaderReader.BlockHeader header,
+            FrameHeader frameHeader
+    ) {
+        if (header.singleInterMode() != SingleInterPredictionMode.GLOBALMV
+                || frameHeader.forceIntegerMotionVectors()
+                || Math.min(header.size().widthPixels(), header.size().heightPixels()) < 8) {
+            return false;
+        }
+        FrameHeader.GlobalMotionType type = frameHeader.globalMotion(header.referenceFrame0()).type();
+        return type == FrameHeader.GlobalMotionType.ROTATION_ZOOM || type == FrameHeader.GlobalMotionType.AFFINE;
+    }
+
+    /// Reconstructs a single-reference inter predictor using frame-level affine global motion.
+    ///
+    /// Scaled references cannot use warped prediction and fall back to the block-center global
+    /// motion vector already stored in the decoded block header.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the inter state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that owns the block
+    /// @param frameLumaWidth the current coded-frame luma width
+    /// @param frameLumaHeight the current coded-frame luma height
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param decodedBlockMap the decoded leaf map used by the translation fallback
+    private static void reconstructGlobalWarpedInterPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            AvifPixelFormat pixelFormat,
+            FrameHeader frameHeader,
+            int frameLumaWidth,
+            int frameLumaHeight,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            DecodedBlockMap decodedBlockMap
+    ) {
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
+                referenceSurfaceSnapshots,
+                frameHeader,
+                pixelFormat,
+                lumaPlane.bitDepth(),
+                header.referenceFrame0()
+        );
+        WarpedMotion.Model model = WarpedMotion.fromGlobalMotion(frameHeader.globalMotion(header.referenceFrame0()));
+        if (referenceScale(frameLumaWidth, frameLumaHeight, referenceSurfaceSnapshot).scaled() || !model.affine()) {
+            reconstructSingleReferenceInterPrediction(
+                    lumaPlane,
+                    chromaUPlane,
+                    chromaVPlane,
+                    header,
+                    transformLayout,
+                    pixelFormat,
+                    frameHeader,
+                    frameLumaWidth,
+                    frameLumaHeight,
+                    referenceSurfaceSnapshots,
+                    decodedBlockMap
+            );
+            return;
+        }
+        reconstructWarpedInterPrediction(
+                lumaPlane,
+                chromaUPlane,
+                chromaVPlane,
+                header,
+                transformLayout,
+                pixelFormat,
+                referenceSurfaceSnapshot.decodedPlanes(),
+                model
+        );
+    }
+
     /// Reconstructs a single-reference inter predictor using an affine local warped motion model.
     ///
     /// @param lumaPlane the mutable luma destination plane
@@ -2421,6 +2551,38 @@ public final class FrameReconstructor {
             );
             return;
         }
+        reconstructWarpedInterPrediction(
+                lumaPlane,
+                chromaUPlane,
+                chromaVPlane,
+                header,
+                transformLayout,
+                pixelFormat,
+                referencePlanes,
+                model
+        );
+    }
+
+    /// Applies one normalized affine model to all visible planes of a single-reference block.
+    ///
+    /// @param lumaPlane the mutable luma destination plane
+    /// @param chromaUPlane the mutable chroma U destination plane, or `null`
+    /// @param chromaVPlane the mutable chroma V destination plane, or `null`
+    /// @param header the decoded block header that owns the inter state
+    /// @param transformLayout the decoded transform layout for the block
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param referencePlanes the decoded planes of the selected reference frame
+    /// @param model the normalized affine warped-motion model
+    private static void reconstructWarpedInterPrediction(
+            MutablePlaneBuffer lumaPlane,
+            @Nullable MutablePlaneBuffer chromaUPlane,
+            @Nullable MutablePlaneBuffer chromaVPlane,
+            TileBlockHeaderReader.BlockHeader header,
+            TransformLayout transformLayout,
+            AvifPixelFormat pixelFormat,
+            DecodedPlanes referencePlanes,
+            WarpedMotion.Model model
+    ) {
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
@@ -3330,7 +3492,7 @@ public final class FrameReconstructor {
         ReferenceScale nonNullReferenceScale1 = Objects.requireNonNull(referenceScale1, "referenceScale1");
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                int sample0 = sampleInterPlaneValue(
+                int sample0 = sampleCompoundInterPlaneValue(
                         referencePlane0,
                         destinationX,
                         destinationY,
@@ -3347,7 +3509,7 @@ public final class FrameReconstructor {
                         verticalFilterMode,
                         destinationPlane.maxSampleValue()
                 );
-                int sample1 = sampleInterPlaneValue(
+                int sample1 = sampleCompoundInterPlaneValue(
                         referencePlane1,
                         destinationX,
                         destinationY,
@@ -3364,9 +3526,11 @@ public final class FrameReconstructor {
                         verticalFilterMode,
                         destinationPlane.maxSampleValue()
                 );
+                int postRoundBits = interPredictionIntermediateBits(destinationPlane.maxSampleValue());
                 int sample = switch (nonNullCompoundPredictionType) {
-                    case AVERAGE -> averageCompoundSamples(sample0, sample1);
-                    case WEIGHTED_AVERAGE -> weightedAverageCompoundSamples(sample0, sample1, jointWeight);
+                    case AVERAGE -> averageCompoundPredictions(sample0, sample1, postRoundBits);
+                    case WEIGHTED_AVERAGE ->
+                            weightedAverageCompoundPredictions(sample0, sample1, jointWeight, postRoundBits);
                     case WEDGE -> {
                         int mask = InterIntraMasks.compoundWedgeMaskValue(
                                 blockSize,
@@ -3377,13 +3541,14 @@ public final class FrameReconstructor {
                                 subsamplingX,
                                 subsamplingY
                         );
-                        yield blendMaskedCompoundSamples(sample0, sample1, mask);
+                        yield blendMaskedCompoundPredictions(sample0, sample1, mask, postRoundBits);
                     }
                     case SEGMENT -> {
                         int mask = segmentCompoundMaskValue(
                                 sample0,
                                 sample1,
                                 bitDepth,
+                                postRoundBits,
                                 maskSign,
                                 x,
                                 y,
@@ -3393,12 +3558,243 @@ public final class FrameReconstructor {
                                 segmentMaskWidth,
                                 segmentMaskHeight
                         );
-                        yield blendMaskedCompoundSamples(sample0, sample1, mask);
+                        yield blendMaskedCompoundPredictions(sample0, sample1, mask, postRoundBits);
                     }
                 };
-                destinationPlane.setSample(destinationX + x, destinationY + y, sample);
+                destinationPlane.setSample(
+                        destinationX + x,
+                        destinationY + y,
+                        clamp(sample, 0, destinationPlane.maxSampleValue())
+                );
             }
         }
+    }
+
+    /// Returns one compound inter predictor while retaining the AV1 post-filter fractional bits.
+    ///
+    /// Unlike [#sampleInterPlaneValue(DecodedPlane, int, int, int, int, int, int, int, int,
+    /// ReferenceScale, int, int, FrameHeader.InterpolationFilter,
+    /// FrameHeader.InterpolationFilter, int)], this method neither rounds to sample precision nor
+    /// clips the predictor. Compound blending performs both operations after combining the two
+    /// predictors.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param destinationX the zero-based horizontal prediction origin
+    /// @param destinationY the zero-based vertical prediction origin
+    /// @param sampleX the block-local horizontal sample offset
+    /// @param sampleY the block-local vertical sample offset
+    /// @param sourceOffsetEighthPelX the signed horizontal motion-vector component in luma eighth-pel units
+    /// @param sourceOffsetEighthPelY the signed vertical motion-vector component in luma eighth-pel units
+    /// @param denominatorX the plane-local horizontal denominator expressed in luma eighth-pel units
+    /// @param denominatorY the plane-local vertical denominator expressed in luma eighth-pel units
+    /// @param referenceScale the scale factors derived from the current and reference luma dimensions
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter mode
+    /// @param verticalFilterMode the effective vertical interpolation filter mode
+    /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
+    /// @return one signed predictor with the AV1 compound post-filter fractional bits retained
+    private static int sampleCompoundInterPlaneValue(
+            DecodedPlane referencePlane,
+            int destinationX,
+            int destinationY,
+            int sampleX,
+            int sampleY,
+            int sourceOffsetEighthPelX,
+            int sourceOffsetEighthPelY,
+            int denominatorX,
+            int denominatorY,
+            ReferenceScale referenceScale,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
+    ) {
+        ReferenceScale nonNullReferenceScale = Objects.requireNonNull(referenceScale, "referenceScale");
+        int sourceNumeratorX;
+        int sourceNumeratorY;
+        int interpolationDenominatorX;
+        int interpolationDenominatorY;
+        if (nonNullReferenceScale.scaled()) {
+            sourceNumeratorX = scaledReferenceSourceNumerator(
+                    destinationX,
+                    sampleX,
+                    sourceOffsetEighthPelX,
+                    denominatorX,
+                    nonNullReferenceScale.horizontalFactor()
+            );
+            sourceNumeratorY = scaledReferenceSourceNumerator(
+                    destinationY,
+                    sampleY,
+                    sourceOffsetEighthPelY,
+                    denominatorY,
+                    nonNullReferenceScale.verticalFactor()
+            );
+            interpolationDenominatorX = 1 << SCALED_INTER_SUBPEL_BITS;
+            interpolationDenominatorY = 1 << SCALED_INTER_SUBPEL_BITS;
+        } else {
+            sourceNumeratorX = (destinationX + sampleX) * denominatorX + sourceOffsetEighthPelX;
+            sourceNumeratorY = (destinationY + sampleY) * denominatorY + sourceOffsetEighthPelY;
+            interpolationDenominatorX = denominatorX;
+            interpolationDenominatorY = denominatorY;
+        }
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        if (Math.floorMod(sourceNumeratorX, interpolationDenominatorX) == 0
+                && Math.floorMod(sourceNumeratorY, interpolationDenominatorY) == 0) {
+            int sample = referencePlane.sample(
+                    clamp(Math.floorDiv(sourceNumeratorX, interpolationDenominatorX), 0, referencePlane.width() - 1),
+                    clamp(Math.floorDiv(sourceNumeratorY, interpolationDenominatorY), 0, referencePlane.height() - 1)
+            );
+            return sample << postRoundBits;
+        }
+        return filteredCompoundInterpolateAt(
+                referencePlane,
+                sourceNumeratorX,
+                sourceNumeratorY,
+                interpolationDenominatorX,
+                interpolationDenominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                horizontalFilterMode,
+                verticalFilterMode,
+                maximumSampleValue
+        );
+    }
+
+    /// Returns one fixed-filter compound predictor before the final compound blend and post-round.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
+    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param denominatorY the vertical interpolation denominator
+    /// @param widthForFilterSelection the sampled block width in pixels
+    /// @param heightForFilterSelection the sampled block height in pixels
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
+    /// @return one signed predictor retaining the AV1 compound post-filter fractional bits
+    private static int filteredCompoundInterpolateAt(
+            DecodedPlane referencePlane,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
+    ) {
+        if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            return bilinearCompoundInterpolateAt(
+                    referencePlane,
+                    sourceNumeratorX,
+                    sourceNumeratorY,
+                    denominatorX,
+                    denominatorY,
+                    maximumSampleValue
+            );
+        }
+        if (!isConcreteInterpolationFilter(horizontalFilterMode)
+                || !isConcreteInterpolationFilter(verticalFilterMode)
+                || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            throw new IllegalStateException(
+                    "Inter reconstruction requires resolved matching BILINEAR or EIGHT_TAP_* filters"
+            );
+        }
+
+        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
+        int phaseY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
+        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
+        int phaseX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        int firstPassRound = INTER_FILTER_BITS - postRoundBits;
+        @Nullable int[] horizontalFilter =
+                phaseX == 0 ? null : selectSubpelFilter(horizontalFilterMode, phaseX, widthForFilterSelection);
+        @Nullable int[] verticalFilter =
+                phaseY == 0 ? null : selectSubpelFilter(verticalFilterMode, phaseY, heightForFilterSelection);
+        if (verticalFilter == null) {
+            return roundShift(
+                    horizontalInterpolate(
+                            referencePlane,
+                            sourceX0,
+                            sourceY0,
+                            Objects.requireNonNull(horizontalFilter, "horizontalFilter")
+                    ),
+                    firstPassRound
+            );
+        }
+        if (horizontalFilter == null) {
+            return roundShift(
+                    verticalInterpolate(
+                            referencePlane,
+                            sourceX0,
+                            sourceY0,
+                            verticalFilter
+                    ),
+                    firstPassRound
+            );
+        }
+
+        int[] horizontallyFilteredRows = new int[INTER_FILTER_TAP_COUNT];
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            int sourceY = clamp(sourceY0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.height() - 1);
+            horizontallyFilteredRows[tapIndex] = roundShift(
+                    horizontalInterpolate(referencePlane, sourceX0, sourceY, horizontalFilter),
+                    firstPassRound
+            );
+        }
+        long combined = 0;
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            combined += (long) verticalFilter[tapIndex] * horizontallyFilteredRows[tapIndex];
+        }
+        return roundShift(combined, INTER_FILTER_BITS);
+    }
+
+    /// Returns one bilinear compound predictor before the final compound blend and post-round.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
+    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param denominatorY the vertical interpolation denominator
+    /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
+    /// @return one signed predictor retaining the AV1 compound post-filter fractional bits
+    private static int bilinearCompoundInterpolateAt(
+            DecodedPlane referencePlane,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int maximumSampleValue
+    ) {
+        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
+        int fractionY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
+        int clampedSourceY0 = clamp(sourceY0, 0, referencePlane.height() - 1);
+        int clampedSourceY1 = clamp(sourceY0 + 1, 0, referencePlane.height() - 1);
+        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
+        int fractionX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
+        int clampedSourceX0 = clamp(sourceX0, 0, referencePlane.width() - 1);
+        int clampedSourceX1 = clamp(sourceX0 + 1, 0, referencePlane.width() - 1);
+        int topLeft = referencePlane.sample(clampedSourceX0, clampedSourceY0);
+        int topRight = referencePlane.sample(clampedSourceX1, clampedSourceY0);
+        int bottomLeft = referencePlane.sample(clampedSourceX0, clampedSourceY1);
+        int bottomRight = referencePlane.sample(clampedSourceX1, clampedSourceY1);
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        int firstPassRound = 4 - postRoundBits;
+        if (fractionY == 0) {
+            return roundShift(bilinearFilterSum(topLeft, topRight, fractionX), firstPassRound);
+        }
+        if (fractionX == 0) {
+            return roundShift(bilinearFilterSum(topLeft, bottomLeft, fractionY), firstPassRound);
+        }
+        int top = roundShift(bilinearFilterSum(topLeft, topRight, fractionX), firstPassRound);
+        int bottom = roundShift(bilinearFilterSum(bottomLeft, bottomRight, fractionX), firstPassRound);
+        return roundShift(bilinearFilterSum(top, bottom, fractionY), 4);
     }
 
     /// Returns one inter-predicted plane sample at a block-local destination offset.
@@ -3880,23 +4276,38 @@ public final class FrameReconstructor {
         return 16 * first + phase * (second - first);
     }
 
-    /// Returns one simple average-compound sample.
+    /// Returns one simple average-compound sample from two higher-precision predictors.
     ///
-    /// @param primarySample the primary predicted sample
-    /// @param secondarySample the secondary predicted sample
+    /// @param primaryPrediction the primary higher-precision predictor
+    /// @param secondaryPrediction the secondary higher-precision predictor
+    /// @param postRoundBits the fractional predictor bits discarded after blending
     /// @return the averaged compound sample
-    private static int averageCompoundSamples(int primarySample, int secondarySample) {
-        return (primarySample + secondarySample + 1) >> 1;
+    private static int averageCompoundPredictions(
+            int primaryPrediction,
+            int secondaryPrediction,
+            int postRoundBits
+    ) {
+        return roundShift((long) primaryPrediction + secondaryPrediction, 1 + postRoundBits);
     }
 
-    /// Returns one weighted average-compound sample.
+    /// Returns one weighted average-compound sample from two higher-precision predictors.
     ///
-    /// @param primarySample the primary predicted sample
-    /// @param secondarySample the secondary predicted sample
+    /// @param primaryPrediction the primary higher-precision predictor
+    /// @param secondaryPrediction the secondary higher-precision predictor
     /// @param primaryWeight the primary predictor weight in sixteenths
+    /// @param postRoundBits the fractional predictor bits discarded after blending
     /// @return one weighted average-compound sample
-    private static int weightedAverageCompoundSamples(int primarySample, int secondarySample, int primaryWeight) {
-        return (primarySample * primaryWeight + secondarySample * (16 - primaryWeight) + 8) >> 4;
+    private static int weightedAverageCompoundPredictions(
+            int primaryPrediction,
+            int secondaryPrediction,
+            int primaryWeight,
+            int postRoundBits
+    ) {
+        return roundShift(
+                (long) primaryPrediction * primaryWeight
+                        + (long) secondaryPrediction * (16 - primaryWeight),
+                4 + postRoundBits
+        );
     }
 
     /// Returns one masked compound sample using the supplied secondary-source weight.
@@ -3909,11 +4320,32 @@ public final class FrameReconstructor {
         return (primarySample * (64 - secondaryWeight) + secondarySample * secondaryWeight + 32) >> 6;
     }
 
+    /// Returns one masked compound sample from two higher-precision predictors.
+    ///
+    /// @param primaryPrediction the primary higher-precision predictor
+    /// @param secondaryPrediction the secondary higher-precision predictor
+    /// @param secondaryWeight the secondary predictor weight in `[0, 64]`
+    /// @param postRoundBits the fractional predictor bits discarded after blending
+    /// @return one masked compound sample
+    private static int blendMaskedCompoundPredictions(
+            int primaryPrediction,
+            int secondaryPrediction,
+            int secondaryWeight,
+            int postRoundBits
+    ) {
+        return roundShift(
+                (long) primaryPrediction * (64 - secondaryWeight)
+                        + (long) secondaryPrediction * secondaryWeight,
+                6 + postRoundBits
+        );
+    }
+
     /// Returns one segment-compound mask value as the effective secondary-source blend weight.
     ///
-    /// @param primarySample the primary predicted sample
-    /// @param secondarySample the secondary predicted sample
+    /// @param primarySample the primary higher-precision predictor
+    /// @param secondarySample the secondary higher-precision predictor
     /// @param bitDepth the decoded sample bit depth
+    /// @param postRoundBits the fractional predictor bits discarded after blending
     /// @param maskSign whether the decoded segment mask uses inverted source order
     /// @param x the plane-local sample X coordinate inside the block
     /// @param y the plane-local sample Y coordinate inside the block
@@ -3927,6 +4359,7 @@ public final class FrameReconstructor {
             int primarySample,
             int secondarySample,
             int bitDepth,
+            int postRoundBits,
             boolean maskSign,
             int x,
             int y,
@@ -3938,7 +4371,7 @@ public final class FrameReconstructor {
     ) {
         int mask;
         if (subsamplingX == 0 && subsamplingY == 0) {
-            mask = lumaSegmentCompoundMaskValue(primarySample, secondarySample, bitDepth);
+            mask = lumaSegmentCompoundMaskValue(primarySample, secondarySample, bitDepth, postRoundBits);
             if (segmentMask != null && x < segmentMaskWidth && y < segmentMaskHeight) {
                 segmentMask[y * segmentMaskWidth + x] = mask;
             }
@@ -3962,15 +4395,22 @@ public final class FrameReconstructor {
 
     /// Returns one luma-domain segment-compound mask value.
     ///
-    /// @param primarySample the primary predicted sample
-    /// @param secondarySample the secondary predicted sample
+    /// @param primarySample the primary higher-precision predictor
+    /// @param secondarySample the secondary higher-precision predictor
     /// @param bitDepth the decoded sample bit depth
+    /// @param postRoundBits the fractional predictor bits retained by each input
     /// @return one luma-domain segment-compound mask value
-    private static int lumaSegmentCompoundMaskValue(int primarySample, int secondarySample, int bitDepth) {
-        int intermediateBits = 4;
-        int maskShift = bitDepth + intermediateBits - 4;
-        int maskRound = 1 << (maskShift - 5);
-        int scaledDifference = ((Math.abs(primarySample - secondarySample) << intermediateBits) + maskRound) >> maskShift;
+    private static int lumaSegmentCompoundMaskValue(
+            int primarySample,
+            int secondarySample,
+            int bitDepth,
+            int postRoundBits
+    ) {
+        int roundedDifference = roundShift(
+                Math.abs((long) primarySample - secondarySample),
+                postRoundBits + bitDepth - 8
+        );
+        int scaledDifference = roundedDifference >> 4;
         return Math.min(38 + scaledDifference, 64);
     }
 
@@ -4434,10 +4874,28 @@ public final class FrameReconstructor {
                 residualUnit.transformType(),
                 lumaPlane.bitDepth()
         );
+        int residualX = residualUnit.position().x4() << 2;
+        int residualY = residualUnit.position().y4() << 2;
+        if (residualUnit.position().x4() == 22 && residualUnit.position().y4() == 1) {
+            int localX = 88 - residualX;
+            int localY = 7 - residualY;
+            int index = localY * residualUnit.size().widthPixels() + localX;
+            System.err.printf(
+                    "TEMP residual pos=%s size=%s type=%s eob=%d coeff=%s dequant=%s target=%d,%d%n",
+                    residualUnit.position(),
+                    residualUnit.size(),
+                    residualUnit.transformType(),
+                    residualUnit.endOfBlockIndex(),
+                    java.util.Arrays.toString(residualUnit.coefficients()),
+                    java.util.Arrays.toString(dequantizedCoefficients),
+                    residualSamples[index],
+                    residualSamples[index + 1]
+            );
+        }
         InverseTransformer.addResidualBlock(
                 lumaPlane,
-                residualUnit.position().x4() << 2,
-                residualUnit.position().y4() << 2,
+                residualX,
+                residualY,
                 residualUnit.size(),
                 residualUnit.visibleWidthPixels(),
                 residualUnit.visibleHeightPixels(),

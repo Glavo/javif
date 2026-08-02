@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.decode;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockPosition;
+import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
@@ -56,6 +57,12 @@ public final class TileDecodeContext {
 
     /// The immutable reference-frame motion-vector projection shared by the frame's tiles.
     private final ReferenceMotionVectorProjection referenceMotionVectorProjection;
+
+    /// The mutable current-frame segment-id map shared by the frame's tiles.
+    private final SegmentIdMap currentSegmentIdMap;
+
+    /// The immutable primary-reference segment-id map, or `null` when none is compatible.
+    private final @Nullable SegmentIdMap referenceSegmentIdMap;
 
     /// The mutable tile-local block syntax state shared across superblocks.
     private final BlockSyntaxState blockSyntaxState;
@@ -115,6 +122,8 @@ public final class TileDecodeContext {
     /// @param cdfContext the tile-local mutable CDF context
     /// @param decodedTemporalMotionField the tile-local temporal motion field produced while decoding the current frame
     /// @param referenceMotionVectorProjection the immutable reference-frame motion-vector projection
+    /// @param currentSegmentIdMap the mutable current-frame segment-id map
+    /// @param referenceSegmentIdMap the immutable primary-reference segment-id map, or `null`
     /// @param blockSyntaxState the mutable tile-local block syntax state shared across superblocks
     /// @param restorationUnitMap the tile-local loop-restoration units decoded from this tile
     /// @param tileIndex the zero-based tile index within the frame
@@ -140,6 +149,8 @@ public final class TileDecodeContext {
             CdfContext cdfContext,
             TemporalMotionField decodedTemporalMotionField,
             ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            SegmentIdMap currentSegmentIdMap,
+            @Nullable SegmentIdMap referenceSegmentIdMap,
             BlockSyntaxState blockSyntaxState,
             RestorationUnitMap restorationUnitMap,
             int tileIndex,
@@ -168,6 +179,8 @@ public final class TileDecodeContext {
                 referenceMotionVectorProjection,
                 "referenceMotionVectorProjection"
         );
+        this.currentSegmentIdMap = Objects.requireNonNull(currentSegmentIdMap, "currentSegmentIdMap");
+        this.referenceSegmentIdMap = referenceSegmentIdMap;
         this.blockSyntaxState = Objects.requireNonNull(blockSyntaxState, "blockSyntaxState");
         this.restorationUnitMap = Objects.requireNonNull(restorationUnitMap, "restorationUnitMap");
         this.tileIndex = tileIndex;
@@ -212,7 +225,9 @@ public final class TileDecodeContext {
                 nonNullAssembly,
                 tileIndex,
                 baseCdfContext,
-                ReferenceMotionVectorProjection.create(nonNullAssembly, new FrameSyntaxDecodeResult[8])
+                ReferenceMotionVectorProjection.create(nonNullAssembly, new FrameSyntaxDecodeResult[8]),
+                SegmentIdMap.create(nonNullAssembly),
+                null
         );
     }
 
@@ -224,12 +239,16 @@ public final class TileDecodeContext {
     /// @param tileIndex the zero-based tile index within the frame
     /// @param baseCdfContext the base CDF context template to copy for this tile
     /// @param referenceMotionVectorProjection the immutable current-frame temporal projection
+    /// @param currentSegmentIdMap the mutable current-frame segment-id map shared by all tiles
+    /// @param referenceSegmentIdMap the immutable primary-reference segment-id map, or `null`
     /// @return tile-local decode state for the selected tile
     static TileDecodeContext create(
             FrameAssembly assembly,
             int tileIndex,
             CdfContext baseCdfContext,
-            ReferenceMotionVectorProjection referenceMotionVectorProjection
+            ReferenceMotionVectorProjection referenceMotionVectorProjection,
+            SegmentIdMap currentSegmentIdMap,
+            @Nullable SegmentIdMap referenceSegmentIdMap
     ) {
         FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
         CdfContext copiedCdfContext = Objects.requireNonNull(baseCdfContext, "baseCdfContext").copy();
@@ -237,6 +256,7 @@ public final class TileDecodeContext {
                 referenceMotionVectorProjection,
                 "referenceMotionVectorProjection"
         );
+        SegmentIdMap nonNullCurrentSegmentIdMap = Objects.requireNonNull(currentSegmentIdMap, "currentSegmentIdMap");
         TileBitstream tileBitstream = nonNullAssembly.tileBitstream(tileIndex);
         SequenceHeader sequenceHeader = nonNullAssembly.sequenceHeader();
         FrameHeader frameHeader = nonNullAssembly.frameHeader();
@@ -277,6 +297,8 @@ public final class TileDecodeContext {
                 copiedCdfContext,
                 new TemporalMotionField(width8, height8),
                 nonNullReferenceMotionVectorProjection,
+                nonNullCurrentSegmentIdMap,
+                referenceSegmentIdMap,
                 new BlockSyntaxState(frameHeader.quantization().baseQIndex()),
                 RestorationUnitMap.createEmpty(nonNullAssembly),
                 tileIndex,
@@ -358,6 +380,34 @@ public final class TileDecodeContext {
     /// @return the immutable reference-frame motion-vector projection for the current frame
     ReferenceMotionVectorProjection referenceMotionVectorProjection() {
         return referenceMotionVectorProjection;
+    }
+
+    /// Returns the mutable current-frame segment-id map shared by all tiles.
+    ///
+    /// @return the current-frame segment-id map
+    SegmentIdMap currentSegmentIdMap() {
+        return currentSegmentIdMap;
+    }
+
+    /// Returns the minimum primary-reference segment identifier covered by one local block.
+    ///
+    /// A missing or dimension-incompatible primary-reference map is represented as an all-zero map.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the block size whose previous-frame footprint is queried
+    /// @return the minimum primary-reference segment identifier, or zero when no map is available
+    int referenceSegmentId(BlockPosition position, BlockSize size) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        if (referenceSegmentIdMap == null) {
+            return 0;
+        }
+        return referenceSegmentIdMap.minimum(
+                (startX >> 2) + nonNullPosition.x4(),
+                (startY >> 2) + nonNullPosition.y4(),
+                nonNullSize.width4(),
+                nonNullSize.height4()
+        );
     }
 
     /// Returns the mutable tile-local block syntax state shared across superblocks.

@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
@@ -333,6 +334,23 @@ final class WarpedMotion {
                 matrix
         )) {
             return new Model(false, matrix, 0, 0, 0, 0);
+        }
+        return normalizeShear(matrix);
+    }
+
+    /// Creates a normalized affine model from decoded frame-level global-motion parameters.
+    ///
+    /// @param parameters the decoded rotation-zoom or affine global-motion parameters
+    /// @return the normalized global warped-motion model
+    static Model fromGlobalMotion(FrameHeader.GlobalMotionParams parameters) {
+        FrameHeader.GlobalMotionParams nonNullParameters = Objects.requireNonNull(parameters, "parameters");
+        if (nonNullParameters.type() != FrameHeader.GlobalMotionType.ROTATION_ZOOM
+                && nonNullParameters.type() != FrameHeader.GlobalMotionType.AFFINE) {
+            throw new IllegalArgumentException("Global motion is not affine: " + nonNullParameters.type());
+        }
+        int[] matrix = new int[6];
+        for (int index = 0; index < matrix.length; index++) {
+            matrix[index] = nonNullParameters.matrix(index);
         }
         return normalizeShear(matrix);
     }
