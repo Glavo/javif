@@ -500,17 +500,17 @@ final class LibavifFFmpegAvifReferenceTest {
         String resourceName = reference.resourceName();
         ArgbImage rawExpected = FFmpegAvifReferenceDecoder.decodeFirstFrameArgb(resourceName);
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
+            ArgbImage transformedExpected =
+                    rawExpected.transformed(reader.info().rotationCode(), reader.info().mirrorAxis());
             boolean dimensionsComparable = !hasDerivedFFmpegDimensions(resourceName);
             if (dimensionsComparable) {
-                assertEquals(rawExpected.width(), reader.info().width());
-                assertEquals(rawExpected.height(), reader.info().height());
+                assertEquals(transformedExpected.width(), reader.info().width());
+                assertEquals(transformedExpected.height(), reader.info().height());
             }
             assertImageInfoMatchesFFmpegMetadata(reader.info(), rawExpected);
 
             AvifFrame actual = reader.readFrame();
             assertNotNull(actual);
-            ArgbImage transformedExpected =
-                    rawExpected.transformed(reader.info().rotationCode(), reader.info().mirrorAxis());
             assertFrameMetadataMatchesFFmpegMetadata(actual, transformedExpected);
             if (dimensionsComparable) {
                 assertEquals(transformedExpected.width(), actual.width());

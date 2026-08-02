@@ -170,10 +170,11 @@ public final class AvifContainerParser {
         );
         MetadataPayloads metadata = collectMetadataPayloads(primaryItem);
         int[] transformParams = extractTransformParams(primaryItem, ispe.width, ispe.height);
+        DisplaySize displaySize = transformedDisplaySize(ispe.width, ispe.height, transformParams);
         GainMapPayloads gainMapPayloads = gainMapPayloads(primaryItem.id);
         AvifImageInfo info = new AvifImageInfo(
-                ispe.width,
-                ispe.height,
+                displaySize.width(),
+                displaySize.height(),
                 sampleTransform != null
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(av1Config.bitDepth()),
@@ -241,11 +242,16 @@ public final class AvifContainerParser {
         );
         MetadataPayloads metadata = collectMetadataPayloads(gridItem);
         int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
+        DisplaySize displaySize = transformedDisplaySize(
+                colorGrid.outputWidth,
+                colorGrid.outputHeight,
+                transforms
+        );
         GainMapPayloads gainMapPayloads = gainMapPayloads(gridItem.id);
 
         AvifImageInfo info = new AvifImageInfo(
-                colorGrid.outputWidth,
-                colorGrid.outputHeight,
+                displaySize.width(),
+                displaySize.height(),
                 sampleTransform != null
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(colorGrid.representativeAv1C.bitDepth()),
@@ -1234,6 +1240,21 @@ public final class AvifContainerParser {
         }
 
         return new int[]{clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis};
+    }
+
+    /// Returns the display dimensions after applying clean-aperture cropping and rotation.
+    ///
+    /// @param imageWidth the image width before item transforms
+    /// @param imageHeight the image height before item transforms
+    /// @param transformParams the normalized transform parameters returned by [#extractTransformParams(Item, int, int)]
+    /// @return the transformed display dimensions
+    private static DisplaySize transformedDisplaySize(int imageWidth, int imageHeight, int[] transformParams) {
+        int width = transformParams[2] > 0 ? transformParams[2] : imageWidth;
+        int height = transformParams[3] > 0 ? transformParams[3] : imageHeight;
+        int rotationCode = transformParams[4];
+        return rotationCode == 1 || rotationCode == 3
+                ? new DisplaySize(height, width)
+                : new DisplaySize(width, height);
     }
 
     /// Converts one clean-aperture center offset to an integer crop origin.
@@ -3854,6 +3875,14 @@ public final class AvifContainerParser {
             this.offset = offset;
             this.length = length;
         }
+    }
+
+    /// Display dimensions after applying AVIF item transforms.
+    ///
+    /// @param width the transformed display width
+    /// @param height the transformed display height
+    @NotNullByDefault
+    private record DisplaySize(int width, int height) {
     }
 
     /// One full-box header.

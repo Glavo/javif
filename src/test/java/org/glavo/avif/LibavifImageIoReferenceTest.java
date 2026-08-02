@@ -88,7 +88,7 @@ final class LibavifImageIoReferenceTest {
             new ImageResource("libavif-test-data/weld_16bit.png", 1024, 684, false),
     };
 
-    /// Source-image to encoded-AVIF dimension relationships documented by libavif test data.
+    /// Source-image to AVIF display-dimension relationships documented by libavif test data.
     private static final SourceAvifPair @Unmodifiable [] SOURCE_AVIF_PAIRS = new SourceAvifPair[]{
             new SourceAvifPair("libavif-test-data/abc.png", "libavif-test-data/abc_color_irot_alpha_irot.avif"),
             new SourceAvifPair("libavif-test-data/abc.png", "libavif-test-data/abc_color_irot_alpha_NOirot.avif"),
@@ -226,11 +226,11 @@ final class LibavifImageIoReferenceTest {
                 .map(resource -> DynamicTest.dynamicTest(resource.resourceName(), () -> assertImageResource(resource)));
     }
 
-    /// Verifies dimensions shared by documented source images and encoded AVIF fixtures.
+    /// Verifies AVIF display dimensions derived from documented source images and item transforms.
     ///
     /// @return the dynamic source relationship tests
     @TestFactory
-    Stream<DynamicTest> imageIoSourceDimensionsMatchEncodedAvifMetadata() {
+    Stream<DynamicTest> imageIoSourceDimensionsMatchAvifDisplayMetadata() {
         return Arrays.stream(SOURCE_AVIF_PAIRS)
                 .map(pair -> DynamicTest.dynamicTest(pair.avifResource(), () -> assertSourceAvifPair(pair)));
     }
@@ -366,8 +366,8 @@ final class LibavifImageIoReferenceTest {
     void clopIrotImorFixtureIgnoresFakeTransformsAndDecodesGradient() throws IOException {
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes("libavif-test-data/clop_irot_imor.avif"))) {
             AvifImageInfo info = reader.info();
-            assertEquals(12, info.width());
-            assertEquals(34, info.height());
+            assertEquals(34, info.width());
+            assertEquals(12, info.height());
             assertEquals(1, info.rotationCode());
             assertEquals(-1, info.mirrorAxis());
             AvifImageTransformInfo transformInfo = info.transformInfo();
@@ -481,8 +481,19 @@ final class LibavifImageIoReferenceTest {
         BufferedImage source = TestResources.readImage(pair.sourceResource());
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(pair.avifResource()))) {
             AvifImageInfo info = reader.info();
-            assertEquals(source.getWidth(), info.width());
-            assertEquals(source.getHeight(), info.height());
+            int expectedWidth = info.hasCleanApertureCrop()
+                    ? info.cleanApertureCropWidth()
+                    : source.getWidth();
+            int expectedHeight = info.hasCleanApertureCrop()
+                    ? info.cleanApertureCropHeight()
+                    : source.getHeight();
+            if (info.rotationCode() == 1 || info.rotationCode() == 3) {
+                int temporary = expectedWidth;
+                expectedWidth = expectedHeight;
+                expectedHeight = temporary;
+            }
+            assertEquals(expectedWidth, info.width());
+            assertEquals(expectedHeight, info.height());
         }
     }
 

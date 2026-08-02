@@ -45,13 +45,13 @@ final class LibavifTestDataCorpusTest {
 
     /// The expected behavior for every AVIF fixture copied from libavif's test data.
     private static final CorpusCase @Unmodifiable [] CASES = new CorpusCase[]{
-            decode("libavif-test-data/abc_color_irot_alpha_NOirot.avif", 512, 256, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/abc_color_irot_alpha_irot.avif", 512, 256, 8, AvifPixelFormat.I444, true, false, 1),
+            decode("libavif-test-data/abc_color_irot_alpha_NOirot.avif", 256, 512, 8, AvifPixelFormat.I444, true, false, 1),
+            decode("libavif-test-data/abc_color_irot_alpha_irot.avif", 256, 512, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/alpha_noispe.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif", 64, 64, 8, AvifPixelFormat.I444, false, false, 1),
             decode("libavif-test-data/circle_custom_properties.avif", 100, 60, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/clap_irot_imir_non_essential.avif", 12, 34, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/clop_irot_imor.avif", 12, 34, 10, AvifPixelFormat.I444, true, false, 1),
+            decode("libavif-test-data/clop_irot_imor.avif", 34, 12, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
             decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),

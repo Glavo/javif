@@ -1676,6 +1676,8 @@ final class AvifImageReaderTest {
         byte[] bytes = minimalAvifWithProperty("clap", cleanAperturePropertyPayload(32, 16, -8, -20));
         try (AvifImageReader reader = AvifImageReader.open(bytes)) {
             AvifImageInfo info = reader.info();
+            assertEquals(32, info.width());
+            assertEquals(16, info.height());
             assertTrue(info.hasCleanApertureCrop());
             assertEquals(8, info.cleanApertureCropX());
             assertEquals(4, info.cleanApertureCropY());

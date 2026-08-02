@@ -47,6 +47,10 @@ parity are not project features.
 
 - `processTestResources` downloads pinned libavif and `link-u/avif-sample-images` source archives
   and copies only their test fixtures and attribution files into generated test resources.
+- The opt-in `aomAvifTest` task downloads a pinned `AOMediaCodec/av1-avif` source archive and tests
+  all 172 AVIF files contributed by Apple, Link-U, Microsoft, Netflix, and Xiph. The task extracts
+  only AVIF files and their licenses or construction notes; it does not add the large reference
+  PNG set to the ordinary test classpath.
 - All 156 AVIF/AVIFS files in `link-u/avif-sample-images` are decoded end to end. FFmpeg source-plane
   comparisons cover 153 of them; the remaining three are alpha-bearing sequences for which the
   test helper selects the auxiliary track instead of the color track.
@@ -63,3 +67,9 @@ parity are not project features.
   ```
 
   The second command must continue to show `No dependencies` for `runtimeClasspath`.
+
+- The extended AOMedia corpus gate is:
+
+  ```text
+  ./gradlew -g .gradle-user-home aomAvifTest
+  ```

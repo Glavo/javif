@@ -95,7 +95,9 @@ tasks.register<JavaExec>("run") {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("aom-corpus")
+    }
     systemProperty(
         "org.bytedeco.javacpp.cachedir",
         layout.buildDirectory.dir("javacpp-cache").get().asFile.absolutePath,
@@ -111,6 +113,9 @@ val libavifZip = layout.buildDirectory.file("downloads/libavif-$libavifCommit.zi
 val linkUAvifSampleImagesCommit = "c666a368b73006246694919b5dbcc078317af6cc"
 val linkUAvifSampleImagesZip =
     layout.buildDirectory.file("downloads/avif-sample-images-$linkUAvifSampleImagesCommit.zip")
+val aomAvifCommit = "bf4c18d1f3971069b75e87d6ee469790589f4f09"
+val aomAvifZip = layout.buildDirectory.file("downloads/av1-avif-$aomAvifCommit.zip")
+val aomAvifTestResourcesDirectory = layout.buildDirectory.dir("aom-avif-test-resources")
 
 val downloadLibavif = tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadLibavif") {
     src("https://github.com/AOMediaCodec/libavif/archive/$libavifCommit.zip")
@@ -124,6 +129,85 @@ val downloadLinkUAvifSampleImages =
         dest(linkUAvifSampleImagesZip)
         overwrite(false)
     }
+
+val downloadAomAvifTestFiles =
+    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadAomAvifTestFiles") {
+        src("https://github.com/AOMediaCodec/av1-avif/archive/$aomAvifCommit.zip")
+        dest(aomAvifZip)
+        overwrite(false)
+        onlyIf("the pinned AOMedia archive is not already cached") {
+            !aomAvifZip.get().asFile.isFile
+        }
+    }
+
+val prepareAomAvifTestResources = tasks.register<Sync>("prepareAomAvifTestResources") {
+    dependsOn(downloadAomAvifTestFiles)
+    into(aomAvifTestResourcesDirectory)
+
+    from(zipTree(aomAvifZip)) {
+        includeEmptyDirs = false
+
+        val rootDirName = "av1-avif-$aomAvifCommit"
+        val copiedRootFileNames = setOf("LICENSE")
+        val copiedTestFileNames = setOf("COPYING")
+
+        eachFile {
+            val pathSegments = relativePath.segments.toList()
+            val fileName = pathSegments.lastOrNull()
+            val copiedTestFile = fileName != null && (
+                    fileName in copiedTestFileNames
+                            || fileName.endsWith(".avif")
+                            || fileName.endsWith(".avifs")
+                            || fileName.endsWith(".md")
+                            || fileName.endsWith(".txt")
+                    )
+
+            when {
+                pathSegments.size == 2
+                        && pathSegments[0] == rootDirName
+                        && pathSegments[1] in copiedRootFileNames -> {
+                    relativePath = RelativePath(true, "aom-av1-avif-test-data", pathSegments[1])
+                }
+
+                pathSegments.size > 2
+                        && pathSegments[0] == rootDirName
+                        && pathSegments[1] == "testFiles"
+                        && copiedTestFile -> {
+                    relativePath = RelativePath(
+                        true,
+                        *(listOf("aom-av1-avif-test-data")
+                                + pathSegments.subList(2, pathSegments.size)).toTypedArray(),
+                    )
+                }
+
+                else -> exclude()
+            }
+        }
+    }
+}
+
+tasks.register<Test>("aomAvifTest") {
+    group = "verification"
+    description = "Runs the AOMedia AVIF corpus tests."
+    dependsOn(tasks.testClasses)
+    dependsOn(prepareAomAvifTestResources)
+
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath + files(aomAvifTestResourcesDirectory)
+    maxHeapSize = "2g"
+
+    useJUnitPlatform {
+        includeTags("aom-corpus")
+    }
+    systemProperty(
+        "org.bytedeco.javacpp.cachedir",
+        layout.buildDirectory.dir("javacpp-cache").get().asFile.absolutePath,
+    )
+
+    if (this.javaVersion >= JavaVersion.VERSION_25) {
+        jvmArgs("--enable-native-access=javafx.graphics")
+    }
+}
 
 tasks.processTestResources {
     dependsOn(downloadLibavif)
