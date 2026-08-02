@@ -3,11 +3,12 @@
 ## Scope
 
 This repository provides a Java 17 decoding library for AV1 low-overhead bitstreams, AVIF still
-images, and AVIS image sequences. The published main module has no runtime dependencies outside
-`java.base`; JetBrains annotations are compile-time-only metadata.
+images, and AVIS image sequences, together with an optional JavaFX image adapter and desktop
+viewer. The core decoding API has no mandatory runtime dependencies outside `java.base`; JetBrains
+annotations are compile-time-only metadata, while the JavaFX package requires JavaFX when used.
 
-The deliverable is a decoding library. Encoders, command-line tools, GUI applications, native ABI
-compatibility, fuzzing binaries, and libavif application parity are not project features.
+Encoders, command-line tools, native ABI compatibility, fuzzing binaries, and libavif application
+parity are not project features.
 
 ## Implemented Decode Surface
 
@@ -25,6 +26,8 @@ compatibility, fuzzing binaries, and libavif application parity are not project 
   maps, Exif/XMP/ICC metadata, and `clap`/`irot`/`imir` presentation transforms.
 - Raw YUV plane output, 8-bit and 16-bit packed ARGB output, CICP range/matrix/transfer/primary
   conversion, alpha premultiplication handling, and gain-map tone mapping.
+- JavaFX adaptation for static and animated decoded frames, plus a desktop viewer available through
+  the Gradle `run` task.
 - Structural validation for item dimensions, grid syntax and geometry, auxiliary relationships,
   layer selection, sample tables, frame-size limits, and decoded `ispe` conformance.
 
