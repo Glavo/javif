@@ -2071,6 +2071,50 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Verifies that a lower transform in a 128-wide `I422` intra block does not consume
+    /// top-right samples across AV1's causal 64-luma-sample region boundary.
+    @Test
+    void wideI422DirectionalTransformDoesNotUseUnavailableTopRightSamples() {
+        DecodedPlanes baseline = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I422,
+                        FrameType.KEY,
+                        128,
+                        64,
+                        createWideDirectionalI422Leaf(0)
+                )
+        );
+        DecodedPlanes changedTopRight = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I422,
+                        FrameType.KEY,
+                        128,
+                        64,
+                        createWideDirectionalI422Leaf(4096)
+                )
+        );
+
+        DecodedPlane baselineU = requirePlane(baseline.chromaUPlane());
+        DecodedPlane baselineV = requirePlane(baseline.chromaVPlane());
+        DecodedPlane changedU = requirePlane(changedTopRight.chromaUPlane());
+        DecodedPlane changedV = requirePlane(changedTopRight.chromaVPlane());
+        boolean topRightChanged = false;
+        for (int y = 0; y < 32; y++) {
+            for (int x = 32; x < 64; x++) {
+                topRightChanged |= baselineU.sample(x, y) != changedU.sample(x, y);
+                topRightChanged |= baselineV.sample(x, y) != changedV.sample(x, y);
+            }
+        }
+        assertTrue(topRightChanged, "The test stimulus must change the top-right transform");
+
+        for (int y = 32; y < 64; y++) {
+            for (int x = 0; x < 32; x++) {
+                assertEquals(baselineU.sample(x, y), changedU.sample(x, y), "U sample at " + x + "," + y);
+                assertEquals(baselineV.sample(x, y), changedV.sample(x, y), "V sample at " + x + "," + y);
+            }
+        }
+    }
+
     /// Verifies that one non-zero directional luma leaf adds its residual after directional
     /// prediction without perturbing the already reconstructed reference row.
     @Test
@@ -5909,6 +5953,85 @@ final class FrameReconstructorTest {
                 size.maxChromaTransformSize(pixelFormat),
                 false,
                 new TransformUnit[]{new TransformUnit(position, transformSize)}
+        );
+    }
+
+    /// Creates one 128x64 directional `I422` leaf whose top-right chroma transform carries the
+    /// supplied DC coefficient.
+    ///
+    /// @param topRightChromaDcCoefficient the DC coefficient stored in both top-right chroma planes
+    /// @return one synthetic wide directional leaf
+    private static TilePartitionTreeReader.LeafNode createWideDirectionalI422Leaf(
+            int topRightChromaDcCoefficient
+    ) {
+        BlockPosition origin = new BlockPosition(0, 0);
+        BlockPosition lumaRight = origin.offset(16, 0);
+        BlockPosition chromaBottomLeft = origin.offset(0, 8);
+        BlockPosition chromaBottomRight = origin.offset(16, 8);
+        BlockSize blockSize = BlockSize.SIZE_128X64;
+        TransformSize lumaTransformSize = TransformSize.TX_64X64;
+        TransformSize chromaTransformSize = TransformSize.TX_32X32;
+        TransformUnit[] lumaTransformUnits = {
+                new TransformUnit(origin, lumaTransformSize),
+                new TransformUnit(lumaRight, lumaTransformSize)
+        };
+        TransformUnit[] chromaTransformUnits = {
+                new TransformUnit(origin, chromaTransformSize),
+                new TransformUnit(lumaRight, chromaTransformSize),
+                new TransformUnit(chromaBottomLeft, chromaTransformSize),
+                new TransformUnit(chromaBottomRight, chromaTransformSize)
+        };
+        TransformLayout transformLayout = new TransformLayout(
+                origin,
+                blockSize,
+                blockSize.width4(),
+                blockSize.height4(),
+                blockSize.widthPixels(),
+                blockSize.heightPixels(),
+                lumaTransformSize,
+                chromaTransformSize,
+                false,
+                lumaTransformUnits,
+                chromaTransformUnits
+        );
+        TransformResidualUnit[] lumaResidualUnits = {
+                createResidualUnit(origin, lumaTransformSize, 64, 64, 0),
+                createResidualUnit(lumaRight, lumaTransformSize, 64, 64, 0)
+        };
+        TransformResidualUnit[] chromaUResidualUnits = {
+                createResidualUnit(origin, chromaTransformSize, 32, 32, 0),
+                createResidualUnit(lumaRight, chromaTransformSize, 32, 32, topRightChromaDcCoefficient),
+                createResidualUnit(chromaBottomLeft, chromaTransformSize, 32, 32, 0),
+                createResidualUnit(chromaBottomRight, chromaTransformSize, 32, 32, 0)
+        };
+        TransformResidualUnit[] chromaVResidualUnits = {
+                createResidualUnit(origin, chromaTransformSize, 32, 32, 0),
+                createResidualUnit(lumaRight, chromaTransformSize, 32, 32, -topRightChromaDcCoefficient),
+                createResidualUnit(chromaBottomLeft, chromaTransformSize, 32, 32, 0),
+                createResidualUnit(chromaBottomRight, chromaTransformSize, 32, 32, 0)
+        };
+        ResidualLayout residualLayout = new ResidualLayout(
+                origin,
+                blockSize,
+                lumaResidualUnits,
+                chromaUResidualUnits,
+                chromaVResidualUnits
+        );
+        return new TilePartitionTreeReader.LeafNode(
+                createIntraBlockHeader(
+                        origin,
+                        blockSize,
+                        true,
+                        LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        UvIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                        null,
+                        0,
+                        0,
+                        0,
+                        0
+                ),
+                transformLayout,
+                residualLayout
         );
     }
 

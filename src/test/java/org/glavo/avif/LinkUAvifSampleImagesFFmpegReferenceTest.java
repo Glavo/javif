@@ -21,6 +21,7 @@ import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestFactory;
 
 import java.io.IOException;
@@ -39,11 +40,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// FFmpeg source-plane reference tests for `link-u/avif-sample-images`.
+/// FFmpeg source-plane reference tests for the Link-U files curated by AOMedia's AVIF corpus.
+@Tag("aom-corpus")
 @NotNullByDefault
 final class LinkUAvifSampleImagesFFmpegReferenceTest {
     /// The copied sample-image resource root.
-    private static final String TEST_DATA_ROOT = "link-u-avif-sample-images";
+    private static final String TEST_DATA_ROOT = "aom-av1-avif-test-data/Link-U";
 
     /// Creates one first-frame source-plane comparison for every copied sample supported by the
     /// FFmpeg reference helper.
@@ -60,22 +62,6 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
                 ));
     }
 
-    /// Creates one all-frame source-plane comparison for each non-alpha AVIFS bit-depth variant.
-    ///
-    /// @return the dynamic sequence-frame reference tests
-    @TestFactory
-    Stream<DynamicTest> sequenceSourcePlanesMatchFFmpeg() {
-        return Stream.of(
-                        "link-u-avif-sample-images/star-8bpc.avifs",
-                        "link-u-avif-sample-images/star-10bpc.avifs",
-                        "link-u-avif-sample-images/star-12bpc.avifs"
-                )
-                .map(resourceName -> DynamicTest.dynamicTest(
-                        resourceName,
-                        () -> assertSequenceSourcePlanesMatchFFmpeg(resourceName)
-                ));
-    }
-
     /// Compares javif's raw first-frame color planes with FFmpeg's decoded source planes.
     ///
     /// @param resourceName the classpath sample resource name
@@ -86,27 +72,6 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
             AvifPlanes actual = reader.readRawColorPlanes(0);
             assertSourcePlanesMatch(resourceName, expected, actual);
-        }
-    }
-
-    /// Compares every javif sequence frame with FFmpeg's decoded source planes.
-    ///
-    /// @param resourceName the classpath AVIFS resource name
-    /// @throws IOException if the sample cannot be read or decoded
-    /// @throws URISyntaxException if FFmpeg cannot resolve the sample resource path
-    private static void assertSequenceSourcePlanesMatchFFmpeg(String resourceName)
-            throws IOException, URISyntaxException {
-        @Unmodifiable List<SourcePlanes> expectedFrames =
-                FFmpegAvifReferenceDecoder.decodeAllFrameSourcePlanes(resourceName);
-        try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
-            assertEquals(reader.info().frameCount(), expectedFrames.size(), resourceName + " frame count");
-            for (int frameIndex = 0; frameIndex < expectedFrames.size(); frameIndex++) {
-                assertSourcePlanesMatch(
-                        resourceName + " frame " + frameIndex,
-                        expectedFrames.get(frameIndex),
-                        reader.readRawColorPlanes(frameIndex)
-                );
-            }
         }
     }
 
@@ -247,24 +212,12 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
                     .map(root::relativize)
                     .map(Path::toString)
                     .filter(LinkUAvifSampleImagesFFmpegReferenceTest::isAvifResource)
-                    .filter(LinkUAvifSampleImagesFFmpegReferenceTest::isSupportedReferenceResource)
                     .map(relativeName -> TEST_DATA_ROOT + "/" + relativeName.replace('\\', '/'))
                     .sorted(Comparator.naturalOrder())
                     .toList();
-            assertEquals(153, resourceNames.size(), "supported sample resource count");
+            assertEquals(83, resourceNames.size(), "supported sample resource count");
             return resourceNames;
         }
-    }
-
-    /// Returns whether the FFmpeg helper selects the color track for one sample resource.
-    ///
-    /// The three alpha-bearing AVIFS samples expose their auxiliary alpha track before the color
-    /// track, while the current helper decodes the first video track.
-    ///
-    /// @param resourceName the relative sample resource name
-    /// @return whether the reference helper can decode the resource's color track
-    private static boolean isSupportedReferenceResource(String resourceName) {
-        return !resourceName.endsWith("-with-alpha.avifs");
     }
 
     /// Returns whether one relative resource name is an AVIF still image or sequence.

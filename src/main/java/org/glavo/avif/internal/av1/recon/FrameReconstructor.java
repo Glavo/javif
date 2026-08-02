@@ -4315,7 +4315,12 @@ public final class FrameReconstructor {
                             predictionY,
                             predictionWidth,
                             predictionHeight,
-                            tileBounds.lumaEndX()
+                            tileBounds.lumaEndX(),
+                            header.size(),
+                            header.position().x4() << 2,
+                            header.position().y4() << 2,
+                            0,
+                            0
                     ),
                     availableDirectionalLeftReferenceLength(
                             lumaPlane,
@@ -4323,7 +4328,12 @@ public final class FrameReconstructor {
                             predictionY,
                             predictionWidth,
                             predictionHeight,
-                            tileBounds.lumaEndY()
+                            tileBounds.lumaEndY(),
+                            header.size(),
+                            header.position().x4() << 2,
+                            header.position().y4() << 2,
+                            0,
+                            0
                     ),
                     tileBounds.lumaStartX(),
                     tileBounds.lumaStartY(),
@@ -4444,6 +4454,11 @@ public final class FrameReconstructor {
     /// @param width the transform width in plane samples
     /// @param height the transform height in plane samples
     /// @param rightBoundary the exclusive sample column available to this tile
+    /// @param blockSize the luma-grid size of the owning coded block
+    /// @param blockX the owning block's plane-local X coordinate
+    /// @param blockY the owning block's plane-local Y coordinate
+    /// @param subsamplingX the plane's horizontal chroma-subsampling shift
+    /// @param subsamplingY the plane's vertical chroma-subsampling shift
     /// @return the available top-edge directional reference length
     private static int availableDirectionalTopReferenceLength(
             MutablePlaneBuffer plane,
@@ -4451,9 +4466,26 @@ public final class FrameReconstructor {
             int y,
             int width,
             int height,
-            int rightBoundary
+            int rightBoundary,
+            BlockSize blockSize,
+            int blockX,
+            int blockY,
+            int subsamplingX,
+            int subsamplingY
     ) {
         int availableLength = width;
+        if (!permitsTopRightExtensionWithinBlock(
+                x,
+                y,
+                width,
+                blockSize,
+                blockX,
+                blockY,
+                subsamplingX,
+                subsamplingY
+        )) {
+            return availableLength;
+        }
         int maximumExtraLength = Math.min(width, height);
         for (int extra = 0; extra < maximumExtraLength; extra++) {
             if (x + width + extra >= rightBoundary) {
@@ -4479,6 +4511,11 @@ public final class FrameReconstructor {
     /// @param width the transform width in plane samples
     /// @param height the transform height in plane samples
     /// @param bottomBoundary the exclusive sample row available to this tile
+    /// @param blockSize the luma-grid size of the owning coded block
+    /// @param blockX the owning block's plane-local X coordinate
+    /// @param blockY the owning block's plane-local Y coordinate
+    /// @param subsamplingX the plane's horizontal chroma-subsampling shift
+    /// @param subsamplingY the plane's vertical chroma-subsampling shift
     /// @return the available left-edge directional reference length
     private static int availableDirectionalLeftReferenceLength(
             MutablePlaneBuffer plane,
@@ -4486,9 +4523,26 @@ public final class FrameReconstructor {
             int y,
             int width,
             int height,
-            int bottomBoundary
+            int bottomBoundary,
+            BlockSize blockSize,
+            int blockX,
+            int blockY,
+            int subsamplingX,
+            int subsamplingY
     ) {
         int availableLength = height;
+        if (!permitsBottomLeftExtensionWithinBlock(
+                x,
+                y,
+                height,
+                blockSize,
+                blockX,
+                blockY,
+                subsamplingX,
+                subsamplingY
+        )) {
+            return availableLength;
+        }
         int maximumExtraLength = Math.min(width, height);
         for (int extra = 0; extra < maximumExtraLength; extra++) {
             if (y + height + extra >= bottomBoundary) {
@@ -4504,6 +4558,92 @@ public final class FrameReconstructor {
             availableLength++;
         }
         return availableLength;
+    }
+
+    /// Returns whether the owning block permits top-right references beyond one transform's top edge.
+    ///
+    /// AV1 decodes blocks wider than 64 luma samples as 64-wide regions in raster order. A sample
+    /// may therefore already have been written while still being unavailable to a transform that
+    /// would cross one of those causal region boundaries.
+    ///
+    /// @param transformX the transform's plane-local X coordinate
+    /// @param transformY the transform's plane-local Y coordinate
+    /// @param transformWidth the transform width in plane samples
+    /// @param blockSize the luma-grid size of the owning coded block
+    /// @param blockX the owning block's plane-local X coordinate
+    /// @param blockY the owning block's plane-local Y coordinate
+    /// @param subsamplingX the plane's horizontal chroma-subsampling shift
+    /// @param subsamplingY the plane's vertical chroma-subsampling shift
+    /// @return whether top-right extension is permitted within the owning block
+    private static boolean permitsTopRightExtensionWithinBlock(
+            int transformX,
+            int transformY,
+            int transformWidth,
+            BlockSize blockSize,
+            int blockX,
+            int blockY,
+            int subsamplingX,
+            int subsamplingY
+    ) {
+        int rowOffset4 = (transformY - blockY) >> 2;
+        if (rowOffset4 <= 0) {
+            return true;
+        }
+
+        int columnOffset4 = (transformX - blockX) >> 2;
+        int transformWidth4 = transformWidth >> 2;
+        int blockWidth4 = Math.max(1, blockSize.width4() >> subsamplingX);
+        if (blockSize.widthPixels() <= 64) {
+            return columnOffset4 + transformWidth4 < blockWidth4;
+        }
+
+        int regionWidth4 = 16 >> subsamplingX;
+        int regionHeight4 = 16 >> subsamplingY;
+        if (rowOffset4 == regionHeight4 && columnOffset4 + transformWidth4 == regionWidth4) {
+            return true;
+        }
+        return columnOffset4 % regionWidth4 + transformWidth4 < regionWidth4;
+    }
+
+    /// Returns whether the owning block permits bottom-left references beyond one transform's left edge.
+    ///
+    /// @param transformX the transform's plane-local X coordinate
+    /// @param transformY the transform's plane-local Y coordinate
+    /// @param transformHeight the transform height in plane samples
+    /// @param blockSize the luma-grid size of the owning coded block
+    /// @param blockX the owning block's plane-local X coordinate
+    /// @param blockY the owning block's plane-local Y coordinate
+    /// @param subsamplingX the plane's horizontal chroma-subsampling shift
+    /// @param subsamplingY the plane's vertical chroma-subsampling shift
+    /// @return whether bottom-left extension is permitted within the owning block
+    private static boolean permitsBottomLeftExtensionWithinBlock(
+            int transformX,
+            int transformY,
+            int transformHeight,
+            BlockSize blockSize,
+            int blockX,
+            int blockY,
+            int subsamplingX,
+            int subsamplingY
+    ) {
+        int columnOffset4 = (transformX - blockX) >> 2;
+        if (columnOffset4 <= 0) {
+            return true;
+        }
+
+        if (blockSize.widthPixels() > 64) {
+            int regionWidth4 = 16 >> subsamplingX;
+            int columnOffsetWithinRegion4 = columnOffset4 % regionWidth4;
+            if (columnOffsetWithinRegion4 == 0) {
+                int rowOffset4 = (transformY - blockY) >> 2;
+                int regionHeight4 = 16 >> subsamplingY;
+                int blockHeight4 = Math.max(1, blockSize.height4() >> subsamplingY);
+                int availableRegionHeight4 = Math.min(blockHeight4, regionHeight4);
+                int transformHeight4 = transformHeight >> 2;
+                return rowOffset4 % regionHeight4 + transformHeight4 < availableRegionHeight4;
+            }
+        }
+        return false;
     }
 
     /// Returns whether one directional reference sample has already been reconstructed.
@@ -4550,6 +4690,7 @@ public final class FrameReconstructor {
                 chromaUPlane,
                 transformLayout.chromaUnits(),
                 residualLayout.chromaUUnits(),
+                header,
                 uvMode,
                 header.uvAngle(),
                 intraEdgeFilterEnabled,
@@ -4570,6 +4711,7 @@ public final class FrameReconstructor {
                 chromaVPlane,
                 transformLayout.chromaUnits(),
                 residualLayout.chromaVUnits(),
+                header,
                 uvMode,
                 header.uvAngle(),
                 intraEdgeFilterEnabled,
@@ -4593,6 +4735,7 @@ public final class FrameReconstructor {
     /// @param chromaPlane the mutable destination chroma plane
     /// @param transformUnits the decoded chroma transform units in prediction order
     /// @param residualUnits the decoded transform residual units in bitstream order
+    /// @param header the decoded block header that owns the transform units
     /// @param uvMode the chroma intra prediction mode
     /// @param uvAngle the derived chroma directional prediction angle
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
@@ -4605,6 +4748,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaPlane,
             TransformUnit[] transformUnits,
             TransformResidualUnit[] residualUnits,
+            TileBlockHeaderReader.BlockHeader header,
             UvIntraPredictionMode uvMode,
             int uvAngle,
             boolean intraEdgeFilterEnabled,
@@ -4616,6 +4760,8 @@ public final class FrameReconstructor {
     ) {
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int blockX = chromaBlockX(header, chromaSubsamplingX);
+        int blockY = chromaBlockY(header, chromaSubsamplingY);
         boolean[] appliedResiduals = new boolean[residualUnits.length];
         for (TransformUnit transformUnit : transformUnits) {
             int predictionX = transformUnit.position().x4() << (2 - chromaSubsamplingX);
@@ -4638,7 +4784,12 @@ public final class FrameReconstructor {
                             predictionY,
                             predictionWidth,
                             predictionHeight,
-                            tileBounds.chromaEndX()
+                            tileBounds.chromaEndX(),
+                            header.size(),
+                            blockX,
+                            blockY,
+                            chromaSubsamplingX,
+                            chromaSubsamplingY
                     ),
                     availableDirectionalLeftReferenceLength(
                             referencePlane,
@@ -4646,7 +4797,12 @@ public final class FrameReconstructor {
                             predictionY,
                             predictionWidth,
                             predictionHeight,
-                            tileBounds.chromaEndY()
+                            tileBounds.chromaEndY(),
+                            header.size(),
+                            blockX,
+                            blockY,
+                            chromaSubsamplingX,
+                            chromaSubsamplingY
                     ),
                     tileBounds.chromaStartX(),
                     tileBounds.chromaStartY(),

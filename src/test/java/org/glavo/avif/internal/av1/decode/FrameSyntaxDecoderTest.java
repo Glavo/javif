@@ -122,8 +122,8 @@ final class FrameSyntaxDecoderTest {
         assertEquals(0, restorationUnitMap.rows(1));
         assertNotNull(unit);
         assertEquals(FrameHeader.RestorationType.WIENER, unit.type());
-        assertArrayEquals(new int[]{1, -10, 13}, unit.wienerCoefficients()[0]);
-        assertArrayEquals(new int[]{4, -7, 7}, unit.wienerCoefficients()[1]);
+        assertArrayEquals(new int[]{4, -7, 7}, unit.wienerCoefficients()[0]);
+        assertArrayEquals(new int[]{1, -10, 13}, unit.wienerCoefficients()[1]);
         assertEquals(BlockSize.SIZE_64X64, result.tileRoots(0)[0].size());
     }
 

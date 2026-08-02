@@ -110,9 +110,6 @@ tasks.test {
 
 val libavifCommit = "b54eac58daf563e9150cc6abce7631ac71b999aa"
 val libavifZip = layout.buildDirectory.file("downloads/libavif-$libavifCommit.zip")
-val linkUAvifSampleImagesCommit = "c666a368b73006246694919b5dbcc078317af6cc"
-val linkUAvifSampleImagesZip =
-    layout.buildDirectory.file("downloads/avif-sample-images-$linkUAvifSampleImagesCommit.zip")
 val aomAvifCommit = "bf4c18d1f3971069b75e87d6ee469790589f4f09"
 val aomAvifZip = layout.buildDirectory.file("downloads/av1-avif-$aomAvifCommit.zip")
 val aomAvifTestResourcesDirectory = layout.buildDirectory.dir("aom-avif-test-resources")
@@ -122,13 +119,6 @@ val downloadLibavif = tasks.register<de.undercouch.gradle.tasks.download.Downloa
     dest(libavifZip)
     overwrite(false)
 }
-
-val downloadLinkUAvifSampleImages =
-    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadLinkUAvifSampleImages") {
-        src("https://github.com/link-u/avif-sample-images/archive/$linkUAvifSampleImagesCommit.zip")
-        dest(linkUAvifSampleImagesZip)
-        overwrite(false)
-    }
 
 val downloadAomAvifTestFiles =
     tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadAomAvifTestFiles") {
@@ -142,6 +132,7 @@ val downloadAomAvifTestFiles =
 
 val prepareAomAvifTestResources = tasks.register<Sync>("prepareAomAvifTestResources") {
     dependsOn(downloadAomAvifTestFiles)
+    inputs.property("aomAvifResourceSetVersion", 2)
     into(aomAvifTestResourcesDirectory)
 
     from(zipTree(aomAvifZip)) {
@@ -154,10 +145,15 @@ val prepareAomAvifTestResources = tasks.register<Sync>("prepareAomAvifTestResour
         eachFile {
             val pathSegments = relativePath.segments.toList()
             val fileName = pathSegments.lastOrNull()
+            val copiedPngReference = fileName?.endsWith(".png") == true
+                    && !(pathSegments.size > 3
+                    && pathSegments[2] == "Netflix"
+                    && fileName.startsWith("original_"))
             val copiedTestFile = fileName != null && (
                     fileName in copiedTestFileNames
                             || fileName.endsWith(".avif")
                             || fileName.endsWith(".avifs")
+                            || copiedPngReference
                             || fileName.endsWith(".md")
                             || fileName.endsWith(".txt")
                     )
@@ -211,7 +207,6 @@ tasks.register<Test>("aomAvifTest") {
 
 tasks.processTestResources {
     dependsOn(downloadLibavif)
-    dependsOn(downloadLinkUAvifSampleImages)
 
     from(zipTree(libavifZip)) {
         includeEmptyDirs = false
@@ -232,28 +227,6 @@ tasks.processTestResources {
         }
     }
 
-    from(zipTree(linkUAvifSampleImagesZip)) {
-        includeEmptyDirs = false
-
-        val rootDirName = "avif-sample-images-$linkUAvifSampleImagesCommit"
-
-        eachFile {
-            val pathSegments = relativePath.segments.toList()
-            val fileName = pathSegments.lastOrNull()
-            val copiedFile = fileName == "LICENSE.txt"
-                    || fileName == "README.md"
-                    || fileName?.endsWith(".avif") == true
-                    || fileName?.endsWith(".avifs") == true
-            if (pathSegments.size > 1 && pathSegments[0] == rootDirName && copiedFile) {
-                relativePath = RelativePath(
-                    true,
-                    *(listOf("link-u-avif-sample-images") + pathSegments.subList(1, pathSegments.size)).toTypedArray(),
-                )
-            } else {
-                exclude()
-            }
-        }
-    }
 }
 
 tasks.jacocoTestReport {

@@ -40,7 +40,7 @@ public final class RestorationUnit {
     /// The concrete restoration type for this unit.
     private final FrameHeader.RestorationType type;
 
-    /// The Wiener coefficients indexed by pass and coefficient.
+    /// The Wiener coefficients indexed by horizontal/vertical axis and coefficient.
     private final int @Unmodifiable [] @Unmodifiable [] wienerCoefficients;
 
     /// The self-guided restoration parameter set index.
@@ -52,7 +52,7 @@ public final class RestorationUnit {
     /// Creates one decoded restoration unit.
     ///
     /// @param type the concrete restoration type for this unit
-    /// @param wienerCoefficients the Wiener coefficients indexed by pass and coefficient
+    /// @param wienerCoefficients the Wiener coefficients indexed by horizontal/vertical axis and coefficient
     /// @param selfGuidedSet the self-guided restoration parameter set index
     /// @param selfGuidedProjectionCoefficients the self-guided projection coefficients
     private RestorationUnit(
@@ -88,7 +88,7 @@ public final class RestorationUnit {
 
     /// Creates one Wiener restoration unit.
     ///
-    /// @param coefficients the two-pass Wiener coefficients
+    /// @param coefficients the horizontal and vertical Wiener coefficients, in that order
     /// @return one Wiener restoration unit
     public static RestorationUnit wiener(int[][] coefficients) {
         return new RestorationUnit(FrameHeader.RestorationType.WIENER, coefficients, 0, new int[2]);
@@ -115,9 +115,9 @@ public final class RestorationUnit {
         return type;
     }
 
-    /// Returns the two-pass Wiener coefficients.
+    /// Returns the horizontal and vertical Wiener coefficients, in that order.
     ///
-    /// @return the two-pass Wiener coefficients
+    /// @return the horizontal and vertical Wiener coefficients
     public int[][] wienerCoefficients() {
         return deepCopyWienerCoefficients(wienerCoefficients);
     }

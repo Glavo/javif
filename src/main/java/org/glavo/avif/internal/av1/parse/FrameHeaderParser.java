@@ -998,22 +998,34 @@ public final class FrameHeaderParser {
         int lastActiveSegmentId;
         if (updateData) {
             preskip = false;
-            lastActiveSegmentId = -1;
+            lastActiveSegmentId = 0;
             for (int i = 0; i < MAX_SEGMENTS; i++) {
-                int deltaQ = reader.readFlag() ? reader.readSignedBits(9) : 0;
-                int deltaLfYVertical = reader.readFlag() ? reader.readSignedBits(7) : 0;
-                int deltaLfYHorizontal = reader.readFlag() ? reader.readSignedBits(7) : 0;
-                int deltaLfU = reader.readFlag() ? reader.readSignedBits(7) : 0;
-                int deltaLfV = reader.readFlag() ? reader.readSignedBits(7) : 0;
-                int referenceFrame = reader.readFlag() ? readInt(reader, 3) : -1;
+                boolean deltaQEnabled = reader.readFlag();
+                int deltaQ = deltaQEnabled ? reader.readSignedBits(9) : 0;
+                boolean deltaLfYVerticalEnabled = reader.readFlag();
+                int deltaLfYVertical = deltaLfYVerticalEnabled ? reader.readSignedBits(7) : 0;
+                boolean deltaLfYHorizontalEnabled = reader.readFlag();
+                int deltaLfYHorizontal = deltaLfYHorizontalEnabled ? reader.readSignedBits(7) : 0;
+                boolean deltaLfUEnabled = reader.readFlag();
+                int deltaLfU = deltaLfUEnabled ? reader.readSignedBits(7) : 0;
+                boolean deltaLfVEnabled = reader.readFlag();
+                int deltaLfV = deltaLfVEnabled ? reader.readSignedBits(7) : 0;
+                boolean referenceFrameEnabled = reader.readFlag();
+                int referenceFrame = referenceFrameEnabled ? readInt(reader, 3) : -1;
                 boolean skip = reader.readFlag();
                 boolean globalMotion = reader.readFlag();
 
-                if (deltaQ != 0 || deltaLfYVertical != 0 || deltaLfYHorizontal != 0 || deltaLfU != 0 || deltaLfV != 0
-                        || referenceFrame >= 0 || skip || globalMotion) {
+                if (deltaQEnabled
+                        || deltaLfYVerticalEnabled
+                        || deltaLfYHorizontalEnabled
+                        || deltaLfUEnabled
+                        || deltaLfVEnabled
+                        || referenceFrameEnabled
+                        || skip
+                        || globalMotion) {
                     lastActiveSegmentId = i;
                 }
-                if (referenceFrame >= 0 || skip || globalMotion) {
+                if (referenceFrameEnabled || skip || globalMotion) {
                     preskip = true;
                 }
 

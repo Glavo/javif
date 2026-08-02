@@ -44,6 +44,9 @@ public final class BlockNeighborContext {
     /// The AV1 coefficient-context byte that marks one transform block as all-zero.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
 
+    /// The inter var-tx edge state used where no top or left transform neighbor is available.
+    private static final byte UNAVAILABLE_INTER_TRANSFORM_LOG2 = (byte) TransformSize.TX_64X64.log2Width4();
+
     /// The switchable interpolation-filter symbol used for regular 8-tap filtering.
     private static final byte INTERPOLATION_FILTER_REGULAR = 0;
 
@@ -495,8 +498,8 @@ public final class BlockNeighborContext {
         InterMotionVector defaultMotionVector = InterMotionVector.predicted(MotionVector.zero());
         Arrays.fill(aboveTransformWidthLog2, (byte) -1);
         Arrays.fill(leftTransformHeightLog2, (byte) -1);
-        Arrays.fill(aboveInterTransformWidthLog2, (byte) -1);
-        Arrays.fill(leftInterTransformHeightLog2, (byte) -1);
+        Arrays.fill(aboveInterTransformWidthLog2, UNAVAILABLE_INTER_TRANSFORM_LOG2);
+        Arrays.fill(leftInterTransformHeightLog2, UNAVAILABLE_INTER_TRANSFORM_LOG2);
         Arrays.fill(aboveLumaCoefficientContext, (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
         Arrays.fill(leftLumaCoefficientContext, (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);
         Arrays.fill(aboveChromaCoefficientContext[0], (byte) ALL_ZERO_COEFFICIENT_CONTEXT_BYTE);

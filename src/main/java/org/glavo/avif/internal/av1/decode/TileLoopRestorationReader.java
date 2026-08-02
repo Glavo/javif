@@ -73,7 +73,9 @@ final class TileLoopRestorationReader {
     /// The frame-level restoration types.
     private final FrameHeader.RestorationType[] frameTypes;
 
-    /// The per-plane, per-pass, per-coefficient Wiener references.
+    /// The per-plane, per-bitstream-axis, per-coefficient Wiener references.
+    ///
+    /// The bitstream axis order is vertical followed by horizontal.
     private final int[][][] referenceWienerCoefficients;
 
     /// The per-plane self-guided projection references.
@@ -170,27 +172,27 @@ final class TileLoopRestorationReader {
         throw new IllegalStateException("Unsupported concrete restoration unit type: " + unitType);
     }
 
-    /// Reads the two-pass Wiener coefficient table.
+    /// Reads the Wiener coefficient table and returns it in horizontal/vertical order.
     ///
     /// @param plane the plane index
-    /// @return the two-pass Wiener coefficient table
+    /// @return the horizontal and vertical Wiener coefficient table
     private int[][] readWienerCoefficients(int plane) {
-        int[][] coefficients = new int[2][3];
+        int[][] bitstreamCoefficients = new int[2][3];
         for (int pass = 0; pass < 2; pass++) {
             int firstCoefficient = plane == 0 ? 0 : 1;
             if (firstCoefficient == 1) {
-                coefficients[pass][0] = 0;
+                bitstreamCoefficients[pass][0] = 0;
             }
             for (int coefficient = firstCoefficient; coefficient < 3; coefficient++) {
                 int value = syntaxReader.readWienerCoefficient(
                         coefficient,
                         referenceWienerCoefficients[plane][pass][coefficient]
                 );
-                coefficients[pass][coefficient] = value;
+                bitstreamCoefficients[pass][coefficient] = value;
                 referenceWienerCoefficients[plane][pass][coefficient] = value;
             }
         }
-        return coefficients;
+        return new int[][]{bitstreamCoefficients[1], bitstreamCoefficients[0]};
     }
 
     /// Reads the self-guided projection coefficients.

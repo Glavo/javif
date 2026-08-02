@@ -60,6 +60,8 @@ final class BlockNeighborContextTest {
         assertEquals(0, context.skipContext(position));
         assertEquals(LumaIntraPredictionMode.DC, context.aboveMode(0));
         assertEquals(LumaIntraPredictionMode.DC, context.leftMode(0));
+        assertEquals(0, context.transformSizeContext(position, TransformSize.TX_32X32));
+        assertEquals(0, context.interTransformSplitContext(position, TransformSize.TX_32X32));
 
         context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
                 position,

@@ -87,6 +87,30 @@ final class FrameHeaderParserTest {
         assertFalse(header.filmGrainPresent());
     }
 
+    /// Verifies that an enabled segmentation feature remains active when its signed data is zero.
+    ///
+    /// @throws IOException if the test payload cannot be parsed
+    @Test
+    void retainsZeroValuedEnabledSegmentationFeature() throws IOException {
+        SequenceHeader sequenceHeader = new SequenceHeaderParser().parse(
+                sequenceHeaderObu(reducedStillPictureSequencePayload()),
+                false
+        );
+        FrameHeader header = new FrameHeaderParser().parse(
+                frameHeaderObu(reducedStillPictureFrameHeaderPayloadWithZeroValuedSegmentFeature()),
+                sequenceHeader,
+                false
+        );
+
+        assertTrue(header.segmentation().enabled());
+        assertTrue(header.segmentation().updateMap());
+        assertTrue(header.segmentation().updateData());
+        assertFalse(header.segmentation().preskip());
+        assertEquals(2, header.segmentation().lastActiveSegmentId());
+        assertEquals(0, header.segmentation().segment(2).deltaQ());
+        assertEquals(0, header.segmentation().qIndex(2));
+    }
+
     /// Verifies that an inter frame header can reuse a reference frame size and derive skip-mode state.
     ///
     /// @throws IOException if the test payload cannot be parsed
@@ -421,6 +445,40 @@ final class FrameHeaderParserTest {
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
+    /// Creates a reduced still-picture header whose segment 2 enables a zero-valued delta-q feature.
+    ///
+    /// @return the reduced still-picture frame header payload with an active zero-valued feature
+    private static byte[] reducedStillPictureFrameHeaderPayloadWithZeroValuedSegmentFeature() {
+        BitWriter writer = new BitWriter();
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeBits(0, 8);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(false);
+        writer.writeFlag(true);
+        for (int segment = 0; segment < 8; segment++) {
+            boolean zeroDeltaQEnabled = segment == 2;
+            writer.writeFlag(zeroDeltaQEnabled);
+            if (zeroDeltaQEnabled) {
+                writer.writeBits(0, 9);
+            }
+            for (int feature = 1; feature < 8; feature++) {
+                writer.writeFlag(false);
+            }
+        }
         writer.writeFlag(false);
         writer.writeFlag(false);
         writer.writeTrailingBits();
