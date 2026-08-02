@@ -898,10 +898,13 @@ final class Av1ImageReaderTest {
             assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
+            DecodedPlanes firstPlanes = reader.lastPlanes();
+            assertNotNull(firstPlanes);
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
             assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
             assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(firstPlanes, reader.lastPlanes());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         });

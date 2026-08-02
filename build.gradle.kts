@@ -96,7 +96,7 @@ tasks.register<JavaExec>("run") {
 
 tasks.test {
     useJUnitPlatform {
-        excludeTags("aom-corpus")
+        excludeTags("aom-corpus", "argon-corpus")
     }
     systemProperty(
         "org.bytedeco.javacpp.cachedir",
@@ -113,6 +113,9 @@ val libavifZip = layout.buildDirectory.file("downloads/libavif-$libavifCommit.zi
 val aomAvifCommit = "bf4c18d1f3971069b75e87d6ee469790589f4f09"
 val aomAvifZip = layout.buildDirectory.file("downloads/av1-avif-$aomAvifCommit.zip")
 val aomAvifTestResourcesDirectory = layout.buildDirectory.dir("aom-avif-test-resources")
+val argonAv1Version = "2.1.1"
+val argonAv1ArchiveName = "argon_coveragetool_av1_base_and_extended_profiles_v$argonAv1Version.zip"
+val argonAv1Zip = layout.buildDirectory.file("downloads/$argonAv1ArchiveName")
 
 val downloadLibavif = tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadLibavif") {
     src("https://github.com/AOMediaCodec/libavif/archive/$libavifCommit.zip")
@@ -127,6 +130,18 @@ val downloadAomAvifTestFiles =
         overwrite(false)
         onlyIf("the pinned AOMedia archive is not already cached") {
             !aomAvifZip.get().asFile.isFile
+        }
+    }
+
+val downloadArgonAv1Streams =
+    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadArgonAv1Streams") {
+        group = "verification"
+        description = "Downloads the pinned Argon Streams AV1 corpus."
+        src("https://aom-cwg-av1-argon-streams-public.s3.us-east-1.amazonaws.com/$argonAv1ArchiveName")
+        dest(argonAv1Zip)
+        overwrite(false)
+        onlyIf("the pinned Argon Streams archive is not already cached") {
+            !argonAv1Zip.get().asFile.isFile
         }
     }
 
@@ -203,6 +218,25 @@ tasks.register<Test>("aomAvifTest") {
     if (this.javaVersion >= JavaVersion.VERSION_25) {
         jvmArgs("--enable-native-access=javafx.graphics")
     }
+}
+
+tasks.register<Test>("argonAv1Test") {
+    group = "verification"
+    description = "Runs the Argon Streams AV1 corpus tests."
+    dependsOn(tasks.testClasses)
+    dependsOn(downloadArgonAv1Streams)
+
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    maxHeapSize = "2g"
+
+    useJUnitPlatform {
+        includeTags("argon-corpus")
+    }
+    systemProperty(
+        "org.glavo.avif.argon.archive",
+        argonAv1Zip.get().asFile.absolutePath,
+    )
 }
 
 tasks.processTestResources {

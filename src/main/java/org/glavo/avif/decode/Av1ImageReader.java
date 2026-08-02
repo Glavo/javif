@@ -661,6 +661,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 "populated reference slot"
         );
         DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
+        lastPlanes = presentationPlanes;
         DecodedFrame outputFrame;
         try {
             outputFrame = OutputFrameFactory.createExistingFrame(

@@ -577,71 +577,91 @@ public final class FrameHeaderParser {
             int[] referenceFrameIndices
     ) throws IOException {
         referenceFrameIndices[0] = readInt(reader, 3);
-        referenceFrameIndices[1] = -1;
-        referenceFrameIndices[2] = -1;
         referenceFrameIndices[3] = readInt(reader, 3);
 
         int[] referenceOffsets = new int[TOTAL_REFERENCE_FRAMES];
-        int earliestReference = -1;
-        int earliestOffset = Integer.MAX_VALUE;
+        boolean[] usedFrames = new boolean[TOTAL_REFERENCE_FRAMES];
         for (int i = 0; i < TOTAL_REFERENCE_FRAMES; i++) {
             FrameHeader referenceFrameHeader = referenceFrameHeaders[i];
             if (referenceFrameHeader == null) {
                 fail("Short-signaled references require all reference-frame headers to be available");
             }
-            int diff = getPocDiff(sequenceHeader.features().orderHintBits(), referenceFrameHeader.frameOffset(), frameOffset);
-            referenceOffsets[i] = diff;
-            if (diff < earliestOffset) {
-                earliestOffset = diff;
-                earliestReference = i;
-            }
+            referenceOffsets[i] = getPocDiff(
+                    sequenceHeader.features().orderHintBits(),
+                    referenceFrameHeader.frameOffset(),
+                    frameOffset
+            );
         }
-
-        referenceOffsets[referenceFrameIndices[0]] = Integer.MIN_VALUE;
-        referenceOffsets[referenceFrameIndices[3]] = Integer.MIN_VALUE;
-        if (earliestReference < 0) {
-            fail("Could not derive an earliest short-signaled reference frame");
-        }
+        usedFrames[referenceFrameIndices[0]] = true;
+        usedFrames[referenceFrameIndices[3]] = true;
 
         int referenceIndex = -1;
-        int latestOffset = 0;
         for (int i = 0; i < TOTAL_REFERENCE_FRAMES; i++) {
-            int hint = referenceOffsets[i];
-            if (hint >= latestOffset) {
-                latestOffset = hint;
+            int offset = referenceOffsets[i];
+            if (!usedFrames[i]
+                    && offset >= 0
+                    && (referenceIndex < 0 || offset >= referenceOffsets[referenceIndex])) {
                 referenceIndex = i;
             }
         }
-        referenceOffsets[referenceIndex] = Integer.MIN_VALUE;
-        referenceFrameIndices[6] = referenceIndex;
+        if (referenceIndex >= 0) {
+            referenceFrameIndices[6] = referenceIndex;
+            usedFrames[referenceIndex] = true;
+        }
 
         for (int i = 4; i < 6; i++) {
-            int earliestUnsignedOffset = -1;
             referenceIndex = -1;
             for (int j = 0; j < TOTAL_REFERENCE_FRAMES; j++) {
-                int hint = referenceOffsets[j];
-                if (Integer.compareUnsigned(hint, earliestUnsignedOffset) < 0) {
-                    earliestUnsignedOffset = hint;
+                int offset = referenceOffsets[j];
+                if (!usedFrames[j]
+                        && offset >= 0
+                        && (referenceIndex < 0 || offset < referenceOffsets[referenceIndex])) {
                     referenceIndex = j;
                 }
             }
-            referenceOffsets[referenceIndex] = Integer.MIN_VALUE;
-            referenceFrameIndices[i] = referenceIndex;
+            if (referenceIndex >= 0) {
+                referenceFrameIndices[i] = referenceIndex;
+                usedFrames[referenceIndex] = true;
+            }
         }
 
-        for (int i = 1; i < REFERENCES_PER_FRAME; i++) {
-            referenceIndex = referenceFrameIndices[i];
-            if (referenceIndex < 0) {
-                int latestUnsignedOffset = ~0xFF;
-                for (int j = 0; j < TOTAL_REFERENCE_FRAMES; j++) {
-                    int hint = referenceOffsets[j];
-                    if (Integer.compareUnsigned(hint, latestUnsignedOffset) >= 0) {
-                        latestUnsignedOffset = hint;
-                        referenceIndex = j;
-                    }
+        for (int i = 0; i < REFERENCES_PER_FRAME - 2; i++) {
+            int referenceFrame = switch (i) {
+                case 0 -> 1;
+                case 1 -> 2;
+                case 2 -> 4;
+                case 3 -> 5;
+                case 4 -> 6;
+                default -> throw new AssertionError(i);
+            };
+            if (referenceFrameIndices[referenceFrame] >= 0) {
+                continue;
+            }
+
+            referenceIndex = -1;
+            for (int j = 0; j < TOTAL_REFERENCE_FRAMES; j++) {
+                int offset = referenceOffsets[j];
+                if (!usedFrames[j]
+                        && offset < 0
+                        && (referenceIndex < 0 || offset >= referenceOffsets[referenceIndex])) {
+                    referenceIndex = j;
                 }
-                referenceOffsets[referenceIndex] = Integer.MIN_VALUE;
-                referenceFrameIndices[i] = referenceIndex >= 0 ? referenceIndex : earliestReference;
+            }
+            if (referenceIndex >= 0) {
+                referenceFrameIndices[referenceFrame] = referenceIndex;
+                usedFrames[referenceIndex] = true;
+            }
+        }
+
+        int earliestReference = 0;
+        for (int i = 1; i < TOTAL_REFERENCE_FRAMES; i++) {
+            if (referenceOffsets[i] < referenceOffsets[earliestReference]) {
+                earliestReference = i;
+            }
+        }
+        for (int i = 0; i < REFERENCES_PER_FRAME; i++) {
+            if (referenceFrameIndices[i] < 0) {
+                referenceFrameIndices[i] = earliestReference;
             }
         }
     }

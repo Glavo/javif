@@ -162,6 +162,22 @@ final class FrameHeaderParserTest {
         assertFalse(header.filmGrainPresent());
     }
 
+    /// Verifies the normative short-signaled LAST-through-ALTREF reference selection order.
+    ///
+    /// @throws IOException if the test payload cannot be parsed
+    @Test
+    void derivesShortSignaledReferenceFrameIndices() throws IOException {
+        FrameHeader header = new FrameHeaderParser().parse(
+                frameHeaderObu(interFrameHeaderPayloadWithShortSignaling()),
+                fullInterSequenceHeader(),
+                false,
+                createShortSignaledInterReferenceFrames()
+        );
+
+        assertTrue(header.frameReferenceShortSignaling());
+        assertArrayEquals(new int[]{0, 5, 6, 3, 2, 4, 1}, header.referenceFrameIndices());
+    }
+
     /// Verifies that translation global-motion parameters are decoded in their normative fixed-point domain.
     ///
     /// @throws IOException if the test payload cannot be parsed
@@ -563,6 +579,22 @@ final class FrameHeaderParserTest {
         return references;
     }
 
+    /// Creates a complete reference set with deterministic forward and backward order hints.
+    ///
+    /// @return refreshed references for short-signaling derivation
+    private static FrameHeader[] createShortSignaledInterReferenceFrames() {
+        FrameHeader[] references = new FrameHeader[8];
+        references[0] = createReferenceFrameHeader(9, 64, 64, 66, 68);
+        references[1] = createReferenceFrameHeader(14, 640, 360, 640, 360);
+        references[2] = createReferenceFrameHeader(12, 640, 360, 640, 360);
+        references[3] = createReferenceFrameHeader(11, 640, 360, 640, 360);
+        references[4] = createReferenceFrameHeader(13, 640, 360, 640, 360);
+        references[5] = createReferenceFrameHeader(9, 640, 360, 640, 360);
+        references[6] = createReferenceFrameHeader(8, 640, 360, 640, 360);
+        references[7] = createReferenceFrameHeader(7, 640, 360, 640, 360);
+        return references;
+    }
+
     /// Creates refreshed reference-frame headers where slot `3` carries film grain parameters for inheritance tests.
     ///
     /// @param filmGrain the film grain parameters stored in reference slot `3`
@@ -765,6 +797,17 @@ final class FrameHeaderParserTest {
         return writer.toByteArray();
     }
 
+    /// Creates a standalone inter frame header that short-signals LAST and GOLDEN references.
+    ///
+    /// @return a standalone short-signaled inter frame header payload
+    private static byte[] interFrameHeaderPayloadWithShortSignaling() {
+        BitWriter writer = new BitWriter();
+        writeInterFrameHeaderBeforeGlobalMotion(writer, true);
+        writeIdentityGlobalMotion(writer);
+        writer.writeTrailingBits();
+        return writer.toByteArray();
+    }
+
     /// Creates a standalone inter frame header payload with a translated LAST reference.
     ///
     /// @return a standalone inter frame header payload with translation global motion
@@ -787,6 +830,14 @@ final class FrameHeaderParserTest {
     ///
     /// @param writer the destination bit writer
     private static void writeInterFrameHeaderBeforeGlobalMotion(BitWriter writer) {
+        writeInterFrameHeaderBeforeGlobalMotion(writer, false);
+    }
+
+    /// Writes the common inter frame-header fields with the requested reference signaling form.
+    ///
+    /// @param writer the destination bit writer
+    /// @param shortSignaling whether only LAST and GOLDEN reference slots are signaled
+    private static void writeInterFrameHeaderBeforeGlobalMotion(BitWriter writer, boolean shortSignaling) {
         writer.writeFlag(false);
         writer.writeBits(1, 2);
         writer.writeFlag(true);
@@ -796,14 +847,19 @@ final class FrameHeaderParserTest {
         writer.writeBits(10, 4);
         writer.writeBits(7, 3);
         writer.writeBits(0x12, 8);
-        writer.writeFlag(false);
-        writer.writeBits(0, 3);
-        writer.writeBits(1, 3);
-        writer.writeBits(2, 3);
-        writer.writeBits(3, 3);
-        writer.writeBits(4, 3);
-        writer.writeBits(5, 3);
-        writer.writeBits(6, 3);
+        writer.writeFlag(shortSignaling);
+        if (shortSignaling) {
+            writer.writeBits(0, 3);
+            writer.writeBits(3, 3);
+        } else {
+            writer.writeBits(0, 3);
+            writer.writeBits(1, 3);
+            writer.writeBits(2, 3);
+            writer.writeBits(3, 3);
+            writer.writeBits(4, 3);
+            writer.writeBits(5, 3);
+            writer.writeBits(6, 3);
+        }
         writer.writeFlag(true);
         writer.writeFlag(false);
         writer.writeFlag(true);
