@@ -292,6 +292,9 @@ tasks.register<Test>("argonAv1Test") {
     providers.gradleProperty("argonAv1Case").orNull?.let { selectedCase ->
         systemProperty("org.glavo.avif.argon.case", selectedCase)
     }
+    providers.gradleProperty("argonAv1Shard").orNull?.let { selectedShard ->
+        systemProperty("org.glavo.avif.argon.shard", selectedShard)
+    }
 }
 
 tasks.processTestResources {

@@ -88,13 +88,15 @@ archives are available or can be downloaded:
 ```
 
 The second archive is several gigabytes. The `Corpus Check` GitHub Actions workflow therefore keeps
-both corpus gates manual and caches their pinned archives independently. The Argon gate covers all
-regular and special low-overhead streams and uses a 4 GB test heap by default. It can be split by
-category or narrowed to one stream, and the heap remains configurable for constrained or unusually
-large workers:
+both corpus gates manual, caches their pinned archives independently, and runs the six Argon
+categories as separate matrix jobs. The Argon gate covers all regular and special low-overhead
+streams and uses a 4 GB test heap by default. It can be split by category or narrowed to one stream,
+and the heap remains configurable for constrained or unusually large workers. Shards are one-based
+and can be combined with `category/all`:
 
 ```text
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/all
+./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/all -PargonAv1Shard=1/8
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/test17.obu
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1MaxHeap=6g
 ```

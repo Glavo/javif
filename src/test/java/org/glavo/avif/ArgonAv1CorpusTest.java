@@ -37,6 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -47,6 +48,7 @@ import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies raw AV1 decoding against selected Argon Streams reference outputs.
@@ -62,6 +64,9 @@ final class ArgonAv1CorpusTest {
     /// Optional system property that selects one `category/stream.obu` case, one `category/all`
     /// group, or `all` for diagnosis.
     private static final String CASE_PROPERTY = "org.glavo.avif.argon.case";
+
+    /// Optional system property that selects one one-based deterministic test shard as `index/count`.
+    private static final String SHARD_PROPERTY = "org.glavo.avif.argon.shard";
 
     /// Root directory stored in the Argon Streams 2.1.1 ZIP.
     private static final String ARCHIVE_ROOT =
@@ -106,6 +111,28 @@ final class ArgonAv1CorpusTest {
         }
     }
 
+    /// Verifies one-based shard parsing and deterministic round-robin selection.
+    @Test
+    void selectsDeterministicCorpusShards() {
+        @Unmodifiable List<CorpusCase> cases = List.of(
+                new CorpusCase("category", "test1.obu"),
+                new CorpusCase("category", "test2.obu"),
+                new CorpusCase("category", "test3.obu"),
+                new CorpusCase("category", "test4.obu"),
+                new CorpusCase("category", "test5.obu")
+        );
+
+        assertEquals(new CorpusShard(2, 3), CorpusShard.parse("2/3"));
+        assertEquals(List.of(cases.get(0), cases.get(3)), new CorpusShard(1, 3).select(cases));
+        assertEquals(List.of(cases.get(1), cases.get(4)), new CorpusShard(2, 3).select(cases));
+        assertEquals(List.of(cases.get(2)), new CorpusShard(3, 3).select(cases));
+        assertThrows(IllegalArgumentException.class, () -> CorpusShard.parse("0/3"));
+        assertThrows(IllegalArgumentException.class, () -> CorpusShard.parse("4/3"));
+        assertThrows(IllegalArgumentException.class, () -> CorpusShard.parse("1/0"));
+        assertThrows(IllegalArgumentException.class, () -> CorpusShard.parse("one/three"));
+        assertThrows(IllegalArgumentException.class, () -> new CorpusShard(4, 4).select(cases.subList(0, 3)));
+    }
+
     /// Returns reference-output checks for the supported low-overhead streams in all AV1 profiles.
     ///
     /// @return the dynamic reference-output tests
@@ -126,10 +153,10 @@ final class ArgonAv1CorpusTest {
     private static @Unmodifiable List<CorpusCase> selectedReferenceCases() throws IOException {
         @Nullable String selectedCase = System.getProperty(CASE_PROPERTY);
         if (selectedCase == null) {
-            return allLowOverheadCases(null);
+            return selectConfiguredShard(allLowOverheadCases(null));
         }
         if (selectedCase.equals("all")) {
-            return allLowOverheadCases(null);
+            return selectConfiguredShard(allLowOverheadCases(null));
         }
         if (selectedCase.endsWith("/all")) {
             String category = selectedCase.substring(0, selectedCase.length() - "/all".length());
@@ -140,9 +167,26 @@ final class ArgonAv1CorpusTest {
             if (cases.isEmpty()) {
                 throw new IllegalArgumentException("Unknown Argon AV1 category: " + category);
             }
-            return cases;
+            return selectConfiguredShard(cases);
+        }
+        if (System.getProperty(SHARD_PROPERTY) != null) {
+            throw new IllegalArgumentException("Argon AV1 sharding cannot be combined with a single-case selector");
         }
         return List.of(CorpusCase.parse(selectedCase));
+    }
+
+    /// Applies the configured deterministic shard to one sorted corpus selection.
+    ///
+    /// @param cases the complete sorted selection
+    /// @return the immutable selected shard, or `cases` when no shard is configured
+    private static @Unmodifiable List<CorpusCase> selectConfiguredShard(
+            @Unmodifiable List<CorpusCase> cases
+    ) {
+        @Nullable String selectedShard = System.getProperty(SHARD_PROPERTY);
+        if (selectedShard == null) {
+            return cases;
+        }
+        return CorpusShard.parse(selectedShard).select(cases);
     }
 
     /// Returns all regular and special low-overhead cases, optionally restricted to one category.
@@ -314,6 +358,59 @@ final class ArgonAv1CorpusTest {
         /// @return the `category/stream.obu` selector
         private String selector() {
             return category + "/" + streamName;
+        }
+    }
+
+    /// Identifies one deterministic one-based shard of a sorted corpus selection.
+    ///
+    /// @param index the one-based shard index
+    /// @param count the total number of shards
+    @NotNullByDefault
+    private record CorpusShard(int index, int count) {
+        /// Creates one validated corpus shard.
+        private CorpusShard {
+            if (count <= 0) {
+                throw new IllegalArgumentException("Argon AV1 shard count must be positive: " + count);
+            }
+            if (index <= 0 || index > count) {
+                throw new IllegalArgumentException("Argon AV1 shard index must be in [1, " + count + "]: " + index);
+            }
+        }
+
+        /// Parses one `index/count` shard selector.
+        ///
+        /// @param value the shard selector to parse
+        /// @return the parsed shard
+        private static CorpusShard parse(String value) {
+            int separator = value.indexOf('/');
+            if (separator <= 0 || separator != value.lastIndexOf('/') || separator == value.length() - 1) {
+                throw new IllegalArgumentException("Invalid Argon AV1 shard: " + value);
+            }
+            try {
+                return new CorpusShard(
+                        Integer.parseInt(value.substring(0, separator)),
+                        Integer.parseInt(value.substring(separator + 1))
+                );
+            } catch (NumberFormatException exception) {
+                throw new IllegalArgumentException("Invalid Argon AV1 shard: " + value, exception);
+            }
+        }
+
+        /// Selects this shard from one deterministically sorted corpus list.
+        ///
+        /// @param cases the complete sorted corpus list
+        /// @return the immutable non-empty shard selection
+        private @Unmodifiable List<CorpusCase> select(@Unmodifiable List<CorpusCase> cases) {
+            List<CorpusCase> selectedCases = new ArrayList<>((cases.size() + count - 1) / count);
+            for (int caseIndex = index - 1; caseIndex < cases.size(); caseIndex += count) {
+                selectedCases.add(cases.get(caseIndex));
+            }
+            if (selectedCases.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Argon AV1 shard " + index + "/" + count + " is empty for " + cases.size() + " cases"
+                );
+            }
+            return List.copyOf(selectedCases);
         }
     }
 }
