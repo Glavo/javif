@@ -1,0 +1,60 @@
+name: Corpus Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      corpus:
+        description: Corpus gate to run
+        required: true
+        default: aom
+        type: choice
+        options:
+          - aom
+          - argon
+          - all
+
+permissions:
+  contents: read
+
+jobs:
+  aom-corpus:
+    if: ${{ inputs.corpus == 'aom' || inputs.corpus == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Restore pinned AOMedia corpus archive
+        uses: actions/cache@v5
+        with:
+          path: build/downloads/av1-avif-bf4c18d1f3971069b75e87d6ee469790589f4f09.zip
+          key: aom-avif-bf4c18d1f3971069b75e87d6ee469790589f4f09
+      - name: Run AOMedia AVIF corpus gate
+        run: >-
+          xvfb-run -a ./gradlew -g .gradle-user-home
+          aomAvifTest --info --no-daemon --stacktrace
+
+  argon-corpus:
+    if: ${{ inputs.corpus == 'argon' || inputs.corpus == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Restore pinned Argon Streams archive
+        uses: actions/cache@v5
+        with:
+          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          key: argon-av1-v2.1.1
+      - name: Run Argon Streams AV1 corpus gate
+        run: >-
+          ./gradlew -g .gradle-user-home
+          argonAv1Test --info --no-daemon --stacktrace

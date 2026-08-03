@@ -1,3 +1,4 @@
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.kotlin.dsl.attributes
 
 plugins {
@@ -67,6 +68,28 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.bytedeco:ffmpeg-platform:8.0.1-1.5.13")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+val runtimeClasspathConfiguration = configurations.named("runtimeClasspath")
+
+tasks.register("verifyNoRuntimeDependencies") {
+    group = "verification"
+    description = "Verifies that the core library has no external runtime dependencies."
+
+    doLast {
+        val externalComponents = runtimeClasspathConfiguration.get()
+            .incoming
+            .resolutionResult
+            .allComponents
+            .filter { it.id !is ProjectComponentIdentifier }
+
+        check(externalComponents.isEmpty()) {
+            externalComponents.joinToString(
+                prefix = "runtimeClasspath contains external dependencies:\n",
+                separator = "\n",
+            ) { component -> "- ${component.id.displayName}" }
+        }
+    }
 }
 
 tasks.withType<JavaCompile> {

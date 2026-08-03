@@ -45,15 +45,19 @@ parity are not project features.
 
 ## Verification Baseline
 
-- `processTestResources` downloads pinned libavif and `link-u/avif-sample-images` source archives
-  and copies only their test fixtures and attribution files into generated test resources.
+- `processTestResources` downloads a pinned libavif source archive and copies its test fixtures into
+  generated test resources.
 - The opt-in `aomAvifTest` task downloads a pinned `AOMediaCodec/av1-avif` source archive and tests
   all 172 AVIF files contributed by Apple, Link-U, Microsoft, Netflix, and Xiph. The task extracts
   only AVIF files and their licenses or construction notes; it does not add the large reference
   PNG set to the ordinary test classpath.
-- All 156 AVIF/AVIFS files in `link-u/avif-sample-images` are decoded end to end. FFmpeg source-plane
-  comparisons cover 153 of them; the remaining three are alpha-bearing sequences for which the
-  test helper selects the auxiliary track instead of the color track.
+- All 83 Link-U files curated by the pinned AOMedia corpus are decoded end to end and compared with
+  FFmpeg's first-frame source planes. Documented PNG references additionally cover presentation
+  transforms such as clean aperture, rotation, and mirroring.
+- The opt-in `argonAv1Test` task verifies the complete 3,921-stream inventory in Argon Streams AV1
+  2.1.1. Its default reference-output gate covers all 37 regular low-overhead streams across AV1
+  profiles 0, 1, and 2 and compares every visible pre-grain YUV frame with Argon's MD5 digest.
+  Other Argon categories remain diagnostic selectors rather than part of the default gate.
 - Libavif fixtures cover still images, sequences, grids, alpha/depth/gain-map relationships,
   progressive images, Sample Transform, HDR/WCG metadata, and reference pixel/plane comparisons.
 - Unit and integration tests cover entropy decoding, syntax contexts, prediction, reconstruction,
@@ -62,14 +66,18 @@ parity are not project features.
 - The release gate is:
 
   ```text
-  ./gradlew -g .gradle-user-home cleanTest test javadoc jar
-  ./gradlew -g .gradle-user-home dependencies --configuration runtimeClasspath
+  ./gradlew -g .gradle-user-home cleanTest test javadoc jar verifyNoRuntimeDependencies
   ```
 
-  The second command must continue to show `No dependencies` for `runtimeClasspath`.
+  `verifyNoRuntimeDependencies` fails if `runtimeClasspath` contains an external component.
 
-- The extended AOMedia corpus gate is:
+- The extended corpus gates are:
 
   ```text
   ./gradlew -g .gradle-user-home aomAvifTest
+  ./gradlew -g .gradle-user-home argonAv1Test
   ```
+
+  The `Corpus Check` GitHub Actions workflow exposes both gates as explicit manual jobs and caches
+  their pinned source archives independently. They are not run for every pull request because of
+  their download size and execution time.
