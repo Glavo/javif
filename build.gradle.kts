@@ -20,6 +20,11 @@ if (version == Project.DEFAULT_VERSION) {
 
 description = "Pure Java implementation of AV1 decoding and AVIF reading library"
 
+java {
+    withJavadocJar()
+    withSourcesJar()
+}
+
 repositories {
     mavenCentral()
 }
@@ -103,6 +108,12 @@ tasks.jar {
     manifest.attributes(
         "Main-Class" to mainClassName,
     )
+}
+
+tasks.withType<Jar>().configureEach {
+    from(layout.projectDirectory.file("LICENSE")) {
+        into("META-INF")
+    }
 }
 
 tasks.register<JavaExec>("run") {

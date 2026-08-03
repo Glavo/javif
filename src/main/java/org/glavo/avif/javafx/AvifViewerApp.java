@@ -38,14 +38,15 @@ import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifFrame;
 import org.glavo.avif.AvifImageInfo;
 import org.glavo.avif.AvifImageReader;
+import org.glavo.avif.AvifSequenceInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.UnknownNullability;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -57,20 +58,34 @@ import java.util.Objects;
 @NotNullByDefault
 public final class AvifViewerApp extends Application {
 
+    /// Displays the current decoded frame.
     private final ImageView imageView = new ImageView();
+    /// Displays the current file, image properties, and loading status.
     private final Label statusLabel = new Label("Open or drop an AVIF file to start.");
+    /// Selects local AVIF input files.
     private final FileChooser fileChooser = createFileChooser();
+    /// Hosts the image and receives pointer gestures used for panning.
     private final StackPane imagePane = new StackPane(imageView);
+    /// Covers the image while a background decode is active.
     private final StackPane loadingOverlay = createLoadingOverlay();
 
+    /// The primary application stage after [#start(Stage)] initializes it.
     private @UnknownNullability Stage stage;
+    /// The currently displayed file path, or `null` when no image is loaded.
     private @Nullable Path currentPath;
+    /// The currently displayed JavaFX image, or `null` when no image is loaded.
     private @Nullable AvifFXImage currentImage;
+    /// The image viewport after [#start(Stage)] initializes it.
     private @Nullable ScrollPane scrollPane;
-    private @Nullable Task<List<AvifFrame>> loadTask;
+    /// The active background decode, or `null` when no load is pending.
+    private @Nullable Task<LoadedImage> loadTask;
+    /// Monotonically increasing identifier used to discard stale load completions.
     private long loadRequestId;
+    /// The pointer position at which the active pan gesture started, or `null` outside a gesture.
     private @Nullable Point2D dragAnchor;
+    /// The horizontal scroll value captured at the start of a pan gesture.
     private double dragStartHValue;
+    /// The vertical scroll value captured at the start of a pan gesture.
     private double dragStartVValue;
 
     /// Launches the viewer application.
@@ -131,6 +146,9 @@ public final class AvifViewerApp extends Application {
         stopPlayback();
     }
 
+    /// Installs AVIF file drag-and-drop handling on the scene.
+    ///
+    /// @param scene the primary application scene
     private void installFileDropHandlers(Scene scene) {
         scene.setOnDragOver(event -> {
             if (event.getDragboard().hasFiles() && findDroppedAvifFile(event.getDragboard().getFiles()) != null) {
@@ -150,6 +168,7 @@ public final class AvifViewerApp extends Application {
         });
     }
 
+    /// Installs pointer handlers that pan images larger than the viewport.
     private void installDragPanHandlers() {
         imagePane.setOnMousePressed(event -> {
             if (event.getButton() != MouseButton.PRIMARY || scrollPane == null || imageView.getImage() == null) {
@@ -197,6 +216,7 @@ public final class AvifViewerApp extends Application {
         });
     }
 
+    /// Opens the file chooser and starts loading the selected file.
     private void openFileChooser() {
         Path initialDirectory = currentDirectory();
         if (initialDirectory != null) {
@@ -209,16 +229,19 @@ public final class AvifViewerApp extends Application {
         }
     }
 
+    /// Starts an asynchronous decode and supersedes any earlier load request.
+    ///
+    /// @param path the AVIF file to load
     private void load(Path path) {
         stopPlayback();
         cancelLoadTask();
 
         long startNanos = System.nanoTime();
         long requestId = ++loadRequestId;
-        Task<List<AvifFrame>> task = new Task<>() {
+        Task<LoadedImage> task = new Task<>() {
             @Override
-            protected List<AvifFrame> call() throws Exception {
-                return decodeFrames(path);
+            protected LoadedImage call() throws Exception {
+                return decodeImage(path);
             }
         };
 
@@ -259,11 +282,19 @@ public final class AvifViewerApp extends Application {
         worker.start();
     }
 
-    private static List<AvifFrame> decodeFrames(Path path) throws IOException {
-        AvifImageReader reader = AvifImageReader.open(path);
-        return reader.readAllFrames();
+    /// Decodes every frame and retains the immutable sequence playback metadata.
+    ///
+    /// @param path the AVIF file to decode
+    /// @return the decoded viewer input
+    /// @throws IOException if the file cannot be opened or decoded
+    private static LoadedImage decodeImage(Path path) throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(path)) {
+            AvifImageInfo info = reader.info();
+            return new LoadedImage(reader.readAllFrames(), info.sequenceInfo());
+        }
     }
 
+    /// Stops active animation and clears the current file state.
     private void stopPlayback() {
         if (currentImage != null) {
             var animation = currentImage.getAnimation();
@@ -275,6 +306,9 @@ public final class AvifViewerApp extends Application {
         currentPath = null;
     }
 
+    /// Returns the directory containing the current file when it is still accessible.
+    ///
+    /// @return the current file directory, or `null`
     private @Nullable Path currentDirectory() {
         if (currentPath != null) {
             Path parent = currentPath.getParent();
@@ -285,6 +319,9 @@ public final class AvifViewerApp extends Application {
         return null;
     }
 
+    /// Returns whether the displayed image exceeds either viewport dimension.
+    ///
+    /// @return whether pointer panning can move the image
     private boolean canPanImage() {
         if (scrollPane == null) {
             return false;
@@ -293,16 +330,26 @@ public final class AvifViewerApp extends Application {
                 || imagePane.getLayoutBounds().getHeight() > scrollPane.getViewportBounds().getHeight();
     }
 
+    /// Ends the active pan gesture and restores the default pointer style.
     private void finishDragPan() {
         dragAnchor = null;
         imagePane.setStyle("");
     }
 
-    private void applyLoadedImage(Path path, List<AvifFrame> frames, long startNanos) {
+    /// Installs one successfully decoded image and starts sequence playback when applicable.
+    ///
+    /// @param path the decoded file path
+    /// @param loadedImage the decoded frames and sequence metadata
+    /// @param startNanos the load start time returned by `System.nanoTime()`
+    private void applyLoadedImage(Path path, LoadedImage loadedImage, long startNanos) {
         long elapsedMillis = elapsedMillis(startNanos);
 
+        @Unmodifiable List<AvifFrame> frames = loadedImage.frames();
         boolean animated = frames.size() > 1;
-        AvifFXImage fxImage = new AvifFXImage(frames, animated);
+        @Nullable AvifSequenceInfo sequenceInfo = loadedImage.sequenceInfo();
+        AvifFXImage fxImage = sequenceInfo == null
+                ? new AvifFXImage(frames, false)
+                : new AvifFXImage(frames, sequenceInfo, false);
 
         currentPath = path;
         currentImage = fxImage;
@@ -323,6 +370,10 @@ public final class AvifViewerApp extends Application {
         }
     }
 
+    /// Clears failed-load state and presents a diagnostic alert.
+    ///
+    /// @param path the file that failed to load
+    /// @param error the background task failure
     private void handleLoadFailure(Path path, Throwable error) {
         IOException exception = error instanceof IOException ioException
                 ? ioException
@@ -338,8 +389,9 @@ public final class AvifViewerApp extends Application {
         showLoadError(path, exception);
     }
 
+    /// Cancels the active decode task, if any, and hides the loading overlay.
     private void cancelLoadTask() {
-        Task<List<AvifFrame>> task = loadTask;
+        @Nullable Task<LoadedImage> task = loadTask;
         loadTask = null;
         if (task != null) {
             task.cancel();
@@ -347,15 +399,27 @@ public final class AvifViewerApp extends Application {
         setLoading(false);
     }
 
-    private boolean isCurrentLoad(long requestId, Task<List<AvifFrame>> task) {
+    /// Returns whether a background task still represents the latest load request.
+    ///
+    /// @param requestId the request identifier captured when the task was created
+    /// @param task the background decode task
+    /// @return whether the task may update the viewer
+    private boolean isCurrentLoad(long requestId, Task<LoadedImage> task) {
         return loadRequestId == requestId && loadTask == task;
     }
 
+    /// Shows or hides the loading overlay.
+    ///
+    /// @param loading whether a background decode is active
     private void setLoading(boolean loading) {
         loadingOverlay.setManaged(loading);
         loadingOverlay.setVisible(loading);
     }
 
+    /// Shows a load failure owned by the primary stage when it is available.
+    ///
+    /// @param path the file that failed to load
+    /// @param ex the decoded I/O failure
     private void showLoadError(Path path, IOException ex) {
         if (stage == null) {
             return;
@@ -368,6 +432,10 @@ public final class AvifViewerApp extends Application {
         alert.show();
     }
 
+    /// Returns the first regular dropped `.avif` file.
+    ///
+    /// @param files the files supplied by the dragboard
+    /// @return the selected path, or `null` when no AVIF file is present
     private static @Nullable Path findDroppedAvifFile(List<java.io.File> files) {
         for (java.io.File file : files) {
             Path path = file.toPath();
@@ -378,10 +446,18 @@ public final class AvifViewerApp extends Application {
         return null;
     }
 
+    /// Restricts a scroll value to the inclusive range from zero to one.
+    ///
+    /// @param value the source value
+    /// @return the restricted value
     private static double clamp(double value) {
         return Math.max(0.0, Math.min(1.0, value));
     }
 
+    /// Returns a non-empty diagnostic message for a failure.
+    ///
+    /// @param error the failure to describe
+    /// @return the failure message or simple class name
     private static String errorMessage(Throwable error) {
         String message = error.getMessage();
         if (message == null || message.isBlank()) {
@@ -390,10 +466,22 @@ public final class AvifViewerApp extends Application {
         return message;
     }
 
+    /// Returns elapsed whole milliseconds since a `System.nanoTime()` sample.
+    ///
+    /// @param startNanos the starting monotonic-clock sample
+    /// @return the non-rounded elapsed milliseconds
     private static long elapsedMillis(long startNanos) {
         return (System.nanoTime() - startNanos) / 1_000_000L;
     }
 
+    /// Builds the compact status text for a successfully decoded image.
+    ///
+    /// @param path the decoded file
+    /// @param frame the first presented frame
+    /// @param frameCount the number of presented frames
+    /// @param animated whether the image contains multiple frames
+    /// @param loadMillis the decode time in milliseconds
+    /// @return the status label text
     private String buildStatusText(Path path, AvifFrame frame, int frameCount, boolean animated, long loadMillis) {
         StringBuilder text = new StringBuilder();
         text.append(path.getFileName())
@@ -414,6 +502,9 @@ public final class AvifViewerApp extends Application {
         return text.toString();
     }
 
+    /// Creates the AVIF-focused file chooser.
+    ///
+    /// @return the configured chooser
     private static FileChooser createFileChooser() {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Open AVIF Image");
@@ -424,6 +515,9 @@ public final class AvifViewerApp extends Application {
         return chooser;
     }
 
+    /// Creates the initially hidden loading overlay.
+    ///
+    /// @return the configured overlay
     private static StackPane createLoadingOverlay() {
         ProgressIndicator indicator = new ProgressIndicator();
         indicator.setMaxSize(96, 96);
@@ -433,5 +527,16 @@ public final class AvifViewerApp extends Application {
         overlay.setVisible(false);
         overlay.setStyle("-fx-background-color: rgba(255, 255, 255, 0.72);");
         return overlay;
+    }
+
+    /// Holds decoded viewer frames and optional AVIS playback metadata.
+    ///
+    /// @param frames the immutable decoded frames in presentation order
+    /// @param sequenceInfo the sequence timing and repetition metadata, or `null` for a still image
+    @NotNullByDefault
+    private record LoadedImage(
+            @Unmodifiable List<AvifFrame> frames,
+            @Nullable AvifSequenceInfo sequenceInfo
+    ) {
     }
 }

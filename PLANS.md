@@ -26,8 +26,8 @@ parity are not project features.
   maps, Exif/XMP/ICC metadata, and `clap`/`irot`/`imir` presentation transforms.
 - Raw YUV plane output, 8-bit and 16-bit packed ARGB output, CICP range/matrix/transfer/primary
   conversion, alpha premultiplication handling, and gain-map tone mapping.
-- JavaFX adaptation for static and animated decoded frames, plus a desktop viewer available through
-  the Gradle `run` task.
+- JavaFX adaptation for static and animated decoded frames, including AVIS frame timing and
+  repetition behavior, plus a desktop viewer available through the Gradle `run` task.
 - Structural validation for item dimensions, grid syntax and geometry, auxiliary relationships,
   layer selection, sample tables, frame-size limits, and decoded `ispe` conformance.
 
@@ -66,7 +66,7 @@ parity are not project features.
 - The release gate is:
 
   ```text
-  ./gradlew -g .gradle-user-home cleanTest test javadoc jar verifyNoRuntimeDependencies
+  ./gradlew -g .gradle-user-home cleanTest test javadoc assemble verifyNoRuntimeDependencies
   ```
 
   `verifyNoRuntimeDependencies` fails if `runtimeClasspath` contains an external component.
