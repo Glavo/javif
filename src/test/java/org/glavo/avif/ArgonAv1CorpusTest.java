@@ -80,7 +80,7 @@ final class ArgonAv1CorpusTest {
             ARCHIVE_ROOT + "profile2_not_annexb/streams/"
     );
 
-    /// Low-overhead streams currently known to match their reference output across all profiles.
+    /// Complete regular low-overhead stream set covered by the default regression gate.
     private static final @Unmodifiable List<CorpusCase> REFERENCE_CASES = List.of(
             new CorpusCase("profile0_not_annexb", "test12144.obu"),
             new CorpusCase("profile0_not_annexb", "test12153.obu"),
@@ -97,11 +97,28 @@ final class ArgonAv1CorpusTest {
             new CorpusCase("profile0_not_annexb", "test12319_12313_12198.obu"),
             new CorpusCase("profile0_not_annexb", "test12320.obu"),
             new CorpusCase("profile0_not_annexb", "test12327.obu"),
+            new CorpusCase("profile1_not_annexb", "test8640_8699_8672.obu"),
             new CorpusCase("profile1_not_annexb", "test8650.obu"),
             new CorpusCase("profile1_not_annexb", "test8660.obu"),
+            new CorpusCase("profile1_not_annexb", "test8666.obu"),
             new CorpusCase("profile1_not_annexb", "test8810.obu"),
+            new CorpusCase("profile1_not_annexb", "test8813.obu"),
             new CorpusCase("profile1_not_annexb", "test8817.obu"),
-            new CorpusCase("profile2_not_annexb", "test17154.obu")
+            new CorpusCase("profile1_not_annexb", "test8822.obu"),
+            new CorpusCase("profile1_not_annexb", "test8824.obu"),
+            new CorpusCase("profile1_not_annexb", "test8833.obu"),
+            new CorpusCase("profile1_not_annexb", "test8850_8721.obu"),
+            new CorpusCase("profile1_not_annexb", "test8861_8857_8751.obu"),
+            new CorpusCase("profile1_not_annexb", "test8865.obu"),
+            new CorpusCase("profile1_not_annexb", "test8866.obu"),
+            new CorpusCase("profile2_not_annexb", "test17143.obu"),
+            new CorpusCase("profile2_not_annexb", "test17154.obu"),
+            new CorpusCase("profile2_not_annexb", "test17204_17367_17136.obu"),
+            new CorpusCase("profile2_not_annexb", "test17257.obu"),
+            new CorpusCase("profile2_not_annexb", "test17278_17279.obu"),
+            new CorpusCase("profile2_not_annexb", "test17298_17282.obu"),
+            new CorpusCase("profile2_not_annexb", "test17359_17276_17334.obu"),
+            new CorpusCase("profile2_not_annexb", "test17362.obu")
     );
 
     /// Creates an Argon corpus test instance.
@@ -123,6 +140,7 @@ final class ArgonAv1CorpusTest {
                     .count();
             assertEquals(EXPECTED_STREAM_COUNT, streamCount);
             assertEquals(EXPECTED_LOW_OVERHEAD_STREAM_COUNT, lowOverheadStreamCount);
+            assertEquals(EXPECTED_LOW_OVERHEAD_STREAM_COUNT, REFERENCE_CASES.size());
             assertNotNull(archive.getEntry(ARCHIVE_ROOT + "P8005-R-005h (Argon Streams AV1 User Manual).pdf"));
         }
     }

@@ -2865,6 +2865,7 @@ public final class FrameReconstructor {
         return !checkedNeighbor.intra()
                 && !checkedNeighbor.useIntrabc()
                 && !checkedNeighbor.compoundReference()
+                && !checkedNeighbor.interIntra()
                 && checkedNeighbor.referenceFrame0() == currentHeader.referenceFrame0()
                 && checkedNeighbor.motionVector0() != null;
     }
@@ -3164,6 +3165,7 @@ public final class FrameReconstructor {
                 header.size(),
                 0,
                 0,
+                true,
                 lumaPlane.bitDepth(),
                 jointWeight,
                 segmentMask,
@@ -3232,6 +3234,7 @@ public final class FrameReconstructor {
                 header.size(),
                 chromaSubsamplingX,
                 chromaSubsamplingY,
+                false,
                 chromaUPlane.bitDepth(),
                 jointWeight,
                 segmentMask,
@@ -3268,6 +3271,7 @@ public final class FrameReconstructor {
                 header.size(),
                 chromaSubsamplingX,
                 chromaSubsamplingY,
+                false,
                 chromaVPlane.bitDepth(),
                 jointWeight,
                 segmentMask,
@@ -3395,6 +3399,7 @@ public final class FrameReconstructor {
     /// @param blockSize the luma block size that owns this plane prediction
     /// @param subsamplingX the horizontal chroma subsampling shift for this plane
     /// @param subsamplingY the vertical chroma subsampling shift for this plane
+    /// @param lumaPlane whether this invocation reconstructs the luma plane and must populate the segment mask
     /// @param bitDepth the decoded sample bit depth
     /// @param jointWeight the decoded joint compound weight for weighted average prediction
     /// @param segmentMask the luma-domain segment mask to populate or reuse, or `null`
@@ -3430,6 +3435,7 @@ public final class FrameReconstructor {
             BlockSize blockSize,
             int subsamplingX,
             int subsamplingY,
+            boolean lumaPlane,
             int bitDepth,
             int jointWeight,
             @Nullable int[] segmentMask,
@@ -3540,6 +3546,7 @@ public final class FrameReconstructor {
                                 y,
                                 subsamplingX,
                                 subsamplingY,
+                                lumaPlane,
                                 segmentMask,
                                 segmentMaskWidth,
                                 segmentMaskHeight
@@ -4343,6 +4350,7 @@ public final class FrameReconstructor {
     /// @param y the plane-local sample Y coordinate inside the block
     /// @param subsamplingX the horizontal chroma subsampling shift for this plane
     /// @param subsamplingY the vertical chroma subsampling shift for this plane
+    /// @param lumaPlane whether the caller is reconstructing luma and must populate the segment mask
     /// @param segmentMask the luma-domain segment mask to populate or reuse, or `null`
     /// @param segmentMaskWidth the luma-domain segment mask width
     /// @param segmentMaskHeight the luma-domain segment mask height
@@ -4357,12 +4365,13 @@ public final class FrameReconstructor {
             int y,
             int subsamplingX,
             int subsamplingY,
+            boolean lumaPlane,
             @Nullable int[] segmentMask,
             int segmentMaskWidth,
             int segmentMaskHeight
     ) {
         int mask;
-        if (subsamplingX == 0 && subsamplingY == 0) {
+        if (lumaPlane) {
             mask = lumaSegmentCompoundMaskValue(primarySample, secondarySample, bitDepth, postRoundBits);
             if (segmentMask != null && x < segmentMaskWidth && y < segmentMaskHeight) {
                 segmentMask[y * segmentMaskWidth + x] = mask;
@@ -4438,11 +4447,11 @@ public final class FrameReconstructor {
                 int sampleX = Math.min(segmentMaskWidth - 1, lumaX + xx);
                 sum += segmentMask[sampleY * segmentMaskWidth + sampleX];
             }
-            if (subsamplingX != 0) {
-                sum++;
-            }
         }
-        return (sum - (maskSign ? 1 : 0)) >> (subsamplingX + subsamplingY);
+        int subsamplingShift = subsamplingX + subsamplingY;
+        int roundingOffset = subsamplingShift == 0 ? 0 : 1 << (subsamplingShift - 1);
+        int invertedMaskAdjustment = maskSign && subsamplingShift != 0 ? 1 : 0;
+        return (sum + roundingOffset - invertedMaskAdjustment) >> subsamplingShift;
     }
 
     /// Returns the joint compound primary weight for one decoded reference pair.

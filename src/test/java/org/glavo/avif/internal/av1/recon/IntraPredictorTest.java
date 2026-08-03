@@ -148,6 +148,53 @@ final class IntraPredictorTest {
         ));
     }
 
+    /// Verifies that filter-intra keeps consuming its recursively generated rows after the
+    /// external left edge reaches the bottom frame boundary.
+    @Test
+    void filterIntraPredictionKeepsRecursiveRowsPastBottomBoundary() {
+        MutablePlaneBuffer clippedBoundaryPlane = new MutablePlaneBuffer(12, 12, 8);
+        MutablePlaneBuffer extendedBoundaryPlane = new MutablePlaneBuffer(12, 12, 8);
+        int[] top = {31, 67, 109, 151, 193, 227, 173, 89};
+        int[] left = {211, 167, 103, 43, 43, 43, 43, 43};
+        seedDirectionalReferences(clippedBoundaryPlane, 1, 1, 127, top, left);
+        seedDirectionalReferences(extendedBoundaryPlane, 1, 1, 127, top, left);
+
+        IntraPredictor.predictFilterIntraLuma(
+                clippedBoundaryPlane,
+                1,
+                1,
+                8,
+                8,
+                FilterIntraMode.PAETH,
+                0,
+                0,
+                12,
+                5
+        );
+        IntraPredictor.predictFilterIntraLuma(
+                extendedBoundaryPlane,
+                1,
+                1,
+                8,
+                8,
+                FilterIntraMode.PAETH,
+                0,
+                0,
+                12,
+                12
+        );
+
+        for (int row = 0; row < 8; row++) {
+            for (int column = 0; column < 8; column++) {
+                assertEquals(
+                        extendedBoundaryPlane.sample(1 + column, 1 + row),
+                        clippedBoundaryPlane.sample(1 + column, 1 + row),
+                        "Mismatch at relative row " + row + ", column " + column
+                );
+            }
+        }
+    }
+
     /// Verifies that vertical prediction copies the top edge into every output row.
     @Test
     void verticalPredictionRepeatsTopReferenceRow() {

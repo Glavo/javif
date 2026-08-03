@@ -3129,6 +3129,69 @@ final class FrameReconstructorTest {
         assertPlaneEquals(planes.lumaPlane(), expectedCompoundSegmentBlend(reference0, reference1, true, 8));
     }
 
+    /// Verifies that `I444` chroma segment-compound prediction reuses the luma-derived mask for
+    /// both mask signs instead of deriving independent masks from the chroma predictors.
+    @Test
+    void reconstructsCompoundReferenceI444SegmentMaskBlockFromLumaMask() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[][] luma0 = rampSamples(8, 8, 18, 3, 2);
+        int[][] luma1 = rampSamples(8, 8, 220, -2, -1);
+        int[][] chromaU0 = rampSamples(8, 8, 40, 1, 1);
+        int[][] chromaU1 = rampSamples(8, 8, 100, -1, 0);
+        int[][] chromaV0 = rampSamples(8, 8, 180, -2, -1);
+        int[][] chromaV1 = rampSamples(8, 8, 30, 2, 1);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I444,
+                luma0,
+                chromaU0,
+                chromaV0
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I444,
+                luma1,
+                chromaU1,
+                chromaV1
+        );
+
+        for (boolean maskSign : new boolean[]{false, true}) {
+            TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                    createCompoundReferenceInterBlockHeader(
+                            position,
+                            size,
+                            true,
+                            0,
+                            1,
+                            MotionVector.zero(),
+                            MotionVector.zero(),
+                            CompoundPredictionType.SEGMENT,
+                            maskSign,
+                            -1
+                    ),
+                    createTransformLayout(position, size, AvifPixelFormat.I444),
+                    createResidualLayout(position, size, true)
+            );
+
+            DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                    createInterFrameSyntaxDecodeResult(AvifPixelFormat.I444, 8, 8, 0, 1, leaf),
+                    createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+            );
+
+            assertPlaneEquals(
+                    planes.lumaPlane(),
+                    expectedCompoundSegmentBlend(luma0, luma1, maskSign, 8)
+            );
+            assertPlaneEquals(
+                    requirePlane(planes.chromaUPlane()),
+                    expectedCompoundSegmentBlend(chromaU0, chromaU1, luma0, luma1, maskSign, 8)
+            );
+            assertPlaneEquals(
+                    requirePlane(planes.chromaVPlane()),
+                    expectedCompoundSegmentBlend(chromaV0, chromaV1, luma0, luma1, maskSign, 8)
+            );
+        }
+    }
+
     /// Verifies that one monochrome single-reference inter block bilinearly samples one
     /// fractional luma footprint from one stored reference surface when the frame filter is
     /// `BILINEAR`.
@@ -3606,6 +3669,84 @@ final class FrameReconstructorTest {
                         {155, 159, 163, 167, 171, 175, 179, 183},
                         {160, 165, 170, 175, 179, 183, 187, 192}
                 }
+        );
+    }
+
+    /// Verifies that an inter-intra neighbor is not used as a local-warp projection sample and
+    /// that a model with only one remaining sample falls back to translational prediction.
+    @Test
+    void excludesInterIntraNeighborsFromLocalWarpSamples() {
+        BlockSize size = BlockSize.SIZE_8X8;
+        BlockPosition abovePosition = new BlockPosition(2, 0);
+        BlockPosition leftPosition = new BlockPosition(0, 2);
+        BlockPosition currentPosition = new BlockPosition(2, 2);
+        int[][] lumaSamples = rampSamples(16, 16, 3, 5, 8);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                lumaSamples,
+                null,
+                null
+        );
+        TileBlockHeaderReader.BlockHeader aboveHeader = createSingleReferenceInterIntraBlockHeader(
+                abovePosition,
+                size,
+                false,
+                0,
+                new MotionVector(0, 8),
+                InterIntraPredictionMode.VERTICAL,
+                false,
+                -1
+        );
+        TileBlockHeaderReader.BlockHeader leftHeader = createSingleReferenceInterBlockHeader(
+                leftPosition,
+                size,
+                false,
+                0,
+                new MotionVector(300, 300)
+        );
+        TileBlockHeaderReader.BlockHeader currentHeader = createSingleReferenceInterBlockHeader(
+                currentPosition,
+                size,
+                false,
+                0,
+                MotionVector.zero(),
+                MotionMode.LOCAL_WARPED
+        );
+        TilePartitionTreeReader.LeafNode aboveLeaf = new TilePartitionTreeReader.LeafNode(
+                aboveHeader,
+                createTransformLayout(abovePosition, size, AvifPixelFormat.I400),
+                createResidualLayout(abovePosition, size, true)
+        );
+        TilePartitionTreeReader.LeafNode leftLeaf = new TilePartitionTreeReader.LeafNode(
+                leftHeader,
+                createTransformLayout(leftPosition, size, AvifPixelFormat.I400),
+                createResidualLayout(leftPosition, size, true)
+        );
+        TilePartitionTreeReader.LeafNode currentLeaf = new TilePartitionTreeReader.LeafNode(
+                currentHeader,
+                createTransformLayout(currentPosition, size, AvifPixelFormat.I400),
+                createResidualLayout(currentPosition, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I400,
+                        16,
+                        16,
+                        0,
+                        FrameHeader.InterpolationFilter.BILINEAR,
+                        aboveLeaf,
+                        leftLeaf,
+                        currentLeaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertPlaneBlockEquals(
+                planes.lumaPlane(),
+                8,
+                8,
+                cropSamples(lumaSamples, 8, 8, 8, 8)
         );
     }
 
@@ -6591,12 +6732,40 @@ final class FrameReconstructorTest {
             boolean maskSign,
             int bitDepth
     ) {
+        return expectedCompoundSegmentBlend(
+                primarySamples,
+                secondarySamples,
+                primarySamples,
+                secondarySamples,
+                maskSign,
+                bitDepth
+        );
+    }
+
+    /// Computes the expected compound segment blend using a mask derived from separate luma
+    /// predictors.
+    ///
+    /// @param primarySamples the primary plane predictor samples to blend
+    /// @param secondarySamples the secondary plane predictor samples to blend
+    /// @param primaryLumaSamples the primary luma predictor samples used to derive the mask
+    /// @param secondaryLumaSamples the secondary luma predictor samples used to derive the mask
+    /// @param maskSign whether the decoded segment mask uses inverted source order
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the expected blended samples
+    private static int[][] expectedCompoundSegmentBlend(
+            int[][] primarySamples,
+            int[][] secondarySamples,
+            int[][] primaryLumaSamples,
+            int[][] secondaryLumaSamples,
+            boolean maskSign,
+            int bitDepth
+    ) {
         int height = primarySamples.length;
         int width = primarySamples[0].length;
         int[][] expected = new int[height][width];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                int mask = segmentCompoundMask(primarySamples[y][x], secondarySamples[y][x], bitDepth);
+                int mask = segmentCompoundMask(primaryLumaSamples[y][x], secondaryLumaSamples[y][x], bitDepth);
                 int secondaryWeight = maskSign ? mask : 64 - mask;
                 expected[y][x] = (primarySamples[y][x] * (64 - secondaryWeight)
                         + secondarySamples[y][x] * secondaryWeight + 32) >> 6;

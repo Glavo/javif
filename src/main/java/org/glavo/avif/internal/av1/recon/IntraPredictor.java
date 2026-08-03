@@ -588,6 +588,9 @@ final class IntraPredictor {
             int rightBoundary,
             int bottomBoundary
     ) {
+        if (topReferenceY >= blockY) {
+            return edgeExtendedSample(plane, sampleX, topReferenceY);
+        }
         if (topReferenceY < topBoundary) {
             return blockX > leftBoundary ? edgeExtendedSample(plane, blockX - 1, blockY) : defaultSample - 1;
         }
@@ -617,6 +620,9 @@ final class IntraPredictor {
             int rightBoundary,
             int bottomBoundary
     ) {
+        if (leftReferenceX >= blockX) {
+            return edgeExtendedSample(plane, leftReferenceX, sampleY);
+        }
         if (leftReferenceX < leftBoundary) {
             return blockY > topBoundary ? edgeExtendedSample(plane, blockX, blockY - 1) : defaultSample + 1;
         }
