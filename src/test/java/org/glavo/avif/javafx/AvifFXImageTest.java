@@ -101,6 +101,22 @@ final class AvifFXImageTest {
         assertThrows(IllegalArgumentException.class, () -> new AvifFXImage(frames, sequenceInfo, false));
     }
 
+    /// Verifies that one JavaFX image cannot combine frames with different dimensions.
+    @Test
+    void rejectsMismatchedFrameDimensions() {
+        AvifFrame firstFrame = frame(0, 0xFF00_0000);
+        AvifFrame secondFrame = new AvifFrame(
+                2,
+                1,
+                AvifBitDepth.EIGHT_BITS,
+                AvifPixelFormat.I444,
+                1,
+                new int[]{0xFFFF_FFFF, 0xFFFF_FFFF}
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> new AvifFXImage(List.of(firstFrame, secondFrame), false));
+    }
+
     /// Creates one single-pixel frame for animation tests.
     ///
     /// @param frameIndex the zero-based frame index

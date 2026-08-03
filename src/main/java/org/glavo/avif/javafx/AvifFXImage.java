@@ -59,19 +59,25 @@ public final class AvifFXImage extends WritableImage {
 
     /// Creates a JavaFX image from a list of decoded frames.
     ///
-    /// The first frame is written immediately. Call [#getAnimation()] to control playback.
+    /// The input list is snapshotted and the first frame is written immediately. All frames must
+    /// have the same dimensions. Call [#getAnimation()] to control playback.
     ///
     /// @param frames  the decoded frames in presentation order
     /// @param autoPlay whether to start playing the animation automatically
+    /// @throws IllegalArgumentException if the frame list is empty or its dimensions differ
     public AvifFXImage(List<AvifFrame> frames, boolean autoPlay) {
         this(frames, autoPlay, 30);
     }
 
     /// Creates a JavaFX image from a list of decoded frames with an explicit frame rate.
     ///
+    /// The input list is snapshotted. All frames must have the same dimensions. Values of `fps`
+    /// below one are treated as one frame per second.
+    ///
     /// @param frames  the decoded frames in presentation order
     /// @param autoPlay whether to start playing the animation automatically
     /// @param fps      the frames per second for playback timing
+    /// @throws IllegalArgumentException if the frame list is empty or its dimensions differ
     public AvifFXImage(List<AvifFrame> frames, boolean autoPlay, int fps) {
         this(frames, null);
 
@@ -83,9 +89,10 @@ public final class AvifFXImage extends WritableImage {
 
     /// Creates a JavaFX image using the frame timing and repetition metadata from an AVIS sequence.
     ///
-    /// When timing metadata is absent, playback falls back to 30 frames per second. An unknown or
-    /// infinite repetition count produces indefinite playback; a non-negative repetition count is
-    /// interpreted as the number of repetitions after the first playback.
+    /// The input list is snapshotted. When timing metadata is absent, playback falls back to 30
+    /// frames per second. An unknown or infinite repetition count produces indefinite playback; a
+    /// non-negative repetition count is interpreted as the number of repetitions after the first
+    /// playback.
     ///
     /// @param frames the decoded frames in presentation order
     /// @param sequenceInfo the timing and repetition metadata for the frames
@@ -133,7 +140,8 @@ public final class AvifFXImage extends WritableImage {
     /// Returns the JavaFX timeline that drives this image's animation.
     ///
     /// Container frame durations and repetition metadata are used when supplied at construction;
-    /// otherwise playback uses 30 frames per second and repeats indefinitely.
+    /// otherwise playback uses 30 frames per second and repeats indefinitely. The timeline is
+    /// created lazily; repeated calls return the same mutable JavaFX timeline.
     ///
     /// @return the timeline, or `null` if not animated
     public @Nullable Timeline getAnimation() {

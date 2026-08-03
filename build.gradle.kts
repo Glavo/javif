@@ -1,3 +1,6 @@
+import java.lang.module.ModuleDescriptor
+import java.lang.module.ModuleFinder
+
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.kotlin.dsl.attributes
 
@@ -76,10 +79,12 @@ dependencies {
 }
 
 val runtimeClasspathConfiguration = configurations.named("runtimeClasspath")
+val mainJar = tasks.named<Jar>("jar")
 
 tasks.register("verifyNoRuntimeDependencies") {
     group = "verification"
     description = "Verifies that the core library has no external runtime dependencies."
+    dependsOn(mainJar)
 
     doLast {
         val externalComponents = runtimeClasspathConfiguration.get()
@@ -93,6 +98,19 @@ tasks.register("verifyNoRuntimeDependencies") {
                 prefix = "runtimeClasspath contains external dependencies:\n",
                 separator = "\n",
             ) { component -> "- ${component.id.displayName}" }
+        }
+
+        val descriptor = ModuleFinder.of(mainJar.get().archiveFile.get().asFile.toPath())
+            .find("org.glavo.avif")
+            .orElseThrow { GradleException("Main JAR does not contain the org.glavo.avif module") }
+            .descriptor()
+        val requiredRuntimeModules = descriptor.requires()
+            .filter { ModuleDescriptor.Requires.Modifier.STATIC !in it.modifiers() }
+            .map { it.name() }
+            .toSet()
+
+        check(requiredRuntimeModules == setOf("java.base")) {
+            "org.glavo.avif requires runtime modules other than java.base: ${requiredRuntimeModules.sorted().joinToString()}"
         }
     }
 }
