@@ -233,6 +233,60 @@ final class Av1ImageReaderTest {
         }
     }
 
+    /// Verifies that the default output policy retains only the last selected spatial layer in a
+    /// temporal unit while still decoding the lower layer.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readFrameReturnsLastSelectedSpatialLayerPerTemporalUnit() throws IOException {
+        byte[] framePayload = fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD);
+        byte[] stream = concat(
+                obu(2, new byte[0]),
+                obu(1, fullSequenceHeaderPayloadWithOperatingPointIdc(0x301)),
+                obu(6, 0, 0, framePayload),
+                obu(6, 0, 1, framePayload),
+                obu(2, new byte[0])
+        );
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            DecodedFrame frame = reader.readFrame();
+            assertNotNull(frame);
+            assertEquals(1, frame.spatialId());
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that `outputAllLayers` exposes every selected spatial layer in decoding order.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readFrameReturnsEverySelectedSpatialLayerWhenConfigured() throws IOException {
+        byte[] framePayload = fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD);
+        byte[] stream = concat(
+                obu(2, new byte[0]),
+                obu(1, fullSequenceHeaderPayloadWithOperatingPointIdc(0x301)),
+                obu(6, 0, 0, framePayload),
+                obu(6, 0, 1, framePayload),
+                obu(2, new byte[0])
+        );
+        Av1DecoderConfig config = Av1DecoderConfig.builder().outputAllLayers(true).build();
+
+        try (Av1ImageReader reader = Av1ImageReader.open(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
+                config
+        )) {
+            DecodedFrame lowerLayer = reader.readFrame();
+            assertNotNull(lowerLayer);
+            assertEquals(0, lowerLayer.spatialId());
+            DecodedFrame upperLayer = reader.readFrame();
+            assertNotNull(upperLayer);
+            assertEquals(1, upperLayer.spatialId());
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Verifies that `readAllFrames()` returns an empty list when the stream only contains a sequence header.
     ///
     /// @throws IOException if the reader cannot consume the test stream

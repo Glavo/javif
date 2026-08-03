@@ -21,11 +21,12 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/// Immutable decoded-plane snapshot produced after reconstruction and post-filtering.
+/// Immutable decoded-plane snapshot used by AV1 reconstruction and post-filtering stages.
 ///
 /// This contract sits between reconstruction and public output conversion. Stored planes represent
-/// the post-filter, post-super-resolution, pre-grain image state in the current stored-surface
-/// domain. The render dimensions are AV1 display hints and do not alter the stored plane dimensions.
+/// the current pipeline stage's sample domain; their width may therefore be either the coded width
+/// or the post-super-resolution width. The render dimensions are AV1 display hints and do not alter
+/// the stored plane dimensions.
 @NotNullByDefault
 public final class DecodedPlanes {
     /// The decoded bit depth.

@@ -557,6 +557,54 @@ final class IntraPredictorTest {
         );
     }
 
+    /// Verifies that CFL pads the subsampled edge values instead of reading beyond the MI grid.
+    @Test
+    void chromaCflPredictionPadsSubsampledValuesAtPartialFrameEdge() {
+        MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(8, 4, 8);
+        int[][] lumaSamples = {
+                {10, 10, 20, 20, 30, 30, 100, 100},
+                {10, 10, 20, 20, 30, 30, 100, 100},
+                {200, 200, 200, 200, 200, 200, 200, 200},
+                {200, 200, 200, 200, 200, 200, 200, 200}
+        };
+        for (int row = 0; row < lumaSamples.length; row++) {
+            for (int column = 0; column < lumaSamples[row].length; column++) {
+                lumaPlane.setSample(column, row, lumaSamples[row][column]);
+            }
+        }
+
+        MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(4, 2, 8);
+        IntraPredictor.predictChromaCfl(
+                chromaPlane,
+                lumaPlane,
+                0,
+                0,
+                0,
+                0,
+                4,
+                2,
+                8,
+                1,
+                1,
+                3,
+                1,
+                0,
+                0,
+                3,
+                1
+        );
+
+        assertBlockEquals(
+                chromaPlane,
+                0,
+                0,
+                new int[][]{
+                        {115, 125, 136, 136},
+                        {115, 125, 136, 136}
+                }
+        );
+    }
+
     /// Verifies that generalized `I422` CFL prediction derives signed AC from horizontally
     /// subsampled reconstructed luma.
     @Test

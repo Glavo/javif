@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
@@ -123,7 +124,6 @@ final class ReferenceMotionVectorProjection {
                 );
             }
         }
-
         @Nullable ProjectedTemporalBlock[] blocks = new ProjectedTemporalBlock[width8 * height8];
         ReferenceMotionVectorProjection result = new ReferenceMotionVectorProjection(
                 currentHeader,
@@ -253,6 +253,16 @@ final class ReferenceMotionVectorProjection {
         if (sourceHeader == null) {
             return;
         }
+        FrameHeader sourceSyntaxHeader = sourceResult.assembly().frameHeader();
+        if (!canProjectSourceMotionField(
+                sourceSyntaxHeader.frameType(),
+                sourceSyntaxHeader.frameSize().codedWidth(),
+                sourceSyntaxHeader.frameSize().height(),
+                currentHeader.frameSize().codedWidth(),
+                currentHeader.frameSize().height()
+        )) {
+            return;
+        }
         int sourceToCurrent = orderHintDifference(
                 orderHintBits,
                 sourceHeader.frameOffset(),
@@ -274,7 +284,12 @@ final class ReferenceMotionVectorProjection {
                     continue;
                 }
 
-                MotionVector offset = project(saved.motionVector(), projectionDistance, saved.denominator());
+                int referenceOffset = saved.referenceOffset();
+                if (referenceOffset <= 0 || referenceOffset > 31) {
+                    continue;
+                }
+
+                MotionVector offset = project(saved.motionVector(), projectionDistance, referenceOffset);
                 int projectedX8 = x8 + applySign(
                         Math.abs(offset.columnEighthPel()) >> 6,
                         offset.columnEighthPel() ^ sourceSign
@@ -292,17 +307,44 @@ final class ReferenceMotionVectorProjection {
                         && projectedX8 < projectedColumnEnd) {
                     destination[projectedY8 * width8 + projectedX8] = new ProjectedTemporalBlock(
                             saved.motionVector(),
-                            saved.denominator()
+                            referenceOffset
                     );
                 }
             }
         }
     }
 
-    /// Selects the saved component that a reference frame contributes to its temporal field.
+    /// Returns whether a saved frame can seed the current frame's temporal motion field.
     ///
-    /// Compound blocks prefer their secondary component when it points to an older frame, matching
-    /// AV1 temporal-field save order.
+    /// Motion fields use the rounded-up 4x4 frame grid, so pixel dimensions may differ within the
+    /// same final grid cell without making the saved field incompatible.
+    ///
+    /// @param sourceFrameType the saved frame type
+    /// @param sourceWidth the saved coded width in pixels
+    /// @param sourceHeight the saved coded height in pixels
+    /// @param currentWidth the current coded width in pixels
+    /// @param currentHeight the current coded height in pixels
+    /// @return whether the saved frame has an inter motion field with compatible grid dimensions
+    static boolean canProjectSourceMotionField(
+            FrameType sourceFrameType,
+            int sourceWidth,
+            int sourceHeight,
+            int currentWidth,
+            int currentHeight
+    ) {
+        FrameType nonNullSourceFrameType = Objects.requireNonNull(sourceFrameType, "sourceFrameType");
+        return nonNullSourceFrameType != FrameType.KEY
+                && nonNullSourceFrameType != FrameType.INTRA
+                && ((sourceWidth + 3) >> 2) == ((currentWidth + 3) >> 2)
+                && ((sourceHeight + 3) >> 2) == ((currentHeight + 3) >> 2);
+    }
+
+    /// Selects the component that a decoded block saves in its reference-frame motion field.
+    ///
+    /// Eligible components are visited in primary-to-secondary order, so an eligible secondary
+    /// component replaces the primary component. Selection intentionally precedes projection
+    /// validity checks: a selected half-range component may later make the saved sample unusable,
+    /// but must not expose the overwritten primary component as a fallback.
     ///
     /// @param sourceResult the source-frame syntax snapshot
     /// @param block the source temporal block, or `null`
@@ -316,6 +358,12 @@ final class ReferenceMotionVectorProjection {
         if (block == null) {
             return null;
         }
+        @Nullable SavedTemporalMotion selected = savedMotion(
+                sourceResult,
+                block.referenceFrame0(),
+                block.motionVector0(),
+                orderHintBits
+        );
         if (block.compoundReference()) {
             @Nullable InterMotionVector secondaryVector = block.motionVector1();
             @Nullable SavedTemporalMotion secondary = savedMotion(
@@ -325,19 +373,23 @@ final class ReferenceMotionVectorProjection {
                     orderHintBits
             );
             if (secondary != null) {
-                return secondary;
+                selected = secondary;
             }
         }
-        return savedMotion(sourceResult, block.referenceFrame0(), block.motionVector0(), orderHintBits);
+        return selected;
     }
 
-    /// Returns one projectable saved component, or `null` when its reference direction or range is invalid.
+    /// Returns one component eligible for reference-frame motion-field storage, or `null`.
+    ///
+    /// Storage uses the reference-to-source direction test from `ref_frame_side`. The returned
+    /// source-to-reference offset remains signed because the modular half-range is negative in
+    /// both directions; projection performs its stricter positive-distance check afterward.
     ///
     /// @param sourceResult the source-frame syntax snapshot
     /// @param referenceFrame the source-frame reference in internal LAST..ALTREF order
     /// @param interMotionVector the saved motion-vector state, or `null`
     /// @param orderHintBits the sequence order-hint width
-    /// @return one projectable saved component, or `null`
+    /// @return one storable motion component and its signed reference offset, or `null`
     private static @Nullable SavedTemporalMotion savedMotion(
             FrameSyntaxDecodeResult sourceResult,
             int referenceFrame,
@@ -352,18 +404,37 @@ final class ReferenceMotionVectorProjection {
         if (referencedHeader == null) {
             return null;
         }
-        int denominator = orderHintDifference(
+        MotionVector vector = interMotionVector.vector();
+        if (!isSavedTemporalReference(
                 orderHintBits,
                 sourceHeader.frameOffset(),
                 referencedHeader.frameOffset()
-        );
-        MotionVector vector = interMotionVector.vector();
-        if (denominator <= 0
-                || denominator > 31
-                || (Math.abs(vector.rowEighthPel()) | Math.abs(vector.columnEighthPel())) >= 4096) {
+        ) || (Math.abs(vector.rowEighthPel()) | Math.abs(vector.columnEighthPel())) >= 4096) {
             return null;
         }
-        return new SavedTemporalMotion(vector, denominator);
+        return new SavedTemporalMotion(
+                vector,
+                orderHintDifference(
+                        orderHintBits,
+                        sourceHeader.frameOffset(),
+                        referencedHeader.frameOffset()
+                )
+        );
+    }
+
+    /// Returns whether one decoded reference is stored in a source frame's saved motion field.
+    ///
+    /// The direction must be evaluated as `referenceOffset - sourceOffset`. At exactly half of the
+    /// modular order-hint range, reversing the operands still produces a negative value, so this
+    /// predicate is not equivalent to requiring a positive source-to-reference distance.
+    ///
+    /// @param orderHintBits the number of order-hint bits
+    /// @param sourceOffset the decoded source frame order hint
+    /// @param referenceOffset the decoded component's reference-frame order hint
+    /// @return whether the component survives the AV1 reference-side storage filter
+    static boolean isSavedTemporalReference(int orderHintBits, int sourceOffset, int referenceOffset) {
+        return sourceOffset != referenceOffset
+                && orderHintDifference(orderHintBits, referenceOffset, sourceOffset) <= 0;
     }
 
     /// Selects up to three reference frames whose temporal fields seed the current projection.
@@ -548,16 +619,16 @@ final class ReferenceMotionVectorProjection {
         return Math.max(minimum, Math.min(maximum, value));
     }
 
-    /// One saved temporal motion component and its source-reference distance.
+    /// One saved temporal motion component and its signed source-to-reference offset.
     ///
     /// @param motionVector the saved motion vector in eighth-pel units
-    /// @param denominator the positive source-reference distance in `[1, 31]`
-    private record SavedTemporalMotion(MotionVector motionVector, int denominator) {
+    /// @param referenceOffset the wrapped source-to-reference order-hint difference
+    private record SavedTemporalMotion(MotionVector motionVector, int referenceOffset) {
         /// Creates one validated saved temporal motion component.
         private SavedTemporalMotion {
             Objects.requireNonNull(motionVector, "motionVector");
-            if (denominator <= 0 || denominator > 31) {
-                throw new IllegalArgumentException("denominator out of range: " + denominator);
+            if (referenceOffset == 0) {
+                throw new IllegalArgumentException("referenceOffset == 0");
             }
         }
     }

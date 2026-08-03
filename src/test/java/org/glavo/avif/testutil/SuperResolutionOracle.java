@@ -19,6 +19,8 @@ import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Objects;
+
 /// Test oracle for AV1 normative horizontal super-resolution upscaling.
 @NotNullByDefault
 public final class SuperResolutionOracle {
@@ -47,7 +49,7 @@ public final class SuperResolutionOracle {
     private static final int SCALE_EXTRA_OFFSET = 1 << (SCALE_EXTRA_BITS - 1);
 
     /// The signed source-sample offset of the first normative super-resolution tap.
-    private static final int FILTER_START_OFFSET = FILTER_TAP_COUNT / 2 - 1;
+    private static final int FILTER_START_OFFSET = FILTER_TAP_COUNT / 2;
 
     /// The AV1 normative 64-phase horizontal super-resolution filters.
     private static final int @Unmodifiable [] @Unmodifiable [] FILTERS = {
@@ -160,32 +162,49 @@ public final class SuperResolutionOracle {
     /// @param bitDepth the decoded sample bit depth
     /// @return the expected horizontally upscaled row
     public static int[] upscaleRow(int[] sourceRow, int targetWidth, int bitDepth) {
-        if (sourceRow.length == 0) {
+        int[] nonNullSourceRow = Objects.requireNonNull(sourceRow, "sourceRow");
+        return upscaleRow(nonNullSourceRow, nonNullSourceRow.length, targetWidth, bitDepth);
+    }
+
+    /// Returns the expected horizontally upscaled row from coded-width samples and their padded
+    /// processing extent.
+    ///
+    /// @param sourceRow the coded-domain source storage row, including any right-hand padding
+    /// @param sourceWidth the coded source width used for coordinate scaling
+    /// @param targetWidth the post-upscale row width
+    /// @param bitDepth the decoded sample bit depth
+    /// @return the expected horizontally upscaled row
+    public static int[] upscaleRow(int[] sourceRow, int sourceWidth, int targetWidth, int bitDepth) {
+        int[] nonNullSourceRow = Objects.requireNonNull(sourceRow, "sourceRow");
+        if (nonNullSourceRow.length == 0) {
             throw new IllegalArgumentException("sourceRow must not be empty");
+        }
+        if (sourceWidth <= 0 || sourceWidth > nonNullSourceRow.length) {
+            throw new IllegalArgumentException("sourceWidth out of range: " + sourceWidth);
         }
         if (targetWidth <= 0) {
             throw new IllegalArgumentException("targetWidth must be positive");
         }
-        if (targetWidth < sourceRow.length) {
+        if (targetWidth < sourceWidth) {
             throw new IllegalArgumentException("targetWidth must not be smaller than source width");
         }
         int[] upscaledRow = new int[targetWidth];
-        if (targetWidth == sourceRow.length) {
-            System.arraycopy(sourceRow, 0, upscaledRow, 0, sourceRow.length);
+        if (targetWidth == sourceWidth) {
+            System.arraycopy(nonNullSourceRow, 0, upscaledRow, 0, sourceWidth);
             return upscaledRow;
         }
 
         int maximumSample = (1 << bitDepth) - 1;
-        int step = upscaleConvolveStep(sourceRow.length, targetWidth);
-        int position = upscaleConvolveInitialPosition(sourceRow.length, targetWidth, step);
+        int step = upscaleConvolveStep(sourceWidth, targetWidth);
+        int position = upscaleConvolveInitialPosition(sourceWidth, targetWidth, step);
         for (int x = 0; x < targetWidth; x++) {
             int integerPosition = position >> SCALE_SUBPEL_BITS;
             int filterIndex = (position & SCALE_SUBPEL_MASK) >> SCALE_EXTRA_BITS;
             int[] filter = FILTERS[filterIndex];
             long sum = 0;
             for (int tap = 0; tap < FILTER_TAP_COUNT; tap++) {
-                int sourceX = clamp(integerPosition + tap - FILTER_START_OFFSET, 0, sourceRow.length - 1);
-                sum += (long) sourceRow[sourceX] * filter[tap];
+                int sourceX = clamp(integerPosition + tap - FILTER_START_OFFSET, 0, nonNullSourceRow.length - 1);
+                sum += (long) nonNullSourceRow[sourceX] * filter[tap];
             }
             upscaledRow[x] = clamp(roundShiftSigned(sum, FILTER_BITS), 0, maximumSample);
             position += step;
@@ -213,7 +232,7 @@ public final class SuperResolutionOracle {
         int position = (int) (((-((long) targetWidth - sourceWidth) << (SCALE_SUBPEL_BITS - 1))
                 + (targetWidth >> 1)) / targetWidth)
                 + SCALE_EXTRA_OFFSET
-                - (int) (error >> 1);
+                - (int) (error / 2);
         return position & SCALE_SUBPEL_MASK;
     }
 

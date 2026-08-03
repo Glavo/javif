@@ -126,6 +126,12 @@ public final class LoopFilterApplier {
             LoopFilterBlockMap blockMap,
             int planeIndex
     ) {
+        int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(pixelFormat);
+        int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(pixelFormat);
+        plane.setProcessingExtent(
+                alignedPlaneBoundaryDimension(plane.width(), subX),
+                alignedPlaneBoundaryDimension(plane.height(), subY)
+        );
         if (planeFilterLevel(frameHeader.loopFilter(), planeIndex, 0) == 0
                 && planeFilterLevel(frameHeader.loopFilter(), planeIndex, 1) == 0) {
             return;
@@ -204,15 +210,18 @@ public final class LoopFilterApplier {
         if (!blockEdge && !transformEdge) {
             return;
         }
+        if (!blockEdge && isSkippedInter(current.header()) && isSkippedInter(previous.header())) {
+            return;
+        }
 
         int x = (col4 * MI_SIZE) >> subX;
         int y = (row4 * MI_SIZE) >> subY;
         if (pass == 0) {
-            if (x <= 0 || x >= plane.width() || y < 0 || y >= plane.height()) {
+            if (x <= 0 || x >= plane.processingWidth() || y < 0 || y >= plane.processingHeight()) {
                 return;
             }
         } else {
-            if (y <= 0 || y >= plane.height() || x < 0 || x >= plane.width()) {
+            if (y <= 0 || y >= plane.processingHeight() || x < 0 || x >= plane.processingWidth()) {
                 return;
             }
         }
@@ -234,12 +243,23 @@ public final class LoopFilterApplier {
             return;
         }
 
-        int samples = Math.min(MI_SIZE, pass == 0 ? plane.height() - y : plane.width() - x);
+        int samples = Math.min(
+                MI_SIZE,
+                pass == 0 ? plane.processingHeight() - y : plane.processingWidth() - x
+        );
         for (int i = 0; i < samples; i++) {
             int sampleX = x + (pass == 0 ? 0 : i);
             int sampleY = y + (pass == 0 ? i : 0);
             applySampleFilter(plane, sampleX, sampleY, dx, dy, filterSize, strength);
         }
+    }
+
+    /// Returns whether one decoded block skips transforms while using inter prediction.
+    ///
+    /// @param header the decoded block header
+    /// @return whether the block is a skipped inter block
+    private static boolean isSkippedInter(TileBlockHeaderReader.BlockHeader header) {
+        return header.skip() && !header.intra() && !header.useIntrabc();
     }
 
     /// Applies one sample filter at a block edge.
@@ -500,9 +520,11 @@ public final class LoopFilterApplier {
             if (referenceIndex >= 0 && referenceIndex < referenceDeltas.length) {
                 level += referenceDeltas[referenceIndex] << shift;
             }
-            int modeIndex = loopFilterModeIndex(header);
-            if (modeIndex >= 0 && modeIndex < modeDeltas.length) {
-                level += modeDeltas[modeIndex] << shift;
+            if (!header.intra() && !header.useIntrabc()) {
+                int modeIndex = loopFilterModeIndex(header);
+                if (modeIndex >= 0 && modeIndex < modeDeltas.length) {
+                    level += modeDeltas[modeIndex] << shift;
+                }
             }
             level = clamp(level, 0, MAX_LOOP_FILTER_LEVEL);
         }
@@ -547,17 +569,14 @@ public final class LoopFilterApplier {
             return 0;
         }
         @Nullable SingleInterPredictionMode singleMode = header.singleInterMode();
-        if (singleMode == SingleInterPredictionMode.NEWMV) {
-            return 1;
+        if (singleMode != null) {
+            return singleMode == SingleInterPredictionMode.GLOBALMV ? 0 : 1;
         }
         @Nullable CompoundInterPredictionMode compoundMode = header.compoundInterMode();
         if (compoundMode == null) {
             return 0;
         }
-        return switch (compoundMode) {
-            case NEARESTMV_NEARESTMV, NEARMV_NEARMV, GLOBALMV_GLOBALMV -> 0;
-            case NEARESTMV_NEWMV, NEWMV_NEARESTMV, NEARMV_NEWMV, NEWMV_NEARMV, NEWMV_NEWMV -> 1;
-        };
+        return compoundMode == CompoundInterPredictionMode.GLOBALMV_GLOBALMV ? 0 : 1;
     }
 
     /// Derives AV1 loop-filter strength parameters from one filter level.
@@ -666,6 +685,16 @@ public final class LoopFilterApplier {
         };
     }
 
+    /// Returns the padded plane boundary available to loop-filter taps along one axis.
+    ///
+    /// @param dimension the visible plane dimension in samples
+    /// @param subsampling the plane subsampling shift for this axis
+    /// @return the dimension rounded up to the AV1 eight-luma-sample boundary
+    private static int alignedPlaneBoundaryDimension(int dimension, int subsampling) {
+        int alignment = 8 >> subsampling;
+        return (dimension + alignment - 1) & -alignment;
+    }
+
     /// Clips one integer into inclusive bounds.
     ///
     /// @param value the input value
@@ -704,6 +733,18 @@ public final class LoopFilterApplier {
         /// The plane height in samples.
         private final int height;
 
+        /// The sample stride of one stored row.
+        private final int stride;
+
+        /// The number of stored rows, including bottom padding.
+        private final int storageHeight;
+
+        /// The horizontal sample extent filtered for the current plane.
+        private int processingWidth;
+
+        /// The vertical sample extent filtered for the current plane.
+        private int processingHeight;
+
         /// The decoded sample bit depth.
         private final int bitDepth;
 
@@ -717,11 +758,24 @@ public final class LoopFilterApplier {
         ///
         /// @param width the plane width in samples
         /// @param height the plane height in samples
+        /// @param stride the sample stride of one stored row
+        /// @param storageHeight the number of stored rows
         /// @param bitDepth the decoded sample bit depth
         /// @param samples the mutable sample storage in row-major order
-        private PlaneBuffer(int width, int height, int bitDepth, short[] samples) {
+        private PlaneBuffer(
+                int width,
+                int height,
+                int stride,
+                int storageHeight,
+                int bitDepth,
+                short[] samples
+        ) {
             this.width = width;
             this.height = height;
+            this.stride = stride;
+            this.storageHeight = storageHeight;
+            this.processingWidth = width;
+            this.processingHeight = height;
             this.bitDepth = bitDepth;
             this.maxSampleValue = (1 << bitDepth) - 1;
             this.samples = Objects.requireNonNull(samples, "samples");
@@ -734,7 +788,14 @@ public final class LoopFilterApplier {
         /// @return a mutable copy of one decoded plane
         public static PlaneBuffer create(DecodedPlane plane, int bitDepth) {
             DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
-            return new PlaneBuffer(checkedPlane.width(), checkedPlane.height(), bitDepth, checkedPlane.samples());
+            return new PlaneBuffer(
+                    checkedPlane.width(),
+                    checkedPlane.height(),
+                    checkedPlane.stride(),
+                    checkedPlane.storageHeight(),
+                    bitDepth,
+                    checkedPlane.samples()
+            );
         }
 
         /// Returns the plane width in samples.
@@ -751,6 +812,29 @@ public final class LoopFilterApplier {
             return height;
         }
 
+        /// Sets the padded sample extent processed by loop filtering.
+        ///
+        /// @param requestedWidth the requested processing width
+        /// @param requestedHeight the requested processing height
+        public void setProcessingExtent(int requestedWidth, int requestedHeight) {
+            processingWidth = Math.min(stride, requestedWidth);
+            processingHeight = Math.min(storageHeight, requestedHeight);
+        }
+
+        /// Returns the horizontal sample extent processed by loop filtering.
+        ///
+        /// @return the processing width
+        public int processingWidth() {
+            return processingWidth;
+        }
+
+        /// Returns the vertical sample extent processed by loop filtering.
+        ///
+        /// @return the processing height
+        public int processingHeight() {
+            return processingHeight;
+        }
+
         /// Returns the decoded sample bit depth.
         ///
         /// @return the decoded sample bit depth
@@ -764,7 +848,7 @@ public final class LoopFilterApplier {
         /// @param y the sample Y coordinate
         /// @return whether one sample coordinate is inside this plane
         public boolean contains(int x, int y) {
-            return x >= 0 && y >= 0 && x < width && y < height;
+            return x >= 0 && y >= 0 && x < processingWidth && y < processingHeight;
         }
 
         /// Returns one mutable sample.
@@ -773,7 +857,7 @@ public final class LoopFilterApplier {
         /// @param y the sample Y coordinate
         /// @return one mutable sample
         public int sample(int x, int y) {
-            return samples[y * width + x] & 0xFFFF;
+            return samples[y * stride + x] & 0xFFFF;
         }
 
         /// Returns one sample after extending the nearest frame-edge sample beyond the plane.
@@ -782,7 +866,7 @@ public final class LoopFilterApplier {
         /// @param y the sample Y coordinate, which may be outside the plane
         /// @return the nearest in-plane sample
         public int sampleClamped(int x, int y) {
-            return sample(clamp(x, 0, width - 1), clamp(y, 0, height - 1));
+            return sample(clamp(x, 0, processingWidth - 1), clamp(y, 0, processingHeight - 1));
         }
 
         /// Stores one sample after clipping it to this plane bit depth.
@@ -791,14 +875,14 @@ public final class LoopFilterApplier {
         /// @param y the sample Y coordinate
         /// @param value the replacement sample value
         public void setSample(int x, int y, int value) {
-            samples[y * width + x] = (short) clamp(value, 0, maxSampleValue);
+            samples[y * stride + x] = (short) clamp(value, 0, maxSampleValue);
         }
 
         /// Returns one immutable decoded-plane snapshot from the current samples.
         ///
         /// @return one immutable decoded-plane snapshot from the current samples
         public DecodedPlane toDecodedPlane() {
-            return new DecodedPlane(width, height, width, samples);
+            return new DecodedPlane(width, height, stride, samples);
         }
     }
 

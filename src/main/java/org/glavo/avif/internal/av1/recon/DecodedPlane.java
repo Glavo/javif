@@ -38,6 +38,9 @@ public final class DecodedPlane {
     /// The sample stride of one plane row.
     private final int stride;
 
+    /// The number of stored rows, including internal bottom padding.
+    private final int storageHeight;
+
     /// The stored unsigned sample values in row-major order.
     private final short @Unmodifiable [] samples;
 
@@ -46,7 +49,8 @@ public final class DecodedPlane {
     /// @param width the plane width in samples
     /// @param height the plane height in samples
     /// @param stride the sample stride of one plane row
-    /// @param samples the stored unsigned sample values in row-major order
+    /// @param samples the stored unsigned sample values in row-major order; the array may include
+    ///                complete padded rows below the visible plane
     public DecodedPlane(int width, int height, int stride, short[] samples) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
@@ -62,13 +66,16 @@ public final class DecodedPlane {
             throw new IllegalArgumentException("plane storage is too large");
         }
 
+        short[] checkedSamples = Objects.requireNonNull(samples, "samples");
+        if (checkedSamples.length < (int) requiredLength || checkedSamples.length % stride != 0) {
+            throw new IllegalArgumentException("samples length does not contain complete stored rows");
+        }
+
         this.width = width;
         this.height = height;
         this.stride = stride;
-        this.samples = Arrays.copyOf(Objects.requireNonNull(samples, "samples"), samples.length);
-        if (this.samples.length != (int) requiredLength) {
-            throw new IllegalArgumentException("samples length does not match stride * height");
-        }
+        this.storageHeight = checkedSamples.length / stride;
+        this.samples = Arrays.copyOf(checkedSamples, checkedSamples.length);
     }
 
     /// Returns the plane width in samples.
@@ -92,18 +99,28 @@ public final class DecodedPlane {
         return stride;
     }
 
-    /// Returns the stored unsigned sample values in row-major order.
+    /// Returns the number of stored rows, including internal bottom padding.
+    ///
+    /// @return the stored row count, which is at least [#height()]
+    public int storageHeight() {
+        return storageHeight;
+    }
+
+    /// Returns the stored unsigned sample values in row-major order, including internal padding.
     ///
     /// @return the stored unsigned sample values in row-major order
     public short @Unmodifiable [] samples() {
         return Arrays.copyOf(samples, samples.length);
     }
 
-    /// Returns a read-only view of the stored unsigned sample values.
+    /// Returns a read-only view of the visible stored rows.
+    ///
+    /// The view includes right-hand row padding described by [#stride()] but excludes rows below
+    /// [#height()].
     ///
     /// @return a read-only view of the stored unsigned sample values
     public @UnmodifiableView ShortBuffer sampleBuffer() {
-        return ShortBuffer.wrap(samples).asReadOnlyBuffer();
+        return ShortBuffer.wrap(samples, 0, stride * height).slice().asReadOnlyBuffer();
     }
 
     /// Returns one unsigned sample value.

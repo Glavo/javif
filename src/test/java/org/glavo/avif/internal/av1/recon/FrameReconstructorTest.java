@@ -47,6 +47,7 @@ import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformType;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
+import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
 import org.glavo.avif.testutil.InterPredictionOracle;
 import org.glavo.avif.testutil.SuperResolutionOracle;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -54,6 +55,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -310,12 +312,17 @@ final class FrameReconstructorTest {
         assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 2048);
     }
 
-    /// Verifies one non-linear AV1 normative super-resolution output row against fixed samples.
+    /// Verifies one non-linear AV1 super-resolution row with MI-grid right padding.
     @Test
     void superResolutionOracleUsesNormativeEightTapFilter() {
         assertArrayEquals(
-                new int[]{13, 76, 181, 244, 238, 218, 220, 226},
-                expectedHorizontallyUpscaledRow(new int[]{32, 32, 224, 224}, 8)
+                new int[]{38, 20, 14, 70, 174, 255, 255, 167},
+                SuperResolutionOracle.upscaleRow(
+                        new int[]{32, 32, 224, 224, 0, 0, 0, 0},
+                        4,
+                        8,
+                        8
+                )
         );
     }
 
@@ -356,8 +363,9 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 8, 4);
         FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.KEY, 4, 8, 4);
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)),
+                frameHeader
         );
 
         assertFalse(planes.hasChroma());
@@ -379,7 +387,7 @@ final class FrameReconstructorTest {
     @Test
     void reconstructsSuperResolvedI420IntraFrameByHorizontallyUpscalingChromaPlanes() {
         BlockPosition position = new BlockPosition(0, 0);
-        BlockSize size = BlockSize.SIZE_4X4;
+        BlockSize size = BlockSize.SIZE_8X8;
         TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
                 createIntraBlockHeader(position, size, true, LumaIntraPredictionMode.DC, UvIntraPredictionMode.DC, null, 0, 0, 0, 0),
                 createTransformLayout(position, size, AvifPixelFormat.I420),
@@ -388,8 +396,9 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.INTRA, 4, 8, 4);
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)),
+                frameHeader
         );
 
         assertTrue(planes.hasChroma());
@@ -423,9 +432,12 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(AvifPixelFormat.I400, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(4, 8, 4, 0);
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
         assertFalse(planes.hasChroma());
@@ -478,9 +490,12 @@ final class FrameReconstructorTest {
                 0,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
         assertTrue(referenceSurfaceSnapshot.frameHeader().superResolution().enabled());
@@ -547,9 +562,12 @@ final class FrameReconstructorTest {
                 0,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
         int[][] codedLuma = InterPredictionOracle.sampleReferencePlaneBlock(
@@ -661,9 +679,12 @@ final class FrameReconstructorTest {
                 0,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
         assertTrue(referenceSurfaceSnapshot.frameHeader().superResolution().enabled());
@@ -761,9 +782,12 @@ final class FrameReconstructorTest {
                 0,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
         int[][] codedLuma = InterPredictionOracle.sampleReferencePlaneBlock(
@@ -865,9 +889,12 @@ final class FrameReconstructorTest {
                 0,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
         int[][] codedLuma = expectedScaledInterPlaneBilinearly(
@@ -929,9 +956,12 @@ final class FrameReconstructorTest {
                 0,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes planes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
         int[][] codedLuma = expectedScaledInterPlaneBilinearly(
@@ -1017,19 +1047,24 @@ final class FrameReconstructorTest {
                 createResidualLayout(position, size, 64)
         );
 
-        DecodedPlanes baselinePlanes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, baselineLeaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes baselinePlanes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, baselineLeaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
-        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, residualLeaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        DecodedPlanes reconstructedPlanes = postprocess(
+                new FrameReconstructor().reconstruct(
+                        createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, residualLeaf),
+                        createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+                ),
+                frameHeader
         );
 
-        assertPlaneDiffersFromBaselineByUniformSignedOffset(
+        assertPlaneContainsPositiveButNoNegativeDifferences(
                 baselinePlanes.lumaPlane(),
-                reconstructedPlanes.lumaPlane(),
-                1
+                reconstructedPlanes.lumaPlane()
         );
     }
 
@@ -1226,8 +1261,8 @@ final class FrameReconstructorTest {
         assertPlaneEquals(requirePlane(planes.chromaVPlane()), expandPaletteRaster(chromaPaletteV, chromaPaletteIndices));
     }
 
-    /// Verifies that luma and chroma palette reconstruction only writes each visible right/bottom
-    /// footprint when the coded block is clipped by the frame edge.
+    /// Verifies that clipped palette reconstruction retains the complete luma palette raster in
+    /// padded storage while exposing cropped luma and chroma planes.
     @Test
     void reconstructsClippedKeyFramesWithLumaAndChromaPalettePredictionForAllChromaLayouts() {
         assertClippedPalettePrediction(AvifPixelFormat.I420);
@@ -1282,6 +1317,10 @@ final class FrameReconstructorTest {
         assertPlaneEquals(
                 planes.lumaPlane(),
                 cropRaster(expandPaletteRaster(lumaPaletteColors, lumaPaletteIndices), frameWidth, frameHeight)
+        );
+        assertStoredPlaneRegionEquals(
+                planes.lumaPlane(),
+                expandPaletteRaster(lumaPaletteColors, lumaPaletteIndices)
         );
         assertPlaneEquals(
                 requirePlane(planes.chromaUPlane()),
@@ -1427,6 +1466,77 @@ final class FrameReconstructorTest {
 
         assertFalse(residualPlanes.hasChroma());
         assertPlaneDiffersFromBaselineByUniformSignedOffset(baseline, residualPlanes.lumaPlane(), 1);
+    }
+
+    /// Verifies that a transform clipped by the visible frame edge still writes its complete
+    /// residual into the MI-grid padding retained by the decoded plane.
+    @Test
+    void reconstructsClippedLumaResidualIntoStoredRightAndBottomPadding() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        TransformSize transformSize = size.maxLumaTransformSize();
+        TransformLayout transformLayout = createTransformLayout(
+                position,
+                size,
+                AvifPixelFormat.I400,
+                6,
+                6
+        );
+        TileBlockHeaderReader.BlockHeader header = createIntraBlockHeader(
+                position,
+                size,
+                false,
+                LumaIntraPredictionMode.DC,
+                null,
+                null,
+                0,
+                0,
+                0,
+                0
+        );
+        TilePartitionTreeReader.LeafNode baselineLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                transformLayout,
+                new ResidualLayout(
+                        position,
+                        size,
+                        new TransformResidualUnit[]{createResidualUnit(position, transformSize, 6, 6, 0)}
+                )
+        );
+        TilePartitionTreeReader.LeafNode residualLeaf = new TilePartitionTreeReader.LeafNode(
+                header,
+                transformLayout,
+                new ResidualLayout(
+                        position,
+                        size,
+                        new TransformResidualUnit[]{createResidualUnit(position, transformSize, 6, 6, 64)}
+                )
+        );
+
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlane baseline = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 6, 6, baselineLeaf)
+        ).lumaPlane();
+        DecodedPlane reconstructed = reconstructor.reconstruct(
+                createFrameSyntaxDecodeResult(AvifPixelFormat.I400, FrameType.KEY, 6, 6, residualLeaf)
+        ).lumaPlane();
+
+        assertTrue(baseline.stride() >= transformSize.widthPixels());
+        assertTrue(baseline.storageHeight() >= transformSize.heightPixels());
+        short[] baselineSamples = baseline.samples();
+        short[] reconstructedSamples = reconstructed.samples();
+        int expectedDelta = (reconstructedSamples[0] & 0xFFFF) - (baselineSamples[0] & 0xFFFF);
+        assertTrue(expectedDelta > 0);
+        for (int y = 0; y < transformSize.heightPixels(); y++) {
+            for (int x = 0; x < transformSize.widthPixels(); x++) {
+                int index = y * baseline.stride() + x;
+                assertEquals(
+                        expectedDelta,
+                        (reconstructedSamples[index] & 0xFFFF) - (baselineSamples[index] & 0xFFFF),
+                        "stored sample at (" + x + ", " + y + ")"
+                );
+            }
+        }
     }
 
     /// Verifies that frame reconstruction consumes the explicit transform type stored on each
@@ -2904,6 +3014,47 @@ final class FrameReconstructorTest {
         });
     }
 
+    /// Verifies that scaled compound prediction handles non-integral Q10 coordinates whose
+    /// quantized horizontal and vertical filter phases are both zero.
+    @Test
+    void reconstructsScaledCompoundReferenceWithZeroQuantizedFilterPhases() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot0 = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                rampSamples(65, 65, 20, 0, 0),
+                null,
+                null
+        );
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot1 = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                rampSamples(65, 65, 60, 0, 0),
+                null,
+                null
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        false,
+                        0,
+                        1,
+                        MotionVector.zero(),
+                        MotionVector.zero()
+                ),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 64, 64, 0, 1, leaf),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot0, 1, referenceSurfaceSnapshot1)
+        );
+
+        assertFalse(planes.hasChroma());
+        assertPlaneBlockFilled(planes.lumaPlane(), 0, 0, 8, 8, 40);
+    }
+
     /// Verifies that one monochrome compound-reference inter block applies the decoded wedge
     /// compound mask to two integer-aligned stored reference surfaces.
     @Test
@@ -3174,6 +3325,107 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Verifies that a clipped chroma OBMC region selects its interpolation filter from the
+    /// complete above-neighbor predictor width rather than the narrower written footprint.
+    @Test
+    void reconstructsClippedI420ObmcRegionWithCompleteNeighborFilterWidth() {
+        int frameWidth = 24;
+        int frameHeight = 48;
+        BlockPosition abovePosition = new BlockPosition(4, 0);
+        BlockPosition currentPosition = new BlockPosition(4, 4);
+        BlockSize aboveSize = BlockSize.SIZE_16X16;
+        BlockSize currentSize = BlockSize.SIZE_16X32;
+        MotionVector aboveMotionVector = new MotionVector(0, 8);
+        int[][] lumaSamples = rampSamples(frameWidth, frameHeight, 0, 1, 3);
+        int[][] chromaUSamples = new int[frameHeight >> 1][frameWidth >> 1];
+        for (int y = 0; y < chromaUSamples.length; y++) {
+            for (int x = 0; x < chromaUSamples[y].length; x++) {
+                chromaUSamples[y][x] = (17 * x * x + 29 * y + 11 * x * y + 71 * (x % 3)) & 0xFF;
+            }
+        }
+        int[][] chromaVSamples = rampSamples(frameWidth >> 1, frameHeight >> 1, 8, 2, 5);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I420,
+                lumaSamples,
+                chromaUSamples,
+                chromaVSamples
+        );
+        TilePartitionTreeReader.LeafNode aboveLeaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(
+                        abovePosition,
+                        aboveSize,
+                        true,
+                        0,
+                        aboveMotionVector
+                ),
+                createTransformLayout(abovePosition, aboveSize, AvifPixelFormat.I420, 8, 16),
+                createResidualLayout(abovePosition, aboveSize, true)
+        );
+        TilePartitionTreeReader.LeafNode obmcLeaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(
+                        currentPosition,
+                        currentSize,
+                        true,
+                        0,
+                        MotionVector.zero(),
+                        MotionMode.OBMC
+                ),
+                createTransformLayout(currentPosition, currentSize, AvifPixelFormat.I420, 8, 32),
+                createResidualLayout(currentPosition, currentSize, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I420,
+                        frameWidth,
+                        frameHeight,
+                        0,
+                        FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
+                        aboveLeaf,
+                        obmcLeaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        int chromaX = currentPosition.x4() << 1;
+        int chromaY = currentPosition.y4() << 1;
+        int visibleWidth = 4;
+        int overlap = 8;
+        int[][] currentPredictor = cropSamples(chromaUSamples, chromaX, chromaY, visibleWidth, 16);
+        int[][] neighborPredictor = InterPredictionOracle.sampleReferencePlaneBlock(
+                requirePlane(referenceSurfaceSnapshot.decodedPlanes().chromaUPlane()),
+                visibleWidth,
+                overlap,
+                chromaX * 16 + aboveMotionVector.columnEighthPel(),
+                chromaY * 16 + aboveMotionVector.rowEighthPel(),
+                16,
+                16,
+                8,
+                overlap,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+        );
+        int[][] incorrectlyClippedPredictor = InterPredictionOracle.sampleReferencePlaneBlock(
+                requirePlane(referenceSurfaceSnapshot.decodedPlanes().chromaUPlane()),
+                visibleWidth,
+                overlap,
+                chromaX * 16 + aboveMotionVector.columnEighthPel(),
+                chromaY * 16 + aboveMotionVector.rowEighthPel(),
+                16,
+                16,
+                visibleWidth,
+                overlap,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
+        );
+
+        assertFalse(Arrays.deepEquals(neighborPredictor, incorrectlyClippedPredictor));
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                chromaX,
+                chromaY,
+                expectedObmcAboveBlend(currentPredictor, neighborPredictor, overlap)
+        );
+    }
+
     /// Verifies that one chroma-bearing OBMC block blends luma and chroma left edges against an
     /// already decoded left inter neighbor.
     @Test
@@ -3354,6 +3606,265 @@ final class FrameReconstructorTest {
                         {155, 159, 163, 167, 171, 175, 179, 183},
                         {160, 165, 170, 175, 179, 183, 187, 192}
                 }
+        );
+    }
+
+    /// Verifies that local warped prediction falls back to translation for a subsampled chroma
+    /// plane whose block width or height is smaller than eight samples.
+    @Test
+    void reconstructsSmallI420ChromaBlockWithTranslationDuringLocalWarpedPrediction() {
+        BlockSize size = BlockSize.SIZE_8X8;
+        BlockPosition abovePosition = new BlockPosition(2, 0);
+        BlockPosition leftPosition = new BlockPosition(0, 2);
+        BlockPosition currentPosition = new BlockPosition(2, 2);
+        int[][] lumaSamples = rampSamples(16, 16, 3, 5, 8);
+        int[][] chromaUSamples = rampSamples(8, 8, 7, 11, 8);
+        int[][] chromaVSamples = rampSamples(8, 8, 9, 13, 8);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I420,
+                lumaSamples,
+                chromaUSamples,
+                chromaVSamples
+        );
+        TileBlockHeaderReader.BlockHeader aboveHeader = createSingleReferenceInterBlockHeader(
+                abovePosition,
+                size,
+                true,
+                0,
+                new MotionVector(0, 8)
+        );
+        TileBlockHeaderReader.BlockHeader leftHeader = createSingleReferenceInterBlockHeader(
+                leftPosition,
+                size,
+                true,
+                0,
+                new MotionVector(8, 0)
+        );
+        TileBlockHeaderReader.BlockHeader currentHeader = createSingleReferenceInterBlockHeader(
+                currentPosition,
+                size,
+                true,
+                0,
+                MotionVector.zero(),
+                MotionMode.LOCAL_WARPED
+        );
+        TilePartitionTreeReader.LeafNode aboveLeaf = new TilePartitionTreeReader.LeafNode(
+                aboveHeader,
+                createTransformLayout(abovePosition, size, AvifPixelFormat.I420),
+                createResidualLayout(abovePosition, size, true)
+        );
+        TilePartitionTreeReader.LeafNode leftLeaf = new TilePartitionTreeReader.LeafNode(
+                leftHeader,
+                createTransformLayout(leftPosition, size, AvifPixelFormat.I420),
+                createResidualLayout(leftPosition, size, true)
+        );
+        TilePartitionTreeReader.LeafNode currentLeaf = new TilePartitionTreeReader.LeafNode(
+                currentHeader,
+                createTransformLayout(currentPosition, size, AvifPixelFormat.I420),
+                createResidualLayout(currentPosition, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createInterFrameSyntaxDecodeResult(
+                        AvifPixelFormat.I420,
+                        16,
+                        16,
+                        0,
+                        FrameHeader.InterpolationFilter.BILINEAR,
+                        aboveLeaf,
+                        leftLeaf,
+                        currentLeaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+
+        assertTrue(
+                planes.lumaPlane().sample(8, 8) != lumaSamples[8][8],
+                "The luma plane should retain local warped prediction"
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaUPlane()),
+                4,
+                4,
+                cropSamples(chromaUSamples, 4, 4, 4, 4)
+        );
+        assertPlaneBlockEquals(
+                requirePlane(planes.chromaVPlane()),
+                4,
+                4,
+                cropSamples(chromaVSamples, 4, 4, 4, 4)
+        );
+    }
+
+    /// Verifies that a `GLOBALMV` block with non-translation frame motion uses affine warped
+    /// prediction instead of the block-center translation vector.
+    @Test
+    void reconstructsGlobalAffineI400InterBlock() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[][] lumaSamples = rampSamples(16, 16, 3, 5, 8);
+        ReferenceSurfaceSnapshot referenceSurfaceSnapshot = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                lumaSamples,
+                null,
+                null
+        );
+        FrameHeader.GlobalMotionParams affineMotion = new FrameHeader.GlobalMotionParams(
+                FrameHeader.GlobalMotionType.ROTATION_ZOOM,
+                new int[]{0, 0, 1 << 16, 1 << 11, -(1 << 11), 1 << 16}
+        );
+        FrameHeader.GlobalMotionParams identityMotion = FrameHeader.GlobalMotionParams.identity();
+        FrameHeader frameHeader = createInterFrameHeader(16, 16, 0).withGlobalMotionParameters(
+                new FrameHeader.GlobalMotionParams[]{
+                        affineMotion,
+                        identityMotion,
+                        identityMotion,
+                        identityMotion,
+                        identityMotion,
+                        identityMotion,
+                        identityMotion
+                }
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createSingleReferenceInterBlockHeader(
+                        position,
+                        size,
+                        false,
+                        0,
+                        MotionVector.zero(),
+                        SingleInterPredictionMode.GLOBALMV
+                ),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(
+                        createSequenceHeader(AvifPixelFormat.I400, 16, 16),
+                        frameHeader,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+        WarpedMotion.Model model = WarpedMotion.fromGlobalMotion(affineMotion);
+        MutablePlaneBuffer expectedPlane = new MutablePlaneBuffer(16, 16, 8);
+        WarpedMotion.predictPlane(
+                expectedPlane,
+                referenceSurfaceSnapshot.decodedPlanes().lumaPlane(),
+                0,
+                0,
+                8,
+                8,
+                8,
+                8,
+                0,
+                0,
+                0,
+                0,
+                model
+        );
+
+        assertTrue(model.affine());
+        assertPlanesEqual(expectedPlane.toDecodedPlane(), planes.lumaPlane());
+        assertTrue(
+                planes.lumaPlane().sample(7, 7) != lumaSamples[7][7],
+                "Affine global prediction should differ from zero-vector translation"
+        );
+    }
+
+    /// Verifies that each reference of a `GLOBALMV_GLOBALMV` block independently uses its affine
+    /// global model before compound averaging.
+    @Test
+    void reconstructsCompoundGlobalAffineI400InterBlock() {
+        BlockPosition position = new BlockPosition(0, 0);
+        BlockSize size = BlockSize.SIZE_8X8;
+        int[][] primarySamples = rampSamples(16, 16, 3, 3, 5);
+        int[][] secondarySamples = rampSamples(16, 16, 20, 7, 4);
+        ReferenceSurfaceSnapshot primaryReference = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                primarySamples,
+                null,
+                null
+        );
+        ReferenceSurfaceSnapshot secondaryReference = createReferenceSurfaceSnapshot(
+                AvifPixelFormat.I400,
+                secondarySamples,
+                null,
+                null
+        );
+        FrameHeader.GlobalMotionParams identityMotion = FrameHeader.GlobalMotionParams.identity();
+        FrameHeader.GlobalMotionParams affineMotion = new FrameHeader.GlobalMotionParams(
+                FrameHeader.GlobalMotionType.ROTATION_ZOOM,
+                new int[]{0, 0, 1 << 16, 1 << 11, -(1 << 11), 1 << 16}
+        );
+        FrameHeader frameHeader = createInterFrameHeader(
+                16,
+                16,
+                0,
+                1,
+                FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
+        ).withGlobalMotionParameters(
+                new FrameHeader.GlobalMotionParams[]{
+                        identityMotion,
+                        affineMotion,
+                        identityMotion,
+                        identityMotion,
+                        identityMotion,
+                        identityMotion,
+                        identityMotion
+                }
+        );
+        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                createCompoundReferenceInterBlockHeader(
+                        position,
+                        size,
+                        false,
+                        0,
+                        1,
+                        MotionVector.zero(),
+                        MotionVector.zero(),
+                        CompoundInterPredictionMode.GLOBALMV_GLOBALMV
+                ),
+                createTransformLayout(position, size, AvifPixelFormat.I400),
+                createResidualLayout(position, size, true)
+        );
+
+        DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                createFrameSyntaxDecodeResult(
+                        createSequenceHeader(AvifPixelFormat.I400, 16, 16),
+                        frameHeader,
+                        leaf
+                ),
+                createReferenceSurfaceSlots(0, primaryReference, 1, secondaryReference)
+        );
+        WarpedMotion.Model model = WarpedMotion.fromGlobalMotion(affineMotion);
+        int[] warpedSecondary = WarpedMotion.predictCompoundPlane(
+                secondaryReference.decodedPlanes().lumaPlane(),
+                8,
+                8,
+                8,
+                8,
+                0,
+                0,
+                0,
+                0,
+                8,
+                model
+        );
+        int[][] expected = new int[8][8];
+        int[][] translationOnly = new int[8][8];
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                expected[y][x] = ((primarySamples[y][x] << 4) + warpedSecondary[y * 8 + x] + 16) >> 5;
+                translationOnly[y][x] = (primarySamples[y][x] + secondarySamples[y][x] + 1) / 2;
+            }
+        }
+
+        assertTrue(model.affine());
+        assertPlaneBlockEquals(planes.lumaPlane(), 0, 0, expected);
+        assertFalse(
+                Arrays.deepEquals(expected, translationOnly),
+                "Compound affine prediction should differ from two zero-vector translations"
         );
     }
 
@@ -3942,8 +4453,8 @@ final class FrameReconstructorTest {
                 planes.lumaPlane(),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                InterPredictionOracle.averageCompoundBlocks(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 createDecodedPlane(lumaSamples0),
                                 4,
                                 4,
@@ -3955,7 +4466,7 @@ final class FrameReconstructorTest {
                                 4,
                                 FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
                         ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 createDecodedPlane(lumaSamples1),
                                 4,
                                 4,
@@ -3973,8 +4484,8 @@ final class FrameReconstructorTest {
                 requirePlane(planes.chromaUPlane()),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                InterPredictionOracle.averageCompoundBlocks(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 createDecodedPlane(chromaUSamples0),
                                 2,
                                 2,
@@ -3986,7 +4497,7 @@ final class FrameReconstructorTest {
                                 2,
                                 FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
                         ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 createDecodedPlane(chromaUSamples1),
                                 2,
                                 2,
@@ -4004,8 +4515,8 @@ final class FrameReconstructorTest {
                 requirePlane(planes.chromaVPlane()),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                InterPredictionOracle.averageCompoundBlocks(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 createDecodedPlane(chromaVSamples0),
                                 2,
                                 2,
@@ -4017,7 +4528,7 @@ final class FrameReconstructorTest {
                                 2,
                                 FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP
                         ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 createDecodedPlane(chromaVSamples1),
                                 2,
                                 2,
@@ -4033,8 +4544,8 @@ final class FrameReconstructorTest {
         );
     }
 
-    /// Verifies that fixed-filter compound inter prediction preserves `12-bit` luma and chroma
-    /// samples while averaging two independently sampled reference surfaces.
+    /// Verifies that fixed-filter compound inter prediction retains the `12-bit` post-filter
+    /// precision until after the two reference predictors are averaged.
     @Test
     void reconstructsTwelveBitCompoundReferenceI420InterBlockWithSharpEightTapSubpelMotionVectors() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -4132,100 +4643,30 @@ final class FrameReconstructorTest {
                 planes.lumaPlane(),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
-                                createDecodedPlane(lumaSamples0),
-                                4,
-                                4,
-                                motionVector0.columnEighthPel(),
-                                motionVector0.rowEighthPel(),
-                                8,
-                                8,
-                                4,
-                                4,
-                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
-                                4095
-                        ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
-                                createDecodedPlane(lumaSamples1),
-                                4,
-                                4,
-                                motionVector1.columnEighthPel(),
-                                motionVector1.rowEighthPel(),
-                                8,
-                                8,
-                                4,
-                                4,
-                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
-                                4095
-                        )
-                )
+                new int[][]{
+                        {1770, 1771, 1771, 1771},
+                        {1769, 1770, 1770, 1770},
+                        {1769, 1770, 1770, 1770},
+                        {1769, 1770, 1770, 1770}
+                }
         );
         assertPlaneBlockEquals(
                 requirePlane(planes.chromaUPlane()),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
-                                createDecodedPlane(chromaUSamples0),
-                                2,
-                                2,
-                                motionVector0.columnEighthPel(),
-                                motionVector0.rowEighthPel(),
-                                16,
-                                16,
-                                2,
-                                2,
-                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
-                                4095
-                        ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
-                                createDecodedPlane(chromaUSamples1),
-                                2,
-                                2,
-                                motionVector1.columnEighthPel(),
-                                motionVector1.rowEighthPel(),
-                                16,
-                                16,
-                                2,
-                                2,
-                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
-                                4095
-                        )
-                )
+                new int[][]{
+                        {1702, 1701},
+                        {1703, 1702}
+                }
         );
         assertPlaneBlockEquals(
                 requirePlane(planes.chromaVPlane()),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
-                                createDecodedPlane(chromaVSamples0),
-                                2,
-                                2,
-                                motionVector0.columnEighthPel(),
-                                motionVector0.rowEighthPel(),
-                                16,
-                                16,
-                                2,
-                                2,
-                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
-                                4095
-                        ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
-                                createDecodedPlane(chromaVSamples1),
-                                2,
-                                2,
-                                motionVector1.columnEighthPel(),
-                                motionVector1.rowEighthPel(),
-                                16,
-                                16,
-                                2,
-                                2,
-                                FrameHeader.InterpolationFilter.EIGHT_TAP_SHARP,
-                                4095
-                        )
-                )
+                new int[][]{
+                        {2052, 2051},
+                        {2053, 2052}
+                }
         );
         assertTrue(planes.lumaPlane().sample(0, 0) > 255);
         assertTrue(requirePlane(planes.chromaUPlane()).sample(0, 0) > 255);
@@ -5428,6 +5869,35 @@ final class FrameReconstructorTest {
                 hasChroma,
                 referenceFrame0,
                 motionVector,
+                SingleInterPredictionMode.NEARESTMV,
+                MotionMode.SIMPLE
+        );
+    }
+
+    /// Creates one single-reference inter block header with an explicit prediction mode.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param motionVector the resolved primary motion vector
+    /// @param singleInterMode the decoded single-reference prediction mode
+    /// @return one single-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createSingleReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            MotionVector motionVector,
+            SingleInterPredictionMode singleInterMode
+    ) {
+        return createSingleReferenceInterBlockHeader(
+                position,
+                size,
+                hasChroma,
+                referenceFrame0,
+                motionVector,
+                singleInterMode,
                 MotionMode.SIMPLE
         );
     }
@@ -5449,6 +5919,36 @@ final class FrameReconstructorTest {
             MotionVector motionVector,
             MotionMode motionMode
     ) {
+        return createSingleReferenceInterBlockHeader(
+                position,
+                size,
+                hasChroma,
+                referenceFrame0,
+                motionVector,
+                SingleInterPredictionMode.NEARESTMV,
+                motionMode
+        );
+    }
+
+    /// Creates one single-reference inter block header with explicit prediction and motion modes.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param motionVector the resolved primary motion vector
+    /// @param singleInterMode the decoded single-reference prediction mode
+    /// @param motionMode the decoded inter motion-compensation mode
+    /// @return one single-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createSingleReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            MotionVector motionVector,
+            SingleInterPredictionMode singleInterMode,
+            MotionMode motionMode
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 size,
@@ -5460,7 +5960,7 @@ final class FrameReconstructorTest {
                 false,
                 referenceFrame0,
                 -1,
-                SingleInterPredictionMode.NEARESTMV,
+                singleInterMode,
                 null,
                 0,
                 InterMotionVector.resolved(motionVector),
@@ -5647,6 +6147,42 @@ final class FrameReconstructorTest {
         );
     }
 
+    /// Creates one compound-reference inter block header with an explicit inter prediction mode.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in LAST..ALTREF order
+    /// @param motionVector0 the resolved primary motion vector
+    /// @param motionVector1 the resolved secondary motion vector
+    /// @param compoundInterMode the decoded compound inter prediction mode
+    /// @return one compound-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createCompoundReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector motionVector0,
+            MotionVector motionVector1,
+            CompoundInterPredictionMode compoundInterMode
+    ) {
+        return createCompoundReferenceInterBlockHeader(
+                position,
+                size,
+                hasChroma,
+                referenceFrame0,
+                referenceFrame1,
+                motionVector0,
+                motionVector1,
+                compoundInterMode,
+                CompoundPredictionType.AVERAGE,
+                false,
+                -1
+        );
+    }
+
     /// Creates one compound-reference inter block header with an explicit compound prediction type.
     ///
     /// @param position the block origin in 4x4 units
@@ -5672,6 +6208,48 @@ final class FrameReconstructorTest {
             boolean compoundMaskSign,
             int compoundWedgeIndex
     ) {
+        return createCompoundReferenceInterBlockHeader(
+                position,
+                size,
+                hasChroma,
+                referenceFrame0,
+                referenceFrame1,
+                motionVector0,
+                motionVector1,
+                CompoundInterPredictionMode.NEARESTMV_NEARESTMV,
+                compoundPredictionType,
+                compoundMaskSign,
+                compoundWedgeIndex
+        );
+    }
+
+    /// Creates one compound-reference inter block header with explicit inter and blend modes.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param hasChroma whether the block carries chroma samples
+    /// @param referenceFrame0 the primary inter reference in LAST..ALTREF order
+    /// @param referenceFrame1 the secondary inter reference in LAST..ALTREF order
+    /// @param motionVector0 the resolved primary motion vector
+    /// @param motionVector1 the resolved secondary motion vector
+    /// @param compoundInterMode the decoded compound inter prediction mode
+    /// @param compoundPredictionType the decoded compound prediction blend type
+    /// @param compoundMaskSign whether the decoded segment or wedge compound mask uses inverted source order
+    /// @param compoundWedgeIndex the decoded compound wedge index, or `-1`
+    /// @return one compound-reference inter block header
+    private static TileBlockHeaderReader.BlockHeader createCompoundReferenceInterBlockHeader(
+            BlockPosition position,
+            BlockSize size,
+            boolean hasChroma,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector motionVector0,
+            MotionVector motionVector1,
+            CompoundInterPredictionMode compoundInterMode,
+            CompoundPredictionType compoundPredictionType,
+            boolean compoundMaskSign,
+            int compoundWedgeIndex
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
                 size,
@@ -5684,7 +6262,7 @@ final class FrameReconstructorTest {
                 referenceFrame0,
                 referenceFrame1,
                 null,
-                CompoundInterPredictionMode.NEARESTMV_NEARESTMV,
+                compoundInterMode,
                 0,
                 InterMotionVector.resolved(motionVector0),
                 InterMotionVector.resolved(motionVector1),
@@ -6093,12 +6671,38 @@ final class FrameReconstructorTest {
     /// @param pixelFormat the active decoded chroma layout
     /// @return one transform layout that exactly covers one leaf block
     private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, AvifPixelFormat pixelFormat) {
+        return createTransformLayout(
+                position,
+                size,
+                pixelFormat,
+                size.widthPixels(),
+                size.heightPixels()
+        );
+    }
+
+    /// Creates one transform layout with an exact visible footprint and one transform unit.
+    ///
+    /// @param position the block origin in 4x4 units
+    /// @param size the coded block size
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param visibleWidthPixels the exact visible block width in pixels
+    /// @param visibleHeightPixels the exact visible block height in pixels
+    /// @return one transform layout with the supplied visible footprint
+    private static TransformLayout createTransformLayout(
+            BlockPosition position,
+            BlockSize size,
+            AvifPixelFormat pixelFormat,
+            int visibleWidthPixels,
+            int visibleHeightPixels
+    ) {
         TransformSize transformSize = size.maxLumaTransformSize();
         return new TransformLayout(
                 position,
                 size,
-                size.width4(),
-                size.height4(),
+                (visibleWidthPixels + 3) >> 2,
+                (visibleHeightPixels + 3) >> 2,
+                visibleWidthPixels,
+                visibleHeightPixels,
                 transformSize,
                 size.maxChromaTransformSize(pixelFormat),
                 false,
@@ -6544,7 +7148,7 @@ final class FrameReconstructorTest {
         assertEquals(height, plane.height());
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                assertEquals(expectedSample, plane.sample(x, y));
+                assertEquals(expectedSample, plane.sample(x, y), "sample at (" + x + ", " + y + ")");
             }
         }
     }
@@ -6586,6 +7190,21 @@ final class FrameReconstructorTest {
         }
     }
 
+    /// Asserts that one decoded plane's top-left stored region matches the supplied samples.
+    ///
+    /// @param plane the decoded plane to inspect
+    /// @param expected the expected stored sample region, including relevant right and bottom padding
+    private static void assertStoredPlaneRegionEquals(DecodedPlane plane, int[][] expected) {
+        assertTrue(plane.stride() >= expected[0].length);
+        assertTrue(plane.storageHeight() >= expected.length);
+        short[] samples = plane.samples();
+        for (int y = 0; y < expected.length; y++) {
+            for (int x = 0; x < expected[y].length; x++) {
+                assertEquals(expected[y][x], samples[y * plane.stride() + x] & 0xFFFF);
+            }
+        }
+    }
+
     /// Asserts that one decoded sub-block matches the supplied expected raster.
     ///
     /// @param plane the decoded plane to inspect
@@ -6620,6 +7239,27 @@ final class FrameReconstructorTest {
                 assertEquals(firstDelta, reconstructed.sample(x, y) - baseline.sample(x, y));
             }
         }
+    }
+
+    /// Asserts that one plane contains at least one positive difference and no negative differences.
+    ///
+    /// @param baseline the baseline plane
+    /// @param reconstructed the plane expected to contain a positive contribution
+    private static void assertPlaneContainsPositiveButNoNegativeDifferences(
+            DecodedPlane baseline,
+            DecodedPlane reconstructed
+    ) {
+        assertEquals(baseline.width(), reconstructed.width());
+        assertEquals(baseline.height(), reconstructed.height());
+        boolean positiveDifference = false;
+        for (int y = 0; y < baseline.height(); y++) {
+            for (int x = 0; x < baseline.width(); x++) {
+                int difference = reconstructed.sample(x, y) - baseline.sample(x, y);
+                assertTrue(difference >= 0, "negative difference at (" + x + ", " + y + ")");
+                positiveDifference |= difference > 0;
+            }
+        }
+        assertTrue(positiveDifference, "expected at least one positive sample difference");
     }
 
     /// Asserts that two decoded planes carry the same stored sample values.
@@ -6811,7 +7451,14 @@ final class FrameReconstructorTest {
     /// @param targetWidth the upscaled row width
     /// @return the expected horizontally upscaled row
     private static int[] expectedHorizontallyUpscaledRow(int[] sourceRow, int targetWidth) {
-        return SuperResolutionOracle.upscaleRow(sourceRow, targetWidth, 8);
+        int processingAlignment = targetWidth <= 4 ? 4 : 8;
+        int processingWidth = (sourceRow.length + processingAlignment - 1) & -processingAlignment;
+        return SuperResolutionOracle.upscaleRow(
+                Arrays.copyOf(sourceRow, processingWidth),
+                sourceRow.length,
+                targetWidth,
+                8
+        );
     }
 
     /// Returns one coded-domain plane predicted from a differently sized stored reference with
@@ -6945,6 +7592,15 @@ final class FrameReconstructorTest {
     /// @return the clamped value
     private static int clamp(int value, int minimum, int maximum) {
         return Math.max(minimum, Math.min(value, maximum));
+    }
+
+    /// Runs the frame-level stages that follow coded-domain reconstruction.
+    ///
+    /// @param reconstructedPlanes the reconstructed coded-domain planes
+    /// @param frameHeader the frame header that owns the planes
+    /// @return the postprocessed planes
+    private static DecodedPlanes postprocess(DecodedPlanes reconstructedPlanes, FrameHeader frameHeader) {
+        return new FramePostprocessor().postprocess(reconstructedPlanes, frameHeader);
     }
 
     /// Returns one guaranteed-present decoded plane after a non-null assertion.

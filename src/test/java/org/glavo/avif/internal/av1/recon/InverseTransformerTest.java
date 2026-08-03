@@ -66,6 +66,34 @@ final class InverseTransformerTest {
         );
     }
 
+    /// Verifies that `TX_4X4` clamps the row-pass output to the 10-bit column-pass input range.
+    @Test
+    void clampsFourByFourRowPassBeforeTenBitColumnTransform() {
+        int[] coefficients = {
+                0, -430, 0, -1434,
+                0, -6435, 599, 0,
+                0, -599, 0, 0,
+                62379, 0, 0, 0
+        };
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.TX_4X4,
+                TransformType.DCT_DCT,
+                10
+        );
+
+        assertArrayEquals(
+                new int[]{
+                        398, 658, 860, 1217,
+                        -2041, -1900, -1905, -1722,
+                        2007, 2022, 1782, 1757,
+                        -531, -576, -942, -1085
+                },
+                residual
+        );
+    }
+
     /// Verifies that `TX_8X8` reconstruction produces the expected two-dimensional signed pattern.
     @Test
     void reconstructsEightByEightTwoDimensionalResidualPattern() {
@@ -162,6 +190,59 @@ final class InverseTransformerTest {
                         0, 8, 0, 0,
                         0, 0, 0, 0,
                         0, 0, 0, 0
+                },
+                residual
+        );
+    }
+
+    /// Verifies that a rectangular vertical DCT preserves the unclamped four-point identity row
+    /// output before the inter-pass shift.
+    @Test
+    void reconstructsFourBySixteenVerticalDctWithUnclampedIdentityRows() {
+        int[] coefficients = {
+                0, 0, -8460, -5076,
+                -11844, 0, 1692, -1692,
+                0, 0, 0, -32768,
+                0, 5076, 0, 0,
+                -1692, -1692, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0
+        };
+
+        int[] residual = InverseTransformer.reconstructResidualBlock(
+                coefficients,
+                TransformSize.RTX_4X16,
+                TransformType.V_DCT,
+                8
+        );
+
+        assertArrayEquals(
+                new int[]{
+                        -590, 146, -190, -1653,
+                        -529, 114, -193, -1434,
+                        -433, 51, -198, -1029,
+                        -335, -37, -206, -499,
+                        -263, -129, -217, 76,
+                        -218, -195, -229, 611,
+                        -181, -202, -243, 1024,
+                        -120, -134, -257, 1254,
+                        -18, -4, -272, 1269,
+                        123, 145, -286, 1067,
+                        275, 252, -300, 681,
+                        401, 267, -312, 171,
+                        474, 175, -322, -383,
+                        490, 7, -330, -897,
+                        472, -171, -336, -1291,
+                        452, -284, -339, -1505
                 },
                 residual
         );
@@ -349,6 +430,38 @@ final class InverseTransformerTest {
         assertEquals(100, plane.sample(3, 1));
         assertEquals(100, plane.sample(0, 2));
         assertEquals(100, plane.sample(3, 3));
+    }
+
+    /// Verifies that callers can write only the portion of a transform retained at a plane edge.
+    @Test
+    void addsResidualBlockOnlyInsideStoredPlaneEdge() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                plane.setSample(x, y, 100);
+            }
+        }
+
+        InverseTransformer.addResidualBlock(
+                plane,
+                2,
+                2,
+                TransformSize.TX_4X4,
+                2,
+                2,
+                new int[]{
+                        1, 2, 30, 40,
+                        3, 4, 50, 60,
+                        70, 80, 90, 100,
+                        110, 120, 130, 140
+                }
+        );
+
+        assertEquals(101, plane.sample(2, 2));
+        assertEquals(102, plane.sample(3, 2));
+        assertEquals(103, plane.sample(2, 3));
+        assertEquals(104, plane.sample(3, 3));
+        assertEquals(100, plane.sample(1, 3));
     }
 
     /// Verifies that every declared transform size accepts zeroed `DCT_DCT` input.

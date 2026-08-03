@@ -44,6 +44,7 @@ import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
 import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
+import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
@@ -483,9 +484,14 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
                 zeroResidualSyntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+                reconstructedPlanes,
+                assembly.frameHeader(),
+                zeroResidualSyntaxDecodeResult
         );
 
         int lumaOriginX = zeroResidualLeaf.header().position().x4() << 2;
@@ -809,9 +815,14 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+                reconstructedPlanes,
+                assembly.frameHeader(),
+                syntaxDecodeResult
         );
 
         int[][] codedLuma = InterPredictionOracle.sampleReferencePlaneBlock(
@@ -857,24 +868,24 @@ final class FrameReconstructorIntegrationTest {
         assertPlaneEquals(
                 decodedPlanes.lumaPlane(),
                 new int[][]{
-                        expectedHorizontallyUpscaledRow(codedLuma[0], 8),
-                        expectedHorizontallyUpscaledRow(codedLuma[1], 8),
-                        expectedHorizontallyUpscaledRow(codedLuma[2], 8),
-                        expectedHorizontallyUpscaledRow(codedLuma[3], 8)
+                        expectedHorizontallyUpscaledRow(codedLuma[0], 8, 8),
+                        expectedHorizontallyUpscaledRow(codedLuma[1], 8, 8),
+                        expectedHorizontallyUpscaledRow(codedLuma[2], 8, 8),
+                        expectedHorizontallyUpscaledRow(codedLuma[3], 8, 8)
                 }
         );
         assertPlaneEquals(
                 requirePlane(decodedPlanes.chromaUPlane()),
                 new int[][]{
-                        expectedHorizontallyUpscaledRow(codedChromaU[0], 4),
-                        expectedHorizontallyUpscaledRow(codedChromaU[1], 4)
+                        expectedHorizontallyUpscaledRow(codedChromaU[0], 4, 4),
+                        expectedHorizontallyUpscaledRow(codedChromaU[1], 4, 4)
                 }
         );
         assertPlaneEquals(
                 requirePlane(decodedPlanes.chromaVPlane()),
                 new int[][]{
-                        expectedHorizontallyUpscaledRow(codedChromaV[0], 4),
-                        expectedHorizontallyUpscaledRow(codedChromaV[1], 4)
+                        expectedHorizontallyUpscaledRow(codedChromaV[0], 4, 4),
+                        expectedHorizontallyUpscaledRow(codedChromaV[1], 4, 4)
                 }
         );
     }
@@ -964,9 +975,14 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+                reconstructedPlanes,
+                assembly.frameHeader(),
+                syntaxDecodeResult
         );
 
         int[][] codedLuma = expectedScaledInterPlaneBilinearly(
@@ -1048,9 +1064,9 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(4, decodedPlanes.codedHeight());
         assertEquals(8, decodedPlanes.renderWidth());
         assertEquals(4, decodedPlanes.renderHeight());
-        assertPlaneEquals(decodedPlanes.lumaPlane(), expectedHorizontallyUpscaledBlock(codedLuma, 8));
-        assertPlaneEquals(requirePlane(decodedPlanes.chromaUPlane()), expectedHorizontallyUpscaledBlock(codedChromaU, 4));
-        assertPlaneEquals(requirePlane(decodedPlanes.chromaVPlane()), expectedHorizontallyUpscaledBlock(codedChromaV, 4));
+        assertPlaneEquals(decodedPlanes.lumaPlane(), expectedHorizontallyUpscaledBlock(codedLuma, 8, 8));
+        assertPlaneEquals(requirePlane(decodedPlanes.chromaUPlane()), expectedHorizontallyUpscaledBlock(codedChromaU, 4, 4));
+        assertPlaneEquals(requirePlane(decodedPlanes.chromaVPlane()), expectedHorizontallyUpscaledBlock(codedChromaV, 4, 4));
     }
 
     /// Verifies that one entropy-decoded DC residual is applied after single-reference inter
@@ -1845,8 +1861,8 @@ final class FrameReconstructorIntegrationTest {
                 decodedPlanes.lumaPlane(),
                 lumaOriginX,
                 lumaOriginY,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                InterPredictionOracle.averageCompoundBlocks(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceLumaPlane0,
                                 blockSize.widthPixels(),
                                 blockSize.heightPixels(),
@@ -1858,7 +1874,7 @@ final class FrameReconstructorIntegrationTest {
                                 blockSize.heightPixels(),
                                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR
                         ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceLumaPlane1,
                                 blockSize.widthPixels(),
                                 blockSize.heightPixels(),
@@ -1985,8 +2001,8 @@ final class FrameReconstructorIntegrationTest {
                 decodedPlanes.lumaPlane(),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                InterPredictionOracle.averageCompoundBlocks(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceLumaPlane0,
                                 4,
                                 4,
@@ -1999,7 +2015,7 @@ final class FrameReconstructorIntegrationTest {
                                 horizontalInterpolationFilter,
                                 verticalInterpolationFilter
                         ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceLumaPlane1,
                                 4,
                                 4,
@@ -2018,8 +2034,8 @@ final class FrameReconstructorIntegrationTest {
                 requirePlane(decodedPlanes.chromaUPlane()),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                InterPredictionOracle.averageCompoundBlocks(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceChromaUPlane0,
                                 2,
                                 2,
@@ -2032,7 +2048,7 @@ final class FrameReconstructorIntegrationTest {
                                 horizontalInterpolationFilter,
                                 verticalInterpolationFilter
                         ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceChromaUPlane1,
                                 2,
                                 2,
@@ -2051,8 +2067,8 @@ final class FrameReconstructorIntegrationTest {
                 requirePlane(decodedPlanes.chromaVPlane()),
                 0,
                 0,
-                InterPredictionOracle.averageBlocks(
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                InterPredictionOracle.averageCompoundBlocks(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceChromaVPlane0,
                                 2,
                                 2,
@@ -2065,7 +2081,7 @@ final class FrameReconstructorIntegrationTest {
                                 horizontalInterpolationFilter,
                                 verticalInterpolationFilter
                         ),
-                        InterPredictionOracle.sampleReferencePlaneBlock(
+                        InterPredictionOracle.sampleCompoundReferencePlaneBlock(
                                 referenceChromaVPlane1,
                                 2,
                                 2,
@@ -4009,7 +4025,13 @@ final class FrameReconstructorIntegrationTest {
         }
         for (int y = 0; y < expected.length; y++) {
             for (int x = 0; x < expected[y].length; x++) {
-                assertEquals(expected[y][x], plane.sample(originX + x, originY + y));
+                int sampleX = originX + x;
+                int sampleY = originY + y;
+                assertEquals(
+                        expected[y][x],
+                        plane.sample(sampleX, sampleY),
+                        () -> "sample at (" + sampleX + ", " + sampleY + ")"
+                );
             }
         }
     }
@@ -4049,9 +4071,22 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param sourcePlane the coded-domain source plane
     /// @param targetWidth the post-upscale plane width
+    /// @param processingAlignment the plane-local AV1 frame-grid alignment
     /// @return the expected horizontally upscaled raster
-    private static int[][] expectedHorizontallyUpscaledPlane(DecodedPlane sourcePlane, int targetWidth) {
-        return SuperResolutionOracle.upscalePlane(sourcePlane, targetWidth, 8);
+    private static int[][] expectedHorizontallyUpscaledPlane(
+            DecodedPlane sourcePlane,
+            int targetWidth,
+            int processingAlignment
+    ) {
+        int[][] expected = new int[sourcePlane.height()][targetWidth];
+        for (int y = 0; y < sourcePlane.height(); y++) {
+            int[] sourceRow = new int[sourcePlane.width()];
+            for (int x = 0; x < sourcePlane.width(); x++) {
+                sourceRow[x] = sourcePlane.sample(x, y);
+            }
+            expected[y] = expectedHorizontallyUpscaledRow(sourceRow, targetWidth, processingAlignment);
+        }
+        return expected;
     }
 
     /// Returns the expected horizontally upscaled raster produced by the normative
@@ -4059,9 +4094,18 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param sourceBlock the coded-domain source block in row-major order
     /// @param targetWidth the post-upscale row width
+    /// @param processingAlignment the plane-local AV1 frame-grid alignment
     /// @return the expected horizontally upscaled raster
-    private static int[][] expectedHorizontallyUpscaledBlock(int[][] sourceBlock, int targetWidth) {
-        return SuperResolutionOracle.upscaleBlock(sourceBlock, targetWidth, 8);
+    private static int[][] expectedHorizontallyUpscaledBlock(
+            int[][] sourceBlock,
+            int targetWidth,
+            int processingAlignment
+    ) {
+        int[][] expected = new int[sourceBlock.length][targetWidth];
+        for (int y = 0; y < sourceBlock.length; y++) {
+            expected[y] = expectedHorizontallyUpscaledRow(sourceBlock[y], targetWidth, processingAlignment);
+        }
+        return expected;
     }
 
     /// Copies one sample block into one mutable expected raster.
@@ -4081,9 +4125,17 @@ final class FrameReconstructorIntegrationTest {
     ///
     /// @param sourceRow the coded-domain source row
     /// @param targetWidth the post-upscale row width
+    /// @param processingAlignment the plane-local AV1 frame-grid alignment
     /// @return the expected horizontally upscaled row
-    private static int[] expectedHorizontallyUpscaledRow(int[] sourceRow, int targetWidth) {
-        return SuperResolutionOracle.upscaleRow(sourceRow, targetWidth, 8);
+    private static int[] expectedHorizontallyUpscaledRow(
+            int[] sourceRow,
+            int targetWidth,
+            int processingAlignment
+    ) {
+        int processingWidth = (sourceRow.length + processingAlignment - 1) & -processingAlignment;
+        int[] paddedRow = new int[processingWidth];
+        System.arraycopy(sourceRow, 0, paddedRow, 0, sourceRow.length);
+        return SuperResolutionOracle.upscaleRow(paddedRow, sourceRow.length, targetWidth, 8);
     }
 
     /// Asserts one rectangular plane block is filled with one constant sample value.
@@ -5083,9 +5135,14 @@ final class FrameReconstructorIntegrationTest {
                 referenceChromaVPlane
         );
 
-        DecodedPlanes decodedPlanes = new FrameReconstructor().reconstruct(
+        DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(
                 syntaxDecodeResult,
                 createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+        );
+        DecodedPlanes decodedPlanes = new FramePostprocessor().postprocess(
+                reconstructedPlanes,
+                assembly.frameHeader(),
+                syntaxDecodeResult
         );
 
         assertEquals(frameType, assembly.frameHeader().frameType());
@@ -5100,15 +5157,15 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(4, decodedPlanes.renderHeight());
         assertPlaneEquals(
                 decodedPlanes.lumaPlane(),
-                expectedHorizontallyUpscaledPlane(referenceLumaPlane, 8)
+                expectedHorizontallyUpscaledPlane(referenceLumaPlane, 8, 8)
         );
         assertPlaneEquals(
                 requirePlane(decodedPlanes.chromaUPlane()),
-                expectedHorizontallyUpscaledPlane(referenceChromaUPlane, 4)
+                expectedHorizontallyUpscaledPlane(referenceChromaUPlane, 4, 4)
         );
         assertPlaneEquals(
                 requirePlane(decodedPlanes.chromaVPlane()),
-                expectedHorizontallyUpscaledPlane(referenceChromaVPlane, 4)
+                expectedHorizontallyUpscaledPlane(referenceChromaVPlane, 4, 4)
         );
     }
 

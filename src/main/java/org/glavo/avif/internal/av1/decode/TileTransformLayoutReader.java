@@ -37,6 +37,9 @@ import java.util.Objects;
 /// transform-unit tiling, lossless 4x4 tiling, and switchable inter variable-transform trees.
 @NotNullByDefault
 public final class TileTransformLayoutReader {
+    /// The width and height of one AV1 transform-processing region in 4x4 luma units.
+    private static final int TRANSFORM_REGION_SIZE4 = 16;
+
     /// The tile-local decode state that owns the active frame and sequence headers.
     private final TileDecodeContext tileContext;
 
@@ -184,7 +187,21 @@ public final class TileTransformLayoutReader {
     ) {
         BlockPosition position = header.position();
         BlockSize size = header.size();
-        if (!header.skip() && maxLumaTransformSize == TransformSize.TX_4X4) {
+        if (header.skip()) {
+            neighborContext.updateInterTransformContext(
+                    position,
+                    visibleWidth4,
+                    visibleHeight4,
+                    size.log2Width4(),
+                    size.log2Height4()
+            );
+            TransformSize skippedTransformSize = lossless ? TransformSize.TX_4X4 : maxLumaTransformSize;
+            return new InterTransformResult(
+                    tileUniformUnits(position, visibleWidth4, visibleHeight4, skippedTransformSize),
+                    false
+            );
+        }
+        if (maxLumaTransformSize == TransformSize.TX_4X4) {
             neighborContext.updateInterTransformContext(position, visibleWidth4, visibleHeight4, TransformSize.TX_4X4);
             return new InterTransformResult(tileUniformUnits(position, visibleWidth4, visibleHeight4, TransformSize.TX_4X4), false);
         }
@@ -192,16 +209,7 @@ public final class TileTransformLayoutReader {
             neighborContext.updateInterTransformContext(position, visibleWidth4, visibleHeight4, TransformSize.TX_4X4);
             return new InterTransformResult(tileUniformUnits(position, visibleWidth4, visibleHeight4, TransformSize.TX_4X4), false);
         }
-        if (tileContext.frameHeader().transformMode() != FrameHeader.TransformMode.SWITCHABLE || header.skip()) {
-            if (tileContext.frameHeader().transformMode() == FrameHeader.TransformMode.SWITCHABLE) {
-                neighborContext.updateInterTransformContext(
-                        position,
-                        visibleWidth4,
-                        visibleHeight4,
-                        size.log2Width4(),
-                        size.log2Height4()
-                );
-            }
+        if (tileContext.frameHeader().transformMode() != FrameHeader.TransformMode.SWITCHABLE) {
             return new InterTransformResult(tileUniformUnits(position, visibleWidth4, visibleHeight4, maxLumaTransformSize), false);
         }
 
@@ -311,7 +319,10 @@ public final class TileTransformLayoutReader {
         }
     }
 
-    /// Tiles one visible block span with repeated luma transform units of a single transform size.
+    /// Tiles one visible block span with repeated luma transform units in AV1 processing order.
+    ///
+    /// Blocks wider or taller than 64 luma samples are divided into 64x64-or-smaller regions.
+    /// Every region is completed before prediction and reconstruction advance to the next region.
     ///
     /// @param position the local tile-relative origin of the owning block
     /// @param visibleWidth4 the visible block width in 4x4 units
@@ -327,15 +338,21 @@ public final class TileTransformLayoutReader {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         List<TransformUnit> units = new ArrayList<>();
-        for (int y4 = 0; y4 < visibleHeight4; y4 += nonNullTransformSize.height4()) {
-            for (int x4 = 0; x4 < visibleWidth4; x4 += nonNullTransformSize.width4()) {
-                units.add(new TransformUnit(nonNullPosition.offset(x4, y4), nonNullTransformSize));
+        for (int regionY4 = 0; regionY4 < visibleHeight4; regionY4 += TRANSFORM_REGION_SIZE4) {
+            int regionEndY4 = Math.min(regionY4 + TRANSFORM_REGION_SIZE4, visibleHeight4);
+            for (int regionX4 = 0; regionX4 < visibleWidth4; regionX4 += TRANSFORM_REGION_SIZE4) {
+                int regionEndX4 = Math.min(regionX4 + TRANSFORM_REGION_SIZE4, visibleWidth4);
+                for (int y4 = regionY4; y4 < regionEndY4; y4 += nonNullTransformSize.height4()) {
+                    for (int x4 = regionX4; x4 < regionEndX4; x4 += nonNullTransformSize.width4()) {
+                        units.add(new TransformUnit(nonNullPosition.offset(x4, y4), nonNullTransformSize));
+                    }
+                }
             }
         }
         return units.toArray(new TransformUnit[0]);
     }
 
-    /// Tiles one visible block span with chroma transform units in chroma bitstream order.
+    /// Tiles one visible block span with chroma transform units in AV1 processing order.
     ///
     /// The returned unit positions are widened back into the shared luma-grid `BlockPosition`
     /// coordinate space so downstream contexts and reconstruction can keep using one position type.
@@ -371,13 +388,21 @@ public final class TileTransformLayoutReader {
                 ((nonNullPosition.y4() << 2) + visibleHeightPixels) - (originY4 << 2),
                 subsamplingY
         );
+        int regionWidthPixels = (TRANSFORM_REGION_SIZE4 << 2) >> subsamplingX;
+        int regionHeightPixels = (TRANSFORM_REGION_SIZE4 << 2) >> subsamplingY;
         List<TransformUnit> units = new ArrayList<>();
-        for (int y = 0; y < visibleChromaHeightPixels; y += nonNullTransformSize.heightPixels()) {
-            for (int x = 0; x < visibleChromaWidthPixels; x += nonNullTransformSize.widthPixels()) {
-                units.add(new TransformUnit(
-                        chromaOrigin.offset((x >> 2) << subsamplingX, (y >> 2) << subsamplingY),
-                        nonNullTransformSize
-                ));
+        for (int regionY = 0; regionY < visibleChromaHeightPixels; regionY += regionHeightPixels) {
+            int regionEndY = Math.min(regionY + regionHeightPixels, visibleChromaHeightPixels);
+            for (int regionX = 0; regionX < visibleChromaWidthPixels; regionX += regionWidthPixels) {
+                int regionEndX = Math.min(regionX + regionWidthPixels, visibleChromaWidthPixels);
+                for (int y = regionY; y < regionEndY; y += nonNullTransformSize.heightPixels()) {
+                    for (int x = regionX; x < regionEndX; x += nonNullTransformSize.widthPixels()) {
+                        units.add(new TransformUnit(
+                                chromaOrigin.offset((x >> 2) << subsamplingX, (y >> 2) << subsamplingY),
+                                nonNullTransformSize
+                        ));
+                    }
+                }
             }
         }
         return units.toArray(new TransformUnit[0]);

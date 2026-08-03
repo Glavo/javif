@@ -99,7 +99,7 @@ final class BlockNeighborContextTest {
         assertEquals(LumaIntraPredictionMode.VERTICAL, context.leftMode(0));
         assertEquals(2, context.segmentPredictionContext(new BlockPosition(2, 2)));
         BlockNeighborContext.SegmentPrediction prediction = context.currentSegmentPrediction(new BlockPosition(2, 2));
-        assertEquals(3, prediction.predictedSegmentId());
+        assertEquals(0, prediction.predictedSegmentId());
         assertEquals(2, prediction.context());
         assertEquals(4, context.abovePaletteSize(0));
         assertEquals(4, context.leftPaletteSize(0));
@@ -360,6 +360,102 @@ final class BlockNeighborContextTest {
         assertEquals(InterMotionVector.predicted(new MotionVector(8, -4)), compoundContext.motionVectorCandidate(1).motionVector0());
         assertEquals(InterMotionVector.predicted(new MotionVector(-8, 16)), compoundContext.motionVectorCandidate(1).motionVector1());
         assertEquals(1, compoundContext.drlContext(0));
+    }
+
+    /// Verifies affine `GLOBALMV` neighbors contribute the current block's position-dependent
+    /// global vector before their stored vector is reused by the extended candidate scan.
+    @Test
+    void provisionalInterModeContextsReevaluateGlobalWarpNeighborsAtCurrentBlock() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        MotionVector neighborGlobalMotion = new MotionVector(-154, 370);
+        MotionVector currentGlobalMotion = new MotionVector(-158, 366);
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(0, 0),
+                BlockSize.SIZE_8X16,
+                2,
+                SingleInterPredictionMode.GLOBALMV,
+                InterMotionVector.resolved(neighborGlobalMotion)
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(
+                        new BlockPosition(2, 0),
+                        BlockSize.SIZE_8X16,
+                        false,
+                        2,
+                        -1,
+                        currentGlobalMotion,
+                        MotionVector.zero(),
+                        FrameHeader.GlobalMotionType.AFFINE,
+                        FrameHeader.GlobalMotionType.IDENTITY
+                );
+
+        assertEquals(2, provisionalContext.candidateCount());
+        assertEquals(648, provisionalContext.candidateWeight(0));
+        assertEquals(2, provisionalContext.candidateWeight(1));
+        assertEquals(
+                InterMotionVector.resolved(currentGlobalMotion),
+                provisionalContext.motionVectorCandidate(0).motionVector0()
+        );
+        assertEquals(
+                InterMotionVector.predicted(neighborGlobalMotion),
+                provisionalContext.motionVectorCandidate(1).motionVector0()
+        );
+        assertFalse(provisionalContext.motionVectorCandidate(1).synthetic());
+        assertEquals(1, provisionalContext.drlContext(0));
+    }
+
+    /// Verifies a compound extended neighbor may append both of its components after one exact
+    /// candidate, exposing the third candidate to `NEARMV` DRL syntax.
+    @Test
+    void provisionalInterModeContextsKeepBothComponentsFromOneExtendedNeighbor() {
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        MotionVector exactMotionVector = new MotionVector(192, 422);
+        MotionVector extendedMotionVector0 = MotionVector.zero();
+        MotionVector extendedMotionVector1 = new MotionVector(256, 394);
+        context.updateFromBlockHeader(singleReferenceInterBlock(
+                new BlockPosition(4, 2),
+                BlockSize.SIZE_8X8,
+                0,
+                SingleInterPredictionMode.NEWMV,
+                InterMotionVector.resolved(exactMotionVector)
+        ));
+        context.updateFromBlockHeader(compoundInterBlock(
+                new BlockPosition(2, 4),
+                BlockSize.SIZE_8X8,
+                1,
+                6,
+                org.glavo.avif.internal.av1.model.CompoundInterPredictionMode.NEARMV_NEARMV,
+                InterMotionVector.resolved(extendedMotionVector0),
+                InterMotionVector.resolved(extendedMotionVector1)
+        ));
+
+        BlockNeighborContext.ProvisionalInterModeContext provisionalContext =
+                context.provisionalInterModeContext(
+                        new BlockPosition(4, 4),
+                        BlockSize.SIZE_8X8,
+                        false,
+                        0,
+                        -1
+                );
+
+        assertEquals(3, provisionalContext.candidateCount());
+        assertEquals(644, provisionalContext.candidateWeight(0));
+        assertEquals(2, provisionalContext.candidateWeight(1));
+        assertEquals(2, provisionalContext.candidateWeight(2));
+        assertEquals(
+                InterMotionVector.resolved(exactMotionVector),
+                provisionalContext.motionVectorCandidate(0).motionVector0()
+        );
+        assertEquals(
+                InterMotionVector.predicted(extendedMotionVector0),
+                provisionalContext.motionVectorCandidate(1).motionVector0()
+        );
+        assertEquals(
+                InterMotionVector.predicted(extendedMotionVector1),
+                provisionalContext.motionVectorCandidate(2).motionVector0()
+        );
+        assertEquals(2, provisionalContext.drlContext(1));
     }
 
     /// Verifies that direct matching neighbors carrying `NEWMV` lower the `newmv` syntax context.
@@ -903,6 +999,33 @@ final class BlockNeighborContextTest {
         assertFalse(contextWithProvisionalAbove.hasLocalWarpSamples(currentPosition, currentSize, 0));
     }
 
+    /// Verifies that intrabc displacement prediction prefers a direct above candidate and falls
+    /// back when no same-frame candidate is available.
+    @Test
+    void selectsIntrabcDisplacementVectorFromDirectAboveCandidate() {
+        BlockPosition currentPosition = new BlockPosition(0, 4);
+        BlockSize currentSize = BlockSize.SIZE_16X16;
+        MotionVector fallback = new MotionVector(0, -2560);
+        MotionVector aboveVector = new MotionVector(-64, 0);
+
+        BlockNeighborContext emptyContext = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        assertEquals(
+                fallback,
+                emptyContext.intrabcReferenceMotionVector(currentPosition, currentSize, fallback)
+        );
+
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        context.updateFromBlockHeader(intrabcBlock(
+                new BlockPosition(1, 3),
+                BlockSize.SIZE_4X4,
+                aboveVector
+        ));
+        assertEquals(
+                aboveVector,
+                context.intrabcReferenceMotionVector(currentPosition, currentSize, fallback)
+        );
+    }
+
     /// Creates a simple tile context used by neighbor-context tests.
     ///
     /// @param frameType the synthetic frame type
@@ -1062,6 +1185,57 @@ final class BlockNeighborContextTest {
             segments[i] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, false);
         }
         return segments;
+    }
+
+    /// Creates one compact intrabc block header used by neighbor-context tests.
+    ///
+    /// @param position the local tile-relative block origin
+    /// @param size the decoded block size
+    /// @param motionVector the resolved same-frame displacement vector
+    /// @return one compact intrabc block header
+    private static TileBlockHeaderReader.BlockHeader intrabcBlock(
+            BlockPosition position,
+            BlockSize size,
+            MotionVector motionVector
+    ) {
+        return new TileBlockHeaderReader.BlockHeader(
+                position,
+                size,
+                false,
+                false,
+                false,
+                false,
+                true,
+                false,
+                -1,
+                -1,
+                null,
+                null,
+                -1,
+                InterMotionVector.resolved(motionVector),
+                null,
+                null,
+                null,
+                false,
+                0,
+                -1,
+                0,
+                new int[4],
+                LumaIntraPredictionMode.DC,
+                null,
+                0,
+                0,
+                new int[0],
+                new int[0],
+                new int[0],
+                new byte[0],
+                new byte[0],
+                null,
+                0,
+                0,
+                0,
+                0
+        );
     }
 
     /// Creates one compact single-reference inter block header used by neighbor-context tests.

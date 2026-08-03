@@ -388,11 +388,121 @@ final class WarpedMotion {
         MutablePlaneBuffer checkedDestination = Objects.requireNonNull(destinationPlane, "destinationPlane");
         DecodedPlane checkedReference = Objects.requireNonNull(referencePlane, "referencePlane");
         Model checkedModel = Objects.requireNonNull(model, "model");
+        int[] predictions = predictPlaneSamples(
+                checkedReference,
+                visibleWidth,
+                visibleHeight,
+                codedWidth,
+                codedHeight,
+                blockX4,
+                blockY4,
+                subsamplingX,
+                subsamplingY,
+                checkedDestination.bitDepth(),
+                0,
+                checkedModel
+        );
+        for (int y = 0; y < visibleHeight; y++) {
+            for (int x = 0; x < visibleWidth; x++) {
+                checkedDestination.setSample(
+                        destinationX + x,
+                        destinationY + y,
+                        clamp(predictions[y * visibleWidth + x], 0, checkedDestination.maxSampleValue())
+                );
+            }
+        }
+    }
+
+    /// Returns affine warped predictors retaining AV1's compound-inter fractional precision.
+    ///
+    /// The returned caller-owned array is row-major and contains `visibleWidth * visibleHeight`
+    /// signed predictors. Each value retains four fractional bits for 8- and 10-bit input, or two
+    /// fractional bits for 12-bit input. Values are neither clipped nor rounded to sample precision.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param visibleWidth the visible prediction width in plane samples
+    /// @param visibleHeight the visible prediction height in plane samples
+    /// @param codedWidth the coded block width in plane samples
+    /// @param codedHeight the coded block height in plane samples
+    /// @param blockX4 the luma block X origin in 4x4 units
+    /// @param blockY4 the luma block Y origin in 4x4 units
+    /// @param subsamplingX the horizontal chroma subsampling shift
+    /// @param subsamplingY the vertical chroma subsampling shift
+    /// @param bitDepth the decoded sample bit depth
+    /// @param model the normalized affine model
+    /// @return the row-major higher-precision compound predictors
+    static int[] predictCompoundPlane(
+            DecodedPlane referencePlane,
+            int visibleWidth,
+            int visibleHeight,
+            int codedWidth,
+            int codedHeight,
+            int blockX4,
+            int blockY4,
+            int subsamplingX,
+            int subsamplingY,
+            int bitDepth,
+            Model model
+    ) {
+        int retainedBits = bitDepth == 12 ? 2 : 4;
+        return predictPlaneSamples(
+                referencePlane,
+                visibleWidth,
+                visibleHeight,
+                codedWidth,
+                codedHeight,
+                blockX4,
+                blockY4,
+                subsamplingX,
+                subsamplingY,
+                bitDepth,
+                retainedBits,
+                model
+        );
+    }
+
+    /// Computes one affine warped plane while retaining the requested output precision.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param visibleWidth the visible prediction width in plane samples
+    /// @param visibleHeight the visible prediction height in plane samples
+    /// @param codedWidth the coded block width in plane samples
+    /// @param codedHeight the coded block height in plane samples
+    /// @param blockX4 the luma block X origin in 4x4 units
+    /// @param blockY4 the luma block Y origin in 4x4 units
+    /// @param subsamplingX the horizontal chroma subsampling shift
+    /// @param subsamplingY the vertical chroma subsampling shift
+    /// @param bitDepth the decoded sample bit depth
+    /// @param retainedBits the number of fractional bits retained in each result
+    /// @param model the normalized affine model
+    /// @return the row-major signed predictors at the requested precision
+    private static int[] predictPlaneSamples(
+            DecodedPlane referencePlane,
+            int visibleWidth,
+            int visibleHeight,
+            int codedWidth,
+            int codedHeight,
+            int blockX4,
+            int blockY4,
+            int subsamplingX,
+            int subsamplingY,
+            int bitDepth,
+            int retainedBits,
+            Model model
+    ) {
+        DecodedPlane checkedReference = Objects.requireNonNull(referencePlane, "referencePlane");
+        Model checkedModel = Objects.requireNonNull(model, "model");
         if (!checkedModel.affine()) {
             throw new IllegalArgumentException("Warped prediction requires an affine model");
         }
-        int intermediateBits = checkedDestination.bitDepth() == 12 ? 2 : 4;
-        int maximumSample = checkedDestination.maxSampleValue();
+        int intermediateBits = bitDepth == 12 ? 2 : 4;
+        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
+            throw new IllegalArgumentException("Unsupported warped-prediction bit depth: " + bitDepth);
+        }
+        if (retainedBits < 0 || retainedBits > intermediateBits) {
+            throw new IllegalArgumentException("retainedBits out of range: " + retainedBits);
+        }
+        int[] predictions = new int[visibleWidth * visibleHeight];
         for (int blockY = 0; blockY < codedHeight; blockY += 8) {
             int sourceY = blockY4 * 4 + ((blockY + 4) << subsamplingY);
             long matrix3Y = (long) checkedModel.matrix(3) * sourceY + checkedModel.matrix(0);
@@ -410,30 +520,33 @@ final class WarpedMotion {
                         - checkedModel.gamma() * 4
                         - checkedModel.delta() * 4) & ~0x3F;
                 predict8x8(
-                        checkedDestination,
                         checkedReference,
-                        destinationX + blockX,
-                        destinationY + blockY,
-                        Math.min(8, visibleWidth - blockX),
-                        Math.min(8, visibleHeight - blockY),
+                        predictions,
+                        visibleWidth,
+                        blockX,
+                        blockY,
+                        Math.max(0, Math.min(8, visibleWidth - blockX)),
+                        Math.max(0, Math.min(8, visibleHeight - blockY)),
                         integerX,
                         integerY,
                         phaseX,
                         phaseY,
                         checkedModel,
                         intermediateBits,
-                        maximumSample
+                        retainedBits
                 );
             }
         }
+        return predictions;
     }
 
     /// Predicts one 8x8 affine warped region.
     ///
-    /// @param destinationPlane the mutable destination plane
     /// @param referencePlane the immutable reference plane
-    /// @param destinationX the destination X origin
-    /// @param destinationY the destination Y origin
+    /// @param predictions the row-major destination predictor array
+    /// @param predictionStride the destination predictor row stride
+    /// @param destinationX the destination X origin within the predictor array
+    /// @param destinationY the destination Y origin within the predictor array
     /// @param visibleWidth the visible width to store
     /// @param visibleHeight the visible height to store
     /// @param sourceX the integer reference X origin
@@ -442,10 +555,11 @@ final class WarpedMotion {
     /// @param phaseY the starting vertical warped phase
     /// @param model the normalized affine model
     /// @param intermediateBits the horizontal intermediate precision
-    /// @param maximumSample the maximum decoded sample value
+    /// @param retainedBits the fractional precision retained after vertical filtering
     private static void predict8x8(
-            MutablePlaneBuffer destinationPlane,
             DecodedPlane referencePlane,
+            int[] predictions,
+            int predictionStride,
             int destinationX,
             int destinationY,
             int visibleWidth,
@@ -456,7 +570,7 @@ final class WarpedMotion {
             int phaseY,
             Model model,
             int intermediateBits,
-            int maximumSample
+            int retainedBits
     ) {
         int[][] intermediate = new int[15][8];
         int horizontalPhase = phaseX;
@@ -484,11 +598,8 @@ final class WarpedMotion {
                     sum += (long) filter[tap] * intermediate[y + tap][x];
                 }
                 if (x < visibleWidth && y < visibleHeight) {
-                    destinationPlane.setSample(
-                            destinationX + x,
-                            destinationY + y,
-                            clamp(roundShiftBiased(sum, 7 + intermediateBits), 0, maximumSample)
-                    );
+                    predictions[(destinationY + y) * predictionStride + destinationX + x] =
+                            roundShiftBiased(sum, 7 + intermediateBits - retainedBits);
                 }
             }
         }

@@ -866,6 +866,69 @@ final class IntraPredictor {
             int rightBoundary,
             int bottomBoundary
     ) {
+        predictChromaCfl(
+                chromaPlane,
+                lumaPlane,
+                chromaX,
+                chromaY,
+                lumaX,
+                lumaY,
+                width,
+                height,
+                alpha,
+                subsamplingX,
+                subsamplingY,
+                width,
+                height,
+                leftBoundary,
+                topBoundary,
+                rightBoundary,
+                bottomBoundary
+        );
+    }
+
+    /// Reconstructs one CFL chroma block with explicit stored-luma and tile boundaries.
+    ///
+    /// The stored dimensions describe the subsampled luma footprint populated by decoded luma
+    /// transform units. Values outside that footprint are padded from its last column or row before
+    /// the block average is subtracted.
+    ///
+    /// @param chromaPlane the mutable chroma destination plane
+    /// @param lumaPlane the already reconstructed luma plane
+    /// @param chromaX the zero-based horizontal chroma sample coordinate
+    /// @param chromaY the zero-based vertical chroma sample coordinate
+    /// @param lumaX the zero-based horizontal luma sample coordinate
+    /// @param lumaY the zero-based vertical luma sample coordinate
+    /// @param width the chroma block width in samples
+    /// @param height the chroma block height in samples
+    /// @param alpha the signed CFL alpha
+    /// @param subsamplingX the horizontal chroma subsampling shift
+    /// @param subsamplingY the vertical chroma subsampling shift
+    /// @param storedWidth the subsampled luma width populated before right-edge padding
+    /// @param storedHeight the subsampled luma height populated before bottom-edge padding
+    /// @param leftBoundary the first chroma sample column available to this tile
+    /// @param topBoundary the first chroma sample row available to this tile
+    /// @param rightBoundary the exclusive chroma sample column available to this tile
+    /// @param bottomBoundary the exclusive chroma sample row available to this tile
+    static void predictChromaCfl(
+            MutablePlaneBuffer chromaPlane,
+            MutablePlaneBuffer lumaPlane,
+            int chromaX,
+            int chromaY,
+            int lumaX,
+            int lumaY,
+            int width,
+            int height,
+            int alpha,
+            int subsamplingX,
+            int subsamplingY,
+            int storedWidth,
+            int storedHeight,
+            int leftBoundary,
+            int topBoundary,
+            int rightBoundary,
+            int bottomBoundary
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -878,6 +941,12 @@ final class IntraPredictor {
         if (subsamplingY < 0 || subsamplingY > 1) {
             throw new IllegalArgumentException("subsamplingY must be 0 or 1: " + subsamplingY);
         }
+        if (storedWidth <= 0 || storedWidth > width) {
+            throw new IllegalArgumentException("storedWidth out of range: " + storedWidth);
+        }
+        if (storedHeight <= 0 || storedHeight > height) {
+            throw new IllegalArgumentException("storedHeight out of range: " + storedHeight);
+        }
         int dc = dcPredictionValue(
                 chromaPlane,
                 chromaX,
@@ -889,7 +958,17 @@ final class IntraPredictor {
                 rightBoundary,
                 bottomBoundary
         );
-        int[] ac = cflAc(lumaPlane, lumaX, lumaY, width, height, subsamplingX, subsamplingY);
+        int[] ac = cflAc(
+                lumaPlane,
+                lumaX,
+                lumaY,
+                width,
+                height,
+                storedWidth,
+                storedHeight,
+                subsamplingX,
+                subsamplingY
+        );
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
                 int diff = alpha * ac[row * width + column];
@@ -1857,6 +1936,8 @@ final class IntraPredictor {
     /// @param lumaY the zero-based vertical luma sample coordinate
     /// @param chromaWidth the chroma block width in samples
     /// @param chromaHeight the chroma block height in samples
+    /// @param storedWidth the width populated by reconstructed luma before right-edge padding
+    /// @param storedHeight the height populated by reconstructed luma before bottom-edge padding
     /// @param subsamplingX the horizontal chroma subsampling shift
     /// @param subsamplingY the vertical chroma subsampling shift
     /// @return the signed CFL AC buffer for one subsampled chroma block
@@ -1866,29 +1947,42 @@ final class IntraPredictor {
             int lumaY,
             int chromaWidth,
             int chromaHeight,
+            int storedWidth,
+            int storedHeight,
             int subsamplingX,
             int subsamplingY
     ) {
         int[] ac = new int[chromaWidth * chromaHeight];
-        int sum = 1 << (Integer.numberOfTrailingZeros(chromaWidth) + Integer.numberOfTrailingZeros(chromaHeight) - 1);
         int horizontalSpan = 1 << subsamplingX;
         int verticalSpan = 1 << subsamplingY;
         int valueShift = 3 - subsamplingX - subsamplingY;
-        for (int row = 0; row < chromaHeight; row++) {
+        for (int row = 0; row < storedHeight; row++) {
             int rowOffset = row * chromaWidth;
             int sourceY = lumaY + (row << subsamplingY);
-            for (int column = 0; column < chromaWidth; column++) {
+            for (int column = 0; column < storedWidth; column++) {
                 int sourceX = lumaX + (column << subsamplingX);
                 int acSum = 0;
                 for (int sampleY = 0; sampleY < verticalSpan; sampleY++) {
                     for (int sampleX = 0; sampleX < horizontalSpan; sampleX++) {
-                        acSum += edgeExtendedSample(lumaPlane, sourceX + sampleX, sourceY + sampleY);
+                        acSum += lumaPlane.sample(sourceX + sampleX, sourceY + sampleY);
                     }
                 }
-                int value = acSum << valueShift;
-                ac[rowOffset + column] = value;
-                sum += value;
+                ac[rowOffset + column] = acSum << valueShift;
             }
+            int lastValue = ac[rowOffset + storedWidth - 1];
+            for (int column = storedWidth; column < chromaWidth; column++) {
+                ac[rowOffset + column] = lastValue;
+            }
+        }
+        for (int row = storedHeight; row < chromaHeight; row++) {
+            int rowOffset = row * chromaWidth;
+            int previousRowOffset = rowOffset - chromaWidth;
+            System.arraycopy(ac, previousRowOffset, ac, rowOffset, chromaWidth);
+        }
+
+        int sum = 1 << (Integer.numberOfTrailingZeros(chromaWidth) + Integer.numberOfTrailingZeros(chromaHeight) - 1);
+        for (int value : ac) {
+            sum += value;
         }
         int shift = Integer.numberOfTrailingZeros(chromaWidth) + Integer.numberOfTrailingZeros(chromaHeight);
         int average = sum >> shift;
@@ -1907,15 +2001,12 @@ final class IntraPredictor {
         return signedSource < 0 ? -magnitude : magnitude;
     }
 
-    /// Returns one reconstructed sample with right and bottom edge extension.
+    /// Returns one reconstructed sample with right and bottom buffer-edge extension.
     ///
-    /// CFL AC derivation pads the luma block at frame edges by repeating the nearest available
-    /// reconstructed luma samples before subtracting the block average.
-    ///
-    /// @param plane the source luma plane
+    /// @param plane the source plane
     /// @param x the requested horizontal coordinate
     /// @param y the requested vertical coordinate
-    /// @return one edge-extended source sample
+    /// @return the nearest in-buffer sample
     private static int edgeExtendedSample(MutablePlaneBuffer plane, int x, int y) {
         int clampedX = Math.max(0, Math.min(x, plane.width() - 1));
         int clampedY = Math.max(0, Math.min(y, plane.height() - 1));

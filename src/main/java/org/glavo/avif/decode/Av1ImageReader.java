@@ -72,6 +72,8 @@ public final class Av1ImageReader implements AutoCloseable {
     private final RuntimeReferenceSlot[] referenceSlots;
     /// The currently assembled frame when tile groups span multiple OBUs.
     private @Nullable FrameAssembly pendingFrameAssembly;
+    /// The last selected spatial-layer output retained for the current temporal unit.
+    private @Nullable PendingOutput pendingLayeredOutput;
     /// The most recently completed structural frame-decode result.
     private @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult;
     /// The AV1 pixel reconstructor used for decoded frame output.
@@ -127,6 +129,43 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @return the next decoded frame, or `null` at end-of-stream
     /// @throws IOException if the source is unreadable or the bitstream is malformed
     public @Nullable DecodedFrame readFrame() throws IOException {
+        @Nullable PendingOutput output = readNextOutput();
+        if (output == null) {
+            return null;
+        }
+        DecodedFrame frame;
+        try {
+            frame = output.createFrame();
+        } catch (UnsupportedOperationException exception) {
+            throw unsupportedOutputConversion(output.packet(), exception);
+        }
+        nextPresentationIndex++;
+        return frame;
+    }
+
+    /// Reads the next output frame as postprocessed YUV planes without RGB conversion.
+    ///
+    /// This method applies the same operating-point, frame-output, and film-grain policies as
+    /// [#readFrame()]. It may be interleaved with `readFrame`; each successful call consumes one
+    /// presentation frame. The returned immutable snapshot retains its own sample storage and does
+    /// not depend on subsequent reader operations.
+    ///
+    /// @return the next decoded plane snapshot, or `null` at end-of-stream
+    /// @throws IOException if the source is unreadable or the bitstream is malformed
+    public @Nullable DecodedPlanes readPlanes() throws IOException {
+        @Nullable PendingOutput output = readNextOutput();
+        if (output == null) {
+            return null;
+        }
+        nextPresentationIndex++;
+        return output.planes();
+    }
+
+    /// Decodes packets until one presentation output is available.
+    ///
+    /// @return the next pending presentation output, or `null` at end-of-stream
+    /// @throws IOException if the source is unreadable or the bitstream is malformed
+    private @Nullable PendingOutput readNextOutput() throws IOException {
         ensureOpen();
 
         while (true) {
@@ -135,10 +174,27 @@ public final class Av1ImageReader implements AutoCloseable {
                 if (pendingFrameAssembly != null) {
                     throw incompleteFrameAtEndOfStream(pendingFrameAssembly);
                 }
+                if (pendingLayeredOutput != null) {
+                    PendingOutput output = pendingLayeredOutput;
+                    pendingLayeredOutput = null;
+                    return output;
+                }
                 return null;
             }
 
             ObuType type = packet.header().type();
+            if (type == ObuType.TEMPORAL_DELIMITER) {
+                ensureNoPendingFrameAssembly(
+                        packet,
+                        "Temporal delimiter appeared before the current frame was completed"
+                );
+                if (pendingLayeredOutput != null) {
+                    PendingOutput output = pendingLayeredOutput;
+                    pendingLayeredOutput = null;
+                    return output;
+                }
+                continue;
+            }
             if (type == ObuType.SEQUENCE_HEADER) {
                 ensureNoPendingFrameAssembly(packet, "Sequence header OBU appeared before the current frame was completed");
                 SequenceHeader parsedSequenceHeader = sequenceHeaderParser.parse(packet, config.strictStdCompliance());
@@ -150,23 +206,36 @@ public final class Av1ImageReader implements AutoCloseable {
                 continue;
             }
             if (type == ObuType.FRAME_HEADER) {
-                DecodedFrame frame = startStandaloneFrameAssembly(packet);
-                if (frame != null) {
-                    return frame;
+                @Nullable PendingOutput output = startStandaloneFrameAssembly(packet);
+                if (output != null) {
+                    @Nullable PendingOutput readyOutput = retainLayeredOutput(output);
+                    if (readyOutput != null) {
+                        return readyOutput;
+                    }
                 }
                 continue;
             }
             if (type == ObuType.FRAME) {
                 CombinedFrameStart start = startCombinedFrameAssembly(packet);
                 if (start.resolvedImmediately()) {
-                    return start.immediateOutput();
+                    @Nullable PendingOutput output = start.immediateOutput();
+                    if (output != null) {
+                        @Nullable PendingOutput readyOutput = retainLayeredOutput(output);
+                        if (readyOutput != null) {
+                            return readyOutput;
+                        }
+                    }
+                    continue;
                 }
                 FrameAssembly assembly = start.frameAssembly();
                 if (assembly.isComplete()) {
                     pendingFrameAssembly = null;
-                    DecodedFrame frame = completeFrameAssembly(assembly, packet);
-                    if (frame != null) {
-                        return frame;
+                    @Nullable PendingOutput output = completeFrameAssembly(assembly, packet);
+                    if (output != null) {
+                        @Nullable PendingOutput readyOutput = retainLayeredOutput(output);
+                        if (readyOutput != null) {
+                            return readyOutput;
+                        }
                     }
                 } else {
                     pendingFrameAssembly = assembly;
@@ -177,9 +246,12 @@ public final class Av1ImageReader implements AutoCloseable {
                 FrameAssembly assembly = appendStandaloneTileGroup(packet);
                 if (assembly.isComplete()) {
                     pendingFrameAssembly = null;
-                    DecodedFrame frame = completeFrameAssembly(assembly, packet);
-                    if (frame != null) {
-                        return frame;
+                    @Nullable PendingOutput output = completeFrameAssembly(assembly, packet);
+                    if (output != null) {
+                        @Nullable PendingOutput readyOutput = retainLayeredOutput(output);
+                        if (readyOutput != null) {
+                            return readyOutput;
+                        }
                     }
                 }
                 continue;
@@ -187,9 +259,27 @@ public final class Av1ImageReader implements AutoCloseable {
         }
     }
 
-    /// Returns the postprocessed decoded planes from the most recently decoded frame.
+    /// Retains a spatial-layer output until its temporal unit ends when layer collapsing is active.
     ///
-    /// @return the postprocessed planes, or `null` if no frame has been decoded yet
+    /// @param output the newly prepared presentation output
+    /// @return the output for immediate presentation, or `null` when it was retained
+    private @Nullable PendingOutput retainLayeredOutput(PendingOutput output) {
+        SequenceHeader activeSequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
+        SequenceHeader.OperatingPoint operatingPoint = activeSequenceHeader.operatingPoint(config.operatingPoint());
+        int selectedSpatialLayers = Integer.bitCount((operatingPoint.idc() >>> 8) & 0x0F);
+        if (config.outputAllLayers() || selectedSpatialLayers <= 1) {
+            return output;
+        }
+        pendingLayeredOutput = output;
+        return null;
+    }
+
+    /// Returns the postprocessed planes from the most recently prepared presentation output.
+    ///
+    /// The value is updated before packed-pixel conversion, so it may be non-null after
+    /// [#readFrame()] fails because the active color configuration cannot be converted.
+    ///
+    /// @return the postprocessed planes, or `null` if no presentation output has been prepared yet
     public @Nullable DecodedPlanes lastPlanes() {
         return lastPlanes;
     }
@@ -379,8 +469,10 @@ public final class Av1ImageReader implements AutoCloseable {
     /// Starts a new frame assembly from a standalone frame-header OBU.
     ///
     /// @param packet the standalone frame-header OBU
+    /// @return an immediate `show_existing_frame` output, or `null` when assembly should continue
+    ///         or the requested output is suppressed by the decoder configuration
     /// @throws IOException if the OBU is unreadable, malformed, or out of order
-    private @Nullable DecodedFrame startStandaloneFrameAssembly(ObuPacket packet) throws IOException {
+    private @Nullable PendingOutput startStandaloneFrameAssembly(ObuPacket packet) throws IOException {
         SequenceHeader activeSequenceHeader = requireSequenceHeader(packet);
         ensureNoPendingFrameAssembly(packet, "Standalone frame header OBU appeared before the previous frame was completed");
 
@@ -408,7 +500,8 @@ public final class Av1ImageReader implements AutoCloseable {
     /// Starts a new frame assembly from a combined `FRAME` OBU.
     ///
     /// @param packet the combined frame OBU
-    /// @return the started frame assembly, including the first tile group
+    /// @return either the started frame assembly including its first tile group or an immediate
+    ///         `show_existing_frame` result
     /// @throws IOException if the OBU is unreadable, malformed, or out of order
     private CombinedFrameStart startCombinedFrameAssembly(ObuPacket packet) throws IOException {
         SequenceHeader activeSequenceHeader = requireSequenceHeader(packet);
@@ -448,13 +541,13 @@ public final class Av1ImageReader implements AutoCloseable {
         return CombinedFrameStart.frameAssembly(assembly);
     }
 
-    /// Finalizes a completed frame assembly by refreshing reference slots and optionally returning
-    /// one decoded public frame.
+    /// Finalizes a completed frame assembly by refreshing reference slots and optionally preparing
+    /// one presentation output.
     ///
     /// @param assembly the completed frame assembly
     /// @param packet the OBU that completed the frame assembly
-    /// @return the decoded public frame, or `null` when current output filtering suppresses it
-    private @Nullable DecodedFrame completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
+    /// @return the pending presentation output, or `null` when current output filtering suppresses it
+    private @Nullable PendingOutput completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
         FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(
@@ -488,20 +581,14 @@ public final class Av1ImageReader implements AutoCloseable {
                 frameHeader
         );
         lastPlanes = presentationPlanes;
-        DecodedFrame outputFrame;
-        try {
-            outputFrame = OutputFrameFactory.createFrame(
-                    presentationPlanes,
-                    storedSyntaxDecodeResult.assembly().sequenceHeader().colorConfig(),
-                    frameHeader,
-                    frameHeader.showFrame(),
-                    nextPresentationIndex
-            );
-        } catch (UnsupportedOperationException exception) {
-            throw unsupportedOutputConversion(packet, exception);
-        }
-        nextPresentationIndex++;
-        return outputFrame;
+        return PendingOutput.normal(
+                presentationPlanes,
+                storedSyntaxDecodeResult.assembly().sequenceHeader().colorConfig(),
+                frameHeader,
+                frameHeader.showFrame(),
+                nextPresentationIndex,
+                packet
+        );
     }
 
     /// Parses and appends a standalone tile-group OBU to the current frame assembly.
@@ -633,17 +720,17 @@ public final class Av1ImageReader implements AutoCloseable {
         }
     }
 
-    /// Returns one decoded `show_existing_frame` output from the requested reference slot, or
-    /// `null` when current public filtering suppresses presentation.
+    /// Prepares one `show_existing_frame` output from the requested reference slot, or `null` when
+    /// current public filtering suppresses presentation.
     ///
     /// The output reuses the reconstructed surface atomically stored with the slot's syntax state.
     /// Showing a stored key frame refreshes every reference slot before presentation filtering.
     ///
     /// @param packet the source OBU packet that requested `show_existing_frame`
     /// @param outputRequestHeader the current show-existing-frame request header
-    /// @return one decoded `show_existing_frame` output, or `null` when output filtering suppresses it
+    /// @return one pending `show_existing_frame` output, or `null` when output filtering suppresses it
     /// @throws DecodeException if the referenced slot is invalid or missing complete reference state
-    private @Nullable DecodedFrame outputExistingFrame(
+    private @Nullable PendingOutput outputExistingFrame(
             ObuPacket packet,
             FrameHeader outputRequestHeader
     ) throws DecodeException {
@@ -662,19 +749,13 @@ public final class Av1ImageReader implements AutoCloseable {
         }
         DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
         lastPlanes = presentationPlanes;
-        DecodedFrame outputFrame;
-        try {
-            outputFrame = OutputFrameFactory.createExistingFrame(
-                    presentationPlanes,
-                    referenceSurfaceSnapshot,
-                    outputRequestHeader,
-                    nextPresentationIndex
-            );
-        } catch (UnsupportedOperationException exception) {
-            throw unsupportedOutputConversion(packet, exception);
-        }
-        nextPresentationIndex++;
-        return outputFrame;
+        return PendingOutput.existing(
+                presentationPlanes,
+                referenceSurfaceSnapshot,
+                outputRequestHeader,
+                nextPresentationIndex,
+                packet
+        );
     }
 
     /// Applies presentation-only output filters such as film grain.
@@ -812,7 +893,7 @@ public final class Av1ImageReader implements AutoCloseable {
         }
 
         CdfContext storedFrameCdfContext = cdfReferenceResult != null
-                ? cdfReferenceResult.contextUpdateTileCdfContext()
+                ? cdfReferenceResult.savedFrameCdfContext()
                 : CdfContext.createDefault(frameHeader.quantization().baseQIndex());
         CdfContext[] storedTileCdfContexts = repeatTileCdfContext(
                 storedFrameCdfContext,
@@ -899,6 +980,104 @@ public final class Av1ImageReader implements AutoCloseable {
         return snapshots;
     }
 
+    /// Holds one decoded presentation output before optional RGB conversion.
+    ///
+    /// @param planes the postprocessed presentation planes
+    /// @param colorConfig the sequence color configuration for a newly decoded frame, or `null` for
+    ///                    `show_existing_frame`
+    /// @param frameHeader the decoded frame header or current `show_existing_frame` request
+    /// @param showFrame whether a newly decoded frame was directly displayable
+    /// @param presentationIndex the zero-based presentation index
+    /// @param packet the OBU that completed or requested the output
+    /// @param existingSurface the referenced surface for `show_existing_frame`, or `null` for a
+    ///                        newly decoded frame
+    @NotNullByDefault
+    private record PendingOutput(
+            DecodedPlanes planes,
+            @Nullable SequenceHeader.ColorConfig colorConfig,
+            FrameHeader frameHeader,
+            boolean showFrame,
+            long presentationIndex,
+            ObuPacket packet,
+            @Nullable ReferenceSurfaceSnapshot existingSurface
+    ) {
+        /// Creates one output for a newly decoded frame.
+        ///
+        /// @param planes the postprocessed presentation planes
+        /// @param colorConfig the active sequence color configuration
+        /// @param frameHeader the decoded frame header
+        /// @param showFrame whether the frame was directly displayable
+        /// @param presentationIndex the zero-based presentation index
+        /// @param packet the OBU that completed the output
+        /// @return one pending output for a newly decoded frame
+        private static PendingOutput normal(
+                DecodedPlanes planes,
+                SequenceHeader.ColorConfig colorConfig,
+                FrameHeader frameHeader,
+                boolean showFrame,
+                long presentationIndex,
+                ObuPacket packet
+        ) {
+            return new PendingOutput(
+                    Objects.requireNonNull(planes, "planes"),
+                    Objects.requireNonNull(colorConfig, "colorConfig"),
+                    Objects.requireNonNull(frameHeader, "frameHeader"),
+                    showFrame,
+                    presentationIndex,
+                    Objects.requireNonNull(packet, "packet"),
+                    null
+            );
+        }
+
+        /// Creates one output that presents a stored reference surface.
+        ///
+        /// @param planes the postprocessed presentation planes
+        /// @param existingSurface the stored reference surface
+        /// @param outputRequestHeader the current `show_existing_frame` request
+        /// @param presentationIndex the zero-based presentation index
+        /// @param packet the OBU that requested the output
+        /// @return one pending output for a stored reference surface
+        private static PendingOutput existing(
+                DecodedPlanes planes,
+                ReferenceSurfaceSnapshot existingSurface,
+                FrameHeader outputRequestHeader,
+                long presentationIndex,
+                ObuPacket packet
+        ) {
+            return new PendingOutput(
+                    Objects.requireNonNull(planes, "planes"),
+                    null,
+                    Objects.requireNonNull(outputRequestHeader, "outputRequestHeader"),
+                    false,
+                    presentationIndex,
+                    Objects.requireNonNull(packet, "packet"),
+                    Objects.requireNonNull(existingSurface, "existingSurface")
+            );
+        }
+
+        /// Converts this pending output to the public packed-pixel frame representation.
+        ///
+        /// @return the converted public frame
+        /// @throws UnsupportedOperationException if the color configuration cannot be converted
+        private DecodedFrame createFrame() {
+            if (existingSurface != null) {
+                return OutputFrameFactory.createExistingFrame(
+                        planes,
+                        existingSurface,
+                        frameHeader,
+                        presentationIndex
+                );
+            }
+            return OutputFrameFactory.createFrame(
+                    planes,
+                    Objects.requireNonNull(colorConfig, "colorConfig"),
+                    frameHeader,
+                    showFrame,
+                    presentationIndex
+            );
+        }
+    }
+
     /// The immediate result of parsing one combined `FRAME` OBU.
     ///
     /// Combined frames either start a normal `FrameAssembly` or resolve immediately through the
@@ -908,8 +1087,8 @@ public final class Av1ImageReader implements AutoCloseable {
         /// The started frame assembly, or `null` when output resolved immediately.
         private final @Nullable FrameAssembly frameAssembly;
 
-        /// The immediate output frame, or `null` when normal frame assembly should continue.
-        private final @Nullable DecodedFrame immediateOutput;
+        /// The immediate output, or `null` when normal frame assembly should continue.
+        private final @Nullable PendingOutput immediateOutput;
 
         /// Whether this combined frame resolved immediately through `show_existing_frame`.
         private final boolean resolvedImmediately;
@@ -921,7 +1100,7 @@ public final class Av1ImageReader implements AutoCloseable {
         /// @param resolvedImmediately whether this combined frame resolved immediately
         private CombinedFrameStart(
                 @Nullable FrameAssembly frameAssembly,
-                @Nullable DecodedFrame immediateOutput,
+                @Nullable PendingOutput immediateOutput,
                 boolean resolvedImmediately
         ) {
             this.frameAssembly = frameAssembly;
@@ -939,9 +1118,9 @@ public final class Av1ImageReader implements AutoCloseable {
 
         /// Creates one result that resolves immediately to output.
         ///
-        /// @param immediateOutput the immediate output frame, or `null` when filtering suppresses output
+        /// @param immediateOutput the immediate output, or `null` when filtering suppresses output
         /// @return one result that resolves immediately to output
-        private static CombinedFrameStart immediateOutput(@Nullable DecodedFrame immediateOutput) {
+        private static CombinedFrameStart immediateOutput(@Nullable PendingOutput immediateOutput) {
             return new CombinedFrameStart(null, immediateOutput, true);
         }
 
@@ -962,10 +1141,10 @@ public final class Av1ImageReader implements AutoCloseable {
             return frameAssembly;
         }
 
-        /// Returns the immediate output frame, or `null`.
+        /// Returns the immediate output, or `null`.
         ///
-        /// @return the immediate output frame, or `null`
-        private @Nullable DecodedFrame immediateOutput() {
+        /// @return the immediate output, or `null`
+        private @Nullable PendingOutput immediateOutput() {
             return immediateOutput;
         }
     }

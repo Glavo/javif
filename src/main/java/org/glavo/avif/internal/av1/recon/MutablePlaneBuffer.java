@@ -157,7 +157,8 @@ final class MutablePlaneBuffer {
     ///
     /// @param croppedWidth the cropped plane width in samples
     /// @param croppedHeight the cropped plane height in samples
-    /// @return one immutable decoded-plane snapshot containing the requested top-left crop
+    /// @return one immutable decoded-plane snapshot containing the requested top-left crop and
+    ///         retaining internal right and bottom padding
     DecodedPlane toDecodedPlane(int croppedWidth, int croppedHeight) {
         if (croppedWidth <= 0 || croppedWidth > width) {
             throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
@@ -168,11 +169,7 @@ final class MutablePlaneBuffer {
         if (croppedWidth == width && croppedHeight == height) {
             return toDecodedPlane();
         }
-        short[] croppedSamples = new short[croppedWidth * croppedHeight];
-        for (int y = 0; y < croppedHeight; y++) {
-            System.arraycopy(samples, y * width, croppedSamples, y * croppedWidth, croppedWidth);
-        }
-        return new DecodedPlane(croppedWidth, croppedHeight, croppedWidth, croppedSamples);
+        return new DecodedPlane(croppedWidth, croppedHeight, width, samples);
     }
 
     /// Creates an independent mutable copy of this plane buffer.

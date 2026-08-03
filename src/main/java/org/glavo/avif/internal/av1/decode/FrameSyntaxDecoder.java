@@ -182,6 +182,6 @@ public final class FrameSyntaxDecoder {
         if (referenceCdfFrameSyntaxResult == null) {
             return null;
         }
-        return referenceCdfFrameSyntaxResult.contextUpdateTileCdfContext();
+        return referenceCdfFrameSyntaxResult.savedFrameCdfContext();
     }
 }

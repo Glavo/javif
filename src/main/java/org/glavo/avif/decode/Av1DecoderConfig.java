@@ -31,6 +31,8 @@ public final class Av1DecoderConfig {
     private final boolean strictStdCompliance;
     /// Whether invisible frames should be exposed through the public API.
     private final boolean outputInvisibleFrames;
+    /// Whether every selected spatial layer should be exposed as a separate output.
+    private final boolean outputAllLayers;
     /// Which frame categories should be decoded.
     private final DecodeFrameType decodeFrameType;
     /// The selected AV1 operating point.
@@ -45,6 +47,7 @@ public final class Av1DecoderConfig {
         this.applyFilmGrain = builder.applyFilmGrain;
         this.strictStdCompliance = builder.strictStdCompliance;
         this.outputInvisibleFrames = builder.outputInvisibleFrames;
+        this.outputAllLayers = builder.outputAllLayers;
         this.decodeFrameType = builder.decodeFrameType;
         this.operatingPoint = builder.operatingPoint;
         this.frameSizeLimit = builder.frameSizeLimit;
@@ -76,6 +79,16 @@ public final class Av1DecoderConfig {
     /// @return whether invisible frames should be returned
     public boolean outputInvisibleFrames() {
         return outputInvisibleFrames;
+    }
+
+    /// Returns whether every selected spatial layer is exposed as a separate output.
+    ///
+    /// When disabled, only the last selected spatial-layer output in each temporal unit is
+    /// returned, while earlier layers remain available for decoding dependencies.
+    ///
+    /// @return whether all selected spatial layers are returned
+    public boolean outputAllLayers() {
+        return outputAllLayers;
     }
 
     /// Returns which frame categories should be decoded.
@@ -113,6 +126,7 @@ public final class Av1DecoderConfig {
                 .applyFilmGrain(applyFilmGrain)
                 .strictStdCompliance(strictStdCompliance)
                 .outputInvisibleFrames(outputInvisibleFrames)
+                .outputAllLayers(outputAllLayers)
                 .decodeFrameType(decodeFrameType)
                 .operatingPoint(value)
                 .frameSizeLimit(frameSizeLimit)
@@ -128,6 +142,8 @@ public final class Av1DecoderConfig {
         private boolean strictStdCompliance = false;
         /// Whether invisible frames should be exposed through the public API.
         private boolean outputInvisibleFrames = false;
+        /// Whether every selected spatial layer should be exposed as a separate output.
+        private boolean outputAllLayers = false;
         /// Which frame categories should be decoded.
         private DecodeFrameType decodeFrameType = DecodeFrameType.ALL;
         /// The selected AV1 operating point.
@@ -163,6 +179,18 @@ public final class Av1DecoderConfig {
         /// @return this builder
         public Builder outputInvisibleFrames(boolean value) {
             this.outputInvisibleFrames = value;
+            return this;
+        }
+
+        /// Sets whether every selected spatial layer is exposed as a separate output.
+        ///
+        /// When `false`, the reader returns only the last selected spatial-layer output in each
+        /// temporal unit. All selected layers are still decoded for reference dependencies.
+        ///
+        /// @param value whether all selected spatial layers should be returned
+        /// @return this builder
+        public Builder outputAllLayers(boolean value) {
+            this.outputAllLayers = value;
             return this;
         }
 

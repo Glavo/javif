@@ -62,11 +62,25 @@ final class TileTransformLayoutReaderTest {
     /// @param blockSize the tested block size
     /// @return one synthetic inter block header with no preceding entropy syntax
     private static TileBlockHeaderReader.BlockHeader interBlockHeader(BlockSize blockSize) {
+        return interBlockHeader(new BlockPosition(0, 0), blockSize, false);
+    }
+
+    /// Creates one synthetic single-reference inter header for a transform-layout test.
+    ///
+    /// @param position the tested block position
+    /// @param blockSize the tested block size
+    /// @param skip whether the synthetic block is skipped
+    /// @return one synthetic inter block header with no preceding entropy syntax
+    private static TileBlockHeaderReader.BlockHeader interBlockHeader(
+            BlockPosition position,
+            BlockSize blockSize,
+            boolean skip
+    ) {
         return new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(0, 0),
+                position,
                 blockSize,
                 false,
-                false,
+                skip,
                 false,
                 false,
                 false,
@@ -156,6 +170,37 @@ final class TileTransformLayoutReaderTest {
         assertEquals(2, layout.chromaUnits()[3].position().x4());
         assertEquals(2, layout.chromaUnits()[3].position().y4());
         assertEquals(TransformSize.TX_4X4, layout.chromaUnits()[3].size());
+    }
+
+    /// Verifies that a 128-pixel-wide lossless block completes its left 64x64 transform region
+    /// before advancing to the right region.
+    @Test
+    void buildsWideLosslessTransformUnitsInSixtyFourSampleRegionOrder() {
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                AvifPixelFormat.I400,
+                FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
+                true,
+                new byte[8],
+                128,
+                64
+        );
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+
+        TransformLayout layout = transformLayoutReader.read(
+                interBlockHeader(BlockSize.SIZE_128X64),
+                neighborContext
+        );
+        TransformUnit[] units = layout.lumaUnits();
+
+        assertEquals(512, units.length);
+        assertEquals(new BlockPosition(0, 0), units[0].position());
+        assertEquals(new BlockPosition(15, 0), units[15].position());
+        assertEquals(new BlockPosition(0, 1), units[16].position());
+        assertEquals(new BlockPosition(15, 15), units[255].position());
+        assertEquals(new BlockPosition(16, 0), units[256].position());
+        assertEquals(new BlockPosition(31, 15), units[511].position());
     }
 
     /// Verifies that clipped `I422` layouts expose exact chroma transform units on the wider
@@ -285,6 +330,41 @@ final class TileTransformLayoutReaderTest {
         assertEquals(2, layout.lumaUnits()[2].position().y4());
         assertEquals(2, layout.lumaUnits()[3].position().x4());
         assertEquals(2, layout.lumaUnits()[3].position().y4());
+    }
+
+    /// Verifies that a skipped lossless inter block stores its full block dimensions in the
+    /// neighboring var-tx context while retaining a 4x4 transform layout.
+    @Test
+    void storesCodedDimensionsForSkippedLosslessInterBlock() {
+        TileDecodeContext tileContext = createTileContext(
+                FrameType.INTER,
+                AvifPixelFormat.I400,
+                FrameHeader.TransformMode.SWITCHABLE,
+                true,
+                new byte[8],
+                64,
+                64
+        );
+        TileTransformLayoutReader transformLayoutReader = new TileTransformLayoutReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        neighborContext.updateInterTransformContext(
+                new BlockPosition(2, 0),
+                2,
+                2,
+                TransformSize.TX_4X4
+        );
+
+        TransformLayout layout = transformLayoutReader.read(
+                interBlockHeader(new BlockPosition(0, 0), BlockSize.SIZE_8X16, true),
+                neighborContext
+        );
+
+        assertEquals(TransformSize.TX_4X4, layout.uniformLumaTransformSize());
+        assertEquals(8, layout.lumaUnits().length);
+        assertEquals(1, neighborContext.interTransformSplitContext(
+                new BlockPosition(2, 0),
+                TransformSize.TX_8X8
+        ));
     }
 
     /// Verifies that partition-tree leaves carry the decoded transform layout.
@@ -426,8 +506,8 @@ final class TileTransformLayoutReaderTest {
                         0,
                         0,
                         1,
-                        new int[]{0, 1},
-                        new int[]{0, 1},
+                        new int[]{0, (codedWidth + 63) / 64},
+                        new int[]{0, (codedHeight + 63) / 64},
                         0
                 ),
                 new FrameHeader.QuantizationInfo(0, 0, 0, 0, 0, 0, false, 0, 0, 0),

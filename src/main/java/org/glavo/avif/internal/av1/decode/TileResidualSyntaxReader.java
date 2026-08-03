@@ -43,6 +43,9 @@ public final class TileResidualSyntaxReader {
     /// The AV1 coefficient-context byte written for all-zero transform blocks.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
 
+    /// The AV1 20-bit coefficient-magnitude mask applied after Golomb extension.
+    private static final int COEFFICIENT_MAGNITUDE_MASK = 0xFFFFF;
+
     /// The chroma-U plane index used by chroma coefficient-context helpers.
     private static final int CHROMA_PLANE_U = 0;
 
@@ -401,7 +404,8 @@ public final class TileResidualSyntaxReader {
                         unitPosition,
                         unitSize
                 );
-                if (syntaxReader.readCoefficientSkipFlag(unitSize, coefficientSkipContext)) {
+                boolean coefficientSkip = syntaxReader.readCoefficientSkipFlag(unitSize, coefficientSkipContext);
+                if (coefficientSkip) {
                     residualUnit = createAllZeroUnit(
                             unitPosition,
                             unitSize,
@@ -418,7 +422,11 @@ public final class TileResidualSyntaxReader {
                             chromaTransformType(
                                     nonNullHeader,
                                     unitSize,
-                                    lumaTransformTypeAt(nonNullLumaResidualUnits, transformUnit)
+                                    lumaTransformTypeAt(
+                                            nonNullLumaResidualUnits,
+                                            transformUnit,
+                                            nonNullTransformLayout.position()
+                                    )
                             ),
                             nonNullNeighborContext.chromaDcSignContext(
                                     plane,
@@ -590,10 +598,12 @@ public final class TileResidualSyntaxReader {
 
         int cumulativeLevel = 0;
         int signedDcLevel = 0;
+        int dcSign = 0;
         if (dcToken != 0) {
             boolean negative = syntaxReader.readDcSignFlag(chroma, dcSignContext);
+            dcSign = negative ? -1 : 1;
             if (dcToken == 15) {
-                dcToken += syntaxReader.readCoefficientGolomb();
+                dcToken = maskCoefficientMagnitude(dcToken + syntaxReader.readCoefficientGolomb());
             }
             signedDcLevel = negative ? -dcToken : dcToken;
             coefficients[0] = signedDcLevel;
@@ -607,7 +617,7 @@ public final class TileResidualSyntaxReader {
             }
             boolean negative = syntaxReader.readCoefficientSignFlag();
             if (token == 15) {
-                token += syntaxReader.readCoefficientGolomb();
+                token = maskCoefficientMagnitude(token + syntaxReader.readCoefficientGolomb());
             }
             coefficients[fourByFourCoefficientIndex(nonNullTransformType, scanIndex)] = negative ? -token : token;
             cumulativeLevel += token;
@@ -621,7 +631,7 @@ public final class TileResidualSyntaxReader {
                 coefficients,
                 visibleWidthPixels,
                 visibleHeightPixels,
-                createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel)
+                createNonZeroCoefficientContextByte(cumulativeLevel, dcSign)
         );
     }
 
@@ -706,10 +716,12 @@ public final class TileResidualSyntaxReader {
 
         int cumulativeLevel = 0;
         int signedDcLevel = 0;
+        int dcSign = 0;
         if (dcToken != 0) {
             boolean negative = syntaxReader.readDcSignFlag(chroma, dcSignContext);
+            dcSign = negative ? -1 : 1;
             if (dcToken == 15) {
-                dcToken += syntaxReader.readCoefficientGolomb();
+                dcToken = maskCoefficientMagnitude(dcToken + syntaxReader.readCoefficientGolomb());
             }
             signedDcLevel = negative ? -dcToken : dcToken;
             coefficients[0] = signedDcLevel;
@@ -723,7 +735,7 @@ public final class TileResidualSyntaxReader {
             }
             boolean negative = syntaxReader.readCoefficientSignFlag();
             if (token == 15) {
-                token += syntaxReader.readCoefficientGolomb();
+                token = maskCoefficientMagnitude(token + syntaxReader.readCoefficientGolomb());
             }
             coefficients[coefficientIndex(nonNullTransformSize, nonNullTransformType, scanIndex)] = negative ? -token : token;
             cumulativeLevel += token;
@@ -737,7 +749,7 @@ public final class TileResidualSyntaxReader {
                 coefficients,
                 visibleWidthPixels,
                 visibleHeightPixels,
-                createNonZeroCoefficientContextByte(cumulativeLevel, signedDcLevel)
+                createNonZeroCoefficientContextByte(cumulativeLevel, dcSign)
         );
     }
 
@@ -890,7 +902,7 @@ public final class TileResidualSyntaxReader {
                 >= TransformSize.TX_64X64.maxSquareLevel()) {
             return TransformType.DCT_DCT;
         }
-        if (nonNullHeader.qIndex() == 0) {
+        if (tileContext.frameHeader().segmentation().qIndex(nonNullHeader.segmentId()) == 0) {
             return TransformType.DCT_DCT;
         }
         if (intraTransform) {
@@ -1004,15 +1016,18 @@ public final class TileResidualSyntaxReader {
     ///
     /// @param lumaResidualUnits the partially decoded luma residual-unit array
     /// @param chromaUnit the chroma transform unit whose colocated luma type should be found
+    /// @param blockPosition the owning syntax block's luma-grid origin
     /// @return the transform type of the colocated decoded luma unit, or `DCT_DCT` if none exists
     private static TransformType lumaTransformTypeAt(
             TransformResidualUnit[] lumaResidualUnits,
-            TransformUnit chromaUnit
+            TransformUnit chromaUnit,
+            BlockPosition blockPosition
     ) {
         TransformResidualUnit[] nonNullLumaResidualUnits = Objects.requireNonNull(lumaResidualUnits, "lumaResidualUnits");
         TransformUnit nonNullChromaUnit = Objects.requireNonNull(chromaUnit, "chromaUnit");
-        int x4 = nonNullChromaUnit.position().x4();
-        int y4 = nonNullChromaUnit.position().y4();
+        BlockPosition nonNullBlockPosition = Objects.requireNonNull(blockPosition, "blockPosition");
+        int x4 = Math.max(nonNullChromaUnit.position().x4(), nonNullBlockPosition.x4());
+        int y4 = Math.max(nonNullChromaUnit.position().y4(), nonNullBlockPosition.y4());
         for (@Nullable TransformResidualUnit lumaResidualUnit : nonNullLumaResidualUnits) {
             if (lumaResidualUnit == null) {
                 continue;
@@ -1390,17 +1405,26 @@ public final class TileResidualSyntaxReader {
     /// Creates the stored coefficient-context byte for one non-zero transform unit.
     ///
     /// @param cumulativeLevel the sum of decoded absolute coefficient levels, clamped later to six bits
-    /// @param signedDcLevel the signed DC coefficient level, or zero when the transform block has only AC
+    /// @param dcSign the decoded DC sign as `-1`, `0`, or `1`; this remains non-zero when a Golomb-extended
+    /// DC magnitude wraps to zero under the AV1 20-bit coefficient mask
     /// @return the stored coefficient-context byte for one non-zero transform unit
-    private static int createNonZeroCoefficientContextByte(int cumulativeLevel, int signedDcLevel) {
+    static int createNonZeroCoefficientContextByte(int cumulativeLevel, int dcSign) {
         int magnitude = Math.min(cumulativeLevel, 63);
-        if (signedDcLevel < 0) {
+        if (dcSign < 0) {
             return magnitude;
         }
-        if (signedDcLevel > 0) {
+        if (dcSign > 0) {
             return magnitude | 0x80;
         }
         return magnitude | 0x40;
+    }
+
+    /// Applies the AV1 20-bit coefficient-magnitude wrap after Golomb extension.
+    ///
+    /// @param magnitude the unmasked coefficient magnitude
+    /// @return the low 20 bits of the supplied magnitude
+    static int maskCoefficientMagnitude(int magnitude) {
+        return magnitude & COEFFICIENT_MAGNITUDE_MASK;
     }
 
     /// Returns the entropy-coded coefficient width for the supplied transform size.

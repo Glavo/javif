@@ -139,6 +139,17 @@ final class TileResidualSyntaxReaderTest {
         assertEquals(residualUnit.dcCoefficient(), residualUnit.coefficients()[0]);
     }
 
+    /// Verifies that Golomb-extended coefficient magnitudes wrap to 20 bits without discarding
+    /// the decoded DC sign class used by subsequent coefficient contexts.
+    @Test
+    void preservesDcSignContextWhenGolombMagnitudeWrapsToZero() {
+        assertEquals(0, TileResidualSyntaxReader.maskCoefficientMagnitude(1 << 20));
+        assertEquals(3, TileResidualSyntaxReader.maskCoefficientMagnitude((1 << 20) + 3));
+        assertEquals(0x03, TileResidualSyntaxReader.createNonZeroCoefficientContextByte(3, -1));
+        assertEquals(0x83, TileResidualSyntaxReader.createNonZeroCoefficientContextByte(3, 1));
+        assertEquals(0x43, TileResidualSyntaxReader.createNonZeroCoefficientContextByte(3, 0));
+    }
+
     /// Verifies that the residual reader supports the first scanned AC coefficient in addition to DC.
     @Test
     void readsResidualWithFirstScannedAcCoefficientForSingleTransformBlock() {

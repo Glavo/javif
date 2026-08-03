@@ -35,6 +35,7 @@ final class Av1DecoderConfigTest {
         assertTrue(config.applyFilmGrain());
         assertFalse(config.strictStdCompliance());
         assertFalse(config.outputInvisibleFrames());
+        assertFalse(config.outputAllLayers());
         assertEquals(DecodeFrameType.ALL, config.decodeFrameType());
         assertEquals(0, config.operatingPoint());
         assertEquals(0, config.frameSizeLimit());
@@ -54,6 +55,7 @@ final class Av1DecoderConfigTest {
                 .applyFilmGrain(false)
                 .strictStdCompliance(true)
                 .outputInvisibleFrames(true)
+                .outputAllLayers(true)
                 .decodeFrameType(DecodeFrameType.REFERENCE)
                 .operatingPoint(2)
                 .frameSizeLimit(1234)
@@ -64,6 +66,7 @@ final class Av1DecoderConfigTest {
         assertFalse(changed.applyFilmGrain());
         assertTrue(changed.strictStdCompliance());
         assertTrue(changed.outputInvisibleFrames());
+        assertTrue(changed.outputAllLayers());
         assertEquals(DecodeFrameType.REFERENCE, changed.decodeFrameType());
         assertEquals(7, changed.operatingPoint());
         assertEquals(1234, changed.frameSizeLimit());

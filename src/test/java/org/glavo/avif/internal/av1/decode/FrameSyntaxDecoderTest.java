@@ -156,6 +156,7 @@ final class FrameSyntaxDecoderTest {
         CdfContext unselectedCdf = CdfContext.createDefault();
         CdfContext selectedCdf = CdfContext.createDefault();
         selectedCdf.mutableSkipCdf(0)[0] = 32000;
+        selectedCdf.mutableSkipCdf(0)[1] = 32;
         FrameAssembly referenceAssembly = createAssembly(
                 FrameType.INTER,
                 new byte[][]{new byte[0], new byte[0]},
@@ -187,7 +188,8 @@ final class FrameSyntaxDecoderTest {
 
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(referenceResult).decode(currentAssembly);
 
-        assertEquals(32000, referenceResult.contextUpdateTileCdfContext().mutableSkipCdf(0)[0]);
+        assertArrayEquals(new int[]{32000, 32}, referenceResult.contextUpdateTileCdfContext().mutableSkipCdf(0));
+        assertArrayEquals(new int[]{32000, 0}, referenceResult.savedFrameCdfContext().mutableSkipCdf(0));
         assertTrue(firstLeaf(result.tileRoots(0)).header().skip());
     }
 

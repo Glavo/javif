@@ -489,6 +489,8 @@ final class FramePostprocessorTest {
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
                 AvifPixelFormat.I400,
+                16,
+                8,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{16, 0},
                         0,
@@ -597,6 +599,8 @@ final class FramePostprocessorTest {
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
                 AvifPixelFormat.I400,
+                32,
+                16,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{16, 0},
                         0,
@@ -691,6 +695,78 @@ final class FramePostprocessorTest {
                 assertEquals(decodedPlanes.chromaVPlane().sample(x, y), postprocessed.chromaVPlane().sample(x, y));
             }
         }
+    }
+
+    /// Verifies that vertical chroma loop filtering covers aligned rows below the visible crop.
+    @Test
+    void postprocessAppliesChromaLoopFilterToStoredBottomPadding() {
+        short[] lumaSamples = new short[16 * 8];
+        short[] chromaUSamples = new short[8 * 4];
+        short[] chromaVSamples = new short[8 * 4];
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 16; x++) {
+                lumaSamples[y * 16 + x] = 100;
+            }
+        }
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 8; x++) {
+                chromaUSamples[y * 8 + x] = (short) (x < 4 ? 60 : 68);
+                chromaVSamples[y * 8 + x] = 90;
+            }
+        }
+        DecodedPlanes decodedPlanes = new DecodedPlanes(
+                8,
+                AvifPixelFormat.I420,
+                16,
+                5,
+                16,
+                5,
+                new DecodedPlane(16, 5, 16, lumaSamples),
+                new DecodedPlane(8, 3, 8, chromaUSamples),
+                new DecodedPlane(8, 3, 8, chromaVSamples)
+        );
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I420,
+                16,
+                5,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        16,
+                        0,
+                        0,
+                        false,
+                        false,
+                        new int[8],
+                        new int[2]
+                ),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createVerticalSplitLeafSyntaxResult(
+                frameHeader,
+                BlockSize.SIZE_8X8,
+                TransformSize.TX_8X8,
+                TransformSize.TX_4X4
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        int[] expectedPaddingRow = new int[]{60, 60, 62, 63, 65, 66, 68, 68};
+        short[] filteredChroma = postprocessed.chromaUPlane().samples();
+        for (int x = 0; x < expectedPaddingRow.length; x++) {
+            assertEquals(expectedPaddingRow[x], filteredChroma[3 * 8 + x] & 0xFFFF);
+        }
+        assertEquals(60, decodedPlanes.chromaUPlane().samples()[3 * 8 + 3] & 0xFFFF);
+        assertEquals(68, decodedPlanes.chromaUPlane().samples()[3 * 8 + 4] & 0xFFFF);
     }
 
     /// Verifies that active loop filtering fails explicitly when decoded block edges are unavailable.

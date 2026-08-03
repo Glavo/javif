@@ -1348,75 +1348,93 @@ public final class CdfContext {
     ///
     /// @return a deep copy of this mutable CDF context
     public CdfContext copy() {
+        return copy(false);
+    }
+
+    /// Creates a deep copy whose adaptive-symbol counters are reset for frame inheritance.
+    ///
+    /// The returned context preserves every CDF threshold while setting each terminal update-count
+    /// slot to zero. The source context is not modified.
+    ///
+    /// @return a deep copy with zero adaptive-symbol counters
+    public CdfContext copyWithResetSymbolCounters() {
+        return copy(true);
+    }
+
+    /// Creates a deep copy and optionally resets every terminal adaptive-symbol counter.
+    ///
+    /// @param resetSymbolCounters whether each copied CDF count slot should be set to zero
+    /// @return the requested deep copy
+    private CdfContext copy(boolean resetSymbolCounters) {
         return new CdfContext(
-                deepCopy(skipCdfs),
-                deepCopy(skipModeCdfs),
-                deepCopy(intraCdfs),
-                deepCopy(compoundReferenceCdfs),
-                deepCopy(compoundDirectionCdfs),
-                deepCopy(singleReferenceCdfs),
-                deepCopy(compoundForwardReferenceCdfs),
-                deepCopy(compoundBackwardReferenceCdfs),
-                deepCopy(compoundUnidirectionalReferenceCdfs),
-                deepCopy(singleInterNewMvCdfs),
-                deepCopy(singleInterGlobalMvCdfs),
-                deepCopy(singleInterReferenceMvCdfs),
-                deepCopy(drlCdfs),
-                deepCopy(compoundInterModeCdfs),
-                deepCopy(motionModeCdfs),
-                deepCopy(obmcCdfs),
-                deepCopy(jointCompoundCdfs),
-                deepCopy(maskCompoundCdfs),
-                deepCopy(wedgeCompoundCdfs),
-                deepCopy(interIntraCdfs),
-                deepCopy(interIntraModeCdfs),
-                deepCopy(interIntraWedgeCdfs),
-                deepCopy(wedgeIndexCdfs),
-                deepCopy(interpolationFilterCdfs),
-                deepCopy(transformSizeCdfs),
-                deepCopy(transformPartitionCdfs),
-                deepCopy(interTransformTypeSet1Cdfs),
-                Arrays.copyOf(interTransformTypeSet2Cdf, interTransformTypeSet2Cdf.length),
-                deepCopy(interTransformTypeSet3Cdfs),
-                deepCopy(intraTransformTypeSet1Cdfs),
-                deepCopy(intraTransformTypeSet2Cdfs),
-                deepCopy(coefficientSkipCdfs),
-                deepCopy(endOfBlockPrefixCdfs),
-                deepCopy(endOfBlockBaseTokenCdfs),
-                deepCopy(endOfBlockHighBitCdfs),
-                deepCopy(baseTokenCdfs),
-                deepCopy(dcSignCdfs),
-                deepCopy(highTokenCdfs),
-                Arrays.copyOf(deltaQCdf, deltaQCdf.length),
-                deepCopy(deltaLfCdfs),
-                Arrays.copyOf(motionVectorJointCdf, motionVectorJointCdf.length),
-                deepCopy(motionVectorClassCdfs),
-                deepCopy(motionVectorSignCdfs),
-                deepCopy(motionVectorClass0Cdfs),
-                deepCopy(motionVectorClass0FpCdfs),
-                deepCopy(motionVectorClass0HpCdfs),
-                deepCopy(motionVectorClassNCdfs),
-                deepCopy(motionVectorClassNFpCdfs),
-                deepCopy(motionVectorClassNHpCdfs),
-                Arrays.copyOf(intrabcCdf, intrabcCdf.length),
-                Arrays.copyOf(restorationWienerCdf, restorationWienerCdf.length),
-                Arrays.copyOf(restorationSelfGuidedCdf, restorationSelfGuidedCdf.length),
-                Arrays.copyOf(restorationSwitchableCdf, restorationSwitchableCdf.length),
-                deepCopy(yModeCdfs),
-                deepCopy(useFilterIntraCdfs),
-                Arrays.copyOf(filterIntraCdf, filterIntraCdf.length),
-                deepCopy(uvModeCdfs),
-                deepCopy(partitionCdfs),
-                deepCopy(lumaPaletteCdfs),
-                deepCopy(paletteSizeCdfs),
-                deepCopy(chromaPaletteCdfs),
-                deepCopy(colorMapCdfs),
-                deepCopy(segmentPredictionCdfs),
-                deepCopy(segmentIdCdfs),
-                deepCopy(keyFrameYModeCdfs),
-                deepCopy(angleDeltaCdfs),
-                Arrays.copyOf(cflSignCdf, cflSignCdf.length),
-                deepCopy(cflAlphaCdfs)
+                deepCopy(skipCdfs, resetSymbolCounters),
+                deepCopy(skipModeCdfs, resetSymbolCounters),
+                deepCopy(intraCdfs, resetSymbolCounters),
+                deepCopy(compoundReferenceCdfs, resetSymbolCounters),
+                deepCopy(compoundDirectionCdfs, resetSymbolCounters),
+                deepCopy(singleReferenceCdfs, resetSymbolCounters),
+                deepCopy(compoundForwardReferenceCdfs, resetSymbolCounters),
+                deepCopy(compoundBackwardReferenceCdfs, resetSymbolCounters),
+                deepCopy(compoundUnidirectionalReferenceCdfs, resetSymbolCounters),
+                deepCopy(singleInterNewMvCdfs, resetSymbolCounters),
+                deepCopy(singleInterGlobalMvCdfs, resetSymbolCounters),
+                deepCopy(singleInterReferenceMvCdfs, resetSymbolCounters),
+                deepCopy(drlCdfs, resetSymbolCounters),
+                deepCopy(compoundInterModeCdfs, resetSymbolCounters),
+                deepCopy(motionModeCdfs, resetSymbolCounters),
+                deepCopy(obmcCdfs, resetSymbolCounters),
+                deepCopy(jointCompoundCdfs, resetSymbolCounters),
+                deepCopy(maskCompoundCdfs, resetSymbolCounters),
+                deepCopy(wedgeCompoundCdfs, resetSymbolCounters),
+                deepCopy(interIntraCdfs, resetSymbolCounters),
+                deepCopy(interIntraModeCdfs, resetSymbolCounters),
+                deepCopy(interIntraWedgeCdfs, resetSymbolCounters),
+                deepCopy(wedgeIndexCdfs, resetSymbolCounters),
+                deepCopy(interpolationFilterCdfs, resetSymbolCounters),
+                deepCopy(transformSizeCdfs, resetSymbolCounters),
+                deepCopy(transformPartitionCdfs, resetSymbolCounters),
+                deepCopy(interTransformTypeSet1Cdfs, resetSymbolCounters),
+                copyCdf(interTransformTypeSet2Cdf, resetSymbolCounters),
+                deepCopy(interTransformTypeSet3Cdfs, resetSymbolCounters),
+                deepCopy(intraTransformTypeSet1Cdfs, resetSymbolCounters),
+                deepCopy(intraTransformTypeSet2Cdfs, resetSymbolCounters),
+                deepCopy(coefficientSkipCdfs, resetSymbolCounters),
+                deepCopy(endOfBlockPrefixCdfs, resetSymbolCounters),
+                deepCopy(endOfBlockBaseTokenCdfs, resetSymbolCounters),
+                deepCopy(endOfBlockHighBitCdfs, resetSymbolCounters),
+                deepCopy(baseTokenCdfs, resetSymbolCounters),
+                deepCopy(dcSignCdfs, resetSymbolCounters),
+                deepCopy(highTokenCdfs, resetSymbolCounters),
+                copyCdf(deltaQCdf, resetSymbolCounters),
+                deepCopy(deltaLfCdfs, resetSymbolCounters),
+                copyCdf(motionVectorJointCdf, resetSymbolCounters),
+                deepCopy(motionVectorClassCdfs, resetSymbolCounters),
+                deepCopy(motionVectorSignCdfs, resetSymbolCounters),
+                deepCopy(motionVectorClass0Cdfs, resetSymbolCounters),
+                deepCopy(motionVectorClass0FpCdfs, resetSymbolCounters),
+                deepCopy(motionVectorClass0HpCdfs, resetSymbolCounters),
+                deepCopy(motionVectorClassNCdfs, resetSymbolCounters),
+                deepCopy(motionVectorClassNFpCdfs, resetSymbolCounters),
+                deepCopy(motionVectorClassNHpCdfs, resetSymbolCounters),
+                copyCdf(intrabcCdf, resetSymbolCounters),
+                copyCdf(restorationWienerCdf, resetSymbolCounters),
+                copyCdf(restorationSelfGuidedCdf, resetSymbolCounters),
+                copyCdf(restorationSwitchableCdf, resetSymbolCounters),
+                deepCopy(yModeCdfs, resetSymbolCounters),
+                deepCopy(useFilterIntraCdfs, resetSymbolCounters),
+                copyCdf(filterIntraCdf, resetSymbolCounters),
+                deepCopy(uvModeCdfs, resetSymbolCounters),
+                deepCopy(partitionCdfs, resetSymbolCounters),
+                deepCopy(lumaPaletteCdfs, resetSymbolCounters),
+                deepCopy(paletteSizeCdfs, resetSymbolCounters),
+                deepCopy(chromaPaletteCdfs, resetSymbolCounters),
+                deepCopy(colorMapCdfs, resetSymbolCounters),
+                deepCopy(segmentPredictionCdfs, resetSymbolCounters),
+                deepCopy(segmentIdCdfs, resetSymbolCounters),
+                deepCopy(keyFrameYModeCdfs, resetSymbolCounters),
+                deepCopy(angleDeltaCdfs, resetSymbolCounters),
+                copyCdf(cflSignCdf, resetSymbolCounters),
+                deepCopy(cflAlphaCdfs, resetSymbolCounters)
         );
     }
 
@@ -2083,9 +2101,31 @@ public final class CdfContext {
     /// @param source the source table to copy
     /// @return a deep copy of the supplied table
     private static int[][] deepCopy(int[][] source) {
+        return deepCopy(source, false);
+    }
+
+    /// Creates a copy of one CDF and optionally resets its terminal adaptive-symbol counter.
+    ///
+    /// @param source the source CDF to copy
+    /// @param resetSymbolCounter whether the copied terminal count slot should be set to zero
+    /// @return a copy of the supplied CDF
+    private static int[] copyCdf(int[] source, boolean resetSymbolCounter) {
+        int[] copy = Arrays.copyOf(source, source.length);
+        if (resetSymbolCounter && copy.length > 0) {
+            copy[copy.length - 1] = 0;
+        }
+        return copy;
+    }
+
+    /// Creates a deep copy of a two-dimensional CDF table and optionally resets all counters.
+    ///
+    /// @param source the source table to copy
+    /// @param resetSymbolCounters whether each copied terminal count slot should be set to zero
+    /// @return a deep copy of the supplied table
+    private static int[][] deepCopy(int[][] source, boolean resetSymbolCounters) {
         int[][] copy = new int[source.length][];
         for (int i = 0; i < source.length; i++) {
-            copy[i] = Arrays.copyOf(source[i], source[i].length);
+            copy[i] = copyCdf(source[i], resetSymbolCounters);
         }
         return copy;
     }
@@ -2095,9 +2135,18 @@ public final class CdfContext {
     /// @param source the source table to copy
     /// @return a deep copy of the supplied table
     private static int[][][] deepCopy(int[][][] source) {
+        return deepCopy(source, false);
+    }
+
+    /// Creates a deep copy of a three-dimensional CDF table and optionally resets all counters.
+    ///
+    /// @param source the source table to copy
+    /// @param resetSymbolCounters whether each copied terminal count slot should be set to zero
+    /// @return a deep copy of the supplied table
+    private static int[][][] deepCopy(int[][][] source, boolean resetSymbolCounters) {
         int[][][] copy = new int[source.length][][];
         for (int i = 0; i < source.length; i++) {
-            copy[i] = deepCopy(source[i]);
+            copy[i] = deepCopy(source[i], resetSymbolCounters);
         }
         return copy;
     }
@@ -2107,9 +2156,18 @@ public final class CdfContext {
     /// @param source the source table to copy
     /// @return a deep copy of the supplied table
     private static int[][][][] deepCopy(int[][][][] source) {
+        return deepCopy(source, false);
+    }
+
+    /// Creates a deep copy of a four-dimensional CDF table and optionally resets all counters.
+    ///
+    /// @param source the source table to copy
+    /// @param resetSymbolCounters whether each copied terminal count slot should be set to zero
+    /// @return a deep copy of the supplied table
+    private static int[][][][] deepCopy(int[][][][] source, boolean resetSymbolCounters) {
         int[][][][] copy = new int[source.length][][][];
         for (int i = 0; i < source.length; i++) {
-            copy[i] = deepCopy(source[i]);
+            copy[i] = deepCopy(source[i], resetSymbolCounters);
         }
         return copy;
     }

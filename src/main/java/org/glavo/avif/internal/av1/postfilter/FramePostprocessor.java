@@ -35,6 +35,9 @@ public final class FramePostprocessor {
     /// The current CDEF applier.
     private final CdefApplier cdefApplier;
 
+    /// The current super-resolution upscaler.
+    private final SuperResolutionUpscaler superResolutionUpscaler;
+
     /// The current restoration applier.
     private final RestorationApplier restorationApplier;
 
@@ -42,6 +45,7 @@ public final class FramePostprocessor {
     public FramePostprocessor() {
         this.loopFilterApplier = new LoopFilterApplier();
         this.cdefApplier = new CdefApplier();
+        this.superResolutionUpscaler = new SuperResolutionUpscaler();
         this.restorationApplier = new RestorationApplier();
     }
 
@@ -69,6 +73,20 @@ public final class FramePostprocessor {
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
         DecodedPlanes afterLoopFilter = loopFilterApplier.apply(checkedDecodedPlanes, checkedFrameHeader, syntaxDecodeResult);
         DecodedPlanes afterCdef = cdefApplier.apply(afterLoopFilter, checkedFrameHeader.cdef(), syntaxDecodeResult);
-        return restorationApplier.apply(afterCdef, afterLoopFilter, checkedFrameHeader.restoration(), syntaxDecodeResult);
+        DecodedPlanes afterSuperResolution = superResolutionUpscaler.apply(afterCdef, checkedFrameHeader);
+        DecodedPlanes restorationBoundary = afterSuperResolution;
+        if (RestorationApplier.hasActiveRestoration(
+                checkedFrameHeader.restoration(),
+                checkedDecodedPlanes.hasChroma()
+        ) && afterLoopFilter != afterCdef) {
+            restorationBoundary = superResolutionUpscaler.apply(afterLoopFilter, checkedFrameHeader);
+        }
+        return restorationApplier.apply(
+                afterSuperResolution,
+                restorationBoundary,
+                checkedFrameHeader.restoration(),
+                syntaxDecodeResult
+        );
     }
+
 }

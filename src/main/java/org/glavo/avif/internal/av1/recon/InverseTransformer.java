@@ -184,8 +184,8 @@ final class InverseTransformer {
         );
     }
 
-    /// Adds one already reconstructed residual block into the supplied predictor plane while
-    /// clipping writes to the visible residual footprint.
+    /// Adds a caller-selected rectangular portion of one reconstructed residual block into the
+    /// supplied predictor plane.
     ///
     /// Sample addition delegates clipping to `MutablePlaneBuffer`, so callers may pass signed
     /// residual values directly.
@@ -194,16 +194,16 @@ final class InverseTransformer {
     /// @param x the zero-based destination x coordinate
     /// @param y the zero-based destination y coordinate
     /// @param transformSize the coded residual block size
-    /// @param visibleWidthPixels the exact visible residual width in pixels
-    /// @param visibleHeightPixels the exact visible residual height in pixels
+    /// @param writtenWidthPixels the residual width to write in pixels
+    /// @param writtenHeightPixels the residual height to write in pixels
     /// @param residualSamples the signed residual sample block in natural raster order
     static void addResidualBlock(
             MutablePlaneBuffer plane,
             int x,
             int y,
             TransformSize transformSize,
-            int visibleWidthPixels,
-            int visibleHeightPixels,
+            int writtenWidthPixels,
+            int writtenHeightPixels,
             int[] residualSamples
     ) {
         MutablePlaneBuffer nonNullPlane = Objects.requireNonNull(plane, "plane");
@@ -213,16 +213,16 @@ final class InverseTransformer {
         if (nonNullResidualSamples.length != transformArea) {
             throw new IllegalArgumentException("residualSamples length does not match transform area");
         }
-        if (visibleWidthPixels <= 0 || visibleWidthPixels > nonNullTransformSize.widthPixels()) {
-            throw new IllegalArgumentException("visibleWidthPixels out of range: " + visibleWidthPixels);
+        if (writtenWidthPixels <= 0 || writtenWidthPixels > nonNullTransformSize.widthPixels()) {
+            throw new IllegalArgumentException("writtenWidthPixels out of range: " + writtenWidthPixels);
         }
-        if (visibleHeightPixels <= 0 || visibleHeightPixels > nonNullTransformSize.heightPixels()) {
-            throw new IllegalArgumentException("visibleHeightPixels out of range: " + visibleHeightPixels);
+        if (writtenHeightPixels <= 0 || writtenHeightPixels > nonNullTransformSize.heightPixels()) {
+            throw new IllegalArgumentException("writtenHeightPixels out of range: " + writtenHeightPixels);
         }
 
         int transformWidth = nonNullTransformSize.widthPixels();
-        for (int row = 0; row < visibleHeightPixels; row++) {
-            for (int column = 0; column < visibleWidthPixels; column++) {
+        for (int row = 0; row < writtenHeightPixels; row++) {
+            for (int column = 0; column < writtenWidthPixels; column++) {
                 int sampleIndex = row * transformWidth + column;
                 int predicted = nonNullPlane.sample(x + column, y + row);
                 nonNullPlane.setSample(x + column, y + row, predicted + nonNullResidualSamples[sampleIndex]);
@@ -246,10 +246,10 @@ final class InverseTransformer {
             scratchIn[2] = coefficients[rowOffset + 2];
             scratchIn[3] = coefficients[rowOffset + 3];
             withActiveClipRange(rowClipRange, () -> inverseDct4(scratchIn, scratchOut));
-            buffer[rowOffset] = scratchOut[0];
-            buffer[rowOffset + 1] = scratchOut[1];
-            buffer[rowOffset + 2] = scratchOut[2];
-            buffer[rowOffset + 3] = scratchOut[3];
+            buffer[rowOffset] = clipToRange(scratchOut[0], columnClipRange);
+            buffer[rowOffset + 1] = clipToRange(scratchOut[1], columnClipRange);
+            buffer[rowOffset + 2] = clipToRange(scratchOut[2], columnClipRange);
+            buffer[rowOffset + 3] = clipToRange(scratchOut[3], columnClipRange);
         }
 
         for (int column = 0; column < 4; column++) {
@@ -2023,6 +2023,9 @@ final class InverseTransformer {
 
     /// Reconstructs one supported one-dimensional inverse identity vector.
     ///
+    /// Identity kernels scale their inputs without a stage-local clamp. The surrounding
+    /// two-dimensional transform applies the required input and inter-pass clipping.
+    ///
     /// @param input the dequantized input vector
     /// @param output the reconstructed output vector
     /// @param length the vector length in samples
@@ -2031,23 +2034,23 @@ final class InverseTransformer {
             case 4 -> {
                 for (int i = 0; i < 4; i++) {
                     int value = input[i];
-                    output[i] = clip((long) value + positiveRoundShift((long) value * 1697, 12));
+                    output[i] = saturatedInt((long) value + positiveRoundShift((long) value * 1697, 12));
                 }
             }
             case 8 -> {
                 for (int i = 0; i < 8; i++) {
-                    output[i] = clip((long) input[i] * 2);
+                    output[i] = saturatedInt((long) input[i] * 2);
                 }
             }
             case 16 -> {
                 for (int i = 0; i < 16; i++) {
                     int value = input[i];
-                    output[i] = clip((long) value * 2 + positiveRoundShift((long) value * 1697, 11));
+                    output[i] = saturatedInt((long) value * 2 + positiveRoundShift((long) value * 1697, 11));
                 }
             }
             case 32 -> {
                 for (int i = 0; i < 32; i++) {
-                    output[i] = clip((long) input[i] * 4);
+                    output[i] = saturatedInt((long) input[i] * 4);
                 }
             }
             default -> throw new IllegalStateException("Unsupported inverse identity length: " + length);

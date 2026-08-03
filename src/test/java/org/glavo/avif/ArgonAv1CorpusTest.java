@@ -18,7 +18,6 @@ package org.glavo.avif;
 import org.glavo.avif.decode.Av1DecoderConfig;
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.io.BufferedInput;
@@ -60,7 +59,8 @@ final class ArgonAv1CorpusTest {
     /// System property that identifies the downloaded Argon Streams ZIP.
     private static final String ARCHIVE_PROPERTY = "org.glavo.avif.argon.archive";
 
-    /// Optional system property that selects one `category/stream.obu` case or `all` for diagnosis.
+    /// Optional system property that selects one `category/stream.obu` case, one `category/all`
+    /// group, or `all` for diagnosis.
     private static final String CASE_PROPERTY = "org.glavo.avif.argon.case";
 
     /// Root directory stored in the Argon Streams 2.1.1 ZIP.
@@ -86,10 +86,21 @@ final class ArgonAv1CorpusTest {
             new CorpusCase("profile0_not_annexb", "test12153.obu"),
             new CorpusCase("profile0_not_annexb", "test12184.obu"),
             new CorpusCase("profile0_not_annexb", "test12207.obu"),
+            new CorpusCase("profile0_not_annexb", "test12217.obu"),
+            new CorpusCase("profile0_not_annexb", "test12258_12326.obu"),
             new CorpusCase("profile0_not_annexb", "test12259.obu"),
+            new CorpusCase("profile0_not_annexb", "test12293_12304.obu"),
+            new CorpusCase("profile0_not_annexb", "test12294.obu"),
+            new CorpusCase("profile0_not_annexb", "test12297.obu"),
+            new CorpusCase("profile0_not_annexb", "test12301.obu"),
+            new CorpusCase("profile0_not_annexb", "test12318.obu"),
+            new CorpusCase("profile0_not_annexb", "test12319_12313_12198.obu"),
+            new CorpusCase("profile0_not_annexb", "test12320.obu"),
+            new CorpusCase("profile0_not_annexb", "test12327.obu"),
             new CorpusCase("profile1_not_annexb", "test8650.obu"),
             new CorpusCase("profile1_not_annexb", "test8660.obu"),
             new CorpusCase("profile1_not_annexb", "test8810.obu"),
+            new CorpusCase("profile1_not_annexb", "test8817.obu"),
             new CorpusCase("profile2_not_annexb", "test17154.obu")
     );
 
@@ -119,7 +130,7 @@ final class ArgonAv1CorpusTest {
     /// Returns reference-output checks for the supported low-overhead streams in all AV1 profiles.
     ///
     /// @return the dynamic reference-output tests
-    /// @throws IOException if the diagnostic `all` selector cannot inspect the archive
+    /// @throws IOException if a diagnostic group selector cannot inspect the archive
     @TestFactory
     Stream<DynamicTest> supportedLowOverheadStreamsMatchReferenceYuvDigests() throws IOException {
         return selectedReferenceCases().stream()
@@ -129,28 +140,50 @@ final class ArgonAv1CorpusTest {
                 ));
     }
 
-    /// Returns the regular regression cases, all regular low-overhead streams, or one explicitly
-    /// selected diagnostic case.
+    /// Returns the regular regression cases, a diagnostic group, or one explicitly selected case.
     ///
     /// @return the immutable selected cases
-    /// @throws IOException if the diagnostic `all` selector cannot inspect the archive
+    /// @throws IOException if a diagnostic group selector cannot inspect the archive
     private static @Unmodifiable List<CorpusCase> selectedReferenceCases() throws IOException {
         @Nullable String selectedCase = System.getProperty(CASE_PROPERTY);
         if (selectedCase == null) {
             return REFERENCE_CASES;
         }
         if (selectedCase.equals("all")) {
-            try (ZipFile archive = new ZipFile(archivePath().toFile())) {
-                return archive.stream()
-                        .map(ZipEntry::getName)
-                        .filter(name -> name.endsWith(".obu"))
-                        .filter(name -> LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
-                        .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
-                        .sorted((left, right) -> left.selector().compareTo(right.selector()))
-                        .toList();
+            return allLowOverheadCases(null);
+        }
+        if (selectedCase.endsWith("/all")) {
+            String category = selectedCase.substring(0, selectedCase.length() - "/all".length());
+            if (category.isEmpty() || category.indexOf('/') >= 0) {
+                throw new IllegalArgumentException("Invalid Argon AV1 category selector: " + selectedCase);
             }
+            @Unmodifiable List<CorpusCase> cases = allLowOverheadCases(category);
+            if (cases.isEmpty()) {
+                throw new IllegalArgumentException("Unknown Argon AV1 category: " + category);
+            }
+            return cases;
         }
         return List.of(CorpusCase.parse(selectedCase));
+    }
+
+    /// Returns all regular low-overhead cases, optionally restricted to one archive category.
+    ///
+    /// @param selectedCategory the exact category to select, or `null` for every profile
+    /// @return the immutable sorted corpus cases
+    /// @throws IOException if the archive cannot be inspected
+    private static @Unmodifiable List<CorpusCase> allLowOverheadCases(
+            @Nullable String selectedCategory
+    ) throws IOException {
+        try (ZipFile archive = new ZipFile(archivePath().toFile())) {
+            return archive.stream()
+                    .map(ZipEntry::getName)
+                    .filter(name -> name.endsWith(".obu"))
+                    .filter(name -> LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
+                    .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
+                    .filter(testCase -> selectedCategory == null || testCase.category().equals(selectedCategory))
+                    .sorted((left, right) -> left.selector().compareTo(right.selector()))
+                    .toList();
+        }
     }
 
     /// Decodes one selected stream and compares all visible pre-grain YUV planes with Argon's MD5.
@@ -166,6 +199,7 @@ final class ArgonAv1CorpusTest {
             MessageDigest actualDigest = MessageDigest.getInstance("MD5");
             Av1DecoderConfig config = Av1DecoderConfig.builder()
                     .applyFilmGrain(false)
+                    .outputAllLayers(true)
                     .build();
 
             int frameCount = 0;
@@ -174,11 +208,10 @@ final class ArgonAv1CorpusTest {
                         new BufferedInput.OfInputStream(archive.getInputStream(streamEntry)),
                         config
                 )) {
-                    @Nullable DecodedFrame frame;
-                    while ((frame = reader.readFrame()) != null) {
-                        @Nullable DecodedPlanes decodedPlanes = reader.lastPlanes();
-                        assertNotNull(decodedPlanes, streamPath + " frame " + frameCount);
-                        updateYuvDigest(actualDigest, Objects.requireNonNull(decodedPlanes));
+                    @Nullable DecodedPlanes decodedPlanes;
+                    while ((decodedPlanes = reader.readPlanes()) != null) {
+                        DecodedPlanes requiredPlanes = decodedPlanes;
+                        updateYuvDigest(actualDigest, requiredPlanes);
                         frameCount++;
                     }
                 }

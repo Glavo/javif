@@ -47,6 +47,9 @@ public final class BlockNeighborContext {
     /// The number of eighth-pel motion-vector units represented by one 4x4 coding unit.
     private static final int MOTION_VECTOR_UNITS_PER_4X4 = 4 * 8;
 
+    /// Internal reference selector used while scanning same-frame intrabc displacement vectors.
+    private static final int INTRABC_REFERENCE_FRAME = -2;
+
     /// The AV1 coefficient-context byte that marks one transform block as all-zero.
     private static final int ALL_ZERO_COEFFICIENT_CONTEXT_BYTE = 0x40;
 
@@ -1002,6 +1005,186 @@ public final class BlockNeighborContext {
         return count[0] == count[1] ? 1 : count[0] < count[1] ? 0 : 2;
     }
 
+    /// Returns the displacement-vector predictor for one intrabc block.
+    ///
+    /// The scan uses the same direct above/left, top-right, top-left, and secondary spatial order
+    /// as the AV1 reference-motion-vector stack. The first non-zero candidate among the nearest
+    /// two is returned; when no usable candidate exists, the caller-supplied fallback is returned.
+    ///
+    /// @param position the current tile-relative block position
+    /// @param size the current block size
+    /// @param fallback the frame-derived fallback displacement vector
+    /// @return the selected displacement-vector predictor in eighth-pel units
+    public MotionVector intrabcReferenceMotionVector(
+            BlockPosition position,
+            BlockSize size,
+            MotionVector fallback
+    ) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        BlockSize nonNullSize = Objects.requireNonNull(size, "size");
+        MotionVector nonNullFallback = Objects.requireNonNull(fallback, "fallback");
+        int x4 = nonNullPosition.x4();
+        int y4 = nonNullPosition.y4();
+        int blockWidth4 = nonNullSize.width4();
+        int blockHeight4 = nonNullSize.height4();
+        int visibleWidth4 = Math.min(Math.min(blockWidth4, 16), tileWidth4 - x4);
+        int visibleHeight4 = Math.min(Math.min(blockHeight4, 16), tileHeight4 - y4);
+        if (visibleWidth4 <= 0 || visibleHeight4 <= 0) {
+            throw new IllegalArgumentException("Intrabc block lies outside the tile");
+        }
+
+        ExactSpatialGlobalMotion zeroGlobalMotion = new ExactSpatialGlobalMotion(
+                MotionVector.zero(),
+                MotionVector.zero(),
+                false,
+                false
+        );
+        ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates =
+                new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[PROVISIONAL_CANDIDATE_CAPACITY];
+        int candidateCount = 0;
+        int maximumRows = 0;
+        int scannedRows = -1;
+        if (y4 > 0) {
+            maximumRows = Math.min((y4 + 1) >> 1, 2 + (blockHeight4 > 1 ? 1 : 0));
+            ExactSpatialScanResult topScan = scanExactRefMvsRow(
+                    y4 - 1,
+                    x4,
+                    blockWidth4,
+                    visibleWidth4,
+                    maximumRows,
+                    blockWidth4 >= 16 ? 4 : 1,
+                    false,
+                    INTRABC_REFERENCE_FRAME,
+                    -1,
+                    zeroGlobalMotion,
+                    candidates,
+                    candidateCount
+            );
+            candidateCount = topScan.candidateCount();
+            scannedRows = topScan.scanDistance();
+        }
+
+        int maximumColumns = 0;
+        int scannedColumns = -1;
+        if (x4 > 0) {
+            maximumColumns = Math.min((x4 + 1) >> 1, 2 + (blockWidth4 > 1 ? 1 : 0));
+            ExactSpatialScanResult leftScan = scanExactRefMvsColumn(
+                    x4 - 1,
+                    y4,
+                    blockHeight4,
+                    visibleHeight4,
+                    maximumColumns,
+                    blockHeight4 >= 16 ? 4 : 1,
+                    false,
+                    INTRABC_REFERENCE_FRAME,
+                    -1,
+                    zeroGlobalMotion,
+                    candidates,
+                    candidateCount
+            );
+            candidateCount = leftScan.candidateCount();
+            scannedColumns = leftScan.scanDistance();
+        }
+
+        if (scannedRows >= 0
+                && Math.max(blockWidth4, blockHeight4) <= 16
+                && x4 + blockWidth4 < tileWidth4) {
+            candidateCount = addExactSpatialCandidate(
+                    storedBlockAtOrNull(x4 + blockWidth4, y4 - 1),
+                    false,
+                    INTRABC_REFERENCE_FRAME,
+                    -1,
+                    zeroGlobalMotion,
+                    4,
+                    candidates,
+                    candidateCount
+            ).candidateCount();
+        }
+
+        int nearestCandidateCount = candidateCount;
+        for (int index = 0; index < nearestCandidateCount; index++) {
+            candidates[index] = candidates[index].withWeight(candidates[index].weight() + 640);
+        }
+
+        if (scannedRows >= 0 && scannedColumns >= 0) {
+            candidateCount = addExactSpatialCandidate(
+                    storedBlockAtOrNull(x4 - 1, y4 - 1),
+                    false,
+                    INTRABC_REFERENCE_FRAME,
+                    -1,
+                    zeroGlobalMotion,
+                    4,
+                    candidates,
+                    candidateCount
+            ).candidateCount();
+        }
+
+        for (int spatialDepth = 2; spatialDepth <= 3; spatialDepth++) {
+            if (spatialDepth > scannedRows && spatialDepth <= maximumRows) {
+                ExactSpatialScanResult secondaryTop = scanExactRefMvsRow(
+                        secondarySpatialOffsetCoordinate(y4, spatialDepth),
+                        x4 | 1,
+                        blockWidth4,
+                        visibleWidth4,
+                        1 + maximumRows - spatialDepth,
+                        blockWidth4 >= 16 ? 4 : 2,
+                        false,
+                        INTRABC_REFERENCE_FRAME,
+                        -1,
+                        zeroGlobalMotion,
+                        candidates,
+                        candidateCount
+                );
+                candidateCount = secondaryTop.candidateCount();
+                scannedRows += secondaryTop.scanDistance();
+            }
+            if (spatialDepth > scannedColumns && spatialDepth <= maximumColumns) {
+                ExactSpatialScanResult secondaryLeft = scanExactRefMvsColumn(
+                        secondarySpatialOffsetCoordinate(x4, spatialDepth),
+                        y4 | 1,
+                        blockHeight4,
+                        visibleHeight4,
+                        1 + maximumColumns - spatialDepth,
+                        blockHeight4 >= 16 ? 4 : 2,
+                        false,
+                        INTRABC_REFERENCE_FRAME,
+                        -1,
+                        zeroGlobalMotion,
+                        candidates,
+                        candidateCount
+                );
+                candidateCount = secondaryLeft.candidateCount();
+                scannedColumns += secondaryLeft.scanDistance();
+            }
+        }
+
+        sortDescending(candidates, 0, nearestCandidateCount);
+        sortDescending(candidates, nearestCandidateCount, candidateCount);
+        int frameX4 = (tileStartX8 << 1) + x4;
+        int frameY4 = (tileStartY8 << 1) + y4;
+        int minimumColumn = -(frameX4 + blockWidth4) * MOTION_VECTOR_UNITS_PER_4X4
+                - REFERENCE_MOTION_VECTOR_BORDER;
+        int maximumColumn = (frameWidth4 - frameX4) * MOTION_VECTOR_UNITS_PER_4X4
+                + REFERENCE_MOTION_VECTOR_BORDER;
+        int minimumRow = -(frameY4 + blockHeight4) * MOTION_VECTOR_UNITS_PER_4X4
+                - REFERENCE_MOTION_VECTOR_BORDER;
+        int maximumRow = (frameHeight4 - frameY4) * MOTION_VECTOR_UNITS_PER_4X4
+                + REFERENCE_MOTION_VECTOR_BORDER;
+        for (int index = 0; index < Math.min(2, candidateCount); index++) {
+            MotionVector candidate = clampReferenceMotionVector(
+                    candidates[index].motionVector0(),
+                    minimumRow,
+                    maximumRow,
+                    minimumColumn,
+                    maximumColumn
+            ).vector();
+            if (candidate.rowEighthPel() != 0 || candidate.columnEighthPel() != 0) {
+                return candidate;
+            }
+        }
+        return nonNullFallback;
+    }
+
     /// Builds an inter-mode syntax context using a zero global-motion baseline.
     ///
     /// This compatibility overload is intended for callers that do not need the temporal
@@ -1028,7 +1211,9 @@ public final class BlockNeighborContext {
                 referenceFrame0,
                 referenceFrame1,
                 MotionVector.zero(),
-                MotionVector.zero()
+                MotionVector.zero(),
+                FrameHeader.GlobalMotionType.TRANSLATION,
+                FrameHeader.GlobalMotionType.TRANSLATION
         );
     }
 
@@ -1056,10 +1241,55 @@ public final class BlockNeighborContext {
             MotionVector globalMotionVector0,
             MotionVector globalMotionVector1
     ) {
+        return provisionalInterModeContext(
+                position,
+                size,
+                compoundReference,
+                referenceFrame0,
+                referenceFrame1,
+                globalMotionVector0,
+                globalMotionVector1,
+                FrameHeader.GlobalMotionType.TRANSLATION,
+                FrameHeader.GlobalMotionType.TRANSLATION
+        );
+    }
+
+    /// Builds an inter-mode syntax context from spatial and projected temporal neighbors.
+    ///
+    /// Non-translation global-motion types affect exact spatial candidates: an eligible
+    /// neighboring `GLOBALMV` block contributes the current block's global vector, because an
+    /// affine or rotation/zoom vector varies with block position. Translation-only callers may
+    /// use the shorter overload.
+    ///
+    /// @param position the current block position
+    /// @param size the current block size
+    /// @param compoundReference whether the current block uses compound references
+    /// @param referenceFrame0 the primary current-block reference in internal LAST..ALTREF order
+    /// @param referenceFrame1 the secondary current-block reference in internal LAST..ALTREF order, or `-1`
+    /// @param globalMotionVector0 the current block's primary global-motion vector
+    /// @param globalMotionVector1 the current block's secondary global-motion vector, or zero for single-reference blocks
+    /// @param globalMotionType0 the primary reference's global-motion type
+    /// @param globalMotionType1 the secondary reference's global-motion type, or identity for single-reference blocks
+    /// @return an inter-mode syntax context derived from available neighbors
+    public ProvisionalInterModeContext provisionalInterModeContext(
+            BlockPosition position,
+            BlockSize size,
+            boolean compoundReference,
+            int referenceFrame0,
+            int referenceFrame1,
+            MotionVector globalMotionVector0,
+            MotionVector globalMotionVector1,
+            FrameHeader.GlobalMotionType globalMotionType0,
+            FrameHeader.GlobalMotionType globalMotionType1
+    ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
         MotionVector nonNullGlobalMotionVector0 = Objects.requireNonNull(globalMotionVector0, "globalMotionVector0");
         MotionVector nonNullGlobalMotionVector1 = Objects.requireNonNull(globalMotionVector1, "globalMotionVector1");
+        FrameHeader.GlobalMotionType nonNullGlobalMotionType0 =
+                Objects.requireNonNull(globalMotionType0, "globalMotionType0");
+        FrameHeader.GlobalMotionType nonNullGlobalMotionType1 =
+                Objects.requireNonNull(globalMotionType1, "globalMotionType1");
         if (referenceFrame0 < 0) {
             throw new IllegalArgumentException("referenceFrame0 < 0");
         }
@@ -1082,6 +1312,12 @@ public final class BlockNeighborContext {
         boolean columnReferenceMatch = false;
         boolean haveNewMotionVectorMatch = false;
         int globalMotionContext = referenceMotionVectorProjection.enabled() ? 1 : 0;
+        ExactSpatialGlobalMotion exactSpatialGlobalMotion = new ExactSpatialGlobalMotion(
+                nonNullGlobalMotionVector0,
+                nonNullGlobalMotionVector1,
+                nonNullGlobalMotionType0.ordinal() > FrameHeader.GlobalMotionType.TRANSLATION.ordinal(),
+                nonNullGlobalMotionType1.ordinal() > FrameHeader.GlobalMotionType.TRANSLATION.ordinal()
+        );
         ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] candidates =
                 new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[PROVISIONAL_CANDIDATE_CAPACITY];
         int candidateCount = 0;
@@ -1100,6 +1336,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    exactSpatialGlobalMotion,
                     candidates,
                     candidateCount
             );
@@ -1124,6 +1361,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    exactSpatialGlobalMotion,
                     candidates,
                     candidateCount
             );
@@ -1142,6 +1380,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    exactSpatialGlobalMotion,
                     4,
                     candidates,
                     candidateCount
@@ -1177,6 +1416,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    exactSpatialGlobalMotion,
                     4,
                     candidates,
                     candidateCount
@@ -1197,6 +1437,7 @@ public final class BlockNeighborContext {
                         compoundReference,
                         referenceFrame0,
                         referenceFrame1,
+                        exactSpatialGlobalMotion,
                         candidates,
                         candidateCount
                 );
@@ -1215,6 +1456,7 @@ public final class BlockNeighborContext {
                         compoundReference,
                         referenceFrame0,
                         referenceFrame1,
+                        exactSpatialGlobalMotion,
                         candidates,
                         candidateCount
                 );
@@ -1693,7 +1935,7 @@ public final class BlockNeighborContext {
                 destination,
                 count
         );
-        if (block.compoundReference() && count < 2) {
+        if (block.compoundReference()) {
             count = appendSingleExtendedComponent(
                     block.referenceFrame1(),
                     block.motionVector1(),
@@ -2503,6 +2745,7 @@ public final class BlockNeighborContext {
         InterMotionVector motionVector0 = fallbackMotionVector(nonNullHeader.motionVector0());
         InterMotionVector motionVector1 = fallbackMotionVector(nonNullHeader.motionVector1());
         byte usesNewMotionVector = (byte) (usesNewMotionVector(nonNullHeader) ? 1 : 0);
+        boolean usesGlobalMotionMode = usesGlobalMotionMode(nonNullHeader);
         byte horizontalInterpolationFilter = interpolationFilterSymbol(nonNullHeader.horizontalInterpolationFilter());
         byte verticalInterpolationFilter = interpolationFilterSymbol(nonNullHeader.verticalInterpolationFilter());
         LumaIntraPredictionMode mode = nonNullHeader.intra() ? nonNullHeader.yMode() : LumaIntraPredictionMode.DC;
@@ -2515,13 +2758,15 @@ public final class BlockNeighborContext {
                 size.height4(),
                 segmentId & 0xFF,
                 intra != 0,
+                nonNullHeader.useIntrabc(),
                 compoundReference != 0,
                 nonNullHeader.interIntra(),
                 referenceFrame0,
                 referenceFrame1,
                 motionVector0,
                 motionVector1,
-                usesNewMotionVector != 0
+                usesNewMotionVector != 0,
+                usesGlobalMotionMode
         );
         if (updateSegmentIdMap) {
             currentSegmentIdMap.fill(
@@ -2756,6 +3001,18 @@ public final class BlockNeighborContext {
         };
     }
 
+    /// Returns whether one decoded block selected the all-global inter mode.
+    ///
+    /// @param header the decoded block header
+    /// @return whether the block selected `GLOBALMV` or `GLOBALMV_GLOBALMV`
+    private static boolean usesGlobalMotionMode(TileBlockHeaderReader.BlockHeader header) {
+        TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
+        return nonNullHeader.singleInterMode()
+                == org.glavo.avif.internal.av1.model.SingleInterPredictionMode.GLOBALMV
+                || nonNullHeader.compoundInterMode()
+                == org.glavo.avif.internal.av1.model.CompoundInterPredictionMode.GLOBALMV_GLOBALMV;
+    }
+
     /// Returns whether one stored neighbor uses a unidirectional compound reference pair.
     ///
     /// @param leftEdge whether the stored neighbor lives on the left edge instead of the above edge
@@ -2886,6 +3143,7 @@ public final class BlockNeighborContext {
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary current-block reference
     /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param globalMotion the current block's global-motion candidates
     /// @param destination the destination candidate stack
     /// @param count the number of active candidates already stored
     /// @return the updated candidate state and spatial-depth contribution
@@ -2899,6 +3157,7 @@ public final class BlockNeighborContext {
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
+            ExactSpatialGlobalMotion globalMotion,
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
             int count
     ) {
@@ -2915,6 +3174,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    globalMotion,
                     length4 * weightFactor,
                     destination,
                     count
@@ -2936,6 +3196,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    globalMotion,
                     length4 * 2,
                     destination,
                     count
@@ -2963,6 +3224,7 @@ public final class BlockNeighborContext {
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary current-block reference
     /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param globalMotion the current block's global-motion candidates
     /// @param destination the destination candidate stack
     /// @param count the number of active candidates already stored
     /// @return the updated candidate state and spatial-depth contribution
@@ -2976,6 +3238,7 @@ public final class BlockNeighborContext {
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
+            ExactSpatialGlobalMotion globalMotion,
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
             int count
     ) {
@@ -2992,6 +3255,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    globalMotion,
                     length4 * weightFactor,
                     destination,
                     count
@@ -3013,6 +3277,7 @@ public final class BlockNeighborContext {
                     compoundReference,
                     referenceFrame0,
                     referenceFrame1,
+                    globalMotion,
                     length4 * 2,
                     destination,
                     count
@@ -3035,6 +3300,7 @@ public final class BlockNeighborContext {
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary current-block reference
     /// @param referenceFrame1 the secondary current-block reference, or `-1`
+    /// @param globalMotion the current block's global-motion candidates
     /// @param weight the spatial candidate weight
     /// @param destination the destination candidate stack
     /// @param count the number of active candidates already stored
@@ -3044,11 +3310,32 @@ public final class BlockNeighborContext {
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
+            ExactSpatialGlobalMotion globalMotion,
             int weight,
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate[] destination,
             int count
     ) {
-        if (block == null || block.intra()) {
+        if (block == null) {
+            return new SpatialCandidateResult(count, false, false);
+        }
+        if (referenceFrame0 == INTRABC_REFERENCE_FRAME) {
+            if (!block.intrabc()) {
+                return new SpatialCandidateResult(count, false, false);
+            }
+            ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
+                    new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
+                            weight,
+                            block.motionVector0().asPredicted(),
+                            null,
+                            false
+                    );
+            return new SpatialCandidateResult(
+                    appendProvisionalCandidate(destination, count, candidate),
+                    true,
+                    false
+            );
+        }
+        if (block.intra()) {
             return new SpatialCandidateResult(count, false, false);
         }
         @Nullable ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
@@ -3056,11 +3343,8 @@ public final class BlockNeighborContext {
                         compoundReference,
                         referenceFrame0,
                         referenceFrame1,
-                        block.compoundReference(),
-                        block.referenceFrame0(),
-                        block.referenceFrame1(),
-                        block.motionVector0(),
-                        block.motionVector1(),
+                        block,
+                        globalMotion,
                         weight
                 );
         if (candidate == null) {
@@ -3323,53 +3607,56 @@ public final class BlockNeighborContext {
     /// @param compoundReference whether the current block uses compound references
     /// @param referenceFrame0 the primary current-block reference
     /// @param referenceFrame1 the secondary current-block reference, or `-1`
-    /// @param neighborCompound whether the stored neighbor uses compound references
-    /// @param neighborReferenceFrame0 the neighbor primary reference
-    /// @param neighborReferenceFrame1 the neighbor secondary reference, or `-1`
-    /// @param neighborMotionVector0 the stored neighbor primary motion vector
-    /// @param neighborMotionVector1 the stored neighbor secondary motion vector
+    /// @param block the stored neighboring block
+    /// @param globalMotion the current block's global-motion candidates
     /// @param weight the provisional candidate weight to assign
     /// @return one matching motion-vector candidate, or `null` when the neighbor does not carry the requested reference selection
     private static @Nullable ProvisionalInterModeContext.ProvisionalMotionVectorCandidate provisionalMotionVectorCandidate(
             boolean compoundReference,
             int referenceFrame0,
             int referenceFrame1,
-            boolean neighborCompound,
-            int neighborReferenceFrame0,
-            int neighborReferenceFrame1,
-            InterMotionVector neighborMotionVector0,
-            InterMotionVector neighborMotionVector1,
+            StoredBlock block,
+            ExactSpatialGlobalMotion globalMotion,
             int weight
     ) {
-        InterMotionVector nonNullNeighborMotionVector0 =
-                Objects.requireNonNull(neighborMotionVector0, "neighborMotionVector0");
-        InterMotionVector nonNullNeighborMotionVector1 =
-                Objects.requireNonNull(neighborMotionVector1, "neighborMotionVector1");
+        StoredBlock nonNullBlock = Objects.requireNonNull(block, "block");
+        ExactSpatialGlobalMotion nonNullGlobalMotion = Objects.requireNonNull(globalMotion, "globalMotion");
+        boolean replaceGlobalMotion = nonNullBlock.usesGlobalMotionMode()
+                && nonNullBlock.width4() >= 2
+                && nonNullBlock.height4() >= 2;
         if (compoundReference) {
-            if (!neighborCompound
-                    || referenceFrame0 != neighborReferenceFrame0
-                    || referenceFrame1 != neighborReferenceFrame1) {
+            if (!nonNullBlock.compoundReference()
+                    || referenceFrame0 != nonNullBlock.referenceFrame0()
+                    || referenceFrame1 != nonNullBlock.referenceFrame1()) {
                 return null;
             }
             return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
                     weight,
-                    nonNullNeighborMotionVector0,
-                    nonNullNeighborMotionVector1,
+                    replaceGlobalMotion && nonNullGlobalMotion.primaryNonTranslation()
+                            ? InterMotionVector.resolved(nonNullGlobalMotion.primary())
+                            : nonNullBlock.motionVector0(),
+                    replaceGlobalMotion && nonNullGlobalMotion.secondaryNonTranslation()
+                            ? InterMotionVector.resolved(nonNullGlobalMotion.secondary())
+                            : nonNullBlock.motionVector1(),
                     false
             );
         }
-        if (referenceFrame0 == neighborReferenceFrame0) {
+        if (referenceFrame0 == nonNullBlock.referenceFrame0()) {
             return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
                     weight,
-                    nonNullNeighborMotionVector0,
+                    replaceGlobalMotion && nonNullGlobalMotion.primaryNonTranslation()
+                            ? InterMotionVector.resolved(nonNullGlobalMotion.primary())
+                            : nonNullBlock.motionVector0(),
                     null,
                     false
             );
         }
-        if (neighborCompound && referenceFrame0 == neighborReferenceFrame1) {
+        if (nonNullBlock.compoundReference() && referenceFrame0 == nonNullBlock.referenceFrame1()) {
             return new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
                     weight,
-                    nonNullNeighborMotionVector1,
+                    replaceGlobalMotion && nonNullGlobalMotion.primaryNonTranslation()
+                            ? InterMotionVector.resolved(nonNullGlobalMotion.primary())
+                            : nonNullBlock.motionVector1(),
                     null,
                     false
             );
@@ -3505,6 +3792,26 @@ public final class BlockNeighborContext {
         }
         for (int y8 = startY8; y8 < endY8; y8++) {
             leftPartition[y8] = (byte) leftValue;
+        }
+    }
+
+    /// Current-block global vectors used when exact spatial candidates came from global-warp blocks.
+    ///
+    /// @param primary the primary current-block global-motion vector
+    /// @param secondary the secondary current-block global-motion vector
+    /// @param primaryNonTranslation whether the primary global model varies with block position
+    /// @param secondaryNonTranslation whether the secondary global model varies with block position
+    @NotNullByDefault
+    private record ExactSpatialGlobalMotion(
+            MotionVector primary,
+            MotionVector secondary,
+            boolean primaryNonTranslation,
+            boolean secondaryNonTranslation
+    ) {
+        /// Validates the global-motion vectors.
+        private ExactSpatialGlobalMotion {
+            Objects.requireNonNull(primary, "primary");
+            Objects.requireNonNull(secondary, "secondary");
         }
     }
 
@@ -3753,6 +4060,9 @@ public final class BlockNeighborContext {
         /// Whether the stored block is intra-coded.
         private final boolean intra;
 
+        /// Whether the stored block uses same-frame intrabc prediction.
+        private final boolean intrabc;
+
         /// Whether the stored block uses compound inter references.
         private final boolean compoundReference;
 
@@ -3774,6 +4084,9 @@ public final class BlockNeighborContext {
         /// Whether the stored block used any `NEWMV`-carrying inter mode.
         private final boolean usesNewMotionVector;
 
+        /// Whether the stored block selected the all-global inter mode.
+        private final boolean usesGlobalMotionMode;
+
         /// Creates one stored decoded block reused by the bounded spatial scan.
         ///
         /// @param originX4 the block origin X coordinate in tile-relative 4x4 units
@@ -3782,6 +4095,7 @@ public final class BlockNeighborContext {
         /// @param height4 the block height in 4x4 units
         /// @param segmentId the decoded segment identifier
         /// @param intra whether the stored block is intra-coded
+        /// @param intrabc whether the stored block uses same-frame intrabc prediction
         /// @param compoundReference whether the stored block uses compound inter references
         /// @param interIntra whether the stored block blends inter and intra prediction
         /// @param referenceFrame0 the stored primary inter reference in internal LAST..ALTREF order
@@ -3789,6 +4103,7 @@ public final class BlockNeighborContext {
         /// @param motionVector0 the stored primary motion-vector state
         /// @param motionVector1 the stored secondary motion-vector state
         /// @param usesNewMotionVector whether the stored block used any `NEWMV`-carrying inter mode
+        /// @param usesGlobalMotionMode whether the stored block selected the all-global inter mode
         private StoredBlock(
                 int originX4,
                 int originY4,
@@ -3796,13 +4111,15 @@ public final class BlockNeighborContext {
                 int height4,
                 int segmentId,
                 boolean intra,
+                boolean intrabc,
                 boolean compoundReference,
                 boolean interIntra,
                 int referenceFrame0,
                 int referenceFrame1,
                 InterMotionVector motionVector0,
                 InterMotionVector motionVector1,
-                boolean usesNewMotionVector
+                boolean usesNewMotionVector,
+                boolean usesGlobalMotionMode
         ) {
             this.originX4 = originX4;
             this.originY4 = originY4;
@@ -3810,6 +4127,7 @@ public final class BlockNeighborContext {
             this.height4 = height4;
             this.segmentId = segmentId;
             this.intra = intra;
+            this.intrabc = intrabc;
             this.compoundReference = compoundReference;
             this.interIntra = interIntra;
             this.referenceFrame0 = referenceFrame0;
@@ -3817,6 +4135,7 @@ public final class BlockNeighborContext {
             this.motionVector0 = Objects.requireNonNull(motionVector0, "motionVector0");
             this.motionVector1 = Objects.requireNonNull(motionVector1, "motionVector1");
             this.usesNewMotionVector = usesNewMotionVector;
+            this.usesGlobalMotionMode = usesGlobalMotionMode;
         }
 
         /// Returns the block origin X coordinate in tile-relative 4x4 units.
@@ -3859,6 +4178,13 @@ public final class BlockNeighborContext {
         /// @return whether the stored block is intra-coded
         public boolean intra() {
             return intra;
+        }
+
+        /// Returns whether the stored block uses same-frame intrabc prediction.
+        ///
+        /// @return whether the stored block uses same-frame intrabc prediction
+        public boolean intrabc() {
+            return intrabc;
         }
 
         /// Returns whether the stored block uses compound inter references.
@@ -3908,6 +4234,13 @@ public final class BlockNeighborContext {
         /// @return whether the stored block used any `NEWMV`-carrying inter mode
         public boolean usesNewMotionVector() {
             return usesNewMotionVector;
+        }
+
+        /// Returns whether the stored block selected the all-global inter mode.
+        ///
+        /// @return whether the stored block selected the all-global inter mode
+        public boolean usesGlobalMotionMode() {
+            return usesGlobalMotionMode;
         }
     }
 

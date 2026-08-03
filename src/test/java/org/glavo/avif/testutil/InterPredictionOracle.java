@@ -301,6 +301,140 @@ public final class InterPredictionOracle {
         return samples;
     }
 
+    /// Samples one 8-bit rectangular compound-reference predictor with one shared inter filter.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param width the sampled block width in samples
+    /// @param height the sampled block height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param filterMode the interpolation filter used for both directions
+    /// @return one higher-precision compound predictor in row-major order
+    public static int[][] sampleCompoundReferencePlaneBlock(
+            DecodedPlane referencePlane,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter filterMode
+    ) {
+        return sampleCompoundReferencePlaneBlock(
+                referencePlane,
+                width,
+                height,
+                sourceNumeratorX,
+                sourceNumeratorY,
+                denominatorX,
+                denominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                filterMode,
+                filterMode
+        );
+    }
+
+    /// Samples one 8-bit rectangular compound-reference predictor while retaining the AV1
+    /// post-filter fractional bits required by the later compound blend.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param width the sampled block width in samples
+    /// @param height the sampled block height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @return one higher-precision compound predictor in row-major order
+    public static int[][] sampleCompoundReferencePlaneBlock(
+            DecodedPlane referencePlane,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
+    ) {
+        return sampleCompoundReferencePlaneBlock(
+                referencePlane,
+                width,
+                height,
+                sourceNumeratorX,
+                sourceNumeratorY,
+                denominatorX,
+                denominatorY,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                horizontalFilterMode,
+                verticalFilterMode,
+                255
+        );
+    }
+
+    /// Samples one rectangular compound-reference predictor while retaining the AV1 post-filter
+    /// fractional bits required by the later compound blend.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param width the sampled block width in samples
+    /// @param height the sampled block height in samples
+    /// @param sourceNumeratorX the source origin numerator in plane-local sample units
+    /// @param sourceNumeratorY the source origin numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
+    /// @return one higher-precision compound predictor in row-major order
+    public static int[][] sampleCompoundReferencePlaneBlock(
+            DecodedPlane referencePlane,
+            int width,
+            int height,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
+    ) {
+        int[][] samples = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                samples[y][x] = sampleCompoundInterPlaneValue(
+                        referencePlane,
+                        sourceNumeratorX + x * denominatorX,
+                        sourceNumeratorY + y * denominatorY,
+                        denominatorX,
+                        denominatorY,
+                        widthForFilterSelection,
+                        heightForFilterSelection,
+                        horizontalFilterMode,
+                        verticalFilterMode,
+                        maximumSampleValue
+                );
+            }
+        }
+        return samples;
+    }
+
     /// Averages two sampled inter-prediction blocks with the same dimensions.
     ///
     /// @param first the primary sampled block in row-major order
@@ -316,6 +450,135 @@ public final class InterPredictionOracle {
             }
         }
         return averaged;
+    }
+
+    /// Averages two higher-precision compound predictors and applies the normative post-round.
+    ///
+    /// @param first the primary higher-precision predictor in row-major order
+    /// @param second the secondary higher-precision predictor in row-major order
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
+    /// @return one averaged and clipped compound block
+    public static int[][] averageCompoundBlocks(
+            int[][] first,
+            int[][] second,
+            int maximumSampleValue
+    ) {
+        int height = first.length;
+        int width = height == 0 ? 0 : first[0].length;
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        int[][] averaged = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                averaged[y][x] = clamp(
+                        roundShift((long) first[y][x] + second[y][x], 1 + postRoundBits),
+                        0,
+                        maximumSampleValue
+                );
+            }
+        }
+        return averaged;
+    }
+
+    /// Averages two higher-precision 8-bit compound predictors and applies the normative post-round.
+    ///
+    /// @param first the primary higher-precision predictor in row-major order
+    /// @param second the secondary higher-precision predictor in row-major order
+    /// @return one averaged and clipped 8-bit compound block
+    public static int[][] averageCompoundBlocks(int[][] first, int[][] second) {
+        return averageCompoundBlocks(first, second, 255);
+    }
+
+    /// Samples one compound predictor without discarding its post-filter fractional bits.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
+    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
+    /// @param denominatorX the horizontal plane-local denominator
+    /// @param denominatorY the vertical plane-local denominator
+    /// @param widthForFilterSelection the sampled block width used for reduced-width filter selection
+    /// @param heightForFilterSelection the sampled block height used for reduced-width filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
+    /// @return one signed higher-precision compound predictor
+    private static int sampleCompoundInterPlaneValue(
+            DecodedPlane referencePlane,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue
+    ) {
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        if (Math.floorMod(sourceNumeratorX, denominatorX) == 0
+                && Math.floorMod(sourceNumeratorY, denominatorY) == 0) {
+            return referencePlane.sample(
+                    clamp(Math.floorDiv(sourceNumeratorX, denominatorX), 0, referencePlane.width() - 1),
+                    clamp(Math.floorDiv(sourceNumeratorY, denominatorY), 0, referencePlane.height() - 1)
+            ) << postRoundBits;
+        }
+        if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            return bilinearCompoundInterpolateAt(
+                    referencePlane,
+                    sourceNumeratorX,
+                    sourceNumeratorY,
+                    denominatorX,
+                    denominatorY,
+                    maximumSampleValue
+            );
+        }
+        if (!isConcreteInterpolationFilter(horizontalFilterMode)
+                || !isConcreteInterpolationFilter(verticalFilterMode)
+                || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            throw new IllegalArgumentException(
+                    "InterPredictionOracle supports only shared BILINEAR or fixed EIGHT_TAP_* filters per direction"
+            );
+        }
+
+        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
+        int phaseY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
+        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
+        int phaseX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
+        if (phaseX == 0 && phaseY == 0) {
+            return referencePlane.sample(
+                    clamp(sourceX0, 0, referencePlane.width() - 1),
+                    clamp(sourceY0, 0, referencePlane.height() - 1)
+            ) << postRoundBits;
+        }
+
+        int @org.jetbrains.annotations.Nullable [] horizontalFilter = phaseX == 0
+                ? null
+                : selectSubpelFilter(horizontalFilterMode, phaseX, widthForFilterSelection);
+        int @org.jetbrains.annotations.Nullable [] verticalFilter = phaseY == 0
+                ? null
+                : selectSubpelFilter(verticalFilterMode, phaseY, heightForFilterSelection);
+        int firstPassRound = INTER_FILTER_BITS - postRoundBits;
+        if (verticalFilter == null) {
+            return roundShift(horizontalInterpolate(referencePlane, sourceX0, sourceY0, horizontalFilter), firstPassRound);
+        }
+        if (horizontalFilter == null) {
+            return roundShift(verticalInterpolate(referencePlane, sourceX0, sourceY0, verticalFilter), firstPassRound);
+        }
+
+        int[] horizontallyFilteredRows = new int[INTER_FILTER_TAP_COUNT];
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            int sourceY = clamp(sourceY0 + tapIndex - INTER_FILTER_START_OFFSET, 0, referencePlane.height() - 1);
+            horizontallyFilteredRows[tapIndex] = roundShift(
+                    horizontalInterpolate(referencePlane, sourceX0, sourceY, horizontalFilter),
+                    firstPassRound
+            );
+        }
+        long combined = 0;
+        for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+            combined += (long) verticalFilter[tapIndex] * horizontallyFilteredRows[tapIndex];
+        }
+        return roundShift(combined, INTER_FILTER_BITS);
     }
 
     /// Samples one plane-local inter value at one source numerator.
@@ -580,6 +843,48 @@ public final class InterPredictionOracle {
                 0,
                 maximumSampleValue
         );
+    }
+
+    /// Returns one bilinear compound predictor while retaining post-filter fractional bits.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceNumeratorX the source horizontal numerator in plane-local sample units
+    /// @param sourceNumeratorY the source vertical numerator in plane-local sample units
+    /// @param denominatorX the horizontal interpolation denominator
+    /// @param denominatorY the vertical interpolation denominator
+    /// @param maximumSampleValue the maximum legal output sample value for the destination bit depth
+    /// @return one signed higher-precision bilinear predictor
+    private static int bilinearCompoundInterpolateAt(
+            DecodedPlane referencePlane,
+            int sourceNumeratorX,
+            int sourceNumeratorY,
+            int denominatorX,
+            int denominatorY,
+            int maximumSampleValue
+    ) {
+        int sourceY0 = Math.floorDiv(sourceNumeratorY, denominatorY);
+        int fractionY = interpolationPhase(Math.floorMod(sourceNumeratorY, denominatorY), denominatorY);
+        int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
+        int fractionX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
+        int clampedSourceX0 = clamp(sourceX0, 0, referencePlane.width() - 1);
+        int clampedSourceY0 = clamp(sourceY0, 0, referencePlane.height() - 1);
+        int clampedSourceX1 = clamp(sourceX0 + 1, 0, referencePlane.width() - 1);
+        int clampedSourceY1 = clamp(sourceY0 + 1, 0, referencePlane.height() - 1);
+        int topLeft = referencePlane.sample(clampedSourceX0, clampedSourceY0);
+        int topRight = referencePlane.sample(clampedSourceX1, clampedSourceY0);
+        int bottomLeft = referencePlane.sample(clampedSourceX0, clampedSourceY1);
+        int bottomRight = referencePlane.sample(clampedSourceX1, clampedSourceY1);
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        int firstPassRound = 4 - postRoundBits;
+        if (fractionY == 0) {
+            return roundShift(bilinearFilterSum(topLeft, topRight, fractionX), firstPassRound);
+        }
+        if (fractionX == 0) {
+            return roundShift(bilinearFilterSum(topLeft, bottomLeft, fractionY), firstPassRound);
+        }
+        int top = roundShift(bilinearFilterSum(topLeft, topRight, fractionX), firstPassRound);
+        int bottom = roundShift(bilinearFilterSum(bottomLeft, bottomRight, fractionX), firstPassRound);
+        return roundShift(bilinearFilterSum(top, bottom, fractionY), 4);
     }
 
     /// Returns one unnormalized AV1 bilinear-filter sum.

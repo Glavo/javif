@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
+import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.decode.Av1DecoderConfig;
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
@@ -45,6 +46,7 @@ import java.util.Objects;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `CdefApplier`.
 @NotNullByDefault
@@ -105,6 +107,75 @@ final class CdefApplierTest {
         }
     }
 
+    /// Verifies that CDEF reads reconstructed padding inside the aligned 8x8 processing grid.
+    @Test
+    void applyUsesStoredPaddingAtPartialFrameEdge() {
+        short[] baselineSamples = new short[8 * 8];
+        Arrays.fill(baselineSamples, (short) 100);
+        short[] paddedSamples = Arrays.copyOf(baselineSamples, baselineSamples.length);
+        for (int y = 0; y < 8; y++) {
+            paddedSamples[y * 8 + 7] = 104;
+        }
+        DecodedPlanes baselinePlanes = new DecodedPlanes(
+                8,
+                AvifPixelFormat.I400,
+                7,
+                8,
+                7,
+                8,
+                new DecodedPlane(7, 8, 8, baselineSamples),
+                null,
+                null
+        );
+        DecodedPlanes paddedPlanes = new DecodedPlanes(
+                8,
+                AvifPixelFormat.I400,
+                7,
+                8,
+                7,
+                8,
+                new DecodedPlane(7, 8, 8, paddedSamples),
+                null,
+                null
+        );
+        FrameHeader.CdefInfo cdef = new FrameHeader.CdefInfo(6, 0, new int[]{3}, new int[0]);
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                7,
+                8,
+                new FrameHeader.LoopFilterInfo(
+                        new int[]{0, 0},
+                        0,
+                        0,
+                        0,
+                        false,
+                        false,
+                        new int[8],
+                        new int[2]
+                ),
+                cdef,
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        0,
+                        0
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult =
+                PostfilterTestFixtures.createSingleLeafSyntaxResult(frameHeader, 0);
+
+        DecodedPlanes baselineFiltered = new CdefApplier().apply(baselinePlanes, cdef, syntaxDecodeResult);
+        DecodedPlanes paddedFiltered = new CdefApplier().apply(paddedPlanes, cdef, syntaxDecodeResult);
+
+        assertEquals(100, baselineFiltered.lumaPlane().sample(6, 4));
+        assertTrue(paddedFiltered.lumaPlane().sample(6, 4) > baselineFiltered.lumaPlane().sample(6, 4));
+        assertEquals(100, paddedPlanes.lumaPlane().sample(6, 4));
+    }
+
     /// Returns the detected CDEF direction for one 8x8 luma unit.
     ///
     /// @param plane the source luma plane
@@ -119,9 +190,20 @@ final class CdefApplierTest {
                     short[].class,
                     int.class,
                     int.class,
+                    int.class,
+                    int.class,
                     int.class
             );
-            Object direction = detectDirection.invoke(null, plane, plane.samples(), startX, startY, 0);
+            Object direction = detectDirection.invoke(
+                    null,
+                    plane,
+                    plane.samples(),
+                    startX,
+                    startY,
+                    plane.width(),
+                    plane.height(),
+                    0
+            );
             Method directionAccessor = direction.getClass().getDeclaredMethod("direction");
             directionAccessor.setAccessible(true);
             return (int) directionAccessor.invoke(direction);
@@ -164,6 +246,8 @@ final class CdefApplierTest {
                     int.class,
                     int.class,
                     int.class,
+                    int.class,
+                    int.class,
                     strength.getClass(),
                     int.class,
                     int.class,
@@ -179,6 +263,8 @@ final class CdefApplierTest {
                     startY,
                     endX,
                     endY,
+                    plane.width(),
+                    plane.height(),
                     damping,
                     strength,
                     direction,

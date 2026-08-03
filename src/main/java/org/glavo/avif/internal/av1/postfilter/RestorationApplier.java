@@ -201,7 +201,7 @@ public final class RestorationApplier {
     /// @param restoration the frame-level restoration state
     /// @param hasChroma whether chroma planes are present
     /// @return whether any plane has active frame-level restoration
-    private static boolean hasActiveRestoration(FrameHeader.RestorationInfo restoration, boolean hasChroma) {
+    static boolean hasActiveRestoration(FrameHeader.RestorationInfo restoration, boolean hasChroma) {
         FrameHeader.RestorationType[] types = restoration.types();
         return types[0] != FrameHeader.RestorationType.NONE
                 || (hasChroma && (types[1] != FrameHeader.RestorationType.NONE

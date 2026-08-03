@@ -33,13 +33,14 @@ import java.util.Objects;
 ///
 /// The implementation mirrors the dav1d CDEF scalar path at decoded-plane granularity: strength
 /// values are scaled by bit depth, dominant directions are detected from luma 8x8 units, chroma
-/// primary filtering reuses the luma direction, and fully skipped CDEF units are preserved.
+/// primary filtering reuses the luma direction, stored edge padding participates up to the aligned
+/// CDEF processing boundary, and fully skipped CDEF units are preserved.
 @NotNullByDefault
 public final class CdefApplier {
     /// The luma CDEF unit size in samples.
     private static final int CDEF_UNIT_SIZE = 8;
 
-    /// Sentinel used for samples beyond visible frame edges.
+    /// Sentinel used for samples beyond the aligned CDEF processing grid.
     private static final int MISSING_SAMPLE = Integer.MIN_VALUE;
 
     /// Direction-search divisors copied from the AV1 CDEF direction estimator.
@@ -101,6 +102,8 @@ public final class CdefApplier {
                 cdefUnitMap,
                 unitColumns,
                 unitRows,
+                unitColumns * CDEF_UNIT_SIZE,
+                unitRows * CDEF_UNIT_SIZE,
                 decodedPlanes.hasChroma()
         );
 
@@ -276,6 +279,8 @@ public final class CdefApplier {
     /// @param cdefUnitMap the row-major CDEF-unit syntax map
     /// @param unitColumns the luma CDEF-unit column count
     /// @param unitRows the luma CDEF-unit row count
+    /// @param processingWidth the CDEF-grid-aligned luma processing width
+    /// @param processingHeight the CDEF-grid-aligned luma processing height
     /// @param hasChroma whether the frame has chroma planes
     /// @return the row-major luma-derived CDEF direction map
     private static CdefDirectionMap buildDirectionMap(
@@ -285,6 +290,8 @@ public final class CdefApplier {
             CdefUnitMap cdefUnitMap,
             int unitColumns,
             int unitRows,
+            int processingWidth,
+            int processingHeight,
             boolean hasChroma
     ) {
         int[] directions = new int[unitColumns * unitRows];
@@ -308,7 +315,15 @@ public final class CdefApplier {
                 if (!requiresDirection(cdef, cdefUnitMap.cdefIndex(unitIndex), bitDepthShift, hasChroma)) {
                     continue;
                 }
-                CdefDirection direction = detectDirection(lumaPlane, sourceSamples, startX, startY, bitDepthShift);
+                CdefDirection direction = detectDirection(
+                        lumaPlane,
+                        sourceSamples,
+                        startX,
+                        startY,
+                        processingWidth,
+                        processingHeight,
+                        bitDepthShift
+                );
                 directions[unitIndex] = direction.direction();
                 variances[unitIndex] = direction.variance();
             }
@@ -383,16 +398,18 @@ public final class CdefApplier {
         short[] sourceSamples = plane.samples();
         short[] outputSamples = Arrays.copyOf(sourceSamples, sourceSamples.length);
         int maximumSample = (1 << (bitDepthShift + 8)) - 1;
+        int processingWidth = Math.min(unitColumns * unitWidth, plane.stride());
+        int processingHeight = Math.min(unitRows * unitHeight, plane.storageHeight());
         boolean changed = false;
         for (int unitY = 0; unitY < unitRows; unitY++) {
             int planeStartY = unitY * unitHeight;
-            if (planeStartY >= plane.height()) {
+            if (planeStartY >= processingHeight) {
                 continue;
             }
-            int planeEndY = Math.min(plane.height(), planeStartY + unitHeight);
+            int planeEndY = Math.min(processingHeight, planeStartY + unitHeight);
             for (int unitX = 0; unitX < unitColumns; unitX++) {
                 int planeStartX = unitX * unitWidth;
-                if (planeStartX >= plane.width()) {
+                if (planeStartX >= processingWidth) {
                     continue;
                 }
                 int unitIndex = unitY * unitColumns + unitX;
@@ -426,8 +443,10 @@ public final class CdefApplier {
                         outputSamples,
                         planeStartX,
                         planeStartY,
-                        Math.min(plane.width(), planeStartX + unitWidth),
+                        Math.min(processingWidth, planeStartX + unitWidth),
                         planeEndY,
+                        processingWidth,
+                        processingHeight,
                         Math.max(0, damping),
                         decodedStrength,
                         direction,
@@ -478,6 +497,8 @@ public final class CdefApplier {
     /// @param startY the inclusive unit start Y coordinate
     /// @param endX the exclusive unit end X coordinate
     /// @param endY the exclusive unit end Y coordinate
+    /// @param processingWidth the exclusive CDEF-grid processing boundary in X
+    /// @param processingHeight the exclusive CDEF-grid processing boundary in Y
     /// @param damping the strength-adjusted CDEF damping value
     /// @param strength the decoded primary and secondary CDEF strengths
     /// @param direction the luma-derived dominant CDEF direction
@@ -491,6 +512,8 @@ public final class CdefApplier {
             int startY,
             int endX,
             int endY,
+            int processingWidth,
+            int processingHeight,
             int damping,
             CdefStrength strength,
             int direction,
@@ -504,7 +527,7 @@ public final class CdefApplier {
         int secondaryDamping = strength.secondary() > 0
                 ? Math.max(0, damping - floorLog2(strength.secondary()))
                 : 0;
-        boolean clipToNeighborRange = strength.active();
+        boolean clipToNeighborRange = strength.primary() > 0 && strength.secondary() > 0;
 
         for (int y = startY; y < endY; y++) {
             int rowOffset = y * plane.stride();
@@ -517,8 +540,10 @@ public final class CdefApplier {
                     int tap = primaryTap;
                     for (int distanceIndex = 0; distanceIndex < 2; distanceIndex++) {
                         int[] step = FILTER_DIRECTIONS[direction][distanceIndex];
-                        int positive = sampleOrMissing(plane, sourceSamples, x + step[0], y + step[1]);
-                        int negative = sampleOrMissing(plane, sourceSamples, x - step[0], y - step[1]);
+                        int positive = sampleOrMissing(
+                                plane, sourceSamples, x + step[0], y + step[1], processingWidth, processingHeight);
+                        int negative = sampleOrMissing(
+                                plane, sourceSamples, x - step[0], y - step[1], processingWidth, processingHeight);
                         sum += tap * constrainSample(positive, center, strength.primary(), primaryDamping);
                         sum += tap * constrainSample(negative, center, strength.primary(), primaryDamping);
                         if (clipToNeighborRange) {
@@ -537,10 +562,14 @@ public final class CdefApplier {
                         int tap = 2 - distanceIndex;
                         int[] step0 = FILTER_DIRECTIONS[secondaryDirection0][distanceIndex];
                         int[] step1 = FILTER_DIRECTIONS[secondaryDirection1][distanceIndex];
-                        int positive0 = sampleOrMissing(plane, sourceSamples, x + step0[0], y + step0[1]);
-                        int negative0 = sampleOrMissing(plane, sourceSamples, x - step0[0], y - step0[1]);
-                        int positive1 = sampleOrMissing(plane, sourceSamples, x + step1[0], y + step1[1]);
-                        int negative1 = sampleOrMissing(plane, sourceSamples, x - step1[0], y - step1[1]);
+                        int positive0 = sampleOrMissing(
+                                plane, sourceSamples, x + step0[0], y + step0[1], processingWidth, processingHeight);
+                        int negative0 = sampleOrMissing(
+                                plane, sourceSamples, x - step0[0], y - step0[1], processingWidth, processingHeight);
+                        int positive1 = sampleOrMissing(
+                                plane, sourceSamples, x + step1[0], y + step1[1], processingWidth, processingHeight);
+                        int negative1 = sampleOrMissing(
+                                plane, sourceSamples, x - step1[0], y - step1[1], processingWidth, processingHeight);
                         sum += tap * constrainSample(positive0, center, strength.secondary(), secondaryDamping);
                         sum += tap * constrainSample(negative0, center, strength.secondary(), secondaryDamping);
                         sum += tap * constrainSample(positive1, center, strength.secondary(), secondaryDamping);
@@ -568,6 +597,8 @@ public final class CdefApplier {
     /// @param sourceSamples the immutable source samples for this CDEF pass
     /// @param startX the inclusive unit start X coordinate
     /// @param startY the inclusive unit start Y coordinate
+    /// @param processingWidth the CDEF-grid-aligned luma processing width
+    /// @param processingHeight the CDEF-grid-aligned luma processing height
     /// @param bitDepthShift the decoded bit-depth shift from 8-bit samples
     /// @return the dominant direction and its directional variance
     private static CdefDirection detectDirection(
@@ -575,6 +606,8 @@ public final class CdefApplier {
             short[] sourceSamples,
             int startX,
             int startY,
+            int processingWidth,
+            int processingHeight,
             int bitDepthShift
     ) {
         int[][] partialSumHv = new int[2][8];
@@ -583,7 +616,14 @@ public final class CdefApplier {
 
         for (int y = 0; y < CDEF_UNIT_SIZE; y++) {
             for (int x = 0; x < CDEF_UNIT_SIZE; x++) {
-                int sample = sampleClamped(plane, sourceSamples, startX + x, startY + y);
+                int sample = samplePaddedOrClamped(
+                        plane,
+                        sourceSamples,
+                        startX + x,
+                        startY + y,
+                        processingWidth,
+                        processingHeight
+                );
                 int px = (sample >> bitDepthShift) - 128;
                 partialSumDiag[0][y + x] += px;
                 partialSumAlt[0][y + (x >> 1)] += px;
@@ -706,24 +746,42 @@ public final class CdefApplier {
     /// @param sourceSamples the immutable source samples for this CDEF pass
     /// @param x the sample X coordinate
     /// @param y the sample Y coordinate
+    /// @param processingWidth the exclusive CDEF-grid processing boundary in X
+    /// @param processingHeight the exclusive CDEF-grid processing boundary in Y
     /// @return one source sample or `MISSING_SAMPLE`
-    private static int sampleOrMissing(DecodedPlane plane, short[] sourceSamples, int x, int y) {
-        if (x < 0 || x >= plane.width() || y < 0 || y >= plane.height()) {
+    private static int sampleOrMissing(
+            DecodedPlane plane,
+            short[] sourceSamples,
+            int x,
+            int y,
+            int processingWidth,
+            int processingHeight
+    ) {
+        if (x < 0 || x >= processingWidth || y < 0 || y >= processingHeight) {
             return MISSING_SAMPLE;
         }
         return sourceSamples[y * plane.stride() + x] & 0xFFFF;
     }
 
-    /// Returns one source sample with edge extension for CDEF direction estimation.
+    /// Returns one stored source sample with processing-boundary extension for direction estimation.
     ///
     /// @param plane the source plane metadata
     /// @param sourceSamples the immutable source samples for this CDEF pass
     /// @param x the unclamped X coordinate
     /// @param y the unclamped Y coordinate
+    /// @param processingWidth the available CDEF-grid processing width
+    /// @param processingHeight the available CDEF-grid processing height
     /// @return one edge-extended source sample
-    private static int sampleClamped(DecodedPlane plane, short[] sourceSamples, int x, int y) {
-        int clampedX = clamp(x, 0, plane.width() - 1);
-        int clampedY = clamp(y, 0, plane.height() - 1);
+    private static int samplePaddedOrClamped(
+            DecodedPlane plane,
+            short[] sourceSamples,
+            int x,
+            int y,
+            int processingWidth,
+            int processingHeight
+    ) {
+        int clampedX = clamp(x, 0, processingWidth - 1);
+        int clampedY = clamp(y, 0, processingHeight - 1);
         return sourceSamples[clampedY * plane.stride() + clampedX] & 0xFFFF;
     }
 

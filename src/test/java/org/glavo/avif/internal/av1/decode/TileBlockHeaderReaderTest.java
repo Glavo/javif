@@ -25,6 +25,7 @@ import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
+import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -280,6 +281,8 @@ final class TileBlockHeaderReaderTest {
         CdfContext oracleCdf = CdfContext.createDefault();
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkipMode = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipModeCdf(0));
+        int expectedRange = oracleDecoder.range();
+        int expectedCount = oracleDecoder.count();
         boolean skipIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
         boolean intraIfConsumed = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntraCdf(0));
         assertTrue(expectedSkipMode);
@@ -297,6 +300,7 @@ final class TileBlockHeaderReaderTest {
         assertEquals(1, header.referenceFrame1());
         assertNull(header.singleInterMode());
         assertEquals(CompoundInterPredictionMode.NEARESTMV_NEARESTMV, header.compoundInterMode());
+        assertEquals(CompoundPredictionType.AVERAGE, header.compoundPredictionType());
         assertEquals(0, header.drlIndex());
         assertEquals(InterMotionVector.resolved(MotionVector.zero()), header.motionVector0());
         assertEquals(InterMotionVector.resolved(MotionVector.zero()), header.motionVector1());
@@ -306,6 +310,8 @@ final class TileBlockHeaderReaderTest {
         assertEquals(0, header.uvAngle());
         assertEquals(0, header.cflAlphaU());
         assertEquals(0, header.cflAlphaV());
+        assertEquals(expectedRange, tileContext.msacDecoder().range());
+        assertEquals(expectedCount, tileContext.msacDecoder().count());
     }
 
     /// Verifies that switchable compound-reference syntax decodes a compound reference pair.
@@ -495,7 +501,7 @@ final class TileBlockHeaderReaderTest {
         assertEquals(0, header.cflAlphaV());
     }
 
-    /// Verifies that segment-level global motion exposes a fixed `GLOBALMV` single-reference mode.
+    /// Verifies that segment-level global motion forces inter syntax without consuming `is_inter`.
     @Test
     void readsGlobalMotionSegmentBlockHeader() {
         byte[] payload = findPayloadForInterBlockWithoutSkipOrIntra();
@@ -529,6 +535,10 @@ final class TileBlockHeaderReaderTest {
         assertNull(header.motionVector1());
         assertNull(header.yMode());
         assertNull(header.uvMode());
+        assertArrayEquals(
+                CdfContext.createDefault().mutableIntraCdf(0),
+                tileContext.cdfContext().mutableIntraCdf(0)
+        );
     }
 
     /// Verifies that segment-level `GLOBALMV` evaluates translation parameters and integer precision.
@@ -737,16 +747,21 @@ final class TileBlockHeaderReaderTest {
         MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
         boolean expectedSkip = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableSkipCdf(0));
         boolean expectedUseIntrabc = oracleDecoder.decodeBooleanAdapt(oracleCdf.mutableIntrabcCdf());
+        BlockPosition position = new BlockPosition(0, 0);
+        MotionVector defaultDisplacementVector = new MotionVector(
+                0,
+                -(tileContext.superblockSize() + 256) * 8
+        );
         MotionVector expectedMotionVector = decodeMotionVectorResidual(
                 oracleDecoder,
                 oracleCdf,
-                MotionVector.zero(),
+                defaultDisplacementVector,
                 tileContext.frameHeader().allowHighPrecisionMotionVectors(),
                 tileContext.frameHeader().forceIntegerMotionVectors()
         );
 
         assertTrue(expectedUseIntrabc);
-        TileBlockHeaderReader.BlockHeader header = reader.read(new BlockPosition(0, 0), BlockSize.SIZE_8X8, neighborContext);
+        TileBlockHeaderReader.BlockHeader header = reader.read(position, BlockSize.SIZE_8X8, neighborContext);
 
         assertEquals(expectedSkip, header.skip());
         assertFalse(header.intra());
@@ -923,17 +938,23 @@ final class TileBlockHeaderReaderTest {
         assertEquals(expectedCflAlphaV, header.cflAlphaV());
     }
 
-    /// Verifies that preskip temporal segmentation prediction can reuse the neighbor-predicted segment id.
+    /// Verifies that preskip temporal segmentation prediction reads the segment id from the primary
+    /// reference map rather than the current frame's spatial predictor.
     @Test
     void readsTemporallyPredictedPreskipSegmentId() {
         byte[] payload = findPayloadForTemporalPreskipPrediction();
         FrameHeader.SegmentData[] segments = defaultSegments();
-        segments[1] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, true, false);
-        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(true, true, 1, segments, new boolean[8], new int[8]);
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        segments[2] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, true, false);
+        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(true, true, 2, segments, new boolean[8], new int[8]);
+        BlockPosition position = new BlockPosition(4, 4);
+        TileDecodeContext tileContext = withReferenceSegmentId(
+                createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false),
+                position,
+                BlockSize.SIZE_8X8,
+                2
+        );
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-        BlockPosition position = new BlockPosition(4, 4);
         seedTemporalSegmentPrediction(neighborContext, 1);
 
         assertEquals(2, neighborContext.segmentPredictionContext(position));
@@ -950,7 +971,7 @@ final class TileBlockHeaderReaderTest {
         assertTrue(header.intra());
         assertFalse(header.useIntrabc());
         assertTrue(header.segmentPredicted());
-        assertEquals(1, header.segmentId());
+        assertEquals(2, header.segmentId());
     }
 
     /// Verifies that postskip segmentation uses the per-segment lossless state to disable CFL.
@@ -1004,15 +1025,21 @@ final class TileBlockHeaderReaderTest {
         assertEquals(0, header.cflAlphaV());
     }
 
-    /// Verifies that postskip temporal segmentation prediction can reuse the neighbor-predicted segment id.
+    /// Verifies that postskip temporal segmentation prediction reads the segment id from the primary
+    /// reference map rather than the current frame's spatial predictor.
     @Test
     void readsTemporallyPredictedPostskipSegmentId() {
         byte[] payload = findPayloadForTemporalPostskipPrediction();
-        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, true, 1, defaultSegments(), new boolean[8], new int[8]);
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, true, 2, defaultSegments(), new boolean[8], new int[8]);
+        BlockPosition position = new BlockPosition(4, 4);
+        TileDecodeContext tileContext = withReferenceSegmentId(
+                createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false),
+                position,
+                BlockSize.SIZE_8X8,
+                2
+        );
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
-        BlockPosition position = new BlockPosition(4, 4);
         seedTemporalSegmentPrediction(neighborContext, 1);
 
         assertEquals(2, neighborContext.segmentPredictionContext(position));
@@ -1031,7 +1058,7 @@ final class TileBlockHeaderReaderTest {
         assertTrue(header.intra());
         assertFalse(header.useIntrabc());
         assertTrue(header.segmentPredicted());
-        assertEquals(1, header.segmentId());
+        assertEquals(2, header.segmentId());
     }
 
     /// Verifies that skipped postskip segmentation reuses the predicted segment id without consuming
@@ -2262,7 +2289,7 @@ final class TileBlockHeaderReaderTest {
     /// @param segmentId the predicted segment identifier to seed
     private static void seedTemporalSegmentPrediction(BlockNeighborContext neighborContext, int segmentId) {
         neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(4, 0),
+                new BlockPosition(4, 2),
                 BlockSize.SIZE_8X8,
                 true,
                 false,
@@ -2290,7 +2317,7 @@ final class TileBlockHeaderReaderTest {
                 0
         ));
         neighborContext.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
-                new BlockPosition(0, 4),
+                new BlockPosition(2, 4),
                 BlockSize.SIZE_8X8,
                 true,
                 false,
@@ -2317,6 +2344,31 @@ final class TileBlockHeaderReaderTest {
                 0,
                 0
         ));
+    }
+
+    /// Recreates one tile context with a populated primary-reference segment-id footprint.
+    ///
+    /// @param baseContext the context whose frame assembly and decode state are reused
+    /// @param position the local tile-relative block origin whose reference footprint is populated
+    /// @param size the block size whose reference footprint is populated
+    /// @param segmentId the primary-reference segment identifier to store
+    /// @return a fresh tile context with separate current and primary-reference segment-id maps
+    private static TileDecodeContext withReferenceSegmentId(
+            TileDecodeContext baseContext,
+            BlockPosition position,
+            BlockSize size,
+            int segmentId
+    ) {
+        SegmentIdMap referenceMap = SegmentIdMap.create(baseContext.assembly());
+        referenceMap.fill(position.x4(), position.y4(), size.width4(), size.height4(), segmentId);
+        return TileDecodeContext.create(
+                baseContext.assembly(),
+                baseContext.tileIndex(),
+                baseContext.cdfContext(),
+                baseContext.referenceMotionVectorProjection(),
+                SegmentIdMap.create(baseContext.assembly()),
+                referenceMap
+        );
     }
 
     /// Seeds one neighbor context so the block at `(4, 4)` observes a single forward reference

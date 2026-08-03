@@ -107,6 +107,28 @@ final class PostfilterTestFixtures {
             FrameHeader.RestorationInfo restoration,
             FrameHeader.FilmGrainParams filmGrain
     ) {
+        return createFrameHeader(pixelFormat, 8, 8, loopFilter, cdef, restoration, filmGrain);
+    }
+
+    /// Creates one minimal frame header with caller-supplied dimensions and postfilter state.
+    ///
+    /// @param pixelFormat the decoded pixel format
+    /// @param width the coded frame width in pixels
+    /// @param height the coded frame height in pixels
+    /// @param loopFilter the loop-filter state
+    /// @param cdef the CDEF state
+    /// @param restoration the restoration state
+    /// @param filmGrain the normalized film-grain state
+    /// @return one minimal frame header with caller-supplied dimensions and postfilter state
+    static FrameHeader createFrameHeader(
+            AvifPixelFormat pixelFormat,
+            int width,
+            int height,
+            FrameHeader.LoopFilterInfo loopFilter,
+            FrameHeader.CdefInfo cdef,
+            FrameHeader.RestorationInfo restoration,
+            FrameHeader.FilmGrainParams filmGrain
+    ) {
         return new FrameHeader(
                 0,
                 0,
@@ -125,7 +147,7 @@ final class PostfilterTestFixtures {
                 7,
                 0,
                 0xFF,
-                new FrameHeader.FrameSize(8, 8, 8, 8, 8),
+                new FrameHeader.FrameSize(width, height, width, width, height),
                 new FrameHeader.SuperResolutionInfo(false, 8),
                 false,
                 true,

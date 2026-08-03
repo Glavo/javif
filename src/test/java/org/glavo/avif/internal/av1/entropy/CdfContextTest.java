@@ -136,6 +136,37 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{5881, 0}, CdfContext.createDefault(121).mutableCoefficientSkipCdf(0, 0));
     }
 
+    /// Verifies that frame-inheritance copies preserve thresholds and reset every table shape's count slot.
+    @Test
+    void copyWithResetSymbolCountersPreservesThresholdsAndClearsCounts() {
+        CdfContext source = CdfContext.createDefault();
+        int[] skipCdf = source.mutableSkipCdf(0);
+        int[] singleReferenceCdf = source.mutableSingleReferenceCdf(0, 0);
+        int[] endOfBlockPrefixCdf = source.mutableEndOfBlockPrefixCdf(0, false, false);
+        int[] interTransformTypeCdf = source.mutableInterTransformTypeSet2Cdf();
+        skipCdf[skipCdf.length - 1] = 32;
+        singleReferenceCdf[singleReferenceCdf.length - 1] = 17;
+        endOfBlockPrefixCdf[endOfBlockPrefixCdf.length - 1] = 9;
+        interTransformTypeCdf[interTransformTypeCdf.length - 1] = 5;
+
+        CdfContext copy = source.copyWithResetSymbolCounters();
+
+        assertArrayEquals(new int[]{1097, 0}, copy.mutableSkipCdf(0));
+        assertArrayEquals(new int[]{27871, 0}, copy.mutableSingleReferenceCdf(0, 0));
+        assertArrayEquals(
+                new int[]{31928, 31729, 30788, 27873, 0},
+                copy.mutableEndOfBlockPrefixCdf(0, false, false)
+        );
+        assertArrayEquals(
+                new int[]{31998, 30347, 27543, 19861, 16949, 13841, 11207, 8679, 6173, 4242, 2239, 0},
+                copy.mutableInterTransformTypeSet2Cdf()
+        );
+        assertEquals(32, skipCdf[skipCdf.length - 1]);
+        assertEquals(17, singleReferenceCdf[singleReferenceCdf.length - 1]);
+        assertEquals(9, endOfBlockPrefixCdf[endOfBlockPrefixCdf.length - 1]);
+        assertEquals(5, interTransformTypeCdf[interTransformTypeCdf.length - 1]);
+    }
+
     /// Verifies that copying the context deep-copies all mutable tables.
     @Test
     void copyDeepCopiesMutableTables() {

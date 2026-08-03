@@ -282,14 +282,26 @@ public final class FrameSyntaxDecodeResult {
         return finalTileCdfContexts[checkedTileIndex(tileIndex)].copy();
     }
 
-    /// Returns the final CDF context selected by `context_update_tile_id`.
+    /// Returns the raw final CDF context selected by `context_update_tile_id`.
     ///
-    /// This is the single frame context saved for later `primary_ref_frame` inheritance when the
-    /// frame-end CDF update is enabled.
+    /// Unlike [#savedFrameCdfContext()], the returned tile-local snapshot retains the adaptive-symbol
+    /// counters accumulated while decoding the selected tile.
     ///
-    /// @return a snapshot of the selected frame-end CDF context
+    /// @return a snapshot of the selected raw tile-final CDF context
     public CdfContext contextUpdateTileCdfContext() {
         return finalTileCdfContext(assembly.frameHeader().tiling().updateTileIndex());
+    }
+
+    /// Returns the frame CDF context saved for later `primary_ref_frame` inheritance.
+    ///
+    /// The context is selected by `context_update_tile_id`. Its thresholds retain the selected
+    /// tile's final values, while every adaptive-symbol counter is reset as required at the frame
+    /// context update boundary. The returned context is independent of this result.
+    ///
+    /// @return an independent inheritable frame CDF context
+    public CdfContext savedFrameCdfContext() {
+        return finalTileCdfContexts[assembly.frameHeader().tiling().updateTileIndex()]
+                .copyWithResetSymbolCounters();
     }
 
     /// Returns a copy of this structural frame-decode result with replaced final tile-local CDF contexts.

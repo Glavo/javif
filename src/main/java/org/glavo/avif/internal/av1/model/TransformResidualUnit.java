@@ -43,10 +43,10 @@ public final class TransformResidualUnit {
     /// The signed transform-domain coefficients in natural raster order.
     private final int @Unmodifiable [] coefficients;
 
-    /// The exact visible residual width in pixels that should be written back into the plane.
+    /// The exact portion of the residual width that lies inside the coded frame or tile boundary.
     private final int visibleWidthPixels;
 
-    /// The exact visible residual height in pixels that should be written back into the plane.
+    /// The exact portion of the residual height that lies inside the coded frame or tile boundary.
     private final int visibleHeightPixels;
 
     /// The coefficient-context byte written back to neighbor state.
@@ -59,8 +59,8 @@ public final class TransformResidualUnit {
     /// @param transformType the transform type used by this residual unit
     /// @param endOfBlockIndex the scan index of the last non-zero coefficient, or `-1` for all-zero units
     /// @param coefficients the signed transform-domain coefficients in natural raster order
-    /// @param visibleWidthPixels the exact visible residual width in pixels that should be written back into the plane
-    /// @param visibleHeightPixels the exact visible residual height in pixels that should be written back into the plane
+    /// @param visibleWidthPixels the exact portion of the residual width inside the coded frame or tile boundary
+    /// @param visibleHeightPixels the exact portion of the residual height inside the coded frame or tile boundary
     /// @param coefficientContextByte the coefficient-context byte written back to neighbor state
     public TransformResidualUnit(
             BlockPosition position,
@@ -110,8 +110,8 @@ public final class TransformResidualUnit {
     /// @param size the transform size used by this residual unit
     /// @param endOfBlockIndex the scan index of the last non-zero coefficient, or `-1` for all-zero units
     /// @param coefficients the signed transform-domain coefficients in natural raster order
-    /// @param visibleWidthPixels the exact visible residual width in pixels that should be written back into the plane
-    /// @param visibleHeightPixels the exact visible residual height in pixels that should be written back into the plane
+    /// @param visibleWidthPixels the exact portion of the residual width inside the coded frame or tile boundary
+    /// @param visibleHeightPixels the exact portion of the residual height inside the coded frame or tile boundary
     /// @param coefficientContextByte the coefficient-context byte written back to neighbor state
     public TransformResidualUnit(
             BlockPosition position,
@@ -251,16 +251,16 @@ public final class TransformResidualUnit {
         return Arrays.copyOf(coefficients, coefficients.length);
     }
 
-    /// Returns the exact visible residual width in pixels that should be written back into the plane.
+    /// Returns the exact portion of the residual width inside the coded frame or tile boundary.
     ///
-    /// @return the exact visible residual width in pixels that should be written back into the plane
+    /// @return the exact visible residual width in pixels
     public int visibleWidthPixels() {
         return visibleWidthPixels;
     }
 
-    /// Returns the exact visible residual height in pixels that should be written back into the plane.
+    /// Returns the exact portion of the residual height inside the coded frame or tile boundary.
     ///
-    /// @return the exact visible residual height in pixels that should be written back into the plane
+    /// @return the exact visible residual height in pixels
     public int visibleHeightPixels() {
         return visibleHeightPixels;
     }

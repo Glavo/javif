@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.BlockSize;
+import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.CompoundPredictionType;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
@@ -49,8 +50,8 @@ import java.util.Objects;
 ///
 /// Reconstruction supports AV1's 8-, 10-, and 12-bit monochrome and 4:2:0, 4:2:2, and 4:4:4
 /// layouts. The pipeline covers intra, inter, compound, inter-intra, `intrabc`, OBMC, warped-motion,
-/// palette, residual, super-resolution, and stored-reference prediction paths before frame-level
-/// postprocessing is applied by the caller.
+/// palette, residual, and stored-reference prediction paths in the coded frame domain before
+/// frame-level filtering and super-resolution are applied by the caller.
 @NotNullByDefault
 public final class FrameReconstructor {
     /// The number of coefficients in one 8-tap interpolation kernel.
@@ -77,36 +78,12 @@ public final class FrameReconstructor {
     /// The fixed-point precision of scaled inter-prediction source coordinates.
     private static final int SCALED_INTER_SUBPEL_BITS = 10;
 
+    /// The largest luma block dimension permitted for inter-intra prediction.
+    private static final int INTER_INTRA_MAX_BLOCK_DIMENSION = 32;
+
     /// The identity reference geometry used by same-frame `intrabc` prediction.
     private static final ReferenceScale IDENTITY_REFERENCE_SCALE =
             new ReferenceScale(REFERENCE_SCALE_IDENTITY, REFERENCE_SCALE_IDENTITY, false);
-
-    /// The number of coefficients in one normative super-resolution filter.
-    private static final int SUPERRES_FILTER_TAP_COUNT = 8;
-
-    /// The AV1 normative super-resolution filter normalization shift.
-    private static final int SUPERRES_FILTER_BITS = 7;
-
-    /// The number of AV1 super-resolution fractional phases.
-    private static final int SUPERRES_SUBPEL_BITS = 6;
-
-    /// The mask for one AV1 super-resolution fractional phase.
-    private static final int SUPERRES_SUBPEL_MASK = (1 << SUPERRES_SUBPEL_BITS) - 1;
-
-    /// The fixed-point precision used by AV1 super-resolution coordinate stepping.
-    private static final int SUPERRES_SCALE_SUBPEL_BITS = 14;
-
-    /// The mask for one AV1 super-resolution fixed-point coordinate.
-    private static final int SUPERRES_SCALE_SUBPEL_MASK = (1 << SUPERRES_SCALE_SUBPEL_BITS) - 1;
-
-    /// The extra fixed-point bits above the normative super-resolution phase precision.
-    private static final int SUPERRES_SCALE_EXTRA_BITS = SUPERRES_SCALE_SUBPEL_BITS - SUPERRES_SUBPEL_BITS;
-
-    /// The AV1 half-phase offset used when deriving the first super-resolution sample position.
-    private static final int SUPERRES_SCALE_EXTRA_OFFSET = 1 << (SUPERRES_SCALE_EXTRA_BITS - 1);
-
-    /// The signed source-sample offset of the first normative super-resolution tap.
-    private static final int SUPERRES_FILTER_START_OFFSET = SUPERRES_FILTER_TAP_COUNT / 2 - 1;
 
     /// The AV1 OBMC blend masks indexed by overlap length `1, 2, 4, 8, 16, 32, 64`.
     private static final int @Unmodifiable [] @Unmodifiable [] OBMC_MASKS = {
@@ -147,6 +124,13 @@ public final class FrameReconstructor {
             int chromaEndX,
             int chromaEndY
     ) {
+    }
+
+    /// Subsampled luma footprint populated for one CFL block before edge padding.
+    ///
+    /// @param width the populated chroma-domain width
+    /// @param height the populated chroma-domain height
+    private record CflStoredSize(int width, int height) {
     }
 
     /// AV1 fixed-point scale factors for one stored reference surface.
@@ -258,74 +242,6 @@ public final class FrameReconstructor {
             {0, 0, 1, 17, 31, 15, 0, 0}
     };
 
-    /// The AV1 normative 64-phase horizontal super-resolution filters.
-    private static final int @Unmodifiable [] @Unmodifiable [] SUPERRES_FILTERS = {
-            {0, 0, 0, 128, 0, 0, 0, 0},
-            {0, 0, -1, 128, 2, -1, 0, 0},
-            {0, 1, -3, 127, 4, -2, 1, 0},
-            {0, 1, -4, 127, 6, -3, 1, 0},
-            {0, 2, -6, 126, 8, -3, 1, 0},
-            {0, 2, -7, 125, 11, -4, 1, 0},
-            {-1, 2, -8, 125, 13, -5, 2, 0},
-            {-1, 3, -9, 124, 15, -6, 2, 0},
-            {-1, 3, -10, 123, 18, -6, 2, -1},
-            {-1, 3, -11, 122, 20, -7, 3, -1},
-            {-1, 4, -12, 121, 22, -8, 3, -1},
-            {-1, 4, -13, 120, 25, -9, 3, -1},
-            {-1, 4, -14, 118, 28, -9, 3, -1},
-            {-1, 4, -15, 117, 30, -10, 4, -1},
-            {-1, 5, -16, 116, 32, -11, 4, -1},
-            {-1, 5, -16, 114, 35, -12, 4, -1},
-            {-1, 5, -17, 112, 38, -12, 4, -1},
-            {-1, 5, -18, 111, 40, -13, 5, -1},
-            {-1, 5, -18, 109, 43, -14, 5, -1},
-            {-1, 6, -19, 107, 45, -14, 5, -1},
-            {-1, 6, -19, 105, 48, -15, 5, -1},
-            {-1, 6, -19, 103, 51, -16, 5, -1},
-            {-1, 6, -20, 101, 53, -16, 6, -1},
-            {-1, 6, -20, 99, 56, -17, 6, -1},
-            {-1, 6, -20, 97, 58, -17, 6, -1},
-            {-1, 6, -20, 95, 61, -18, 6, -1},
-            {-2, 7, -20, 93, 64, -18, 6, -2},
-            {-2, 7, -20, 91, 66, -19, 6, -1},
-            {-2, 7, -20, 88, 69, -19, 6, -1},
-            {-2, 7, -20, 86, 71, -19, 6, -1},
-            {-2, 7, -20, 84, 74, -20, 7, -2},
-            {-2, 7, -20, 81, 76, -20, 7, -1},
-            {-2, 7, -20, 79, 79, -20, 7, -2},
-            {-1, 7, -20, 76, 81, -20, 7, -2},
-            {-2, 7, -20, 74, 84, -20, 7, -2},
-            {-1, 6, -19, 71, 86, -20, 7, -2},
-            {-1, 6, -19, 69, 88, -20, 7, -2},
-            {-1, 6, -19, 66, 91, -20, 7, -2},
-            {-2, 6, -18, 64, 93, -20, 7, -2},
-            {-1, 6, -18, 61, 95, -20, 6, -1},
-            {-1, 6, -17, 58, 97, -20, 6, -1},
-            {-1, 6, -17, 56, 99, -20, 6, -1},
-            {-1, 6, -16, 53, 101, -20, 6, -1},
-            {-1, 5, -16, 51, 103, -19, 6, -1},
-            {-1, 5, -15, 48, 105, -19, 6, -1},
-            {-1, 5, -14, 45, 107, -19, 6, -1},
-            {-1, 5, -14, 43, 109, -18, 5, -1},
-            {-1, 5, -13, 40, 111, -18, 5, -1},
-            {-1, 4, -12, 38, 112, -17, 5, -1},
-            {-1, 4, -12, 35, 114, -16, 5, -1},
-            {-1, 4, -11, 32, 116, -16, 5, -1},
-            {-1, 4, -10, 30, 117, -15, 4, -1},
-            {-1, 3, -9, 28, 118, -14, 4, -1},
-            {-1, 3, -9, 25, 120, -13, 4, -1},
-            {-1, 3, -8, 22, 121, -12, 4, -1},
-            {-1, 3, -7, 20, 122, -11, 3, -1},
-            {-1, 2, -6, 18, 123, -10, 3, -1},
-            {0, 2, -6, 15, 124, -9, 3, -1},
-            {0, 2, -5, 13, 125, -8, 2, -1},
-            {0, 1, -4, 11, 125, -7, 2, 0},
-            {0, 1, -3, 8, 126, -6, 2, 0},
-            {0, 1, -3, 6, 127, -4, 1, 0},
-            {0, 1, -2, 4, 127, -3, 1, 0},
-            {0, 0, -1, 2, 128, -1, 0, 0}
-    };
-
     /// Reconstructs one supported structural frame result into decoded planes.
     ///
     /// @param syntaxDecodeResult the structural frame result to reconstruct
@@ -385,8 +301,8 @@ public final class FrameReconstructor {
                     assembly,
                     tileIndex,
                     pixelFormat,
-                    alignedLumaWidth,
-                    alignedLumaHeight
+                    alignedFrameBoundaryDimension(frameSize.codedWidth()),
+                    alignedFrameBoundaryDimension(frameSize.height())
             );
             TilePartitionTreeReader.Node[] tileRoots = tileRootsByTile[tileIndex];
             for (TilePartitionTreeReader.Node root : tileRoots) {
@@ -414,17 +330,6 @@ public final class FrameReconstructor {
                 ? chromaVPlane.toDecodedPlane(chromaWidth(pixelFormat, frameSize.codedWidth()), chromaHeight(pixelFormat, frameSize.height()))
                 : null;
 
-        if (frameHeader.superResolution().enabled()) {
-            return applySuperResolution(
-                    sequenceHeader.colorConfig().bitDepth(),
-                    pixelFormat,
-                    frameSize,
-                    decodedLumaPlane,
-                    decodedChromaUPlane,
-                    decodedChromaVPlane
-            );
-        }
-
         return new DecodedPlanes(
                 sequenceHeader.colorConfig().bitDepth(),
                 pixelFormat,
@@ -443,8 +348,8 @@ public final class FrameReconstructor {
     /// @param assembly the frame assembly that owns tile geometry
     /// @param tileIndex the zero-based tile index in frame order
     /// @param pixelFormat the active decoded chroma layout
-    /// @param lumaWidth the internal luma plane width
-    /// @param lumaHeight the internal luma plane height
+    /// @param lumaWidth the MI-grid-aligned luma frame width
+    /// @param lumaHeight the MI-grid-aligned luma frame height
     /// @return the sample boundaries for one frame tile
     private static TileSampleBounds tileSampleBounds(
             FrameAssembly assembly,
@@ -564,11 +469,20 @@ public final class FrameReconstructor {
         };
     }
 
-    /// Returns an AV1 luma dimension rounded up to the decoder's 8-pixel frame buffer grid.
+    /// Returns an AV1 luma dimension rounded up far enough to hold a complete edge inter-intra
+    /// predictor.
     ///
     /// @param dimension the uncropped luma dimension in samples
-    /// @return the dimension rounded up to a multiple of 8 samples
+    /// @return the dimension rounded up to a multiple of 32 samples
     private static int alignedLumaDimension(int dimension) {
+        return (dimension + INTER_INTRA_MAX_BLOCK_DIMENSION - 1) & -INTER_INTRA_MAX_BLOCK_DIMENSION;
+    }
+
+    /// Returns the luma boundary represented by the AV1 frame MI grid.
+    ///
+    /// @param dimension the uncropped luma dimension in samples
+    /// @return the dimension rounded up to the eight-sample MI-grid boundary
+    private static int alignedFrameBoundaryDimension(int dimension) {
         return (dimension + 7) & ~7;
     }
 
@@ -595,61 +509,6 @@ public final class FrameReconstructor {
             case I400 -> 0;
             case I420 -> (lumaHeight + 1) >> 1;
             case I422, I444 -> lumaHeight;
-        };
-    }
-
-    /// Applies normative AV1 horizontal super-resolution to one reconstructed frame.
-    ///
-    /// The pass runs after reconstruction has populated coded-domain planes. The returned
-    /// `DecodedPlanes` expose the post-super-resolution plane widths as their coded dimensions so
-    /// stored reference surfaces live in the AV1 post-super-resolution domain.
-    ///
-    /// @param bitDepth the decoded sample bit depth
-    /// @param pixelFormat the active decoded chroma layout
-    /// @param frameSize the frame dimensions and render size
-    /// @param lumaPlane the reconstructed coded-width luma plane
-    /// @param chromaUPlane the reconstructed coded-width chroma U plane, or `null`
-    /// @param chromaVPlane the reconstructed coded-width chroma V plane, or `null`
-    /// @return one decoded-plane snapshot in the post-super-resolution domain
-    private static DecodedPlanes applySuperResolution(
-            int bitDepth,
-            AvifPixelFormat pixelFormat,
-            FrameHeader.FrameSize frameSize,
-            DecodedPlane lumaPlane,
-            @Nullable DecodedPlane chromaUPlane,
-            @Nullable DecodedPlane chromaVPlane
-    ) {
-        int upscaledWidth = frameSize.upscaledWidth();
-        DecodedPlane upscaledLumaPlane = upscalePlaneHorizontally(lumaPlane, upscaledWidth, bitDepth);
-        @Nullable DecodedPlane upscaledChromaUPlane = chromaUPlane != null
-                ? upscalePlaneHorizontally(chromaUPlane, upscaledChromaWidth(pixelFormat, upscaledWidth), bitDepth)
-                : null;
-        @Nullable DecodedPlane upscaledChromaVPlane = chromaVPlane != null
-                ? upscalePlaneHorizontally(chromaVPlane, upscaledChromaWidth(pixelFormat, upscaledWidth), bitDepth)
-                : null;
-        return new DecodedPlanes(
-                bitDepth,
-                pixelFormat,
-                upscaledWidth,
-                frameSize.height(),
-                frameSize.renderWidth(),
-                frameSize.renderHeight(),
-                upscaledLumaPlane,
-                upscaledChromaUPlane,
-                upscaledChromaVPlane
-        );
-    }
-
-    /// Returns the post-super-resolution chroma width for one pixel format.
-    ///
-    /// @param pixelFormat the active decoded chroma layout
-    /// @param upscaledLumaWidth the post-super-resolution luma width
-    /// @return the post-super-resolution chroma width for one pixel format
-    private static int upscaledChromaWidth(AvifPixelFormat pixelFormat, int upscaledLumaWidth) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420, I422 -> (upscaledLumaWidth + 1) >> 1;
-            case I444 -> upscaledLumaWidth;
         };
     }
 
@@ -813,89 +672,6 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Upscales one decoded plane horizontally with the normative AV1 super-resolution filter.
-    ///
-    /// @param plane the decoded plane to upscale
-    /// @param targetWidth the post-upscale plane width
-    /// @param bitDepth the decoded sample bit depth
-    /// @return one horizontally upscaled decoded plane
-    private static DecodedPlane upscalePlaneHorizontally(
-            DecodedPlane plane,
-            int targetWidth,
-            int bitDepth
-    ) {
-        DecodedPlane checkedPlane = Objects.requireNonNull(plane, "plane");
-        if (targetWidth <= 0) {
-            throw new IllegalArgumentException("targetWidth <= 0: " + targetWidth);
-        }
-        if (targetWidth == checkedPlane.width()) {
-            return checkedPlane;
-        }
-        if (targetWidth < checkedPlane.width()) {
-            throw new IllegalArgumentException(
-                    "targetWidth is smaller than the source width: " + targetWidth + " < " + checkedPlane.width()
-            );
-        }
-
-        short[] sourceSamples = checkedPlane.samples();
-        short[] upscaledSamples = new short[targetWidth * checkedPlane.height()];
-        int sourceWidth = checkedPlane.width();
-        int sourceStride = checkedPlane.stride();
-        int maximumSample = (1 << bitDepth) - 1;
-        int step = upscaleConvolveStep(sourceWidth, targetWidth);
-        int firstPosition = upscaleConvolveInitialPosition(sourceWidth, targetWidth, step);
-
-        for (int y = 0; y < checkedPlane.height(); y++) {
-            int sourceRowOffset = y * sourceStride;
-            int upscaledRowOffset = y * targetWidth;
-            int position = firstPosition;
-            for (int x = 0; x < targetWidth; x++) {
-                int integerPosition = position >> SUPERRES_SCALE_SUBPEL_BITS;
-                int filterIndex = (position & SUPERRES_SCALE_SUBPEL_MASK) >> SUPERRES_SCALE_EXTRA_BITS;
-                int[] filter = SUPERRES_FILTERS[filterIndex];
-                long sum = 0;
-                for (int tap = 0; tap < SUPERRES_FILTER_TAP_COUNT; tap++) {
-                    int sourceX = clamp(
-                            integerPosition + tap - SUPERRES_FILTER_START_OFFSET,
-                            0,
-                            sourceWidth - 1
-                    );
-                    int sourceSample = sourceSamples[sourceRowOffset + sourceX] & 0xFFFF;
-                    sum += (long) sourceSample * filter[tap];
-                }
-                int filteredSample = roundShift(sum, SUPERRES_FILTER_BITS);
-                upscaledSamples[upscaledRowOffset + x] = (short) clamp(filteredSample, 0, maximumSample);
-                position += step;
-            }
-        }
-
-        return new DecodedPlane(targetWidth, checkedPlane.height(), targetWidth, upscaledSamples);
-    }
-
-    /// Returns the AV1 super-resolution fixed-point step for one source and target width.
-    ///
-    /// @param sourceWidth the downscaled coded-domain source width
-    /// @param targetWidth the post-super-resolution target width
-    /// @return the fixed-point horizontal step
-    private static int upscaleConvolveStep(int sourceWidth, int targetWidth) {
-        return (int) ((((long) sourceWidth << SUPERRES_SCALE_SUBPEL_BITS) + (targetWidth >> 1)) / targetWidth);
-    }
-
-    /// Returns the AV1 super-resolution fixed-point position for the first output sample.
-    ///
-    /// @param sourceWidth the downscaled coded-domain source width
-    /// @param targetWidth the post-super-resolution target width
-    /// @param step the fixed-point horizontal step
-    /// @return the initial fixed-point horizontal position
-    private static int upscaleConvolveInitialPosition(int sourceWidth, int targetWidth, int step) {
-        long error = (long) targetWidth * step - ((long) sourceWidth << SUPERRES_SCALE_SUBPEL_BITS);
-        int position = (int) (((-((long) targetWidth - sourceWidth) << (SUPERRES_SCALE_SUBPEL_BITS - 1))
-                + (targetWidth >> 1)) / targetWidth)
-                + SUPERRES_SCALE_EXTRA_OFFSET
-                - (int) (error >> 1);
-        return position & SUPERRES_SCALE_SUBPEL_MASK;
-    }
-
     /// Recursively reconstructs one partition-tree node.
     ///
     /// @param node the partition-tree node to reconstruct
@@ -1044,7 +820,8 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     header,
                     transformLayout,
-                    pixelFormat
+                    pixelFormat,
+                    frameHeader
             );
         } else if (header.intra()) {
             if (header.yPaletteSize() != 0) {
@@ -1053,8 +830,8 @@ public final class FrameReconstructor {
                         header,
                         lumaX,
                         lumaY,
-                        visibleLumaWidth,
-                        visibleLumaHeight
+                        header.size().widthPixels(),
+                        header.size().heightPixels()
                 );
             } else if (header.filterIntraMode() != null) {
                 reconstructFilterIntraLuma(
@@ -1095,40 +872,8 @@ public final class FrameReconstructor {
             );
         }
 
-        if (frameHeader.frameSize().codedWidth() == 1058
-                && header.position().x4() == 20
-                && header.position().y4() == 0) {
-            for (TransformResidualUnit unit : residualLayout.lumaUnits()) {
-                System.err.printf(
-                        "TEMP unit pos=%d,%d size=%s type=%s zero=%s eob=%d%n",
-                        unit.position().x4(),
-                        unit.position().y4(),
-                        unit.size(),
-                        unit.transformType(),
-                        unit.allZero(),
-                        unit.endOfBlockIndex()
-                );
-            }
-            System.err.printf(
-                    "TEMP target before residual x88=%d x89=%d residualUnits=%s%n",
-                    lumaPlane.sample(88, 7),
-                    lumaPlane.sample(89, 7),
-                    java.util.Arrays.toString(residualLayout.lumaUnits())
-            );
-        }
-
         if (!lumaResidualsApplied) {
             reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader);
-        }
-
-        if (frameHeader.frameSize().codedWidth() == 1058
-                && header.position().x4() == 20
-                && header.position().y4() == 0) {
-            System.err.printf(
-                    "TEMP target after residual x88=%d x89=%d%n",
-                    lumaPlane.sample(88, 7),
-                    lumaPlane.sample(89, 7)
-            );
         }
 
         if (header.hasChroma() && chromaUPlane != null && chromaVPlane != null) {
@@ -1154,6 +899,15 @@ public final class FrameReconstructor {
                             visibleChromaHeight
                     );
                 } else if (header.uvMode() == UvIntraPredictionMode.CFL) {
+                    CflStoredSize cflStoredSize = cflStoredSize(
+                            transformLayout,
+                            chromaLumaX,
+                            chromaLumaY,
+                            codedChromaWidth,
+                            codedChromaHeight,
+                            chromaSubsamplingX,
+                            chromaSubsamplingY
+                    );
                     IntraPredictor.predictChromaCfl(
                             chromaUPlane,
                             lumaPlane,
@@ -1166,6 +920,8 @@ public final class FrameReconstructor {
                             header.cflAlphaU(),
                             chromaSubsamplingX,
                             chromaSubsamplingY,
+                            cflStoredSize.width(),
+                            cflStoredSize.height(),
                             tileBounds.chromaStartX(),
                             tileBounds.chromaStartY(),
                             tileBounds.chromaEndX(),
@@ -1183,6 +939,8 @@ public final class FrameReconstructor {
                             header.cflAlphaV(),
                             chromaSubsamplingX,
                             chromaSubsamplingY,
+                            cflStoredSize.width(),
+                            cflStoredSize.height(),
                             tileBounds.chromaStartX(),
                             tileBounds.chromaStartY(),
                             tileBounds.chromaEndX(),
@@ -1505,7 +1263,8 @@ public final class FrameReconstructor {
                         pixelFormat,
                         frameHeader,
                         referenceSurfaceSnapshots,
-                        decodedBlockMap
+                        decodedBlockMap,
+                        tileBounds
                 );
             }
         }
@@ -1522,6 +1281,7 @@ public final class FrameReconstructor {
     /// @param frameHeader the frame header that owns the block
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
+    /// @param tileBounds the tile boundaries that constrain causal neighbor lookup
     private static void applyObmcPrediction(
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
@@ -1531,7 +1291,8 @@ public final class FrameReconstructor {
             AvifPixelFormat pixelFormat,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
@@ -1550,7 +1311,8 @@ public final class FrameReconstructor {
                 frameHeader,
                 pixelFormat,
                 referenceSurfaceSnapshots,
-                decodedBlockMap
+                decodedBlockMap,
+                tileBounds
         );
         applyObmcLeftNeighbors(
                 lumaPlane,
@@ -1565,7 +1327,8 @@ public final class FrameReconstructor {
                 frameHeader,
                 pixelFormat,
                 referenceSurfaceSnapshots,
-                decodedBlockMap
+                decodedBlockMap,
+                tileBounds
         );
 
         if (!header.hasChroma() || chromaUPlane == null || chromaVPlane == null) {
@@ -1591,7 +1354,8 @@ public final class FrameReconstructor {
                 frameHeader,
                 pixelFormat,
                 referenceSurfaceSnapshots,
-                decodedBlockMap
+                decodedBlockMap,
+                tileBounds
         );
         applyObmcLeftNeighbors(
                 chromaUPlane,
@@ -1606,7 +1370,8 @@ public final class FrameReconstructor {
                 frameHeader,
                 pixelFormat,
                 referenceSurfaceSnapshots,
-                decodedBlockMap
+                decodedBlockMap,
+                tileBounds
         );
         applyObmcAboveNeighbors(
                 chromaVPlane,
@@ -1621,7 +1386,8 @@ public final class FrameReconstructor {
                 frameHeader,
                 pixelFormat,
                 referenceSurfaceSnapshots,
-                decodedBlockMap
+                decodedBlockMap,
+                tileBounds
         );
         applyObmcLeftNeighbors(
                 chromaVPlane,
@@ -1636,7 +1402,8 @@ public final class FrameReconstructor {
                 frameHeader,
                 pixelFormat,
                 referenceSurfaceSnapshots,
-                decodedBlockMap
+                decodedBlockMap,
+                tileBounds
         );
     }
 
@@ -1655,6 +1422,7 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
+    /// @param tileBounds the tile boundaries that constrain causal neighbor lookup
     private static void applyObmcAboveNeighbors(
             MutablePlaneBuffer destinationPlane,
             @Nullable ChromaPlane chromaPlane,
@@ -1668,11 +1436,12 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         int blockX4 = header.position().x4();
         int blockY4 = header.position().y4();
-        if (blockY4 <= 0 || visibleWidth <= 0 || visibleHeight <= 0) {
+        if (blockY4 <= tileBounds.lumaStartY() >> 2 || visibleWidth <= 0 || visibleHeight <= 0) {
             return;
         }
         if (chromaPlane != null
@@ -1700,9 +1469,10 @@ public final class FrameReconstructor {
                 int relativeLumaX = Math.max(0, scanX4 - blockX4) << 2;
                 int planeRelativeX = relativeLumaX >> subsamplingX;
                 int overlapWidth4 = Math.min(step4, header.size().width4());
+                int predictionWidth = Math.max(1, (overlapWidth4 << 2) >> subsamplingX);
                 int planeWidth = Math.min(
                         visibleWidth - planeRelativeX,
-                        Math.max(1, (overlapWidth4 << 2) >> subsamplingX)
+                        predictionWidth
                 );
                 if (planeWidth > 0) {
                     blendObmcRegion(
@@ -1713,6 +1483,8 @@ public final class FrameReconstructor {
                             destinationY,
                             planeWidth,
                             overlap,
+                            predictionWidth,
+                            fullOverlap,
                             mask,
                             true,
                             frameHeader,
@@ -1741,6 +1513,7 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
+    /// @param tileBounds the tile boundaries that constrain causal neighbor lookup
     private static void applyObmcLeftNeighbors(
             MutablePlaneBuffer destinationPlane,
             @Nullable ChromaPlane chromaPlane,
@@ -1754,11 +1527,12 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
-            DecodedBlockMap decodedBlockMap
+            DecodedBlockMap decodedBlockMap,
+            TileSampleBounds tileBounds
     ) {
         int blockX4 = header.position().x4();
         int blockY4 = header.position().y4();
-        if (blockX4 <= 0 || visibleWidth <= 0 || visibleHeight <= 0) {
+        if (blockX4 <= tileBounds.lumaStartX() >> 2 || visibleWidth <= 0 || visibleHeight <= 0) {
             return;
         }
         int lumaOverlap = Math.min(header.size().widthPixels(), 64) >> 1;
@@ -1781,9 +1555,10 @@ public final class FrameReconstructor {
                 int relativeLumaY = Math.max(0, scanY4 - blockY4) << 2;
                 int planeRelativeY = relativeLumaY >> subsamplingY;
                 int overlapHeight4 = Math.min(step4, header.size().height4());
+                int predictionHeight = Math.max(1, (overlapHeight4 << 2) >> subsamplingY);
                 int planeHeight = Math.min(
                         visibleHeight - planeRelativeY,
-                        Math.max(1, (overlapHeight4 << 2) >> subsamplingY)
+                        predictionHeight
                 );
                 if (planeHeight > 0) {
                     blendObmcRegion(
@@ -1794,6 +1569,8 @@ public final class FrameReconstructor {
                             destinationY + planeRelativeY,
                             overlap,
                             planeHeight,
+                            fullOverlap,
+                            predictionHeight,
                             mask,
                             false,
                             frameHeader,
@@ -1816,6 +1593,8 @@ public final class FrameReconstructor {
     /// @param destinationY the plane-local region origin Y
     /// @param width the region width in plane samples
     /// @param height the region height in plane samples
+    /// @param predictionWidth the complete neighbor-predictor width used for interpolation-filter selection
+    /// @param predictionHeight the complete neighbor-predictor height used for interpolation-filter selection
     /// @param mask the OBMC mask for the varying axis
     /// @param above whether the region is blended from an above neighbor
     /// @param frameHeader the frame header that owns the current block
@@ -1829,6 +1608,8 @@ public final class FrameReconstructor {
             int destinationY,
             int width,
             int height,
+            int predictionWidth,
+            int predictionHeight,
             int[] mask,
             boolean above,
             FrameHeader frameHeader,
@@ -1879,8 +1660,8 @@ public final class FrameReconstructor {
                         denominatorX,
                         denominatorY,
                         referenceScale,
-                        width,
-                        height,
+                        predictionWidth,
+                        predictionHeight,
                         horizontalFilter,
                         verticalFilter,
                         destinationPlane.maxSampleValue()
@@ -1950,16 +1731,20 @@ public final class FrameReconstructor {
     /// @param header the decoded block header that owns the intrabc state
     /// @param transformLayout the decoded transform layout for the block
     /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that defines the MI-grid reference boundary
     private static void reconstructIntrabcPrediction(
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat
+            AvifPixelFormat pixelFormat,
+            FrameHeader frameHeader
     ) {
         MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
-        DecodedPlane lumaSnapshot = lumaPlane.toDecodedPlane();
+        int frameLumaWidth = alignedFrameBoundaryDimension(frameHeader.frameSize().codedWidth());
+        int frameLumaHeight = alignedFrameBoundaryDimension(frameHeader.frameSize().height());
+        DecodedPlane lumaSnapshot = lumaPlane.toDecodedPlane(frameLumaWidth, frameLumaHeight);
         int lumaX = header.position().x4() << 2;
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
@@ -1967,8 +1752,8 @@ public final class FrameReconstructor {
         reconstructInterPlanePrediction(
                 lumaPlane,
                 lumaSnapshot,
-                lumaSnapshot.width(),
-                lumaSnapshot.height(),
+                frameLumaWidth,
+                frameLumaHeight,
                 lumaX,
                 lumaY,
                 visibleLumaWidth,
@@ -1996,13 +1781,15 @@ public final class FrameReconstructor {
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int chromaDenominatorX = 8 << chromaSubsamplingX;
         int chromaDenominatorY = 8 << chromaSubsamplingY;
-        DecodedPlane chromaUSnapshot = chromaUPlane.toDecodedPlane();
-        DecodedPlane chromaVSnapshot = chromaVPlane.toDecodedPlane();
+        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
+        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
+        DecodedPlane chromaUSnapshot = chromaUPlane.toDecodedPlane(frameChromaWidth, frameChromaHeight);
+        DecodedPlane chromaVSnapshot = chromaVPlane.toDecodedPlane(frameChromaWidth, frameChromaHeight);
         reconstructInterPlanePrediction(
                 chromaUPlane,
                 chromaUSnapshot,
-                chromaUSnapshot.width(),
-                chromaUSnapshot.height(),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -2020,8 +1807,8 @@ public final class FrameReconstructor {
         reconstructInterPlanePrediction(
                 chromaVPlane,
                 chromaVSnapshot,
-                chromaVSnapshot.width(),
-                chromaVSnapshot.height(),
+                frameChromaWidth,
+                frameChromaHeight,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -2079,6 +1866,8 @@ public final class FrameReconstructor {
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        int lumaBlockWidth = header.size().widthPixels();
+        int lumaBlockHeight = header.size().heightPixels();
         reconstructInterPlanePrediction(
                 lumaPlane,
                 referencePlanes.lumaPlane(),
@@ -2093,8 +1882,8 @@ public final class FrameReconstructor {
                 8,
                 8,
                 referenceScale,
-                visibleLumaWidth,
-                visibleLumaHeight,
+                lumaBlockWidth,
+                lumaBlockHeight,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter
         );
@@ -2108,6 +1897,8 @@ public final class FrameReconstructor {
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
+        int chromaBlockWidth = header.size().widthPixels() >> chromaSubsamplingX;
+        int chromaBlockHeight = header.size().heightPixels() >> chromaSubsamplingY;
         int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
         int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
         int chromaDenominatorX = 8 << chromaSubsamplingX;
@@ -2143,8 +1934,8 @@ public final class FrameReconstructor {
                 chromaDenominatorX,
                 chromaDenominatorY,
                 referenceScale,
-                visibleChromaWidth,
-                visibleChromaHeight,
+                chromaBlockWidth,
+                chromaBlockHeight,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter
         );
@@ -2162,8 +1953,8 @@ public final class FrameReconstructor {
                 chromaDenominatorX,
                 chromaDenominatorY,
                 referenceScale,
-                visibleChromaWidth,
-                visibleChromaHeight,
+                chromaBlockWidth,
+                chromaBlockHeight,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter
         );
@@ -2434,6 +2225,44 @@ public final class FrameReconstructor {
         return type == FrameHeader.GlobalMotionType.ROTATION_ZOOM || type == FrameHeader.GlobalMotionType.AFFINE;
     }
 
+    /// Returns the affine global model used by one reference of a compound prediction plane.
+    ///
+    /// Global warped prediction is disabled for non-global compound modes, forced-integer motion,
+    /// sub-8x8 plane blocks, scaled references, and global models that fail AV1 shear
+    /// normalization. In those cases the caller must use the decoded block-center global motion
+    /// vector as an ordinary translation predictor.
+    ///
+    /// @param header the decoded block header
+    /// @param frameHeader the frame header that owns the block
+    /// @param referenceFrame the zero-based LAST-through-ALTREF reference position
+    /// @param referenceScale the current-to-reference frame scale factors
+    /// @param planeBlockWidth the coded block width in plane samples
+    /// @param planeBlockHeight the coded block height in plane samples
+    /// @return the normalized affine model, or `null` when translation prediction is required
+    private static @Nullable WarpedMotion.Model compoundGlobalWarpModel(
+            TileBlockHeaderReader.BlockHeader header,
+            FrameHeader frameHeader,
+            int referenceFrame,
+            ReferenceScale referenceScale,
+            int planeBlockWidth,
+            int planeBlockHeight
+    ) {
+        if (header.compoundInterMode() != CompoundInterPredictionMode.GLOBALMV_GLOBALMV
+                || frameHeader.forceIntegerMotionVectors()
+                || planeBlockWidth < 8
+                || planeBlockHeight < 8
+                || referenceScale.scaled()) {
+            return null;
+        }
+        FrameHeader.GlobalMotionParams parameters = frameHeader.globalMotion(referenceFrame);
+        if (parameters.type() != FrameHeader.GlobalMotionType.ROTATION_ZOOM
+                && parameters.type() != FrameHeader.GlobalMotionType.AFFINE) {
+            return null;
+        }
+        WarpedMotion.Model model = WarpedMotion.fromGlobalMotion(parameters);
+        return model.affine() ? model : null;
+    }
+
     /// Reconstructs a single-reference inter predictor using frame-level affine global motion.
     ///
     /// Scaled references cannot use warped prediction and fall back to the block-center global
@@ -2494,6 +2323,7 @@ public final class FrameReconstructor {
                 header,
                 transformLayout,
                 pixelFormat,
+                frameHeader,
                 referenceSurfaceSnapshot.decodedPlanes(),
                 model
         );
@@ -2558,6 +2388,7 @@ public final class FrameReconstructor {
                 header,
                 transformLayout,
                 pixelFormat,
+                frameHeader,
                 referencePlanes,
                 model
         );
@@ -2571,6 +2402,7 @@ public final class FrameReconstructor {
     /// @param header the decoded block header that owns the inter state
     /// @param transformLayout the decoded transform layout for the block
     /// @param pixelFormat the active decoded chroma layout
+    /// @param frameHeader the frame header that supplies resolved interpolation filters
     /// @param referencePlanes the decoded planes of the selected reference frame
     /// @param model the normalized affine warped-motion model
     private static void reconstructWarpedInterPrediction(
@@ -2580,6 +2412,7 @@ public final class FrameReconstructor {
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             AvifPixelFormat pixelFormat,
+            FrameHeader frameHeader,
             DecodedPlanes referencePlanes,
             WarpedMotion.Model model
     ) {
@@ -2615,10 +2448,67 @@ public final class FrameReconstructor {
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int codedChromaWidth = codedChromaBlockWidth(header, chromaSubsamplingX);
         int codedChromaHeight = codedChromaBlockHeight(header, chromaSubsamplingY);
+        DecodedPlane referenceChromaUPlane = Objects.requireNonNull(
+                referencePlanes.chromaUPlane(),
+                "referencePlanes.chromaUPlane()"
+        );
+        DecodedPlane referenceChromaVPlane = Objects.requireNonNull(
+                referencePlanes.chromaVPlane(),
+                "referencePlanes.chromaVPlane()"
+        );
+
+        if (codedChromaWidth < 8 || codedChromaHeight < 8) {
+            MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
+            int chromaDenominatorX = 8 << chromaSubsamplingX;
+            int chromaDenominatorY = 8 << chromaSubsamplingY;
+            FrameHeader.InterpolationFilter horizontalInterpolationFilter =
+                    resolveHorizontalInterpolationFilter(header, frameHeader);
+            FrameHeader.InterpolationFilter verticalInterpolationFilter =
+                    resolveVerticalInterpolationFilter(header, frameHeader);
+            reconstructInterPlanePrediction(
+                    chromaUPlane,
+                    referenceChromaUPlane,
+                    referenceChromaUPlane.width(),
+                    referenceChromaUPlane.height(),
+                    chromaX,
+                    chromaY,
+                    visibleChromaWidth,
+                    visibleChromaHeight,
+                    motionVector.columnEighthPel(),
+                    motionVector.rowEighthPel(),
+                    chromaDenominatorX,
+                    chromaDenominatorY,
+                    IDENTITY_REFERENCE_SCALE,
+                    codedChromaWidth,
+                    codedChromaHeight,
+                    horizontalInterpolationFilter,
+                    verticalInterpolationFilter
+            );
+            reconstructInterPlanePrediction(
+                    chromaVPlane,
+                    referenceChromaVPlane,
+                    referenceChromaVPlane.width(),
+                    referenceChromaVPlane.height(),
+                    chromaX,
+                    chromaY,
+                    visibleChromaWidth,
+                    visibleChromaHeight,
+                    motionVector.columnEighthPel(),
+                    motionVector.rowEighthPel(),
+                    chromaDenominatorX,
+                    chromaDenominatorY,
+                    IDENTITY_REFERENCE_SCALE,
+                    codedChromaWidth,
+                    codedChromaHeight,
+                    horizontalInterpolationFilter,
+                    verticalInterpolationFilter
+            );
+            return;
+        }
 
         WarpedMotion.predictPlane(
                 chromaUPlane,
-                Objects.requireNonNull(referencePlanes.chromaUPlane(), "referencePlanes.chromaUPlane()"),
+                referenceChromaUPlane,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -2633,7 +2523,7 @@ public final class FrameReconstructor {
         );
         WarpedMotion.predictPlane(
                 chromaVPlane,
-                Objects.requireNonNull(referencePlanes.chromaVPlane(), "referencePlanes.chromaVPlane()"),
+                referenceChromaVPlane,
                 chromaX,
                 chromaY,
                 visibleChromaWidth,
@@ -3002,14 +2892,16 @@ public final class FrameReconstructor {
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        int lumaPredictionWidth = header.size().widthPixels();
+        int lumaPredictionHeight = header.size().heightPixels();
 
         MutablePlaneBuffer lumaIntraPlane = lumaPlane.copy();
         IntraPredictor.predictLuma(
                 lumaIntraPlane,
                 lumaX,
                 lumaY,
-                visibleLumaWidth,
-                visibleLumaHeight,
+                lumaPredictionWidth,
+                lumaPredictionHeight,
                 mode.toLumaPredictionMode(),
                 0,
                 false,
@@ -3044,14 +2936,16 @@ public final class FrameReconstructor {
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
+        int chromaPredictionWidth = header.size().widthPixels() >> chromaSubsamplingX;
+        int chromaPredictionHeight = header.size().heightPixels() >> chromaSubsamplingY;
 
         MutablePlaneBuffer chromaUIntraPlane = chromaUPlane.copy();
         IntraPredictor.predictChroma(
                 chromaUIntraPlane,
                 chromaX,
                 chromaY,
-                visibleChromaWidth,
-                visibleChromaHeight,
+                chromaPredictionWidth,
+                chromaPredictionHeight,
                 mode.toUvPredictionMode(),
                 0,
                 false,
@@ -3081,8 +2975,8 @@ public final class FrameReconstructor {
                 chromaVIntraPlane,
                 chromaX,
                 chromaY,
-                visibleChromaWidth,
-                visibleChromaHeight,
+                chromaPredictionWidth,
+                chromaPredictionHeight,
                 mode.toUvPredictionMode(),
                 0,
                 false,
@@ -3218,6 +3112,24 @@ public final class FrameReconstructor {
         int lumaY = header.position().y4() << 2;
         int visibleLumaWidth = transformLayout.visibleWidthPixels();
         int visibleLumaHeight = transformLayout.visibleHeightPixels();
+        int lumaBlockWidth = header.size().widthPixels();
+        int lumaBlockHeight = header.size().heightPixels();
+        @Nullable WarpedMotion.Model lumaGlobalWarpModel0 = compoundGlobalWarpModel(
+                header,
+                frameHeader,
+                header.referenceFrame0(),
+                referenceScale0,
+                lumaBlockWidth,
+                lumaBlockHeight
+        );
+        @Nullable WarpedMotion.Model lumaGlobalWarpModel1 = compoundGlobalWarpModel(
+                header,
+                frameHeader,
+                header.referenceFrame1(),
+                referenceScale1,
+                lumaBlockWidth,
+                lumaBlockHeight
+        );
         @Nullable int[] segmentMask = compoundPredictionType == CompoundPredictionType.SEGMENT
                 ? new int[visibleLumaWidth * visibleLumaHeight]
                 : null;
@@ -3230,6 +3142,8 @@ public final class FrameReconstructor {
                 lumaY,
                 visibleLumaWidth,
                 visibleLumaHeight,
+                header.position().x4(),
+                header.position().y4(),
                 motionVector0.columnEighthPel(),
                 motionVector0.rowEighthPel(),
                 motionVector1.columnEighthPel(),
@@ -3238,8 +3152,10 @@ public final class FrameReconstructor {
                 8,
                 referenceScale0,
                 referenceScale1,
-                visibleLumaWidth,
-                visibleLumaHeight,
+                lumaGlobalWarpModel0,
+                lumaGlobalWarpModel1,
+                lumaBlockWidth,
+                lumaBlockHeight,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
                 compoundPredictionType,
@@ -3265,8 +3181,26 @@ public final class FrameReconstructor {
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
+        int chromaBlockWidth = header.size().widthPixels() >> chromaSubsamplingX;
+        int chromaBlockHeight = header.size().heightPixels() >> chromaSubsamplingY;
         int chromaDenominatorX = 8 << chromaSubsamplingX;
         int chromaDenominatorY = 8 << chromaSubsamplingY;
+        @Nullable WarpedMotion.Model chromaGlobalWarpModel0 = compoundGlobalWarpModel(
+                header,
+                frameHeader,
+                header.referenceFrame0(),
+                referenceScale0,
+                chromaBlockWidth,
+                chromaBlockHeight
+        );
+        @Nullable WarpedMotion.Model chromaGlobalWarpModel1 = compoundGlobalWarpModel(
+                header,
+                frameHeader,
+                header.referenceFrame1(),
+                referenceScale1,
+                chromaBlockWidth,
+                chromaBlockHeight
+        );
 
         reconstructCompoundInterPlanePrediction(
                 chromaUPlane,
@@ -3276,6 +3210,8 @@ public final class FrameReconstructor {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
+                header.position().x4(),
+                header.position().y4(),
                 motionVector0.columnEighthPel(),
                 motionVector0.rowEighthPel(),
                 motionVector1.columnEighthPel(),
@@ -3284,8 +3220,10 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 referenceScale0,
                 referenceScale1,
-                visibleChromaWidth,
-                visibleChromaHeight,
+                chromaGlobalWarpModel0,
+                chromaGlobalWarpModel1,
+                chromaBlockWidth,
+                chromaBlockHeight,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
                 compoundPredictionType,
@@ -3308,6 +3246,8 @@ public final class FrameReconstructor {
                 chromaY,
                 visibleChromaWidth,
                 visibleChromaHeight,
+                header.position().x4(),
+                header.position().y4(),
                 motionVector0.columnEighthPel(),
                 motionVector0.rowEighthPel(),
                 motionVector1.columnEighthPel(),
@@ -3316,8 +3256,10 @@ public final class FrameReconstructor {
                 chromaDenominatorY,
                 referenceScale0,
                 referenceScale1,
-                visibleChromaWidth,
-                visibleChromaHeight,
+                chromaGlobalWarpModel0,
+                chromaGlobalWarpModel1,
+                chromaBlockWidth,
+                chromaBlockHeight,
                 horizontalInterpolationFilter,
                 verticalInterpolationFilter,
                 compoundPredictionType,
@@ -3431,6 +3373,8 @@ public final class FrameReconstructor {
     /// @param destinationY the zero-based vertical destination coordinate
     /// @param width the copied width in samples
     /// @param height the copied height in samples
+    /// @param blockX4 the luma block X origin in 4x4 units
+    /// @param blockY4 the luma block Y origin in 4x4 units
     /// @param sourceOffsetEighthPelX0 the primary signed horizontal motion-vector component in luma eighth-pel units
     /// @param sourceOffsetEighthPelY0 the primary signed vertical motion-vector component in luma eighth-pel units
     /// @param sourceOffsetEighthPelX1 the secondary signed horizontal motion-vector component in luma eighth-pel units
@@ -3439,6 +3383,8 @@ public final class FrameReconstructor {
     /// @param denominatorY the plane-local vertical denominator expressed in luma eighth-pel units
     /// @param referenceScale0 the primary reference scale factors
     /// @param referenceScale1 the secondary reference scale factors
+    /// @param globalWarpModel0 the primary affine global model, or `null` for translation prediction
+    /// @param globalWarpModel1 the secondary affine global model, or `null` for translation prediction
     /// @param widthForFilterSelection the sampled block width in pixels used for AV1 reduced-width filter selection
     /// @param heightForFilterSelection the sampled block height in pixels used for AV1 reduced-width filter selection
     /// @param horizontalFilterMode the effective horizontal interpolation filter mode
@@ -3462,6 +3408,8 @@ public final class FrameReconstructor {
             int destinationY,
             int width,
             int height,
+            int blockX4,
+            int blockY4,
             int sourceOffsetEighthPelX0,
             int sourceOffsetEighthPelY0,
             int sourceOffsetEighthPelX1,
@@ -3470,6 +3418,8 @@ public final class FrameReconstructor {
             int denominatorY,
             ReferenceScale referenceScale0,
             ReferenceScale referenceScale1,
+            @Nullable WarpedMotion.Model globalWarpModel0,
+            @Nullable WarpedMotion.Model globalWarpModel1,
             int widthForFilterSelection,
             int heightForFilterSelection,
             FrameHeader.InterpolationFilter horizontalFilterMode,
@@ -3490,9 +3440,44 @@ public final class FrameReconstructor {
                 Objects.requireNonNull(compoundPredictionType, "compoundPredictionType");
         ReferenceScale nonNullReferenceScale0 = Objects.requireNonNull(referenceScale0, "referenceScale0");
         ReferenceScale nonNullReferenceScale1 = Objects.requireNonNull(referenceScale1, "referenceScale1");
+        @Nullable int[] warpedPrediction0 = globalWarpModel0 == null
+                ? null
+                : WarpedMotion.predictCompoundPlane(
+                referencePlane0,
+                width,
+                height,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                blockX4,
+                blockY4,
+                subsamplingX,
+                subsamplingY,
+                bitDepth,
+                globalWarpModel0
+        );
+        @Nullable int[] warpedPrediction1 = globalWarpModel1 == null
+                ? null
+                : WarpedMotion.predictCompoundPlane(
+                referencePlane1,
+                width,
+                height,
+                widthForFilterSelection,
+                heightForFilterSelection,
+                blockX4,
+                blockY4,
+                subsamplingX,
+                subsamplingY,
+                bitDepth,
+                globalWarpModel1
+        );
+        int maximumSampleValue = destinationPlane.maxSampleValue();
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                int sample0 = sampleCompoundInterPlaneValue(
+                int predictionIndex = y * width + x;
+                int sample0 = warpedPrediction0 != null
+                        ? warpedPrediction0[predictionIndex]
+                        : sampleCompoundInterPlaneValue(
                         referencePlane0,
                         destinationX,
                         destinationY,
@@ -3507,9 +3492,11 @@ public final class FrameReconstructor {
                         heightForFilterSelection,
                         horizontalFilterMode,
                         verticalFilterMode,
-                        destinationPlane.maxSampleValue()
+                        maximumSampleValue
                 );
-                int sample1 = sampleCompoundInterPlaneValue(
+                int sample1 = warpedPrediction1 != null
+                        ? warpedPrediction1[predictionIndex]
+                        : sampleCompoundInterPlaneValue(
                         referencePlane1,
                         destinationX,
                         destinationY,
@@ -3524,9 +3511,8 @@ public final class FrameReconstructor {
                         heightForFilterSelection,
                         horizontalFilterMode,
                         verticalFilterMode,
-                        destinationPlane.maxSampleValue()
+                        maximumSampleValue
                 );
-                int postRoundBits = interPredictionIntermediateBits(destinationPlane.maxSampleValue());
                 int sample = switch (nonNullCompoundPredictionType) {
                     case AVERAGE -> averageCompoundPredictions(sample0, sample1, postRoundBits);
                     case WEIGHTED_AVERAGE ->
@@ -3564,7 +3550,7 @@ public final class FrameReconstructor {
                 destinationPlane.setSample(
                         destinationX + x,
                         destinationY + y,
-                        clamp(sample, 0, destinationPlane.maxSampleValue())
+                        clamp(sample, 0, maximumSampleValue)
                 );
             }
         }
@@ -3712,6 +3698,12 @@ public final class FrameReconstructor {
         int sourceX0 = Math.floorDiv(sourceNumeratorX, denominatorX);
         int phaseX = interpolationPhase(Math.floorMod(sourceNumeratorX, denominatorX), denominatorX);
         int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        if (phaseX == 0 && phaseY == 0) {
+            return referencePlane.sample(
+                    clamp(sourceX0, 0, referencePlane.width() - 1),
+                    clamp(sourceY0, 0, referencePlane.height() - 1)
+            ) << postRoundBits;
+        }
         int firstPassRound = INTER_FILTER_BITS - postRoundBits;
         @Nullable int[] horizontalFilter =
                 phaseX == 0 ? null : selectSubpelFilter(horizontalFilterMode, phaseX, widthForFilterSelection);
@@ -4596,22 +4588,22 @@ public final class FrameReconstructor {
     /// @param header the decoded block header that owns the luma palette state
     /// @param lumaX the zero-based horizontal luma sample coordinate
     /// @param lumaY the zero-based vertical luma sample coordinate
-    /// @param visibleLumaWidth the exact visible luma width in pixels
-    /// @param visibleLumaHeight the exact visible luma height in pixels
+    /// @param lumaWidth the stored luma block width in pixels
+    /// @param lumaHeight the stored luma block height in pixels
     private static void reconstructLumaPalette(
             MutablePlaneBuffer lumaPlane,
             TileBlockHeaderReader.BlockHeader header,
             int lumaX,
             int lumaY,
-            int visibleLumaWidth,
-            int visibleLumaHeight
+            int lumaWidth,
+            int lumaHeight
     ) {
         reconstructPalettePlane(
                 lumaPlane,
                 lumaX,
                 lumaY,
-                visibleLumaWidth,
-                visibleLumaHeight,
+                lumaWidth,
+                lumaHeight,
                 header.size().widthPixels(),
                 header.yPaletteColors(),
                 header.yPaletteIndices()
@@ -4874,31 +4866,15 @@ public final class FrameReconstructor {
                 residualUnit.transformType(),
                 lumaPlane.bitDepth()
         );
-        int residualX = residualUnit.position().x4() << 2;
-        int residualY = residualUnit.position().y4() << 2;
-        if (residualUnit.position().x4() == 22 && residualUnit.position().y4() == 1) {
-            int localX = 88 - residualX;
-            int localY = 7 - residualY;
-            int index = localY * residualUnit.size().widthPixels() + localX;
-            System.err.printf(
-                    "TEMP residual pos=%s size=%s type=%s eob=%d coeff=%s dequant=%s target=%d,%d%n",
-                    residualUnit.position(),
-                    residualUnit.size(),
-                    residualUnit.transformType(),
-                    residualUnit.endOfBlockIndex(),
-                    java.util.Arrays.toString(residualUnit.coefficients()),
-                    java.util.Arrays.toString(dequantizedCoefficients),
-                    residualSamples[index],
-                    residualSamples[index + 1]
-            );
-        }
+        int destinationX = residualUnit.position().x4() << 2;
+        int destinationY = residualUnit.position().y4() << 2;
         InverseTransformer.addResidualBlock(
                 lumaPlane,
-                residualX,
-                residualY,
+                destinationX,
+                destinationY,
                 residualUnit.size(),
-                residualUnit.visibleWidthPixels(),
-                residualUnit.visibleHeightPixels(),
+                Math.min(residualUnit.size().widthPixels(), lumaPlane.width() - destinationX),
+                Math.min(residualUnit.size().heightPixels(), lumaPlane.height() - destinationY),
                 residualSamples
         );
     }
@@ -5433,13 +5409,15 @@ public final class FrameReconstructor {
                 residualUnit.transformType(),
                 chromaPlane.bitDepth()
         );
+        int destinationX = residualUnit.position().x4() << (2 - chromaSubsamplingX);
+        int destinationY = residualUnit.position().y4() << (2 - chromaSubsamplingY);
         InverseTransformer.addResidualBlock(
                 chromaPlane,
-                residualUnit.position().x4() << (2 - chromaSubsamplingX),
-                residualUnit.position().y4() << (2 - chromaSubsamplingY),
+                destinationX,
+                destinationY,
                 residualUnit.size(),
-                residualUnit.visibleWidthPixels(),
-                residualUnit.visibleHeightPixels(),
+                Math.min(residualUnit.size().widthPixels(), chromaPlane.width() - destinationX),
+                Math.min(residualUnit.size().heightPixels(), chromaPlane.height() - destinationY),
                 residualSamples
         );
     }
@@ -5473,6 +5451,59 @@ public final class FrameReconstructor {
     /// @return the corresponding chroma-plane dimension
     private static int chromaDimension(int lumaDimension, int subsamplingShift) {
         return (lumaDimension + (1 << subsamplingShift) - 1) >> subsamplingShift;
+    }
+
+    /// Returns the subsampled luma footprint stored for one CFL block before normative padding.
+    ///
+    /// AV1 stores each reconstructed luma transform at its full transform size. A partial frame-edge
+    /// block may therefore populate either part or all of its chroma transform footprint depending
+    /// on the decoded luma transform sizes.
+    ///
+    /// @param transformLayout the decoded transform layout for the owning block
+    /// @param lumaX the luma origin of the shared chroma footprint
+    /// @param lumaY the luma origin of the shared chroma footprint
+    /// @param codedChromaWidth the complete chroma prediction width
+    /// @param codedChromaHeight the complete chroma prediction height
+    /// @param subsamplingX the horizontal chroma subsampling shift
+    /// @param subsamplingY the vertical chroma subsampling shift
+    /// @return the populated chroma-domain footprint before edge padding
+    private static CflStoredSize cflStoredSize(
+            TransformLayout transformLayout,
+            int lumaX,
+            int lumaY,
+            int codedChromaWidth,
+            int codedChromaHeight,
+            int subsamplingX,
+            int subsamplingY
+    ) {
+        TransformUnit[] lumaUnits = transformLayout.lumaUnits();
+        if (lumaUnits.length == 0) {
+            return new CflStoredSize(codedChromaWidth, codedChromaHeight);
+        }
+
+        int storedLumaEndX = lumaX;
+        int storedLumaEndY = lumaY;
+        for (TransformUnit unit : lumaUnits) {
+            storedLumaEndX = Math.max(
+                    storedLumaEndX,
+                    (unit.position().x4() << 2) + unit.size().widthPixels()
+            );
+            storedLumaEndY = Math.max(
+                    storedLumaEndY,
+                    (unit.position().y4() << 2) + unit.size().heightPixels()
+            );
+        }
+        int storedWidth = clamp(
+                chromaDimension(storedLumaEndX - lumaX, subsamplingX),
+                1,
+                codedChromaWidth
+        );
+        int storedHeight = clamp(
+                chromaDimension(storedLumaEndY - lumaY, subsamplingY),
+                1,
+                codedChromaHeight
+        );
+        return new CflStoredSize(storedWidth, storedHeight);
     }
 
     /// Returns the luma-grid origin for one chroma block span.

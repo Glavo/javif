@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.decode.FrameType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -35,5 +36,61 @@ final class ReferenceMotionVectorProjectionTest {
         assertFalse(ReferenceMotionVectorProjection.hasFutureSignBias(1, 0, 1));
         assertTrue(ReferenceMotionVectorProjection.hasFutureSignBias(2, 1, 0));
         assertFalse(ReferenceMotionVectorProjection.hasFutureSignBias(2, 0, 1));
+    }
+
+    /// Verifies saved temporal components use reference-to-source direction at the half-range boundary.
+    @Test
+    void preservesHalfRangeReferenceSideStorageSemantics() {
+        assertTrue(ReferenceMotionVectorProjection.isSavedTemporalReference(3, 4, 0));
+        assertTrue(ReferenceMotionVectorProjection.isSavedTemporalReference(3, 4, 2));
+        assertFalse(ReferenceMotionVectorProjection.isSavedTemporalReference(3, 4, 6));
+        assertFalse(ReferenceMotionVectorProjection.isSavedTemporalReference(3, 4, 4));
+    }
+
+    /// Verifies temporal projection rejects intra sources and incompatible 4x4 frame grids.
+    @Test
+    void requiresInterSourceWithMatchingMotionFieldGrid() {
+        assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+                FrameType.KEY,
+                460,
+                2892,
+                460,
+                2892
+        ));
+        assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+                FrameType.INTRA,
+                460,
+                2892,
+                460,
+                2892
+        ));
+        assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+                FrameType.INTER,
+                459,
+                2891,
+                460,
+                2892
+        ));
+        assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+                FrameType.SWITCH,
+                460,
+                2892,
+                460,
+                2892
+        ));
+        assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+                FrameType.INTER,
+                461,
+                2892,
+                460,
+                2892
+        ));
+        assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+                FrameType.INTER,
+                460,
+                2893,
+                460,
+                2892
+        ));
     }
 }

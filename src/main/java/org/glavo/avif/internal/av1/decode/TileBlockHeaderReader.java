@@ -52,6 +52,9 @@ public final class TileBlockHeaderReader {
     /// The AV1 mapping from palette color-neighbor hash to color-map CDF context.
     private static final int @Unmodifiable [] PALETTE_COLOR_CONTEXTS_BY_HASH = {-1, -1, 0, -1, -1, 4, 3, 2, 1};
 
+    /// The horizontal delay required by the default intrabc displacement vector, in luma pixels.
+    private static final int INTRABC_DELAY_PIXELS = 256;
+
     /// Sentinel used when a block does not carry an inter reference frame.
     private static final int NO_REFERENCE_FRAME = -1;
 
@@ -150,7 +153,6 @@ public final class TileBlockHeaderReader {
                 segmentPredicted = segmentReadResult.segmentPredicted();
             }
         }
-
         @Nullable FrameHeader.SegmentData segmentDataBeforeSkip =
                 segmentation.enabled() && segmentation.updateMap() && !segmentation.preskip()
                         ? null
@@ -162,7 +164,8 @@ public final class TileBlockHeaderReader {
         }
         boolean skip = skipMode || (segmentDataBeforeSkip != null && segmentDataBeforeSkip.skip());
         if (!skip) {
-            skip = syntaxReader.readSkipFlag(nonNullNeighborContext.skipContext(nonNullPosition));
+            int skipContext = nonNullNeighborContext.skipContext(nonNullPosition);
+            skip = syntaxReader.readSkipFlag(skipContext);
         }
         FrameHeader.SegmentData segmentData;
         if (segmentation.enabled() && segmentation.updateMap() && !segmentation.preskip()) {
@@ -181,9 +184,8 @@ public final class TileBlockHeaderReader {
             }
             segmentData = segmentDataBeforeSkip;
         }
-
         int cdefIndex = resolveCdefIndex(nonNullPosition, nonNullSize, skip, blockSyntaxState);
-        int qIndex = applyDeltaSyntax(nonNullPosition, nonNullSize, skip, hasChroma, blockSyntaxState);
+        int qIndex = applyDeltaSyntax(nonNullPosition, nonNullSize, skip, blockSyntaxState);
         int[] deltaLfValues = blockSyntaxState.currentDeltaLfValues();
 
         boolean useIntrabc = false;
@@ -194,6 +196,8 @@ public final class TileBlockHeaderReader {
             int segmentReferenceFrame = segmentData.referenceFrame();
             if (segmentReferenceFrame >= 0) {
                 intra = segmentReferenceFrame == SEGMENT_REFERENCE_INTRA_FRAME;
+            } else if (segmentData.globalMotion()) {
+                intra = false;
             } else {
                 intra = syntaxReader.readIntraBlockFlag(nonNullNeighborContext.intraContext(nonNullPosition));
             }
@@ -203,7 +207,6 @@ public final class TileBlockHeaderReader {
         } else {
             intra = true;
         }
-
         boolean compoundReference = false;
         int referenceFrame0 = NO_REFERENCE_FRAME;
         int referenceFrame1 = NO_REFERENCE_FRAME;
@@ -244,7 +247,9 @@ public final class TileBlockHeaderReader {
                                 referenceFrame0,
                                 referenceFrame1,
                                 globalMotionVector(nonNullPosition, nonNullSize, referenceFrame0),
-                                globalMotionVector(nonNullPosition, nonNullSize, referenceFrame1)
+                                globalMotionVector(nonNullPosition, nonNullSize, referenceFrame1),
+                                tileContext.frameHeader().globalMotion(referenceFrame0).type(),
+                                tileContext.frameHeader().globalMotion(referenceFrame1).type()
                         );
                 BlockNeighborContext.ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
                         provisionalContext.motionVectorCandidate(0);
@@ -275,16 +280,20 @@ public final class TileBlockHeaderReader {
                 motionVector1 = interModeSelection.motionVector1();
             }
             if (compoundReference) {
-                CompoundPredictionSelection compoundPredictionSelection = readCompoundPredictionSelection(
-                        nonNullPosition,
-                        nonNullSize,
-                        nonNullNeighborContext,
-                        referenceFrame0,
-                        referenceFrame1
-                );
-                compoundPredictionType = compoundPredictionSelection.type();
-                compoundMaskSign = compoundPredictionSelection.maskSign();
-                compoundWedgeIndex = compoundPredictionSelection.wedgeIndex();
+                if (skipMode) {
+                    compoundPredictionType = CompoundPredictionType.AVERAGE;
+                } else {
+                    CompoundPredictionSelection compoundPredictionSelection = readCompoundPredictionSelection(
+                            nonNullPosition,
+                            nonNullSize,
+                            nonNullNeighborContext,
+                            referenceFrame0,
+                            referenceFrame1
+                    );
+                    compoundPredictionType = compoundPredictionSelection.type();
+                    compoundMaskSign = compoundPredictionSelection.maskSign();
+                    compoundWedgeIndex = compoundPredictionSelection.wedgeIndex();
+                }
             }
             boolean canUseInterIntra = canDecodeInterIntra(nonNullSize, compoundReference);
             boolean useInterIntra = canUseInterIntra
@@ -342,7 +351,15 @@ public final class TileBlockHeaderReader {
         int cflAlphaU = 0;
         int cflAlphaV = 0;
         if (useIntrabc) {
-            motionVector0 = InterMotionVector.resolved(syntaxReader.readMotionVectorResidual(MotionVector.zero()));
+            MotionVector fallback = defaultIntrabcReferenceMotionVector(nonNullPosition);
+            MotionVector predictor = nonNullNeighborContext.intrabcReferenceMotionVector(
+                    nonNullPosition,
+                    nonNullSize,
+                    fallback
+            );
+            motionVector0 = InterMotionVector.resolved(syntaxReader.readMotionVectorResidual(
+                    predictor
+            ));
             yMode = LumaIntraPredictionMode.DC;
             if (hasChroma) {
                 uvMode = UvIntraPredictionMode.DC;
@@ -398,7 +415,6 @@ public final class TileBlockHeaderReader {
         if (uvPaletteSize > 0) {
             uvPaletteIndices = readPaletteIndices(1, uvPaletteSize, nonNullPosition, nonNullSize);
         }
-
         BlockHeader header = new BlockHeader(
                 nonNullPosition,
                 nonNullSize,
@@ -485,14 +501,12 @@ public final class TileBlockHeaderReader {
     /// @param position the local tile-relative block origin
     /// @param size the current block size
     /// @param skip whether the current block is skipped
-    /// @param hasChroma whether the current block has chroma samples in the active frame layout
     /// @param blockSyntaxState the mutable tile-local block syntax state
     /// @return the current luma AC quantizer index after any delta syntax was applied
     private int applyDeltaSyntax(
             BlockPosition position,
             BlockSize size,
             boolean skip,
-            boolean hasChroma,
             TileDecodeContext.BlockSyntaxState blockSyntaxState
     ) {
         if (!isSuperblockOrigin(position)) {
@@ -512,7 +526,7 @@ public final class TileBlockHeaderReader {
         blockSyntaxState.setCurrentQIndex(currentQIndex);
         if (delta.deltaLfPresent()) {
             int deltaLfCount = delta.deltaLfMulti()
-                    ? (hasChroma ? 4 : 2)
+                    ? (tileContext.sequenceHeader().colorConfig().pixelFormat() == AvifPixelFormat.I400 ? 2 : 4)
                     : 1;
             int contextOffset = delta.deltaLfMulti() ? 1 : 0;
             for (int i = 0; i < deltaLfCount; i++) {
@@ -600,6 +614,23 @@ public final class TileBlockHeaderReader {
         int subsamplingY = tileContext.sequenceHeader().colorConfig().chromaSubsamplingY() ? 1 : 0;
         return (size.width4() > subsamplingX || (position.x4() & 1) != 0)
                 && (size.height4() > subsamplingY || (position.y4() & 1) != 0);
+    }
+
+    /// Returns the AV1 fallback displacement-vector predictor for one intrabc block.
+    ///
+    /// Blocks in the first superblock row of a tile reference an earlier horizontal region. Later
+    /// rows reference the superblock immediately above. The returned vector is expressed in
+    /// eighth-pel units even though intrabc displacement vectors have integer-pixel precision.
+    ///
+    /// @param position the tile-relative block origin
+    /// @return the default intrabc displacement-vector predictor
+    private MotionVector defaultIntrabcReferenceMotionVector(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        int superblockSize = tileContext.superblockSize();
+        if ((nonNullPosition.y4() << 2) < superblockSize) {
+            return new MotionVector(0, -(superblockSize + INTRABC_DELAY_PIXELS) * 8);
+        }
+        return new MotionVector(-superblockSize * 8, 0);
     }
 
     /// Returns whether CFL syntax is available for the supplied block size in the active frame.
@@ -805,7 +836,11 @@ public final class TileBlockHeaderReader {
                         globalMotionVector(position, size, referenceFrame0),
                         compoundReference
                                 ? globalMotionVector(position, size, referenceFrame1)
-                                : MotionVector.zero()
+                                : MotionVector.zero(),
+                        tileContext.frameHeader().globalMotion(referenceFrame0).type(),
+                        compoundReference
+                                ? tileContext.frameHeader().globalMotion(referenceFrame1).type()
+                                : FrameHeader.GlobalMotionType.IDENTITY
                 );
         if (compoundReference) {
             CompoundInterPredictionMode compoundInterMode =
