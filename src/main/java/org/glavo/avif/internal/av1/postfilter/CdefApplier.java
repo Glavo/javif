@@ -16,7 +16,6 @@
 package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.AvifPixelFormat;
-import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -211,11 +210,7 @@ public final class CdefApplier {
         int[] cdefIndices = new int[unitColumns * unitRows];
         boolean[] nonSkipUnits = new boolean[unitColumns * unitRows];
         for (int tileIndex = 0; tileIndex < syntaxDecodeResult.tileCount(); tileIndex++) {
-            TilePartitionTreeReader.Node[] frameLocalRoots = FrameLocalPartitionTrees.create(
-                    syntaxDecodeResult.assembly(),
-                    tileIndex,
-                    syntaxDecodeResult.tileRoots(tileIndex)
-            );
+            TilePartitionTreeReader.Node[] frameLocalRoots = syntaxDecodeResult.tileRoots(tileIndex);
             for (TilePartitionTreeReader.Node root : frameLocalRoots) {
                 fillCdefUnitMap(root, cdefIndices, nonSkipUnits, unitColumns, unitRows);
             }

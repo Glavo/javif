@@ -104,7 +104,8 @@ public final class FrameSyntaxDecoder {
                 decodedTemporalMotionFields,
                 restorationUnitMap,
                 finalTileCdfContexts,
-                currentSegmentIdMap
+                currentSegmentIdMap,
+                true
         );
     }
 

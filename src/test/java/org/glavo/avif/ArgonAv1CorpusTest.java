@@ -70,55 +70,17 @@ final class ArgonAv1CorpusTest {
     /// Number of AV1 streams distributed in the pinned Argon Streams archive.
     private static final long EXPECTED_STREAM_COUNT = 3_921L;
 
-    /// Number of regular low-overhead streams across all three AV1 profiles.
-    private static final int EXPECTED_LOW_OVERHEAD_STREAM_COUNT = 37;
+    /// Number of regular and special low-overhead streams across all three AV1 profiles.
+    private static final int EXPECTED_LOW_OVERHEAD_STREAM_COUNT = 202;
 
-    /// Archive prefixes for regular low-overhead streams in all three profiles.
+    /// Archive prefixes for regular and special low-overhead streams in all three profiles.
     private static final @Unmodifiable List<String> LOW_OVERHEAD_STREAM_PREFIXES = List.of(
             ARCHIVE_ROOT + "profile0_not_annexb/streams/",
+            ARCHIVE_ROOT + "profile0_not_annexb_special/streams/",
             ARCHIVE_ROOT + "profile1_not_annexb/streams/",
-            ARCHIVE_ROOT + "profile2_not_annexb/streams/"
-    );
-
-    /// Complete regular low-overhead stream set covered by the default regression gate.
-    private static final @Unmodifiable List<CorpusCase> REFERENCE_CASES = List.of(
-            new CorpusCase("profile0_not_annexb", "test12144.obu"),
-            new CorpusCase("profile0_not_annexb", "test12153.obu"),
-            new CorpusCase("profile0_not_annexb", "test12184.obu"),
-            new CorpusCase("profile0_not_annexb", "test12207.obu"),
-            new CorpusCase("profile0_not_annexb", "test12217.obu"),
-            new CorpusCase("profile0_not_annexb", "test12258_12326.obu"),
-            new CorpusCase("profile0_not_annexb", "test12259.obu"),
-            new CorpusCase("profile0_not_annexb", "test12293_12304.obu"),
-            new CorpusCase("profile0_not_annexb", "test12294.obu"),
-            new CorpusCase("profile0_not_annexb", "test12297.obu"),
-            new CorpusCase("profile0_not_annexb", "test12301.obu"),
-            new CorpusCase("profile0_not_annexb", "test12318.obu"),
-            new CorpusCase("profile0_not_annexb", "test12319_12313_12198.obu"),
-            new CorpusCase("profile0_not_annexb", "test12320.obu"),
-            new CorpusCase("profile0_not_annexb", "test12327.obu"),
-            new CorpusCase("profile1_not_annexb", "test8640_8699_8672.obu"),
-            new CorpusCase("profile1_not_annexb", "test8650.obu"),
-            new CorpusCase("profile1_not_annexb", "test8660.obu"),
-            new CorpusCase("profile1_not_annexb", "test8666.obu"),
-            new CorpusCase("profile1_not_annexb", "test8810.obu"),
-            new CorpusCase("profile1_not_annexb", "test8813.obu"),
-            new CorpusCase("profile1_not_annexb", "test8817.obu"),
-            new CorpusCase("profile1_not_annexb", "test8822.obu"),
-            new CorpusCase("profile1_not_annexb", "test8824.obu"),
-            new CorpusCase("profile1_not_annexb", "test8833.obu"),
-            new CorpusCase("profile1_not_annexb", "test8850_8721.obu"),
-            new CorpusCase("profile1_not_annexb", "test8861_8857_8751.obu"),
-            new CorpusCase("profile1_not_annexb", "test8865.obu"),
-            new CorpusCase("profile1_not_annexb", "test8866.obu"),
-            new CorpusCase("profile2_not_annexb", "test17143.obu"),
-            new CorpusCase("profile2_not_annexb", "test17154.obu"),
-            new CorpusCase("profile2_not_annexb", "test17204_17367_17136.obu"),
-            new CorpusCase("profile2_not_annexb", "test17257.obu"),
-            new CorpusCase("profile2_not_annexb", "test17278_17279.obu"),
-            new CorpusCase("profile2_not_annexb", "test17298_17282.obu"),
-            new CorpusCase("profile2_not_annexb", "test17359_17276_17334.obu"),
-            new CorpusCase("profile2_not_annexb", "test17362.obu")
+            ARCHIVE_ROOT + "profile1_not_annexb_special/streams/",
+            ARCHIVE_ROOT + "profile2_not_annexb/streams/",
+            ARCHIVE_ROOT + "profile2_not_annexb_special/streams/"
     );
 
     /// Creates an Argon corpus test instance.
@@ -140,7 +102,6 @@ final class ArgonAv1CorpusTest {
                     .count();
             assertEquals(EXPECTED_STREAM_COUNT, streamCount);
             assertEquals(EXPECTED_LOW_OVERHEAD_STREAM_COUNT, lowOverheadStreamCount);
-            assertEquals(EXPECTED_LOW_OVERHEAD_STREAM_COUNT, REFERENCE_CASES.size());
             assertNotNull(archive.getEntry(ARCHIVE_ROOT + "P8005-R-005h (Argon Streams AV1 User Manual).pdf"));
         }
     }
@@ -158,14 +119,14 @@ final class ArgonAv1CorpusTest {
                 ));
     }
 
-    /// Returns the regular regression cases, a diagnostic group, or one explicitly selected case.
+    /// Returns the complete low-overhead gate, a diagnostic group, or one explicitly selected case.
     ///
     /// @return the immutable selected cases
     /// @throws IOException if a diagnostic group selector cannot inspect the archive
     private static @Unmodifiable List<CorpusCase> selectedReferenceCases() throws IOException {
         @Nullable String selectedCase = System.getProperty(CASE_PROPERTY);
         if (selectedCase == null) {
-            return REFERENCE_CASES;
+            return allLowOverheadCases(null);
         }
         if (selectedCase.equals("all")) {
             return allLowOverheadCases(null);
@@ -184,7 +145,7 @@ final class ArgonAv1CorpusTest {
         return List.of(CorpusCase.parse(selectedCase));
     }
 
-    /// Returns all regular low-overhead cases, optionally restricted to one archive category.
+    /// Returns all regular and special low-overhead cases, optionally restricted to one category.
     ///
     /// @param selectedCategory the exact category to select, or `null` for every profile
     /// @return the immutable sorted corpus cases

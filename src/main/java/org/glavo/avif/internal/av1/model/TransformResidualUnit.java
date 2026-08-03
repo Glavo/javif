@@ -28,7 +28,10 @@ import java.util.Objects;
 /// rectangle and coefficient-neighbor context produced by AV1 entropy decoding.
 @NotNullByDefault
 public final class TransformResidualUnit {
-    /// The tile-relative block origin of this transform residual unit in luma 4x4 units.
+    /// Shared internal coefficient storage for transform units signaled as all-zero.
+    private static final int @Unmodifiable [] EMPTY_COEFFICIENTS = new int[0];
+
+    /// The block origin of this transform residual unit in luma 4x4 units.
     private final BlockPosition position;
 
     /// The transform size used by this residual unit.
@@ -40,7 +43,8 @@ public final class TransformResidualUnit {
     /// The scan index of the last non-zero coefficient, or `-1` for all-zero units.
     private final int endOfBlockIndex;
 
-    /// The signed transform-domain coefficients in natural raster order.
+    /// The signed transform-domain coefficients in natural raster order, or an empty internal
+    /// representation when the unit is signaled as all-zero.
     private final int @Unmodifiable [] coefficients;
 
     /// The exact portion of the residual width that lies inside the coded frame or tile boundary.
@@ -79,8 +83,8 @@ public final class TransformResidualUnit {
             throw new IllegalArgumentException("endOfBlockIndex out of range: " + endOfBlockIndex);
         }
         this.endOfBlockIndex = endOfBlockIndex;
-        this.coefficients = Arrays.copyOf(Objects.requireNonNull(coefficients, "coefficients"), coefficients.length);
-        if (this.coefficients.length != size.widthPixels() * size.heightPixels()) {
+        int[] checkedCoefficients = Objects.requireNonNull(coefficients, "coefficients");
+        if (checkedCoefficients.length != size.widthPixels() * size.heightPixels()) {
             throw new IllegalArgumentException("coefficients length does not match transform area");
         }
         if (visibleWidthPixels <= 0 || visibleWidthPixels > size.widthPixels()) {
@@ -90,12 +94,15 @@ public final class TransformResidualUnit {
             throw new IllegalArgumentException("visibleHeightPixels out of range: " + visibleHeightPixels);
         }
         if (endOfBlockIndex < 0) {
-            for (int coefficient : this.coefficients) {
+            for (int coefficient : checkedCoefficients) {
                 if (coefficient != 0) {
                     throw new IllegalArgumentException("all-zero residual units must not carry coefficients");
                 }
             }
         }
+        this.coefficients = endOfBlockIndex < 0
+                ? EMPTY_COEFFICIENTS
+                : Arrays.copyOf(checkedCoefficients, checkedCoefficients.length);
         this.visibleWidthPixels = visibleWidthPixels;
         this.visibleHeightPixels = visibleHeightPixels;
         if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
@@ -132,6 +139,22 @@ public final class TransformResidualUnit {
                 visibleHeightPixels,
                 coefficientContextByte
         );
+    }
+
+    /// Creates a position-adjusted unit that shares the source unit's immutable coefficients.
+    ///
+    /// @param position the replacement residual-unit position
+    /// @param source the residual unit whose non-position state is retained
+    private TransformResidualUnit(BlockPosition position, TransformResidualUnit source) {
+        this.position = Objects.requireNonNull(position, "position");
+        TransformResidualUnit nonNullSource = Objects.requireNonNull(source, "source");
+        this.size = nonNullSource.size;
+        this.transformType = nonNullSource.transformType;
+        this.endOfBlockIndex = nonNullSource.endOfBlockIndex;
+        this.coefficients = nonNullSource.coefficients;
+        this.visibleWidthPixels = nonNullSource.visibleWidthPixels;
+        this.visibleHeightPixels = nonNullSource.visibleHeightPixels;
+        this.coefficientContextByte = nonNullSource.coefficientContextByte;
     }
 
     /// Creates one transform residual unit whose exact visible footprint matches the coded
@@ -188,9 +211,9 @@ public final class TransformResidualUnit {
         );
     }
 
-    /// Returns the tile-relative block origin of this transform residual unit in luma 4x4 units.
+    /// Returns the block origin of this transform residual unit in luma 4x4 units.
     ///
-    /// @return the tile-relative block origin of this transform residual unit in luma 4x4 units
+    /// @return the block origin of this transform residual unit in luma 4x4 units
     public BlockPosition position() {
         return position;
     }
@@ -204,16 +227,7 @@ public final class TransformResidualUnit {
         if (this.position.x4() == nonNullPosition.x4() && this.position.y4() == nonNullPosition.y4()) {
             return this;
         }
-        return new TransformResidualUnit(
-                nonNullPosition,
-                size,
-                transformType,
-                endOfBlockIndex,
-                coefficients,
-                visibleWidthPixels,
-                visibleHeightPixels,
-                coefficientContextByte
-        );
+        return new TransformResidualUnit(nonNullPosition, this);
     }
 
     /// Returns the transform size used by this residual unit.
@@ -248,7 +262,9 @@ public final class TransformResidualUnit {
     ///
     /// @return the signed transform-domain coefficients in natural raster order
     public int[] coefficients() {
-        return Arrays.copyOf(coefficients, coefficients.length);
+        return allZero()
+                ? new int[size.widthPixels() * size.heightPixels()]
+                : Arrays.copyOf(coefficients, coefficients.length);
     }
 
     /// Returns the exact portion of the residual width inside the coded frame or tile boundary.
@@ -269,7 +285,7 @@ public final class TransformResidualUnit {
     ///
     /// @return the decoded DC coefficient in natural raster order
     public int dcCoefficient() {
-        return coefficients[0];
+        return allZero() ? 0 : coefficients[0];
     }
 
     /// Returns the coefficient-context byte written back to neighbor state.

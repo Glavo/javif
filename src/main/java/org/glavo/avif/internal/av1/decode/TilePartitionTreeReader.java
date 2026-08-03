@@ -29,7 +29,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-/// Recursive reader that turns one tile bitstream into an early AV1 partition tree with leaf block headers.
+/// Recursively decodes one tile bitstream into a frame-relative AV1 partition tree.
+///
+/// Entropy and neighbor-context operations use tile-relative coordinates while decoding. Nodes retained
+/// in the returned tree use frame-relative coordinates so reconstruction does not need a second tree.
 @NotNullByDefault
 public final class TilePartitionTreeReader {
     /// The above-edge partition state values copied from `dav1d`.
@@ -77,6 +80,12 @@ public final class TilePartitionTreeReader {
     /// The tile height in AV1 4x4 coding units after 8x8 frame-grid rounding.
     private final int tileHeight4;
 
+    /// The frame-relative X origin of the tile in AV1 4x4 coding units.
+    private final int frameOffsetX4;
+
+    /// The frame-relative Y origin of the tile in AV1 4x4 coding units.
+    private final int frameOffsetY4;
+
     /// Creates one recursive tile partition tree reader.
     ///
     /// @param tileContext the tile-local decode state that owns the active tile bitstream
@@ -91,6 +100,8 @@ public final class TilePartitionTreeReader {
         this.loopRestorationReader = new TileLoopRestorationReader(nonNullTileContext, syntaxReader);
         this.tileWidth4 = nonNullTileContext.codedWidth4();
         this.tileHeight4 = nonNullTileContext.codedHeight4();
+        this.frameOffsetX4 = nonNullTileContext.startX() >> 2;
+        this.frameOffsetY4 = nonNullTileContext.startY() >> 2;
     }
 
     /// Returns the tile-local decode state that owns this tree reader.
@@ -109,7 +120,7 @@ public final class TilePartitionTreeReader {
 
     /// Reads the current tile into top-level superblock nodes in raster order.
     ///
-    /// @return the top-level superblock nodes in raster order
+    /// @return the frame-relative top-level superblock nodes in raster order
     public Node[] readTile() {
         SquareBlockLevel rootLevel = tileContext.superblockSize() == 128
                 ? SquareBlockLevel.BLOCK_128X128
@@ -263,7 +274,14 @@ public final class TilePartitionTreeReader {
                 }
             }
         }
-        return new LeafNode(header, transformLayout, residualLayout);
+        if (frameOffsetX4 == 0 && frameOffsetY4 == 0) {
+            return new LeafNode(header, transformLayout, residualLayout);
+        }
+        return new LeafNode(
+                header.withPosition(header.position().offset(frameOffsetX4, frameOffsetY4)),
+                transformLayout.withOffset(frameOffsetX4, frameOffsetY4),
+                residualLayout.withOffset(frameOffsetX4, frameOffsetY4)
+        );
     }
 
     /// Creates a partition node and drops children that fell fully outside the tile.
@@ -285,7 +303,12 @@ public final class TilePartitionTreeReader {
                 visibleChildren.add(child);
             }
         }
-        return new PartitionNode(position, level.squareSize(), partitionType, visibleChildren.toArray(new Node[0]));
+        return new PartitionNode(
+                position.offset(frameOffsetX4, frameOffsetY4),
+                level.squareSize(),
+                partitionType,
+                visibleChildren.toArray(new Node[0])
+        );
     }
 
     /// One square block level used by the recursive partition reader.

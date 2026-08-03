@@ -280,7 +280,7 @@ tasks.register<Test>("argonAv1Test") {
 
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
-    maxHeapSize = "2g"
+    maxHeapSize = providers.gradleProperty("argonAv1MaxHeap").getOrElse("4g")
 
     useJUnitPlatform {
         includeTags("argon-corpus")

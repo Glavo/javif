@@ -87,6 +87,25 @@ final class TilePartitionTreeReaderTest {
         assertFalse(hasInvalidLeafOrigin(roots[0], 10, 8));
     }
 
+    /// Verifies that a non-origin tile retains frame-relative coordinates in its decoded tree.
+    @Test
+    void retainsFrameRelativeCoordinatesForOffsetTile() {
+        TilePartitionTreeReader reader = new TilePartitionTreeReader(
+                createContext(FrameType.KEY, 128, 64, FIXED_TILE_PAYLOAD, 2, 1)
+        );
+
+        TilePartitionTreeReader.Node[] roots = reader.readTile();
+        TilePartitionTreeReader.LeafNode leafNode = firstLeaf(roots[0]);
+
+        assertEquals(16, roots[0].position().x4());
+        assertEquals(0, roots[0].position().y4());
+        assertEquals(16, leafNode.header().position().x4());
+        assertEquals(16, leafNode.transformLayout().position().x4());
+        assertEquals(16, leafNode.residualLayout().position().x4());
+        assertEquals(16, leafNode.transformLayout().lumaUnits()[0].position().x4());
+        assertEquals(16, leafNode.residualLayout().lumaUnits()[0].position().x4());
+    }
+
     /// Verifies that four-way partitions preserve the parent's full axis and divide only the
     /// stripe axis into quarters.
     @Test
@@ -190,6 +209,26 @@ final class TilePartitionTreeReaderTest {
     /// @param payload the collected tile entropy payload
     /// @return a synthetic tile context used by partition-tree tests
     private static TileDecodeContext createContext(FrameType frameType, int codedWidth, int codedHeight, byte[] payload) {
+        return createContext(frameType, codedWidth, codedHeight, payload, 1, 0);
+    }
+
+    /// Creates a synthetic tile context used by partition-tree tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param codedWidth the coded frame width
+    /// @param codedHeight the coded frame height
+    /// @param payload the collected tile entropy payload
+    /// @param tileColumns the number of 64x64 tile columns
+    /// @param tileIndex the tile index whose context is returned
+    /// @return a synthetic tile context used by partition-tree tests
+    private static TileDecodeContext createContext(
+            FrameType frameType,
+            int codedWidth,
+            int codedHeight,
+            byte[] payload,
+            int tileColumns,
+            int tileIndex
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 codedWidth,
@@ -264,15 +303,15 @@ final class TilePartitionTreeReaderTest {
                 new FrameHeader.TilingInfo(
                         true,
                         0,
+                        tileColumns == 1 ? 0 : 1,
+                        tileColumns == 1 ? 0 : 1,
+                        tileColumns == 1 ? 0 : 1,
+                        tileColumns,
                         0,
                         0,
                         0,
                         1,
-                        0,
-                        0,
-                        0,
-                        1,
-                        new int[]{0, 1},
+                        tileColumns == 1 ? new int[]{0, 1} : new int[]{0, 1, 2},
                         new int[]{0, 1},
                         0
                 ),
@@ -305,14 +344,18 @@ final class TilePartitionTreeReaderTest {
                 false
         );
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
+        TileBitstream[] tiles = new TileBitstream[tileColumns];
+        for (int i = 0; i < tiles.length; i++) {
+            tiles[i] = new TileBitstream(i, payload, 0, payload.length);
+        }
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
-                new TileGroupHeader(false, 0, 0, 1),
+                new TileGroupHeader(tileColumns > 1, 0, tileColumns - 1, tileColumns),
                 0,
                 0,
-                new TileBitstream[]{new TileBitstream(0, payload, 0, payload.length)}
+                tiles
         );
-        return TileDecodeContext.create(assembly, 0);
+        return TileDecodeContext.create(assembly, tileIndex);
     }
 
     /// Creates default per-segment data with all features disabled.

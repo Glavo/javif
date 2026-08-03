@@ -2029,7 +2029,7 @@ public final class TileBlockHeaderReader {
     /// One decoded leaf block header.
     @NotNullByDefault
     public static final class BlockHeader {
-        /// The local tile-relative block origin.
+        /// The block origin in the coordinate space used by this header.
         private final BlockPosition position;
 
         /// The decoded block size.
@@ -2417,6 +2417,58 @@ public final class TileBlockHeaderReader {
                     throw new IllegalArgumentException("Blocks without a secondary reference must not carry a secondary motion vector");
                 }
             }
+        }
+
+        /// Creates a position-adjusted header that shares the source header's immutable payload.
+        ///
+        /// @param position the replacement block origin
+        /// @param source the decoded header whose non-position state is retained
+        private BlockHeader(BlockPosition position, BlockHeader source) {
+            this.position = Objects.requireNonNull(position, "position");
+            BlockHeader nonNullSource = Objects.requireNonNull(source, "source");
+            this.size = nonNullSource.size;
+            this.hasChroma = nonNullSource.hasChroma;
+            this.skip = nonNullSource.skip;
+            this.skipMode = nonNullSource.skipMode;
+            this.intra = nonNullSource.intra;
+            this.useIntrabc = nonNullSource.useIntrabc;
+            this.compoundReference = nonNullSource.compoundReference;
+            this.referenceFrame0 = nonNullSource.referenceFrame0;
+            this.referenceFrame1 = nonNullSource.referenceFrame1;
+            this.singleInterMode = nonNullSource.singleInterMode;
+            this.compoundInterMode = nonNullSource.compoundInterMode;
+            this.drlIndex = nonNullSource.drlIndex;
+            this.motionVector0 = nonNullSource.motionVector0;
+            this.motionVector1 = nonNullSource.motionVector1;
+            this.motionMode = nonNullSource.motionMode;
+            this.horizontalInterpolationFilter = nonNullSource.horizontalInterpolationFilter;
+            this.verticalInterpolationFilter = nonNullSource.verticalInterpolationFilter;
+            this.compoundPredictionType = nonNullSource.compoundPredictionType;
+            this.compoundMaskSign = nonNullSource.compoundMaskSign;
+            this.compoundWedgeIndex = nonNullSource.compoundWedgeIndex;
+            this.interIntra = nonNullSource.interIntra;
+            this.interIntraMode = nonNullSource.interIntraMode;
+            this.interIntraWedge = nonNullSource.interIntraWedge;
+            this.interIntraWedgeIndex = nonNullSource.interIntraWedgeIndex;
+            this.segmentPredicted = nonNullSource.segmentPredicted;
+            this.segmentId = nonNullSource.segmentId;
+            this.cdefIndex = nonNullSource.cdefIndex;
+            this.qIndex = nonNullSource.qIndex;
+            this.deltaLfValues = nonNullSource.deltaLfValues;
+            this.yMode = nonNullSource.yMode;
+            this.uvMode = nonNullSource.uvMode;
+            this.yPaletteSize = nonNullSource.yPaletteSize;
+            this.uvPaletteSize = nonNullSource.uvPaletteSize;
+            this.yPaletteColors = nonNullSource.yPaletteColors;
+            this.uPaletteColors = nonNullSource.uPaletteColors;
+            this.vPaletteColors = nonNullSource.vPaletteColors;
+            this.yPaletteIndices = nonNullSource.yPaletteIndices;
+            this.uvPaletteIndices = nonNullSource.uvPaletteIndices;
+            this.filterIntraMode = nonNullSource.filterIntraMode;
+            this.yAngle = nonNullSource.yAngle;
+            this.uvAngle = nonNullSource.uvAngle;
+            this.cflAlphaU = nonNullSource.cflAlphaU;
+            this.cflAlphaV = nonNullSource.cflAlphaV;
         }
 
         /// Creates one decoded leaf block header with inter-intra state defaulted to unavailable.
@@ -2853,9 +2905,9 @@ public final class TileBlockHeaderReader {
             );
         }
 
-        /// Returns the local tile-relative block origin.
+        /// Returns the block origin in the coordinate space used by this header.
         ///
-        /// @return the local tile-relative block origin
+        /// @return the block origin in the coordinate space used by this header
         public BlockPosition position() {
             return position;
         }
@@ -2869,52 +2921,7 @@ public final class TileBlockHeaderReader {
             if (this.position.x4() == nonNullPosition.x4() && this.position.y4() == nonNullPosition.y4()) {
                 return this;
             }
-            return new BlockHeader(
-                    nonNullPosition,
-                    size,
-                    hasChroma,
-                    skip,
-                    skipMode,
-                    intra,
-                    useIntrabc,
-                    compoundReference,
-                    referenceFrame0,
-                    referenceFrame1,
-                    singleInterMode,
-                    compoundInterMode,
-                    drlIndex,
-                    motionVector0,
-                    motionVector1,
-                    motionMode,
-                    horizontalInterpolationFilter,
-                    verticalInterpolationFilter,
-                    compoundPredictionType,
-                    compoundMaskSign,
-                    compoundWedgeIndex,
-                    interIntra,
-                    interIntraMode,
-                    interIntraWedge,
-                    interIntraWedgeIndex,
-                    segmentPredicted,
-                    segmentId,
-                    cdefIndex,
-                    qIndex,
-                    deltaLfValues,
-                    yMode,
-                    uvMode,
-                    yPaletteSize,
-                    uvPaletteSize,
-                    yPaletteColors,
-                    uPaletteColors,
-                    vPaletteColors,
-                    yPaletteIndices,
-                    uvPaletteIndices,
-                    filterIntraMode,
-                    yAngle,
-                    uvAngle,
-                    cflAlphaU,
-                    cflAlphaV
-            );
+            return new BlockHeader(nonNullPosition, this);
         }
 
         /// Returns the decoded block size.

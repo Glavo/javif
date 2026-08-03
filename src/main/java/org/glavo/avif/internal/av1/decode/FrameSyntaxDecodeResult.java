@@ -30,7 +30,7 @@ public final class FrameSyntaxDecodeResult {
     /// The fully assembled frame that was structurally decoded.
     private final FrameAssembly assembly;
 
-    /// The decoded top-level partition roots for each tile in frame order.
+    /// The frame-relative decoded top-level partition roots for each tile in frame order.
     private final TilePartitionTreeReader.Node @Unmodifiable [] @Unmodifiable [] tileRoots;
 
     /// The tile-local temporal motion fields produced while decoding the current frame.
@@ -50,7 +50,7 @@ public final class FrameSyntaxDecodeResult {
     /// Final tile CDF contexts default to fresh `CdfContext.createDefault()` copies.
     ///
     /// @param assembly the fully assembled frame that was structurally decoded
-    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param tileRoots the tile-relative decoded top-level partition roots for each tile in frame order
     /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced while decoding the current frame
     public FrameSyntaxDecodeResult(
             FrameAssembly assembly,
@@ -69,7 +69,7 @@ public final class FrameSyntaxDecodeResult {
     /// Creates one structural frame-decode result.
     ///
     /// @param assembly the fully assembled frame that was structurally decoded
-    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param tileRoots the tile-relative decoded top-level partition roots for each tile in frame order
     /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced while decoding the current frame
     /// @param finalTileCdfContexts the final tile-local CDF contexts produced while decoding the current frame
     public FrameSyntaxDecodeResult(
@@ -90,7 +90,7 @@ public final class FrameSyntaxDecodeResult {
     /// Creates one structural frame-decode result.
     ///
     /// @param assembly the fully assembled frame that was structurally decoded
-    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param tileRoots the tile-relative decoded top-level partition roots for each tile in frame order
     /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced while decoding the current frame
     /// @param restorationUnitMap the decoded frame-level loop-restoration unit syntax
     /// @param finalTileCdfContexts the final tile-local CDF contexts produced while decoding the current frame
@@ -114,7 +114,7 @@ public final class FrameSyntaxDecodeResult {
     /// Creates one structural frame-decode result with an exact segment-id map.
     ///
     /// @param assembly the fully assembled frame that was structurally decoded
-    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param tileRoots the tile-relative decoded top-level partition roots for each tile in frame order
     /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced while decoding the current frame
     /// @param restorationUnitMap the decoded frame-level loop-restoration unit syntax
     /// @param finalTileCdfContexts the final tile-local CDF contexts produced while decoding the current frame
@@ -126,6 +126,35 @@ public final class FrameSyntaxDecodeResult {
             RestorationUnitMap restorationUnitMap,
             CdfContext[] finalTileCdfContexts,
             SegmentIdMap segmentIdMap
+    ) {
+        this(
+                assembly,
+                tileRoots,
+                decodedTemporalMotionFields,
+                restorationUnitMap,
+                finalTileCdfContexts,
+                segmentIdMap,
+                false
+        );
+    }
+
+    /// Creates one structural frame-decode result with an exact segment-id map.
+    ///
+    /// @param assembly the fully assembled frame that was structurally decoded
+    /// @param tileRoots the decoded top-level partition roots for each tile in frame order
+    /// @param decodedTemporalMotionFields the tile-local temporal motion fields produced while decoding the current frame
+    /// @param restorationUnitMap the decoded frame-level loop-restoration unit syntax
+    /// @param finalTileCdfContexts the final tile-local CDF contexts produced while decoding the current frame
+    /// @param segmentIdMap the exact current-frame segment identifiers
+    /// @param frameRelativeTileRoots whether `tileRoots` already use frame-relative coordinates
+    FrameSyntaxDecodeResult(
+            FrameAssembly assembly,
+            TilePartitionTreeReader.Node[][] tileRoots,
+            TileDecodeContext.TemporalMotionField[] decodedTemporalMotionFields,
+            RestorationUnitMap restorationUnitMap,
+            CdfContext[] finalTileCdfContexts,
+            SegmentIdMap segmentIdMap,
+            boolean frameRelativeTileRoots
     ) {
         this.assembly = Objects.requireNonNull(assembly, "assembly");
         Objects.requireNonNull(tileRoots, "tileRoots");
@@ -143,9 +172,16 @@ public final class FrameSyntaxDecodeResult {
             throw new IllegalArgumentException("finalTileCdfContexts.length != totalTiles: " + finalTileCdfContexts.length);
         }
 
-        this.tileRoots = new TilePartitionTreeReader.Node[tileRoots.length][];
-        for (int i = 0; i < tileRoots.length; i++) {
-            this.tileRoots[i] = Arrays.copyOf(Objects.requireNonNull(tileRoots[i], "tileRoots[" + i + "]"), tileRoots[i].length);
+        TilePartitionTreeReader.Node[][] normalizedTileRoots = frameRelativeTileRoots
+                ? tileRoots
+                : FrameLocalPartitionTrees.create(assembly, tileRoots);
+        this.tileRoots = new TilePartitionTreeReader.Node[normalizedTileRoots.length][];
+        for (int i = 0; i < normalizedTileRoots.length; i++) {
+            TilePartitionTreeReader.Node[] roots = Objects.requireNonNull(
+                    normalizedTileRoots[i],
+                    "tileRoots[" + i + "]"
+            );
+            this.tileRoots[i] = Arrays.copyOf(roots, roots.length);
         }
         this.decodedTemporalMotionFields = new TileDecodeContext.TemporalMotionField[decodedTemporalMotionFields.length];
         for (int i = 0; i < decodedTemporalMotionFields.length; i++) {
@@ -176,9 +212,9 @@ public final class FrameSyntaxDecodeResult {
         return tileRoots.length;
     }
 
-    /// Returns a snapshot of the decoded top-level partition roots for every tile.
+    /// Returns a snapshot of the frame-relative decoded top-level partition roots for every tile.
     ///
-    /// @return a snapshot of the decoded top-level partition roots for every tile
+    /// @return a snapshot of the frame-relative decoded top-level partition roots for every tile
     public TilePartitionTreeReader.Node[][] tileRoots() {
         TilePartitionTreeReader.Node[][] copy = new TilePartitionTreeReader.Node[tileRoots.length][];
         for (int i = 0; i < tileRoots.length; i++) {
@@ -187,10 +223,10 @@ public final class FrameSyntaxDecodeResult {
         return copy;
     }
 
-    /// Returns a snapshot of the decoded top-level partition roots for one tile.
+    /// Returns a snapshot of the frame-relative decoded top-level partition roots for one tile.
     ///
     /// @param tileIndex the zero-based tile index in frame order
-    /// @return a snapshot of the decoded top-level partition roots for one tile
+    /// @return a snapshot of the frame-relative decoded top-level partition roots for one tile
     public TilePartitionTreeReader.Node[] tileRoots(int tileIndex) {
         int checkedTileIndex = checkedTileIndex(tileIndex);
         return Arrays.copyOf(tileRoots[checkedTileIndex], tileRoots[checkedTileIndex].length);
@@ -318,7 +354,8 @@ public final class FrameSyntaxDecodeResult {
                 decodedTemporalMotionFields(),
                 restorationUnitMap,
                 replacementTileCdfContexts,
-                segmentIdMap
+                segmentIdMap,
+                true
         );
     }
 
