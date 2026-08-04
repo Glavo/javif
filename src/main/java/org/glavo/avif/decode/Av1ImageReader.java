@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecoder;
 import org.glavo.avif.internal.av1.decode.InvalidFrameSyntaxException;
+import org.glavo.avif.internal.av1.decode.ReferenceFrameSyntaxState;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -367,17 +368,17 @@ public final class Av1ImageReader implements AutoCloseable {
         return lastFrameSyntaxDecodeResult;
     }
 
-    /// Returns one refreshed reference-frame structural decode result, or `null`.
+    /// Returns one refreshed compact reference-frame syntax state, or `null`.
     ///
     /// This package-private accessor exposes reference-slot state for decoder conformance tests.
     ///
     /// @param slot the zero-based reference-frame slot
-    /// @return one refreshed reference-frame structural decode result, or `null`
-    @Nullable FrameSyntaxDecodeResult referenceFrameSyntaxResult(int slot) {
+    /// @return one refreshed compact reference-frame syntax state, or `null`
+    @Nullable ReferenceFrameSyntaxState referenceFrameSyntaxState(int slot) {
         if (slot < 0 || slot >= referenceSlots.length) {
             throw new IndexOutOfBoundsException("slot out of range: " + slot);
         }
-        return referenceSlots[slot].syntaxResult();
+        return referenceSlots[slot].syntaxState();
     }
 
     /// Returns one refreshed reference-frame header, or `null`.
@@ -579,12 +580,12 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @return the pending presentation output, or `null` when current output filtering suppresses it
     private @Nullable PendingOutput completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
-        @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
+        @Nullable ReferenceFrameSyntaxState cdfReferenceState = selectCdfReferenceFrameSyntaxState(frameHeader);
         FrameSyntaxDecodeResult syntaxDecodeResult;
         try {
             syntaxDecodeResult = new FrameSyntaxDecoder(
-                    cdfReferenceResult,
-                    referenceFrameSyntaxResultsForDecoding()
+                    cdfReferenceState,
+                    referenceFrameSyntaxStatesForDecoding()
             ).decode(assembly);
         } catch (InvalidFrameSyntaxException exception) {
             throw new DecodeException(
@@ -598,10 +599,11 @@ public final class Av1ImageReader implements AutoCloseable {
             );
         }
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
-        FrameSyntaxDecodeResult storedSyntaxDecodeResult =
-                storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult);
         boolean shouldOutput = FrameOutputPolicy.shouldOutputFrame(frameHeader, config);
         boolean needsSurfaceSnapshot = frameHeader.refreshFrameFlags() != 0;
+        @Nullable ReferenceFrameSyntaxState storedSyntaxState = needsSurfaceSnapshot
+                ? storedReferenceFrameSyntaxState(frameHeader, syntaxDecodeResult, cdfReferenceState)
+                : null;
 
         @Nullable DecodedPlanes decodedPlanes = null;
         if (shouldOutput || needsSurfaceSnapshot) {
@@ -611,10 +613,16 @@ public final class Av1ImageReader implements AutoCloseable {
         @Nullable DecodedPlanes postprocessedPlanes = null;
         if (decodedPlanes != null) {
             postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
-            refreshReferenceState(
-                    frameHeader,
-                    new ReferenceSurfaceSnapshot(frameHeader, storedSyntaxDecodeResult, postprocessedPlanes)
-            );
+            if (needsSurfaceSnapshot) {
+                refreshReferenceState(
+                        frameHeader,
+                        new ReferenceSurfaceSnapshot(
+                                frameHeader,
+                                Objects.requireNonNull(storedSyntaxState, "storedSyntaxState"),
+                                postprocessedPlanes
+                        )
+                );
+            }
         }
         if (!shouldOutput) {
             return null;
@@ -626,7 +634,7 @@ public final class Av1ImageReader implements AutoCloseable {
         lastPlanes = presentationPlanes;
         return PendingOutput.normal(
                 presentationPlanes,
-                storedSyntaxDecodeResult.assembly().sequenceHeader().colorConfig(),
+                assembly.sequenceHeader().colorConfig(),
                 frameHeader,
                 frameHeader.showFrame(),
                 nextPresentationIndex,
@@ -780,7 +788,6 @@ public final class Av1ImageReader implements AutoCloseable {
         int existingFrameIndex = outputRequestHeader.existingFrameIndex();
         requireExistingFrameState(packet, existingFrameIndex);
         RuntimeReferenceSlot slot = referenceSlots[existingFrameIndex];
-        lastFrameSyntaxDecodeResult = slot.syntaxResult();
         FrameHeader referencedFrameHeader = Objects.requireNonNull(slot.frameHeader(), "referencedFrameHeader");
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(
                 slot.surfaceSnapshot(),
@@ -897,14 +904,14 @@ public final class Av1ImageReader implements AutoCloseable {
         }
     }
 
-    /// Returns the structural decode result whose final tile-local CDF contexts should seed the next frame.
+    /// Returns the compact reference state whose saved CDF should seed the next frame.
     ///
     /// AV1 inherits entropy state from `primary_ref_frame` when it is present. When
     /// `primary_ref_frame == PRIMARY_REF_NONE`, no reference CDF state is inherited.
     ///
     /// @param frameHeader the parsed frame header for the next frame
-    /// @return the structural decode result whose final tile-local CDF contexts should seed the next frame, or `null`
-    private @Nullable FrameSyntaxDecodeResult selectCdfReferenceFrameSyntaxResult(FrameHeader frameHeader) {
+    /// @return the compact reference state that should seed the next frame, or `null`
+    private @Nullable ReferenceFrameSyntaxState selectCdfReferenceFrameSyntaxState(FrameHeader frameHeader) {
         int primaryRefFrame = frameHeader.primaryRefFrame();
         if (primaryRefFrame < 0 || primaryRefFrame >= 7) {
             return null;
@@ -914,35 +921,29 @@ public final class Av1ImageReader implements AutoCloseable {
         if (primarySlot < 0 || primarySlot >= referenceSlots.length) {
             return null;
         }
-        return referenceSlots[primarySlot].syntaxResult();
+        return referenceSlots[primarySlot].syntaxState();
     }
 
-    /// Returns the structural decode result that should be stored in refreshed reference slots.
+    /// Creates the compact syntax state stored in refreshed reference slots.
     ///
     /// When `refresh_context` is disabled the refreshed slots keep their inherited entropy state,
-    /// while still receiving the current frame's partition trees and temporal motion fields.
+    /// while still receiving the current frame's segment identifiers and temporal motion field.
     ///
     /// @param frameHeader the parsed frame header whose refresh flags will be applied
     /// @param syntaxDecodeResult the structural frame-decode result produced for the current frame
-    /// @param cdfReferenceResult the inherited CDF reference snapshot, or `null`
-    /// @return the structural decode result that should be stored in refreshed reference slots
-    private FrameSyntaxDecodeResult storedReferenceFrameSyntaxResult(
+    /// @param cdfReferenceState the inherited compact reference state, or `null`
+    /// @return the compact syntax state to store in refreshed reference slots
+    private ReferenceFrameSyntaxState storedReferenceFrameSyntaxState(
             FrameHeader frameHeader,
             FrameSyntaxDecodeResult syntaxDecodeResult,
-            @Nullable FrameSyntaxDecodeResult cdfReferenceResult
+            @Nullable ReferenceFrameSyntaxState cdfReferenceState
     ) {
-        if (frameHeader.refreshContext()) {
-            return syntaxDecodeResult;
-        }
-
-        CdfContext storedFrameCdfContext = cdfReferenceResult != null
-                ? cdfReferenceResult.savedFrameCdfContext()
+        CdfContext storedFrameCdfContext = frameHeader.refreshContext()
+                ? syntaxDecodeResult.savedFrameCdfContext()
+                : cdfReferenceState != null
+                ? cdfReferenceState.savedFrameCdfContext()
                 : CdfContext.createDefault(frameHeader.quantization().baseQIndex());
-        CdfContext[] storedTileCdfContexts = repeatTileCdfContext(
-                storedFrameCdfContext,
-                syntaxDecodeResult.tileCount()
-        );
-        return syntaxDecodeResult.withFinalTileCdfContexts(storedTileCdfContexts);
+        return ReferenceFrameSyntaxState.from(syntaxDecodeResult, storedFrameCdfContext);
     }
 
     /// Atomically refreshes any reference slots targeted by the parsed frame header.
@@ -962,20 +963,6 @@ public final class Av1ImageReader implements AutoCloseable {
                 referenceSlots[i].refresh(referenceSurfaceSnapshot);
             }
         }
-    }
-
-    /// Creates independent copies of one saved frame CDF context for every current tile.
-    ///
-    /// @param frameCdfContext the saved frame CDF context to repeat
-    /// @param tileCount the number of tiles in the frame
-    /// @return repeated tile-local CDF contexts for the supplied tile count
-    private static CdfContext[] repeatTileCdfContext(CdfContext frameCdfContext, int tileCount) {
-        CdfContext checkedFrameCdfContext = Objects.requireNonNull(frameCdfContext, "frameCdfContext");
-        CdfContext[] contexts = new CdfContext[tileCount];
-        for (int i = 0; i < tileCount; i++) {
-            contexts[i] = checkedFrameCdfContext.copy();
-        }
-        return contexts;
     }
 
     /// Creates one fixed-size array of empty runtime reference slots.
@@ -1001,15 +988,15 @@ public final class Av1ImageReader implements AutoCloseable {
         return headers;
     }
 
-    /// Returns the current structural reference snapshots as one slot-indexed array.
+    /// Returns the current compact reference syntax states as one slot-indexed array.
     ///
-    /// @return the current structural reference snapshots as one slot-indexed array
-    private FrameSyntaxDecodeResult[] referenceFrameSyntaxResultsForDecoding() {
-        FrameSyntaxDecodeResult[] results = new FrameSyntaxDecodeResult[referenceSlots.length];
+    /// @return the current compact reference syntax states as one slot-indexed array
+    private ReferenceFrameSyntaxState[] referenceFrameSyntaxStatesForDecoding() {
+        ReferenceFrameSyntaxState[] states = new ReferenceFrameSyntaxState[referenceSlots.length];
         for (int i = 0; i < referenceSlots.length; i++) {
-            results[i] = referenceSlots[i].syntaxResult();
+            states[i] = referenceSlots[i].syntaxState();
         }
-        return results;
+        return states;
     }
 
     /// Returns the current stored reference surfaces as one slot-indexed snapshot array.

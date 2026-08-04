@@ -225,7 +225,7 @@ public final class TileDecodeContext {
                 nonNullAssembly,
                 tileIndex,
                 baseCdfContext,
-                ReferenceMotionVectorProjection.create(nonNullAssembly, new FrameSyntaxDecodeResult[8]),
+                ReferenceMotionVectorProjection.create(nonNullAssembly, new ReferenceFrameSyntaxState[8]),
                 SegmentIdMap.create(nonNullAssembly),
                 null
         );

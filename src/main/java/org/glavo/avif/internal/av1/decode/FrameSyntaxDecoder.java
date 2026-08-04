@@ -27,36 +27,41 @@ import java.util.Objects;
 /// Structural frame decoder that expands every tile into partition trees and saved motion-vector fields.
 @NotNullByDefault
 public final class FrameSyntaxDecoder {
-    /// The optional reference-frame syntax result that provides the inherited frame CDF context.
-    private final @Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult;
+    /// The optional compact reference state that provides the inherited frame CDF context.
+    private final @Nullable ReferenceFrameSyntaxState referenceCdfFrameSyntaxState;
 
-    /// The reference-frame syntax snapshots indexed by runtime reference slot.
-    private final @Nullable FrameSyntaxDecodeResult @Unmodifiable [] referenceFrameSyntaxResults;
+    /// The compact reference-frame syntax states indexed by runtime reference slot.
+    private final @Nullable ReferenceFrameSyntaxState @Unmodifiable [] referenceFrameSyntaxStates;
 
     /// Creates one structural frame decoder.
     ///
     /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides the inherited frame CDF context
     public FrameSyntaxDecoder(@Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult) {
-        this(referenceCdfFrameSyntaxResult, new FrameSyntaxDecodeResult[8]);
+        this(
+                referenceCdfFrameSyntaxResult == null
+                        ? null
+                        : ReferenceFrameSyntaxState.from(referenceCdfFrameSyntaxResult),
+                new ReferenceFrameSyntaxState[8]
+        );
     }
 
-    /// Creates one structural frame decoder with runtime reference syntax snapshots.
+    /// Creates one structural frame decoder with compact runtime reference syntax states.
     ///
-    /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides the inherited frame CDF context
-    /// @param referenceFrameSyntaxResults the syntax snapshots indexed by runtime reference slot
+    /// @param referenceCdfFrameSyntaxState the optional compact reference state that provides the inherited frame CDF context
+    /// @param referenceFrameSyntaxStates compact syntax states indexed by runtime reference slot
     public FrameSyntaxDecoder(
-            @Nullable FrameSyntaxDecodeResult referenceCdfFrameSyntaxResult,
-            @Nullable FrameSyntaxDecodeResult[] referenceFrameSyntaxResults
+            @Nullable ReferenceFrameSyntaxState referenceCdfFrameSyntaxState,
+            @Nullable ReferenceFrameSyntaxState[] referenceFrameSyntaxStates
     ) {
-        this.referenceCdfFrameSyntaxResult = referenceCdfFrameSyntaxResult;
-        @Nullable FrameSyntaxDecodeResult[] nonNullReferenceFrameSyntaxResults =
-                Objects.requireNonNull(referenceFrameSyntaxResults, "referenceFrameSyntaxResults");
-        if (nonNullReferenceFrameSyntaxResults.length != 8) {
+        this.referenceCdfFrameSyntaxState = referenceCdfFrameSyntaxState;
+        @Nullable ReferenceFrameSyntaxState[] nonNullReferenceFrameSyntaxStates =
+                Objects.requireNonNull(referenceFrameSyntaxStates, "referenceFrameSyntaxStates");
+        if (nonNullReferenceFrameSyntaxStates.length != 8) {
             throw new IllegalArgumentException(
-                    "referenceFrameSyntaxResults.length != 8: " + nonNullReferenceFrameSyntaxResults.length
+                    "referenceFrameSyntaxStates.length != 8: " + nonNullReferenceFrameSyntaxStates.length
             );
         }
-        this.referenceFrameSyntaxResults = nonNullReferenceFrameSyntaxResults.clone();
+        this.referenceFrameSyntaxStates = nonNullReferenceFrameSyntaxStates.clone();
     }
 
     /// Structurally decodes every collected tile in one completed frame assembly.
@@ -71,7 +76,7 @@ public final class FrameSyntaxDecoder {
         }
         int tileCount = nonNullAssembly.totalTiles();
         ReferenceMotionVectorProjection referenceMotionVectorProjection =
-                ReferenceMotionVectorProjection.create(nonNullAssembly, referenceFrameSyntaxResults);
+                ReferenceMotionVectorProjection.create(nonNullAssembly, referenceFrameSyntaxStates);
         @Nullable SegmentIdMap referenceSegmentIdMap = referenceSegmentIdMap(nonNullAssembly);
         SegmentIdMap currentSegmentIdMap = SegmentIdMap.create(nonNullAssembly);
         FrameHeader.SegmentationInfo segmentation = nonNullAssembly.frameHeader().segmentation();
@@ -166,15 +171,15 @@ public final class FrameSyntaxDecoder {
             return null;
         }
         int primarySlot = frameHeader.referenceFrameIndex(primaryRefFrame);
-        if (primarySlot < 0 || primarySlot >= referenceFrameSyntaxResults.length) {
+        if (primarySlot < 0 || primarySlot >= referenceFrameSyntaxStates.length) {
             return null;
         }
-        @Nullable FrameSyntaxDecodeResult referenceResult = referenceFrameSyntaxResults[primarySlot];
-        if (referenceResult == null) {
+        @Nullable ReferenceFrameSyntaxState referenceState = referenceFrameSyntaxStates[primarySlot];
+        if (referenceState == null) {
             return null;
         }
 
-        SegmentIdMap referenceMap = referenceResult.segmentIdMap();
+        SegmentIdMap referenceMap = referenceState.segmentIdMap();
         int width4 = ((frameHeader.frameSize().codedWidth() + 7) >> 3) << 1;
         int height4 = ((frameHeader.frameSize().height() + 7) >> 3) << 1;
         return referenceMap.hasDimensions(width4, height4) ? referenceMap : null;
@@ -185,9 +190,9 @@ public final class FrameSyntaxDecoder {
     ///
     /// @return the inherited frame CDF context, or `null`
     private @Nullable CdfContext referenceCdfContext() {
-        if (referenceCdfFrameSyntaxResult == null) {
+        if (referenceCdfFrameSyntaxState == null) {
             return null;
         }
-        return referenceCdfFrameSyntaxResult.savedFrameCdfContext();
+        return referenceCdfFrameSyntaxState.savedFrameCdfContext();
     }
 }

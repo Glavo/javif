@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.ReferenceFrameSyntaxState;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -25,7 +25,7 @@ import java.util.Objects;
 
 /// Mutable runtime storage for one atomically refreshed AV1 reference slot.
 ///
-/// A populated slot always retains its frame header, structural syntax state, and reconstructed
+/// A populated slot always retains its frame header, compact syntax state, and reconstructed
 /// post-filter surface in one [ReferenceSurfaceSnapshot].
 @NotNullByDefault
 public final class RuntimeReferenceSlot {
@@ -52,12 +52,12 @@ public final class RuntimeReferenceSlot {
         return current != null ? current.frameHeader() : null;
     }
 
-    /// Returns the structural frame-syntax result stored in this slot.
+    /// Returns the compact frame-syntax state stored in this slot.
     ///
-    /// @return the stored structural syntax state, or `null` when empty
-    public @Nullable FrameSyntaxDecodeResult syntaxResult() {
+    /// @return the compact stored syntax state, or `null` when empty
+    public @Nullable ReferenceFrameSyntaxState syntaxState() {
         ReferenceSurfaceSnapshot current = snapshot;
-        return current != null ? current.frameSyntaxDecodeResult() : null;
+        return current != null ? current.frameSyntaxState() : null;
     }
 
     /// Returns the complete reference surface snapshot stored in this slot.

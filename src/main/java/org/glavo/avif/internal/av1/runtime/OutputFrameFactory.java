@@ -168,7 +168,7 @@ public final class OutputFrameFactory {
                 checkedDecodedPlanes,
                 metadata,
                 YuvToRgbTransform.fromColorConfig(
-                        checkedSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+                        checkedSnapshot.frameSyntaxState().sequenceHeader().colorConfig()
                 )
         );
     }

@@ -22,6 +22,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.BlockNeighborContext;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
+import org.glavo.avif.internal.av1.decode.ReferenceFrameSyntaxState;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
 import org.glavo.avif.internal.av1.decode.TileDecodeContext;
@@ -580,11 +581,12 @@ final class Av1ImageReaderTest {
             assertNotNull(firstSyntaxResult);
             assertTrue(firstSyntaxResult.assembly().frameHeader().superResolution().enabled());
             assertReferenceStateStoredForLastSyntaxResult(reader);
-            FrameSyntaxDecodeResult storedSyntaxResult =
-                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
+            ReferenceFrameSyntaxState storedSyntaxState =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxState(0), "stored syntax state");
 
             assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), AvifPixelFormat.I420, 1);
-            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxState, reader.referenceFrameSyntaxState(0));
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         });
@@ -613,8 +615,8 @@ final class Av1ImageReaderTest {
             assertActivePostfilterSuperResolvedHeader(firstFrameHeader);
             assertDecodedActiveWienerRestorationUnit(firstSyntaxResult);
             assertReferenceStateStoredForLastSyntaxResult(reader);
-            FrameSyntaxDecodeResult storedSyntaxResult =
-                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
+            ReferenceFrameSyntaxState storedSyntaxState =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxState(0), "stored syntax state");
 
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface");
@@ -622,7 +624,8 @@ final class Av1ImageReaderTest {
 
             DecodedFrame reusedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 1);
-            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxState, reader.referenceFrameSyntaxState(0));
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
         });
@@ -747,7 +750,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -769,7 +772,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         }
     }
@@ -1007,11 +1010,12 @@ final class Av1ImageReaderTest {
             DecodedPlanes firstPlanes = reader.lastPlanes();
             assertNotNull(firstPlanes);
             assertReferenceStateStoredForLastSyntaxResult(reader);
-            FrameSyntaxDecodeResult storedSyntaxResult =
-                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
+            ReferenceFrameSyntaxState storedSyntaxState =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxState(0), "stored syntax state");
 
             assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
-            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxState, reader.referenceFrameSyntaxState(0));
             assertSame(firstPlanes, reader.lastPlanes());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
@@ -1033,7 +1037,7 @@ final class Av1ImageReaderTest {
             assertNotNull(reader.readFrame());
             for (int i = 0; i < 8; i++) {
                 assertSame(referenceState.frameHeader(), reader.referenceFrameHeader(i));
-                assertSame(referenceState.syntaxResult(), reader.referenceFrameSyntaxResult(i));
+                assertSame(referenceState.syntaxState(), reader.referenceFrameSyntaxState(i));
                 assertSame(referenceState.referenceSurfaceSnapshot(), reader.referenceSurfaceSnapshot(i));
             }
             assertNull(reader.readFrame());
@@ -1060,11 +1064,12 @@ final class Av1ImageReaderTest {
             assertNotNull(firstSyntaxResult);
             DecodedPlanes firstPlanes = reader.lastPlanes();
             assertNotNull(firstPlanes);
-            FrameSyntaxDecodeResult storedSyntaxResult =
-                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
+            ReferenceFrameSyntaxState storedSyntaxState =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxState(0), "stored syntax state");
 
             assertFullRangeOpaqueGrayStillPictureFrame(reader.readFrame(), 1);
-            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxState, reader.referenceFrameSyntaxState(0));
             assertSame(firstPlanes, reader.lastPlanes());
             assertNull(reader.readFrame());
         });
@@ -1117,11 +1122,12 @@ final class Av1ImageReaderTest {
             assertNotNull(firstSyntaxResult);
             assertLegacyDirectionalLeafDecoded(firstSyntaxResult);
             assertReferenceStateStoredForLastSyntaxResult(reader);
-            FrameSyntaxDecodeResult storedSyntaxResult =
-                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "stored syntax result");
+            ReferenceFrameSyntaxState storedSyntaxState =
+                    Objects.requireNonNull(reader.referenceFrameSyntaxState(0), "stored syntax state");
 
             assertFullRangeOpaqueDirectionalStillPictureFrame(reader.readFrame(), 1);
-            assertSame(storedSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
+            assertSame(storedSyntaxState, reader.referenceFrameSyntaxState(0));
             assertLegacyDirectionalLeafDecoded(reader.lastFrameSyntaxDecodeResult());
             assertReferenceStateStoredForLastSyntaxResult(reader);
             assertNull(reader.readFrame());
@@ -1304,7 +1310,7 @@ final class Av1ImageReaderTest {
             int tileRows
     ) {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
-                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+                referenceSurfaceSnapshot.frameSyntaxState().sequenceHeader().colorConfig()
         );
         int[] expectedPixels = ArgbOutput.toOpaqueArgbPixels(referenceSurfaceSnapshot.decodedPlanes(), transform);
         int tileWidth = frame.width() / tileColumns;
@@ -1343,8 +1349,16 @@ final class Av1ImageReaderTest {
             DecodedFrame frame = decodedFrame;
             int secondTileFirstPixelIndex = frame.width() / referenceState.frameHeader().tiling().columns();
             assertEquals(OPAQUE_FULL_RANGE_MID_GRAY, frame.intPixels()[secondTileFirstPixelIndex]);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
-            assertEquals(2, reader.lastFrameSyntaxDecodeResult().tileCount());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
+            ReferenceFrameSyntaxState storedSyntaxState = Objects.requireNonNull(
+                    reader.referenceFrameSyntaxState(0),
+                    "stored syntax state"
+            );
+            assertEquals(
+                    2,
+                    storedSyntaxState.frameHeader().tiling().columns()
+                            * storedSyntaxState.frameHeader().tiling().rows()
+            );
             assertNull(reader.readFrame());
         });
     }
@@ -1412,7 +1426,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -1439,7 +1453,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesGrainAppliedReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -1466,7 +1480,7 @@ final class Av1ImageReaderTest {
             DecodedFrame decodedFrame = reader.readFrame();
             assertTrue(decodedFrame.bitDepth().isHighBitDepth());
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -1586,9 +1600,9 @@ final class Av1ImageReaderTest {
             }
 
             assertTrue(reader.readAllFrames().isEmpty());
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertSame(referenceState.frameHeader(), reader.referenceFrameHeader(0));
-            assertSame(referenceState.syntaxResult(), reader.referenceFrameSyntaxResult(0));
+            assertSame(referenceState.syntaxState(), reader.referenceFrameSyntaxState(0));
             assertSame(referenceState.referenceSurfaceSnapshot(), reader.referenceSurfaceSnapshot(0));
         });
     }
@@ -1609,8 +1623,6 @@ final class Av1ImageReaderTest {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
             return new InjectedReferenceState(
                     parseFullSequenceHeader(),
-                    Objects.requireNonNull(reader.referenceFrameHeader(0), "frame header"),
-                    Objects.requireNonNull(reader.referenceFrameSyntaxResult(0), "syntax result"),
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface")
             );
         }
@@ -1652,8 +1664,6 @@ final class Av1ImageReaderTest {
 
         return new InjectedReferenceState(
                 parseFullSequenceHeader(pixelFormat),
-                assembly.frameHeader(),
-                syntaxResult,
                 referenceSurfaceSnapshot
         );
     }
@@ -1693,8 +1703,6 @@ final class Av1ImageReaderTest {
             );
             referenceStates[i] = new InjectedReferenceState(
                     sequenceHeader,
-                    referenceFrameHeader,
-                    syntaxResult,
                     referenceSurfaceSnapshot
             );
         }
@@ -2086,8 +2094,6 @@ final class Av1ImageReaderTest {
 
         return new InjectedReferenceState(
                 baseReferenceState.sequenceHeader(),
-                multiTileFrameHeader,
-                multiTileSyntaxResult,
                 multiTileSurfaceSnapshot
         );
     }
@@ -2114,8 +2120,6 @@ final class Av1ImageReaderTest {
 
         return new InjectedReferenceState(
                 sequenceHeader,
-                frameHeader,
-                syntaxResult,
                 referenceSurfaceSnapshot
         );
     }
@@ -2145,8 +2149,6 @@ final class Av1ImageReaderTest {
         );
         return new InjectedReferenceState(
                 sequenceHeader,
-                frameHeader,
-                syntaxResult,
                 referenceSurfaceSnapshot
         );
     }
@@ -2174,8 +2176,6 @@ final class Av1ImageReaderTest {
         );
         return new InjectedReferenceState(
                 baseReferenceState.sequenceHeader(),
-                filteredFrameHeader,
-                syntaxResult,
                 referenceSurfaceSnapshot
         );
     }
@@ -2213,8 +2213,6 @@ final class Av1ImageReaderTest {
         );
         return new InjectedReferenceState(
                 baseReferenceState.sequenceHeader(),
-                superResolvedFrameHeader,
-                syntaxResult,
                 referenceSurfaceSnapshot
         );
     }
@@ -2242,8 +2240,6 @@ final class Av1ImageReaderTest {
 
         return new InjectedReferenceState(
                 baseReferenceState.sequenceHeader(),
-                filmGrainFrameHeader,
-                syntaxResult,
                 referenceSurfaceSnapshot
         );
     }
@@ -2489,7 +2485,8 @@ final class Av1ImageReaderTest {
 
             DecodedFrame reusedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(reader.referenceFrameSyntaxResult(0), reader.lastFrameSyntaxDecodeResult());
+            assertSame(referenceState.syntaxState(), reader.referenceFrameSyntaxState(0));
+                assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -2685,7 +2682,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -2711,7 +2708,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         }
     }
@@ -2744,7 +2741,7 @@ final class Av1ImageReaderTest {
 
                 DecodedFrame decodedFrame = reader.readFrame();
                 assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-                assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
                 assertNull(reader.readFrame());
             }
             return;
@@ -2759,7 +2756,7 @@ final class Av1ImageReaderTest {
 
             DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
-            assertSame(referenceState.syntaxResult(), reader.lastFrameSyntaxDecodeResult());
+            assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
@@ -3413,7 +3410,7 @@ final class Av1ImageReaderTest {
                 expectedPresentationIndex
         );
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
-                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+                referenceSurfaceSnapshot.frameSyntaxState().sequenceHeader().colorConfig()
         );
         if (decodedPlanes.bitDepth() == 8) {
             assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
@@ -3448,7 +3445,7 @@ final class Av1ImageReaderTest {
                 expectedPresentationIndex
         );
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
-                referenceSurfaceSnapshot.frameSyntaxDecodeResult().assembly().sequenceHeader().colorConfig()
+                referenceSurfaceSnapshot.frameSyntaxState().sequenceHeader().colorConfig()
         );
         if (synthesizedPlanes.bitDepth() == 8) {
             assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
@@ -3935,17 +3932,11 @@ final class Av1ImageReaderTest {
     private static void assertReferenceStateStoredForLastSyntaxResult(Av1ImageReader reader) {
         FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
         assertNotNull(syntaxResult);
-        RestorationUnitMap syntaxRestorationUnitMap = syntaxResult.restorationUnitMap();
         for (int i = 0; i < 8; i++) {
-            FrameSyntaxDecodeResult storedResult = reader.referenceFrameSyntaxResult(i);
-            assertNotNull(storedResult);
-            assertSame(syntaxResult.assembly(), storedResult.assembly());
-            assertEquals(syntaxResult.tileCount(), storedResult.tileCount());
-            RestorationUnitMap storedRestorationUnitMap = storedResult.restorationUnitMap();
-            for (int plane = 0; plane < 3; plane++) {
-                assertEquals(syntaxRestorationUnitMap.columns(plane), storedRestorationUnitMap.columns(plane));
-                assertEquals(syntaxRestorationUnitMap.rows(plane), storedRestorationUnitMap.rows(plane));
-            }
+            ReferenceFrameSyntaxState storedState = reader.referenceFrameSyntaxState(i);
+            assertNotNull(storedState);
+            assertSame(syntaxResult.assembly().sequenceHeader(), storedState.sequenceHeader());
+            assertSame(syntaxResult.assembly().frameHeader(), storedState.frameHeader());
         }
     }
 
@@ -5359,13 +5350,9 @@ final class Av1ImageReaderTest {
         /// Creates one injected reference-slot state.
         ///
         /// @param sequenceHeader the sequence header that enables `show_existing_frame` parsing
-        /// @param frameHeader the stored frame header for the referenced slot
-        /// @param syntaxResult the stored structural syntax result for the referenced slot
         /// @param referenceSurfaceSnapshot the complete stored reference state
         private InjectedReferenceState(
                 SequenceHeader sequenceHeader,
-                FrameHeader frameHeader,
-                FrameSyntaxDecodeResult syntaxResult,
                 ReferenceSurfaceSnapshot referenceSurfaceSnapshot
         ) {
             this.sequenceHeader = Objects.requireNonNull(sequenceHeader, "sequenceHeader");
@@ -5373,10 +5360,6 @@ final class Av1ImageReaderTest {
                     referenceSurfaceSnapshot,
                     "referenceSurfaceSnapshot"
             );
-            if (frameHeader != referenceSurfaceSnapshot.frameHeader()
-                    || syntaxResult != referenceSurfaceSnapshot.frameSyntaxDecodeResult()) {
-                throw new IllegalArgumentException("Injected reference state components must describe one snapshot");
-            }
         }
 
         /// Returns the sequence header that enables `show_existing_frame` parsing.
@@ -5393,11 +5376,11 @@ final class Av1ImageReaderTest {
             return referenceSurfaceSnapshot.frameHeader();
         }
 
-        /// Returns the stored structural syntax result for the referenced slot.
+        /// Returns the compact syntax state for the referenced slot.
         ///
-        /// @return the stored structural syntax result for the referenced slot
-        private FrameSyntaxDecodeResult syntaxResult() {
-            return referenceSurfaceSnapshot.frameSyntaxDecodeResult();
+        /// @return the compact syntax state for the referenced slot
+        private ReferenceFrameSyntaxState syntaxState() {
+            return referenceSurfaceSnapshot.frameSyntaxState();
         }
 
         /// Returns the complete stored reference state.

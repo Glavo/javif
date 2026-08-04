@@ -92,10 +92,10 @@ final class ReferenceMotionVectorProjection {
     /// @return the immutable projected temporal field for the current frame
     static ReferenceMotionVectorProjection create(
             FrameAssembly assembly,
-            @Nullable FrameSyntaxDecodeResult[] referenceSyntaxResults
+            @Nullable ReferenceFrameSyntaxState[] referenceSyntaxResults
     ) {
         FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
-        @Nullable FrameSyntaxDecodeResult[] nonNullReferenceSyntaxResults =
+        @Nullable ReferenceFrameSyntaxState[] nonNullReferenceSyntaxResults =
                 Objects.requireNonNull(referenceSyntaxResults, "referenceSyntaxResults");
         if (nonNullReferenceSyntaxResults.length != 8) {
             throw new IllegalArgumentException(
@@ -144,7 +144,7 @@ final class ReferenceMotionVectorProjection {
         );
         for (int sourceReference : sourceReferences) {
             int slot = currentHeader.referenceFrameIndex(sourceReference);
-            @Nullable FrameSyntaxDecodeResult sourceResult = nonNullReferenceSyntaxResults[slot];
+            @Nullable ReferenceFrameSyntaxState sourceResult = nonNullReferenceSyntaxResults[slot];
             if (sourceResult != null) {
                 result.projectSource(nonNullAssembly, sourceResult, sourceReference, orderHintBits, blocks);
             }
@@ -243,7 +243,7 @@ final class ReferenceMotionVectorProjection {
     /// @param destination the mutable destination used only during construction
     private void projectSource(
             FrameAssembly currentAssembly,
-            FrameSyntaxDecodeResult sourceResult,
+            ReferenceFrameSyntaxState sourceResult,
             int sourceReference,
             int orderHintBits,
             @Nullable ProjectedTemporalBlock[] destination
@@ -253,7 +253,7 @@ final class ReferenceMotionVectorProjection {
         if (sourceHeader == null) {
             return;
         }
-        FrameHeader sourceSyntaxHeader = sourceResult.assembly().frameHeader();
+        FrameHeader sourceSyntaxHeader = sourceResult.frameHeader();
         if (!canProjectSourceMotionField(
                 sourceSyntaxHeader.frameType(),
                 sourceSyntaxHeader.frameSize().codedWidth(),
@@ -351,7 +351,7 @@ final class ReferenceMotionVectorProjection {
     /// @param orderHintBits the sequence order-hint width
     /// @return the selected projectable motion component, or `null`
     private static @Nullable SavedTemporalMotion selectSavedMotion(
-            FrameSyntaxDecodeResult sourceResult,
+            ReferenceFrameSyntaxState sourceResult,
             @Nullable TileDecodeContext.TemporalMotionBlock block,
             int orderHintBits
     ) {
@@ -391,7 +391,7 @@ final class ReferenceMotionVectorProjection {
     /// @param orderHintBits the sequence order-hint width
     /// @return one storable motion component and its signed reference offset, or `null`
     private static @Nullable SavedTemporalMotion savedMotion(
-            FrameSyntaxDecodeResult sourceResult,
+            ReferenceFrameSyntaxState sourceResult,
             int referenceFrame,
             @Nullable InterMotionVector interMotionVector,
             int orderHintBits
@@ -399,8 +399,8 @@ final class ReferenceMotionVectorProjection {
         if (interMotionVector == null || referenceFrame < 0 || referenceFrame >= 7) {
             return null;
         }
-        FrameHeader sourceHeader = sourceResult.assembly().frameHeader();
-        @Nullable FrameHeader referencedHeader = sourceResult.assembly().referenceFrameHeader(referenceFrame);
+        FrameHeader sourceHeader = sourceResult.frameHeader();
+        @Nullable FrameHeader referencedHeader = sourceResult.referenceFrameHeader(referenceFrame);
         if (referencedHeader == null) {
             return null;
         }
@@ -445,7 +445,7 @@ final class ReferenceMotionVectorProjection {
     /// @return the selected references in AV1 overwrite order
     private static int[] selectTemporalSources(
             FrameAssembly assembly,
-            @Nullable FrameSyntaxDecodeResult[] referenceSyntaxResults,
+            @Nullable ReferenceFrameSyntaxState[] referenceSyntaxResults,
             int orderHintBits
     ) {
         FrameHeader currentHeader = assembly.frameHeader();
@@ -453,11 +453,11 @@ final class ReferenceMotionVectorProjection {
         int count = 0;
         int targetCount = 2;
 
-        @Nullable FrameSyntaxDecodeResult lastResult = syntaxResult(currentHeader, referenceSyntaxResults, 0);
+        @Nullable ReferenceFrameSyntaxState lastResult = syntaxResult(currentHeader, referenceSyntaxResults, 0);
         @Nullable FrameHeader currentGoldenHeader = assembly.referenceFrameHeader(3);
         @Nullable FrameHeader lastAltHeader = lastResult == null
                 ? null
-                : lastResult.assembly().referenceFrameHeader(6);
+                : lastResult.referenceFrameHeader(6);
         if (lastResult != null
                 && currentGoldenHeader != null
                 && lastAltHeader != null
@@ -499,9 +499,9 @@ final class ReferenceMotionVectorProjection {
     /// @param referenceSyntaxResults the syntax snapshots indexed by runtime reference slot
     /// @param referenceFrame the current reference in internal LAST..ALTREF order
     /// @return the stored syntax result, or `null`
-    private static @Nullable FrameSyntaxDecodeResult syntaxResult(
+    private static @Nullable ReferenceFrameSyntaxState syntaxResult(
             FrameHeader currentHeader,
-            @Nullable FrameSyntaxDecodeResult[] referenceSyntaxResults,
+            @Nullable ReferenceFrameSyntaxState[] referenceSyntaxResults,
             int referenceFrame
     ) {
         int slot = currentHeader.referenceFrameIndex(referenceFrame);
@@ -520,7 +520,7 @@ final class ReferenceMotionVectorProjection {
     /// @return whether the candidate is a populated and projectable future temporal source
     private static boolean isProjectableFutureTemporalSource(
             FrameAssembly assembly,
-            @Nullable FrameSyntaxDecodeResult sourceResult,
+            @Nullable ReferenceFrameSyntaxState sourceResult,
             int referenceFrame,
             int orderHintBits
     ) {
@@ -529,7 +529,7 @@ final class ReferenceMotionVectorProjection {
         }
         @Nullable FrameHeader sourceHeader = assembly.referenceFrameHeader(referenceFrame);
         FrameHeader currentHeader = assembly.frameHeader();
-        FrameHeader sourceSyntaxHeader = sourceResult.assembly().frameHeader();
+        FrameHeader sourceSyntaxHeader = sourceResult.frameHeader();
         return sourceHeader != null
                 && orderHintDifference(
                 orderHintBits,

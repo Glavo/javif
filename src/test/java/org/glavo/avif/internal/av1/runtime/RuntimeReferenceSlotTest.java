@@ -34,7 +34,7 @@ final class RuntimeReferenceSlotTest {
         RuntimeReferenceSlot slot = new RuntimeReferenceSlot();
 
         assertNull(slot.frameHeader());
-        assertNull(slot.syntaxResult());
+        assertNull(slot.syntaxState());
         assertNull(slot.surfaceSnapshot());
         assertFalse(slot.isPopulated());
     }
@@ -58,13 +58,13 @@ final class RuntimeReferenceSlotTest {
         slot.refresh(second);
 
         assertSame(second.frameHeader(), slot.frameHeader());
-        assertSame(second.frameSyntaxDecodeResult(), slot.syntaxResult());
+        assertSame(second.frameSyntaxState(), slot.syntaxState());
         assertSame(second, slot.surfaceSnapshot());
         assertTrue(slot.isPopulated());
 
         slot.clear();
         assertNull(slot.frameHeader());
-        assertNull(slot.syntaxResult());
+        assertNull(slot.syntaxState());
         assertNull(slot.surfaceSnapshot());
         assertFalse(slot.isPopulated());
     }

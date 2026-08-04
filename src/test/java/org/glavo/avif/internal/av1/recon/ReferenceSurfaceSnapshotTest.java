@@ -58,9 +58,9 @@ final class ReferenceSurfaceSnapshotTest {
         ReferenceSurfaceSnapshot snapshot = new ReferenceSurfaceSnapshot(frameHeader, syntaxResult, decodedPlanes);
 
         assertSame(frameHeader, snapshot.frameHeader());
-        assertSame(syntaxResult, snapshot.frameSyntaxDecodeResult());
+        assertSame(frameHeader, snapshot.frameSyntaxState().frameHeader());
+        assertSame(syntaxResult.assembly().sequenceHeader(), snapshot.frameSyntaxState().sequenceHeader());
         assertSame(decodedPlanes, snapshot.decodedPlanes());
-        assertEquals(1, snapshot.frameSyntaxDecodeResult().tileCount());
     }
 
     /// Verifies that a reference-surface snapshot rejects mismatched frame headers.

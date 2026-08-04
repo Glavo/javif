@@ -38,6 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `FrameSyntaxDecoder`.
@@ -217,6 +219,36 @@ final class FrameSyntaxDecoderTest {
 
         assertEquals(32000, replaced.finalTileCdfContext(0).mutableSkipCdf(0)[0]);
         assertEquals(result.decodedTemporalMotionField(0).block(0, 0), replaced.decodedTemporalMotionField(0).block(0, 0));
+    }
+
+    /// Verifies that compact reference state retains every later-decoder input while returning
+    /// independent mutable snapshots.
+    @Test
+    void compactReferenceStateRetainsLaterDecoderInputs() {
+        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
+        FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
+
+        ReferenceFrameSyntaxState state = ReferenceFrameSyntaxState.from(result);
+
+        assertSame(assembly.sequenceHeader(), state.sequenceHeader());
+        assertSame(assembly.frameHeader(), state.frameHeader());
+        assertNull(state.referenceFrameHeader(0));
+
+        TileDecodeContext.TemporalMotionBlock temporalBlock = state.decodedTemporalMotionBlockAt(0, 0);
+        assertNotNull(temporalBlock);
+        assertEquals(0, temporalBlock.referenceFrame0());
+        assertEquals(InterMotionVector.resolved(MotionVector.zero()), temporalBlock.motionVector0());
+        assertNull(state.decodedTemporalMotionBlockAt(-1, 0));
+        assertNull(state.decodedTemporalMotionBlockAt(8, 0));
+
+        SegmentIdMap segmentIdMap = state.segmentIdMap();
+        segmentIdMap.fill(0, 0, 16, 16, 7);
+        assertEquals(0, state.segmentIdMap().getOrZero(0, 0));
+
+        CdfContext savedCdf = state.savedFrameCdfContext();
+        int savedSkipThreshold = savedCdf.mutableSkipCdf(0)[0];
+        savedCdf.mutableSkipCdf(0)[0] = 32000;
+        assertEquals(savedSkipThreshold, state.savedFrameCdfContext().mutableSkipCdf(0)[0]);
     }
 
     /// Creates a synthetic frame assembly used by structural frame-decoder tests.
