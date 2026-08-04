@@ -260,6 +260,15 @@ public final class TilePartitionTreeReader {
             return null;
         }
         TileBlockHeaderReader.BlockHeader header = blockHeaderReader.read(position, size, neighborContext, false);
+        if (header.useIntrabc()) {
+            IntrabcDisplacementValidator.requireValid(
+                    tileContext,
+                    position,
+                    size,
+                    Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector(),
+                    header.hasChroma()
+            );
+        }
         TransformLayout transformLayout = transformLayoutReader.read(header, neighborContext);
         ResidualLayout residualLayout = residualSyntaxReader.read(header, transformLayout, neighborContext);
         neighborContext.updateFromBlockHeader(header);
@@ -277,8 +286,9 @@ public final class TilePartitionTreeReader {
         if (frameOffsetX4 == 0 && frameOffsetY4 == 0) {
             return new LeafNode(header, transformLayout, residualLayout);
         }
+        header.relocatePosition(header.position().offset(frameOffsetX4, frameOffsetY4));
         return new LeafNode(
-                header.withPosition(header.position().offset(frameOffsetX4, frameOffsetY4)),
+                header,
                 transformLayout.withOffset(frameOffsetX4, frameOffsetY4),
                 residualLayout.withOffset(frameOffsetX4, frameOffsetY4)
         );
@@ -307,7 +317,8 @@ public final class TilePartitionTreeReader {
                 position.offset(frameOffsetX4, frameOffsetY4),
                 level.squareSize(),
                 partitionType,
-                visibleChildren.toArray(new Node[0])
+                visibleChildren.toArray(new Node[0]),
+                false
         );
     }
 
@@ -644,10 +655,28 @@ public final class TilePartitionTreeReader {
         /// @param partitionType the decoded partition type
         /// @param children the child nodes in bitstream order
         public PartitionNode(BlockPosition position, BlockSize size, PartitionType partitionType, Node[] children) {
+            this(position, size, partitionType, children, true);
+        }
+
+        /// Creates one non-leaf partition node with copied or exclusively transferred children.
+        ///
+        /// @param position the node origin
+        /// @param size the square block size
+        /// @param partitionType the decoded partition type
+        /// @param children the child nodes in bitstream order
+        /// @param copyChildren whether to copy the child array
+        private PartitionNode(
+                BlockPosition position,
+                BlockSize size,
+                PartitionType partitionType,
+                Node[] children,
+                boolean copyChildren
+        ) {
             this.position = Objects.requireNonNull(position, "position");
             this.size = Objects.requireNonNull(size, "size");
             this.partitionType = Objects.requireNonNull(partitionType, "partitionType");
-            this.children = Arrays.copyOf(Objects.requireNonNull(children, "children"), children.length);
+            Node[] checkedChildren = Objects.requireNonNull(children, "children");
+            this.children = copyChildren ? Arrays.copyOf(checkedChildren, checkedChildren.length) : checkedChildren;
         }
 
         /// Returns the local tile-relative origin of this node.
@@ -678,6 +707,21 @@ public final class TilePartitionTreeReader {
         /// @return the child nodes in bitstream order
         public Node[] children() {
             return Arrays.copyOf(children, children.length);
+        }
+
+        /// Returns the number of child nodes.
+        ///
+        /// @return the number of child nodes
+        public int childCount() {
+            return children.length;
+        }
+
+        /// Returns one child node without materializing a copy of the complete child array.
+        ///
+        /// @param index the zero-based child index
+        /// @return the selected child node
+        public Node child(int index) {
+            return children[index];
         }
     }
 }

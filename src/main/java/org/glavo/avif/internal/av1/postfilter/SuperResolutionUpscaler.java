@@ -230,7 +230,6 @@ final class SuperResolutionUpscaler {
             );
         }
 
-        short[] sourceSamples = checkedPlane.samples();
         short[] upscaledSamples = new short[targetWidth * checkedPlane.height()];
         int sourceWidth = checkedPlane.width();
         int sourceStride = checkedPlane.stride();
@@ -240,7 +239,6 @@ final class SuperResolutionUpscaler {
         int firstPosition = convolveInitialPosition(sourceWidth, targetWidth, step);
 
         for (int y = 0; y < checkedPlane.height(); y++) {
-            int sourceRowOffset = y * sourceStride;
             int upscaledRowOffset = y * targetWidth;
             int position = firstPosition;
             for (int x = 0; x < targetWidth; x++) {
@@ -254,7 +252,7 @@ final class SuperResolutionUpscaler {
                             0,
                             sourceProcessingWidth - 1
                     );
-                    int sourceSample = sourceSamples[sourceRowOffset + sourceX] & 0xFFFF;
+                    int sourceSample = checkedPlane.storedSample(sourceX, y);
                     sum += (long) sourceSample * filter[tap];
                 }
                 int filteredSample = roundShift(sum, FILTER_BITS);
@@ -263,7 +261,7 @@ final class SuperResolutionUpscaler {
             }
         }
 
-        return new DecodedPlane(targetWidth, checkedPlane.height(), targetWidth, upscaledSamples);
+        return DecodedPlane.fromOwnedSamples(targetWidth, checkedPlane.height(), targetWidth, upscaledSamples);
     }
 
     /// Returns the fixed-point step for one source and target width.

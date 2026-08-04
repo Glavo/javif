@@ -51,27 +51,26 @@ final class LumaDequantizer {
             throw new IllegalStateException("Unsupported luma dequantization bit depth: " + nonNullContext.bitDepth());
         }
 
-        int coefficientCount = nonNullResidualUnit.size().widthPixels() * nonNullResidualUnit.size().heightPixels();
+        int coefficientCount = nonNullResidualUnit.coefficientCount();
         if (nonNullResidualUnit.allZero()) {
             return new int[coefficientCount];
         }
 
-        int[] quantizedCoefficients = nonNullResidualUnit.coefficients();
-        int[] dequantizedCoefficients = new int[quantizedCoefficients.length];
+        int[] dequantizedCoefficients = new int[coefficientCount];
         int dcQuantizer = lumaDcQuantizer(nonNullContext);
         int acQuantizer = lumaAcQuantizer(nonNullContext);
         int dequantizationShift = QuantizerTables.dequantizationShift(nonNullResidualUnit.size());
         byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(nonNullResidualUnit, nonNullContext);
         dequantizedCoefficients[0] = scaledCoefficient(
-                quantizedCoefficients[0],
+                nonNullResidualUnit.coefficient(0),
                 dcQuantizer,
                 dequantizationShift,
                 nonNullContext.bitDepth(),
                 matrixValue(quantizationMatrix, nonNullResidualUnit.size(), 0)
         );
-        for (int coefficientIndex = 1; coefficientIndex < quantizedCoefficients.length; coefficientIndex++) {
+        for (int coefficientIndex = 1; coefficientIndex < coefficientCount; coefficientIndex++) {
             dequantizedCoefficients[coefficientIndex] = scaledCoefficient(
-                    quantizedCoefficients[coefficientIndex],
+                    nonNullResidualUnit.coefficient(coefficientIndex),
                     acQuantizer,
                     dequantizationShift,
                     nonNullContext.bitDepth(),

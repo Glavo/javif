@@ -63,6 +63,7 @@ public final class FrameSyntaxDecoder {
     ///
     /// @param assembly the completed frame assembly to decode
     /// @return the structural frame-decode result
+    /// @throws InvalidFrameSyntaxException if decoded tile syntax violates AV1 structural constraints
     public FrameSyntaxDecodeResult decode(FrameAssembly assembly) {
         FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
         if (!nonNullAssembly.isComplete()) {
@@ -93,7 +94,11 @@ public final class FrameSyntaxDecoder {
                     inheritedCdfContext
             );
             TilePartitionTreeReader treeReader = new TilePartitionTreeReader(tileContext);
-            tileRoots[tileIndex] = treeReader.readTile();
+            try {
+                tileRoots[tileIndex] = treeReader.readTile();
+            } catch (IntrabcDisplacementValidator.InvalidDisplacementVectorException exception) {
+                throw new InvalidFrameSyntaxException(exception.getMessage(), exception);
+            }
             restorationUnitMap.mergeFrom(tileContext.restorationUnitMap());
             decodedTemporalMotionFields[tileIndex] = tileContext.decodedTemporalMotionField().copy();
             finalTileCdfContexts[tileIndex] = tileContext.cdfContext().copy();

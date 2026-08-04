@@ -162,12 +162,11 @@ public final class TileResidualSyntaxReader {
             throw new IllegalArgumentException("Header and transform layout must describe the same block");
         }
 
-        TransformUnit[] transformUnits = nonNullTransformLayout.lumaUnits();
-        TransformResidualUnit[] residualUnits = new TransformResidualUnit[transformUnits.length];
-        TransformUnit[] chromaUnits = nonNullTransformLayout.chromaUnits();
-        boolean hasChromaResiduals = nonNullHeader.hasChroma() && chromaUnits.length != 0;
-        TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[hasChromaResiduals ? chromaUnits.length : 0];
-        TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[hasChromaResiduals ? chromaUnits.length : 0];
+        TransformResidualUnit[] residualUnits = new TransformResidualUnit[nonNullTransformLayout.lumaUnitCount()];
+        boolean hasChromaResiduals = nonNullHeader.hasChroma() && nonNullTransformLayout.chromaUnitCount() != 0;
+        int chromaUnitCount = hasChromaResiduals ? nonNullTransformLayout.chromaUnitCount() : 0;
+        TransformResidualUnit[] chromaUUnits = new TransformResidualUnit[chromaUnitCount];
+        TransformResidualUnit[] chromaVUnits = new TransformResidualUnit[chromaUnitCount];
 
         BlockPosition blockPosition = nonNullTransformLayout.position();
         int visibleWidth4 = nonNullTransformLayout.visibleWidth4();
@@ -182,7 +181,6 @@ public final class TileResidualSyntaxReader {
                 readLumaResidualRegion(
                         nonNullHeader,
                         nonNullTransformLayout,
-                        transformUnits,
                         residualUnits,
                         nonNullNeighborContext,
                         regionStartX4,
@@ -194,7 +192,6 @@ public final class TileResidualSyntaxReader {
                     readChromaResidualRegion(
                             nonNullHeader,
                             nonNullTransformLayout,
-                            chromaUnits,
                             residualUnits,
                             chromaUUnits,
                             CHROMA_PLANE_U,
@@ -208,7 +205,6 @@ public final class TileResidualSyntaxReader {
                     readChromaResidualRegion(
                             nonNullHeader,
                             nonNullTransformLayout,
-                            chromaUnits,
                             residualUnits,
                             chromaVUnits,
                             CHROMA_PLANE_V,
@@ -235,8 +231,7 @@ public final class TileResidualSyntaxReader {
     ///
     /// @param header the owning leaf block header
     /// @param transformLayout the owning block-level transform layout
-    /// @param transformUnits all luma transform units for the block
-    /// @param residualUnits the destination array parallel to `transformUnits`
+    /// @param residualUnits the destination array parallel to the layout's luma units
     /// @param neighborContext the mutable neighbor context that supplies entropy contexts
     /// @param regionStartX4 the inclusive region start on the luma-grid X axis
     /// @param regionStartY4 the inclusive region start on the luma-grid Y axis
@@ -245,7 +240,6 @@ public final class TileResidualSyntaxReader {
     private void readLumaResidualRegion(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            TransformUnit[] transformUnits,
             TransformResidualUnit[] residualUnits,
             BlockNeighborContext neighborContext,
             int regionStartX4,
@@ -253,8 +247,8 @@ public final class TileResidualSyntaxReader {
             int regionEndX4,
             int regionEndY4
     ) {
-        for (int i = 0; i < transformUnits.length; i++) {
-            TransformUnit transformUnit = transformUnits[i];
+        for (int i = 0; i < transformLayout.lumaUnitCount(); i++) {
+            TransformUnit transformUnit = transformLayout.lumaUnit(i);
             if (!isInCoefficientRegion(
                     transformUnit,
                     regionStartX4,
@@ -343,9 +337,8 @@ public final class TileResidualSyntaxReader {
     ///
     /// @param header the owning leaf block header
     /// @param transformLayout the owning block-level transform layout
-    /// @param transformUnits all chroma transform units for the block
     /// @param lumaResidualUnits the decoded luma residual units used for inter transform-type inference
-    /// @param residualUnits the destination array parallel to `transformUnits`
+    /// @param residualUnits the destination array parallel to the layout's chroma units
     /// @param plane the chroma plane index, where `0` is U and `1` is V
     /// @param neighborContext the mutable neighbor context that supplies and stores coefficient contexts
     /// @param includeAllUnits whether this is the block's only coefficient region
@@ -356,7 +349,6 @@ public final class TileResidualSyntaxReader {
     private void readChromaResidualRegion(
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            TransformUnit[] transformUnits,
             TransformResidualUnit[] lumaResidualUnits,
             TransformResidualUnit[] residualUnits,
             int plane,
@@ -369,13 +361,12 @@ public final class TileResidualSyntaxReader {
     ) {
         TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
         TransformLayout nonNullTransformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
-        TransformUnit[] nonNullTransformUnits = Objects.requireNonNull(transformUnits, "transformUnits");
         TransformResidualUnit[] nonNullLumaResidualUnits = Objects.requireNonNull(lumaResidualUnits, "lumaResidualUnits");
         TransformResidualUnit[] nonNullResidualUnits = Objects.requireNonNull(residualUnits, "residualUnits");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
 
-        for (int i = 0; i < nonNullTransformUnits.length; i++) {
-            TransformUnit transformUnit = nonNullTransformUnits[i];
+        for (int i = 0; i < nonNullTransformLayout.chromaUnitCount(); i++) {
+            TransformUnit transformUnit = nonNullTransformLayout.chromaUnit(i);
             if (!includeAllUnits && !isInCoefficientRegion(
                     transformUnit,
                     regionStartX4,
@@ -542,7 +533,10 @@ public final class TileResidualSyntaxReader {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int[] coefficients = new int[16];
         int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
-        int[][] levelBytes = new int[FOUR_BY_FOUR_LEVEL_GRID_SIZE][FOUR_BY_FOUR_LEVEL_GRID_SIZE];
+        CoefficientLevelGrid levelBytes = new CoefficientLevelGrid(
+                FOUR_BY_FOUR_LEVEL_GRID_SIZE,
+                FOUR_BY_FOUR_LEVEL_GRID_SIZE
+        );
 
         if (endOfBlockIndex > 0) {
             int lastX = fourByFourLevelX(nonNullTransformType, endOfBlockIndex);
@@ -560,7 +554,7 @@ public final class TileResidualSyntaxReader {
                 );
             }
             coefficientTokens[endOfBlockIndex] = lastToken;
-            levelBytes[lastX][lastY] = coefficientLevelByte(lastToken);
+            levelBytes.set(lastX, lastY, coefficientLevelByte(lastToken));
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
                 int x = fourByFourLevelX(nonNullTransformType, scanIndex);
@@ -578,7 +572,7 @@ public final class TileResidualSyntaxReader {
                     );
                 }
                 coefficientTokens[scanIndex] = token;
-                levelBytes[x][y] = coefficientLevelByte(token);
+                levelBytes.set(x, y, coefficientLevelByte(token));
             }
         }
 
@@ -623,7 +617,7 @@ public final class TileResidualSyntaxReader {
             cumulativeLevel += token;
         }
 
-        return new TransformResidualUnit(
+        return TransformResidualUnit.fromOwnedCoefficients(
                 nonNullPosition,
                 TransformSize.TX_4X4,
                 nonNullTransformType,
@@ -661,7 +655,7 @@ public final class TileResidualSyntaxReader {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int[] coefficients = new int[nonNullTransformSize.widthPixels() * nonNullTransformSize.heightPixels()];
         int[] coefficientTokens = new int[Math.max(endOfBlockIndex + 1, 0)];
-        int[][] levelBytes = createGenericLevelGrid(nonNullTransformSize, nonNullTransformType);
+        CoefficientLevelGrid levelBytes = createGenericLevelGrid(nonNullTransformSize, nonNullTransformType);
         if (endOfBlockIndex > 0) {
             int lastX = genericLevelX(nonNullTransformSize, nonNullTransformType, endOfBlockIndex);
             int lastY = genericLevelY(nonNullTransformSize, nonNullTransformType, endOfBlockIndex);
@@ -678,7 +672,7 @@ public final class TileResidualSyntaxReader {
                 );
             }
             coefficientTokens[endOfBlockIndex] = lastToken;
-            levelBytes[lastX][lastY] = coefficientLevelByte(lastToken);
+            levelBytes.set(lastX, lastY, coefficientLevelByte(lastToken));
 
             for (int scanIndex = endOfBlockIndex - 1; scanIndex > 0; scanIndex--) {
                 int x = genericLevelX(nonNullTransformSize, nonNullTransformType, scanIndex);
@@ -696,7 +690,7 @@ public final class TileResidualSyntaxReader {
                     );
                 }
                 coefficientTokens[scanIndex] = token;
-                levelBytes[x][y] = coefficientLevelByte(token);
+                levelBytes.set(x, y, coefficientLevelByte(token));
             }
         }
 
@@ -741,7 +735,7 @@ public final class TileResidualSyntaxReader {
             cumulativeLevel += token;
         }
 
-        return new TransformResidualUnit(
+        return TransformResidualUnit.fromOwnedCoefficients(
                 nonNullPosition,
                 nonNullTransformSize,
                 nonNullTransformType,
@@ -768,11 +762,9 @@ public final class TileResidualSyntaxReader {
     ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
-        return new TransformResidualUnit(
+        return TransformResidualUnit.allZero(
                 nonNullPosition,
                 nonNullTransformSize,
-                -1,
-                new int[nonNullTransformSize.widthPixels() * nonNullTransformSize.heightPixels()],
                 visibleWidthPixels,
                 visibleHeightPixels,
                 ALL_ZERO_COEFFICIENT_CONTEXT_BYTE
@@ -1069,7 +1061,10 @@ public final class TileResidualSyntaxReader {
     /// @param transformSize the active transform size
     /// @param transformType the active transform type
     /// @return a padded zero-filled level grid
-    private static int[][] createGenericLevelGrid(TransformSize transformSize, TransformType transformType) {
+    private static CoefficientLevelGrid createGenericLevelGrid(
+            TransformSize transformSize,
+            TransformType transformType
+    ) {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int width;
@@ -1084,7 +1079,7 @@ public final class TileResidualSyntaxReader {
             width = 4 << Math.min(nonNullTransformSize.log2Height4(), 3);
             height = coefficientCount(nonNullTransformSize) / width;
         }
-        return new int[width + 5][height + 5];
+        return new CoefficientLevelGrid(width + 5, height + 5);
     }
 
     /// Returns the coefficient-context grid X coordinate for one larger-transform scan index.
@@ -1137,7 +1132,7 @@ public final class TileResidualSyntaxReader {
     private static int genericBaseTokenContext(
             TransformSize transformSize,
             TransformType transformType,
-            int[][] levelBytes,
+            CoefficientLevelGrid levelBytes,
             int x,
             int y
     ) {
@@ -1146,10 +1141,10 @@ public final class TileResidualSyntaxReader {
         int magnitude = genericHighMagnitude(nonNullTransformType, levelBytes, x, y);
         int offset;
         if (nonNullTransformType.oneDimensional()) {
-            magnitude += levelBytes[x][y + 3] + levelBytes[x][y + 4];
+            magnitude += levelBytes.get(x, y + 3) + levelBytes.get(x, y + 4);
             offset = 26 + (y > 1 ? 10 : y * 5);
         } else {
-            magnitude += levelBytes[x][y + 2] + levelBytes[x + 2][y];
+            magnitude += levelBytes.get(x, y + 2) + levelBytes.get(x + 2, y);
             offset = LEVEL_CONTEXT_OFFSETS[levelContextOffsetIndex(nonNullTransformSize)]
                     [Math.min(y, 4)][Math.min(x, 4)];
         }
@@ -1163,7 +1158,12 @@ public final class TileResidualSyntaxReader {
     /// @param x the coefficient-context grid X coordinate
     /// @param y the coefficient-context grid Y coordinate
     /// @return the high-token context for the supplied coefficient
-    private static int genericHighTokenContext(TransformType transformType, int[][] levelBytes, int x, int y) {
+    private static int genericHighTokenContext(
+            TransformType transformType,
+            CoefficientLevelGrid levelBytes,
+            int x,
+            int y
+    ) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int magnitude = genericHighMagnitude(nonNullTransformType, levelBytes, x, y) & 0x3F;
         int baseContext = genericEndOfBlockHighTokenContext(nonNullTransformType, x, y);
@@ -1189,11 +1189,14 @@ public final class TileResidualSyntaxReader {
     /// @param transformType the active transform type
     /// @param levelBytes the padded local `levels` grid
     /// @return the high-token context for the DC coefficient
-    private static int genericDcHighTokenContext(TransformType transformType, int[][] levelBytes) {
+    private static int genericDcHighTokenContext(
+            TransformType transformType,
+            CoefficientLevelGrid levelBytes
+    ) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int magnitude = nonNullTransformType.oneDimensional()
                 ? genericHighMagnitude(nonNullTransformType, levelBytes, 0, 0)
-                : levelBytes[0][1] + levelBytes[1][0] + levelBytes[1][1];
+                : levelBytes.get(0, 1) + levelBytes.get(1, 0) + levelBytes.get(1, 1);
         magnitude &= 0x3F;
         return magnitude > 12 ? 6 : (magnitude + 1) >> 1;
     }
@@ -1205,13 +1208,18 @@ public final class TileResidualSyntaxReader {
     /// @param x the coefficient-context grid X coordinate
     /// @param y the coefficient-context grid Y coordinate
     /// @return the high-magnitude accumulator for the supplied coefficient position
-    private static int genericHighMagnitude(TransformType transformType, int[][] levelBytes, int x, int y) {
+    private static int genericHighMagnitude(
+            TransformType transformType,
+            CoefficientLevelGrid levelBytes,
+            int x,
+            int y
+    ) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
-        int magnitude = levelBytes[x][y + 1] + levelBytes[x + 1][y];
+        int magnitude = levelBytes.get(x, y + 1) + levelBytes.get(x + 1, y);
         if (!nonNullTransformType.oneDimensional()) {
-            magnitude += levelBytes[x + 1][y + 1];
+            magnitude += levelBytes.get(x + 1, y + 1);
         } else {
-            magnitude += levelBytes[x][y + 2];
+            magnitude += levelBytes.get(x, y + 2);
         }
         return magnitude;
     }
@@ -1343,15 +1351,20 @@ public final class TileResidualSyntaxReader {
     /// @param x the zero-based coefficient column in `[0, 4)`
     /// @param y the zero-based coefficient row in `[0, 4)`
     /// @return the base-token context for the supplied coefficient
-    private static int fourByFourBaseTokenContext(TransformType transformType, int[][] levelBytes, int x, int y) {
+    private static int fourByFourBaseTokenContext(
+            TransformType transformType,
+            CoefficientLevelGrid levelBytes,
+            int x,
+            int y
+    ) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int magnitude = fourByFourHighMagnitude(nonNullTransformType, levelBytes, x, y);
         int offset;
         if (nonNullTransformType.oneDimensional()) {
-            magnitude += levelBytes[x][y + 3] + levelBytes[x][y + 4];
+            magnitude += levelBytes.get(x, y + 3) + levelBytes.get(x, y + 4);
             offset = 26 + (y > 1 ? 10 : y * 5);
         } else {
-            magnitude += levelBytes[x][y + 2] + levelBytes[x + 2][y];
+            magnitude += levelBytes.get(x, y + 2) + levelBytes.get(x + 2, y);
             offset = LEVEL_CONTEXT_OFFSETS[0][Math.min(y, 4)][Math.min(x, 4)];
         }
         return offset + (magnitude > 512 ? 4 : (magnitude + 64) >> 7);
@@ -1364,7 +1377,12 @@ public final class TileResidualSyntaxReader {
     /// @param x the zero-based coefficient column in `[0, 4)`
     /// @param y the zero-based coefficient row in `[0, 4)`
     /// @return the high-token context for the supplied coefficient
-    private static int fourByFourHighTokenContext(TransformType transformType, int[][] levelBytes, int x, int y) {
+    private static int fourByFourHighTokenContext(
+            TransformType transformType,
+            CoefficientLevelGrid levelBytes,
+            int x,
+            int y
+    ) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int magnitude = fourByFourHighMagnitude(nonNullTransformType, levelBytes, x, y) & 0x3F;
         int baseContext = nonNullTransformType.oneDimensional()
@@ -1378,7 +1396,10 @@ public final class TileResidualSyntaxReader {
     /// @param transformType the active transform type
     /// @param levelBytes the padded local `levels` grid
     /// @return the DC high-token context for the current residual block
-    private static int fourByFourDcHighTokenContext(TransformType transformType, int[][] levelBytes) {
+    private static int fourByFourDcHighTokenContext(
+            TransformType transformType,
+            CoefficientLevelGrid levelBytes
+    ) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
         int magnitude = fourByFourHighMagnitude(nonNullTransformType, levelBytes, 0, 0) & 0x3F;
         return magnitude > 12 ? 6 : (magnitude + 1) >> 1;
@@ -1391,13 +1412,18 @@ public final class TileResidualSyntaxReader {
     /// @param x the zero-based coefficient column in `[0, 4)`
     /// @param y the zero-based coefficient row in `[0, 4)`
     /// @return the `dav1d` high-magnitude accumulator for the supplied coefficient position
-    private static int fourByFourHighMagnitude(TransformType transformType, int[][] levelBytes, int x, int y) {
+    private static int fourByFourHighMagnitude(
+            TransformType transformType,
+            CoefficientLevelGrid levelBytes,
+            int x,
+            int y
+    ) {
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
-        int magnitude = levelBytes[x][y + 1] + levelBytes[x + 1][y];
+        int magnitude = levelBytes.get(x, y + 1) + levelBytes.get(x + 1, y);
         if (!nonNullTransformType.oneDimensional()) {
-            magnitude += levelBytes[x + 1][y + 1];
+            magnitude += levelBytes.get(x + 1, y + 1);
         } else {
-            magnitude += levelBytes[x][y + 2];
+            magnitude += levelBytes.get(x, y + 2);
         }
         return magnitude;
     }
@@ -1520,5 +1546,45 @@ public final class TileResidualSyntaxReader {
             return column * codedHeight + row;
         }
         return row * outputWidth + column;
+    }
+
+    /// Flat zero-filled coefficient-level grid addressed in AV1's X-major scratch layout.
+    @NotNullByDefault
+    private static final class CoefficientLevelGrid {
+        /// The number of stored Y coordinates per X coordinate.
+        private final int height;
+
+        /// The flattened X-major level values.
+        private final int[] values;
+
+        /// Creates one zero-filled coefficient-level grid.
+        ///
+        /// @param width the stored X extent
+        /// @param height the stored Y extent
+        private CoefficientLevelGrid(int width, int height) {
+            if (width <= 0 || height <= 0) {
+                throw new IllegalArgumentException("Coefficient level-grid dimensions must be positive");
+            }
+            this.height = height;
+            this.values = new int[Math.multiplyExact(width, height)];
+        }
+
+        /// Returns one stored level value.
+        ///
+        /// @param x the zero-based X coordinate
+        /// @param y the zero-based Y coordinate
+        /// @return the stored level value
+        private int get(int x, int y) {
+            return values[x * height + y];
+        }
+
+        /// Stores one level value.
+        ///
+        /// @param x the zero-based X coordinate
+        /// @param y the zero-based Y coordinate
+        /// @param value the replacement level value
+        private void set(int x, int y, int value) {
+            values[x * height + y] = value;
+        }
     }
 }

@@ -845,20 +845,20 @@ final class Av1ImageReaderTest {
         assertSelfContainedRealParsedInterFrameRoundTripWithParsedPrimaryReferenceSurface(AvifPixelFormat.I444, true);
     }
 
-    /// Verifies that one standalone real parsed `intrabc` key frame reconstructs through the public reader.
+    /// Verifies that a standalone parsed `intrabc` key frame with an out-of-tile displacement is rejected.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsDecodedFrameForStandaloneRealParsedIntrabcFrame() throws IOException {
-        assertRealParsedIntrabcFrameRoundTrip(false);
+    void readFrameRejectsStandaloneParsedIntrabcFrameWithInvalidDisplacement() throws IOException {
+        assertRealParsedIntrabcFrameRejected(false);
     }
 
-    /// Verifies that one combined real parsed `intrabc` key frame reconstructs through the public reader.
+    /// Verifies that a combined parsed `intrabc` key frame with an out-of-tile displacement is rejected.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
-    void readFrameReturnsDecodedFrameForCombinedRealParsedIntrabcFrame() throws IOException {
-        assertRealParsedIntrabcFrameRoundTrip(true);
+    void readFrameRejectsCombinedParsedIntrabcFrameWithInvalidDisplacement() throws IOException {
+        assertRealParsedIntrabcFrameRejected(true);
     }
 
 
@@ -2589,12 +2589,11 @@ final class Av1ImageReaderTest {
         });
     }
 
-    /// Asserts that one real parsed `intrabc` frame reconstructs through the public reader with
-    /// `allow_intrabc` carried by the parsed frame header.
+    /// Asserts that one parsed `intrabc` frame whose displacement leaves its 64x64 tile is rejected.
     ///
     /// @param combined whether the `intrabc` frame is carried by one combined `FRAME` OBU
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
-    private static void assertRealParsedIntrabcFrameRoundTrip(boolean combined) throws IOException {
+    private static void assertRealParsedIntrabcFrameRejected(boolean combined) throws IOException {
         byte[] stream = concat(
                 obu(1, fullSequenceHeaderPayload(AvifPixelFormat.I420)),
                 combined
@@ -2606,31 +2605,11 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame decodedFrame = reader.readFrame();
-            FrameSyntaxDecodeResult syntaxResult =
-                    Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
-            TilePartitionTreeReader.LeafNode intrabcLeaf = requireDecodedTileContainsIntrabcLeaf(syntaxResult);
-            DecodedPlanes reconstructedPlanes = new FrameReconstructor().reconstruct(syntaxResult);
-            DecodedPlanes baselinePlanes = new FrameReconstructor().reconstruct(
-                    copySyntaxResultWithLeavesBefore(syntaxResult, intrabcLeaf)
-            );
-            ReferenceSurfaceSnapshot expectedOutputSnapshot = new ReferenceSurfaceSnapshot(
-                    syntaxResult.assembly().frameHeader(),
-                    syntaxResult,
-                    reconstructedPlanes
-            );
-
-            assertTrue(syntaxResult.assembly().frameHeader().allowScreenContentTools());
-            assertTrue(syntaxResult.assembly().frameHeader().allowIntrabc());
-            assertIntrabcLeafCopiesSameFrameSamples(
-                    intrabcLeaf,
-                    syntaxResult.assembly().sequenceHeader().colorConfig().pixelFormat(),
-                    baselinePlanes,
-                    reconstructedPlanes
-            );
-            assertStillPictureFrameMatchesReferenceSurface(decodedFrame, expectedOutputSnapshot, 0);
-            assertReferenceStateStoredForLastSyntaxResult(reader);
-            assertNull(reader.readFrame());
+            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
+            assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+            assertTrue(exception.getMessage().contains("Invalid intrabc displacement vector"));
+            assertNull(reader.lastFrameSyntaxDecodeResult());
         });
     }
 

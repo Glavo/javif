@@ -1968,6 +1968,14 @@ public final class FrameHeader {
             return Arrays.copyOf(levelY, levelY.length);
         }
 
+        /// Returns one luma loop-filter level without copying the complete level array.
+        ///
+        /// @param pass the edge pass, `0` for vertical and `1` for horizontal edges
+        /// @return the selected level, or zero when `pass` is outside the stored array
+        public int levelY(int pass) {
+            return pass >= 0 && pass < levelY.length ? levelY[pass] : 0;
+        }
+
         /// Returns the chroma U loop filter level.
         ///
         /// @return the chroma U loop filter level
@@ -2010,11 +2018,41 @@ public final class FrameHeader {
             return Arrays.copyOf(referenceDeltas, referenceDeltas.length);
         }
 
+        /// Returns the number of reference-frame loop-filter deltas.
+        ///
+        /// @return the reference-frame delta count
+        public int referenceDeltaCount() {
+            return referenceDeltas.length;
+        }
+
+        /// Returns one reference-frame loop-filter delta.
+        ///
+        /// @param index the zero-based reference-frame index
+        /// @return the selected reference-frame delta
+        public int referenceDelta(int index) {
+            return referenceDeltas[index];
+        }
+
         /// Returns the mode loop filter deltas.
         ///
         /// @return the mode loop filter deltas
         public int[] modeDeltas() {
             return Arrays.copyOf(modeDeltas, modeDeltas.length);
+        }
+
+        /// Returns the number of mode loop-filter deltas.
+        ///
+        /// @return the mode delta count
+        public int modeDeltaCount() {
+            return modeDeltas.length;
+        }
+
+        /// Returns one mode loop-filter delta.
+        ///
+        /// @param index the zero-based mode index
+        /// @return the selected mode delta
+        public int modeDelta(int index) {
+            return modeDeltas[index];
         }
     }
 

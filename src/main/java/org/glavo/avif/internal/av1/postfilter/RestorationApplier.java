@@ -236,8 +236,10 @@ public final class RestorationApplier {
         }
 
         int unitSize = 1 << (planeIndex == 0 ? restoration.unitSizeLog2Y() : restoration.unitSizeLog2Uv());
-        PlaneBuffer source = PlaneBuffer.create(plane, bitDepth);
-        PlaneBuffer boundarySource = PlaneBuffer.create(boundaryPlane, bitDepth);
+        PlaneSampleSource source = new DecodedPlaneSource(plane, bitDepth);
+        PlaneSampleSource boundarySource = boundaryPlane == plane
+                ? source
+                : new DecodedPlaneSource(boundaryPlane, bitDepth);
         PlaneBuffer destination = PlaneBuffer.create(plane, bitDepth);
         boolean changed = false;
         int rows = unitMap.rows(planeIndex);
@@ -298,8 +300,8 @@ public final class RestorationApplier {
     /// @param verticalOffset the vertical processing stripe offset for this plane
     /// @param processingUnitWidth the horizontal processing unit width for this plane
     private static void applyRestorationUnit(
-            PlaneBuffer source,
-            PlaneBuffer boundarySource,
+            PlaneSampleSource source,
+            PlaneSampleSource boundarySource,
             PlaneBuffer destination,
             RestorationUnit unit,
             int startX,
@@ -630,13 +632,53 @@ public final class RestorationApplier {
             int count = radius == 1 ? 9 : 25;
             int oneByX = radius == 1 ? 455 : 164;
             int bitDepthShift = source.bitDepth() - 8;
-            for (int y = -1; y <= height; y++) {
-                for (int x = -1; x <= width; x++) {
-                    BoxSum box = boxSum(source, startX + x, startY + y, radius);
-                    Projection projection = projection(box, count, strength, oneByX, bitDepthShift);
-                    int index = (y + 1) * (width + 2) + x + 1;
+            int fieldWidth = width + 2;
+            int fieldHeight = height + 2;
+            int windowSize = radius * 2 + 1;
+            int extendedWidth = fieldWidth + radius * 2;
+            int firstSourceX = startX - 1 - radius;
+            int firstCenterY = startY - 1;
+            int[] columnSums = new int[extendedWidth];
+            int[] columnSquareSums = new int[extendedWidth];
+            // Keep vertical column totals and slide them horizontally so each field sample is O(1).
+            for (int column = 0; column < extendedWidth; column++) {
+                int sourceX = firstSourceX + column;
+                for (int dy = -radius; dy <= radius; dy++) {
+                    int sample = source.sample(sourceX, firstCenterY + dy);
+                    columnSums[column] += sample;
+                    columnSquareSums[column] += sample * sample;
+                }
+            }
+
+            for (int fieldY = 0; fieldY < fieldHeight; fieldY++) {
+                if (fieldY != 0) {
+                    int centerY = firstCenterY + fieldY;
+                    int removedY = centerY - radius - 1;
+                    int addedY = centerY + radius;
+                    for (int column = 0; column < extendedWidth; column++) {
+                        int sourceX = firstSourceX + column;
+                        int removedSample = source.sample(sourceX, removedY);
+                        int addedSample = source.sample(sourceX, addedY);
+                        columnSums[column] += addedSample - removedSample;
+                        columnSquareSums[column] += addedSample * addedSample - removedSample * removedSample;
+                    }
+                }
+
+                int sum = 0;
+                int sumSquares = 0;
+                for (int column = 0; column < windowSize; column++) {
+                    sum += columnSums[column];
+                    sumSquares += columnSquareSums[column];
+                }
+                for (int fieldX = 0; fieldX < fieldWidth; fieldX++) {
+                    Projection projection = projection(sum, sumSquares, count, strength, oneByX, bitDepthShift);
+                    int index = fieldY * fieldWidth + fieldX;
                     a[index] = projection.a();
                     b[index] = projection.b();
+                    if (fieldX + 1 < fieldWidth) {
+                        sum += columnSums[fieldX + windowSize] - columnSums[fieldX];
+                        sumSquares += columnSquareSums[fieldX + windowSize] - columnSquareSums[fieldX];
+                    }
                 }
             }
             return new SelfGuidedIntermediate(width, height, a, b);
@@ -728,41 +770,29 @@ public final class RestorationApplier {
                     + (value(values, x - 1, y) + value(values, x + 1, y)) * 5;
         }
 
-        /// Computes one box sum and squared sum using the source border extension.
-        ///
-        /// @param source the source plane
-        /// @param x the global sample X coordinate
-        /// @param y the global sample Y coordinate
-        /// @param radius the self-guided filter radius
-        /// @return the box sums
-        private static BoxSum boxSum(PlaneSampleSource source, int x, int y, int radius) {
-            int sum = 0;
-            int sumSquares = 0;
-            for (int dy = -radius; dy <= radius; dy++) {
-                for (int dx = -radius; dx <= radius; dx++) {
-                    int sample = source.sample(x + dx, y + dy);
-                    sum += sample;
-                    sumSquares += sample * sample;
-                }
-            }
-            return new BoxSum(sum, sumSquares);
-        }
-
         /// Computes the inverted dav1d A/B projection values for one box.
         ///
-        /// @param box the source box sums
+        /// @param sum the source box sample sum
+        /// @param sumSquares the source box squared-sample sum
         /// @param count the number of samples in the box
         /// @param strength the self-guided strength value
         /// @param oneByX the reciprocal normalization constant
         /// @param bitDepthShift the decoded bit depth minus eight
         /// @return the inverted A/B projection values
-        private static Projection projection(BoxSum box, int count, int strength, int oneByX, int bitDepthShift) {
-            int scaledSumSquares = roundForBitDepth(box.sumSquares(), bitDepthShift * 2);
-            int scaledSum = roundForBitDepth(box.sum(), bitDepthShift);
+        private static Projection projection(
+                int sum,
+                int sumSquares,
+                int count,
+                int strength,
+                int oneByX,
+                int bitDepthShift
+        ) {
+            int scaledSumSquares = roundForBitDepth(sumSquares, bitDepthShift * 2);
+            int scaledSum = roundForBitDepth(sum, bitDepthShift);
             long variance = Math.max((long) scaledSumSquares * count - (long) scaledSum * scaledSum, 0L);
             int z = (int) Math.min(SELF_GUIDED_MAX_Z, (variance * strength + (1 << 19)) >> 20);
             int xByX = selfGuidedXByX(z);
-            int a = (int) (((long) xByX * box.sum() * oneByX + (1 << 11)) >> 12);
+            int a = (int) (((long) xByX * sum * oneByX + (1 << 11)) >> 12);
             return new Projection(a, xByX);
         }
 
@@ -788,14 +818,6 @@ public final class RestorationApplier {
             }
             return Math.min(255, (256 + (z >> 1)) / (z + 1));
         }
-    }
-
-    /// Box sums used by self-guided restoration.
-    ///
-    /// @param sum the sample sum
-    /// @param sumSquares the squared sample sum
-    @NotNullByDefault
-    private record BoxSum(int sum, int sumSquares) {
     }
 
     /// Inverted self-guided projection values.
@@ -838,6 +860,59 @@ public final class RestorationApplier {
         /// @param y the sample Y coordinate
         /// @return one sample
         int sample(int x, int y);
+    }
+
+    /// Read-only restoration source backed by one immutable decoded plane.
+    @NotNullByDefault
+    private static final class DecodedPlaneSource implements PlaneSampleSource {
+        /// The immutable decoded plane.
+        private final DecodedPlane plane;
+
+        /// The decoded bit depth.
+        private final int bitDepth;
+
+        /// Creates one read-only decoded-plane source.
+        ///
+        /// @param plane the immutable decoded plane
+        /// @param bitDepth the decoded bit depth
+        private DecodedPlaneSource(DecodedPlane plane, int bitDepth) {
+            this.plane = Objects.requireNonNull(plane, "plane");
+            this.bitDepth = bitDepth;
+        }
+
+        /// Returns the visible plane width.
+        ///
+        /// @return the visible plane width in samples
+        @Override
+        public int width() {
+            return plane.width();
+        }
+
+        /// Returns the visible plane height.
+        ///
+        /// @return the visible plane height in samples
+        @Override
+        public int height() {
+            return plane.height();
+        }
+
+        /// Returns the decoded bit depth.
+        ///
+        /// @return the decoded bit depth
+        @Override
+        public int bitDepth() {
+            return bitDepth;
+        }
+
+        /// Returns one frame-border-extended sample.
+        ///
+        /// @param x the sample X coordinate
+        /// @param y the sample Y coordinate
+        /// @return the nearest visible-plane sample
+        @Override
+        public int sample(int x, int y) {
+            return plane.sample(clamp(x, 0, plane.width() - 1), clamp(y, 0, plane.height() - 1));
+        }
     }
 
     /// Source view that substitutes AV1 internal restoration stripe boundary rows.
@@ -1030,7 +1105,7 @@ public final class RestorationApplier {
         ///
         /// @return one immutable decoded plane from the current samples
         public DecodedPlane toDecodedPlane() {
-            return new DecodedPlane(width, height, stride, samples);
+            return DecodedPlane.fromOwnedSamples(width, height, stride, samples);
         }
     }
 }

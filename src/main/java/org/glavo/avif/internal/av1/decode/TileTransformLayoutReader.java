@@ -27,7 +27,6 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -467,15 +466,15 @@ public final class TileTransformLayoutReader {
         /// @param lumaUnits the decoded luma transform units in bitstream order
         /// @param variableTransformTree whether the layout came from a variable luma transform tree
         private InterTransformResult(TransformUnit[] lumaUnits, boolean variableTransformTree) {
-            this.lumaUnits = Arrays.copyOf(Objects.requireNonNull(lumaUnits, "lumaUnits"), lumaUnits.length);
+            this.lumaUnits = Objects.requireNonNull(lumaUnits, "lumaUnits");
             this.variableTransformTree = variableTransformTree;
         }
 
         /// Returns the decoded luma transform units in bitstream order.
         ///
         /// @return the decoded luma transform units in bitstream order
-        public TransformUnit[] lumaUnits() {
-            return Arrays.copyOf(lumaUnits, lumaUnits.length);
+        public TransformUnit @Unmodifiable [] lumaUnits() {
+            return lumaUnits;
         }
 
         /// Returns whether the layout came from a variable luma transform tree.

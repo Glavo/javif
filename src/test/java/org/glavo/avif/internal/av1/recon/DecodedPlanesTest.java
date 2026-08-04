@@ -43,6 +43,24 @@ final class DecodedPlanesTest {
         assertArrayEquals(new short[]{1, (short) 0xFFFF, 3, 4}, plane.samples());
     }
 
+    /// Verifies that stored-plane reads use the row stride across right and bottom padding.
+    @Test
+    void decodedPlaneReadsPaddedStorageByStride() {
+        DecodedPlane plane = new DecodedPlane(
+                2,
+                2,
+                3,
+                new short[]{10, 11, 90, 20, 21, 91, 30, 31, 92}
+        );
+
+        assertEquals(3, plane.storageHeight());
+        assertEquals(20, plane.storedSample(0, 1));
+        assertEquals(91, plane.storedSample(2, 1));
+        assertEquals(92, plane.storedSample(2, 2));
+        assertThrows(IndexOutOfBoundsException.class, () -> plane.storedSample(3, 0));
+        assertThrows(IndexOutOfBoundsException.class, () -> plane.storedSample(0, 3));
+    }
+
     /// Verifies that monochrome decoded planes reject unexpected chroma storage.
     @Test
     void monochromeDecodedPlanesRejectUnexpectedChroma() {

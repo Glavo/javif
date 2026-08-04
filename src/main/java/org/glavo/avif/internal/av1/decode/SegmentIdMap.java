@@ -215,8 +215,8 @@ final class SegmentIdMap {
             return;
         }
         TilePartitionTreeReader.PartitionNode partition = (TilePartitionTreeReader.PartitionNode) node;
-        for (TilePartitionTreeReader.Node child : partition.children()) {
-            fillDecodedNode(child, tileStartX4, tileStartY4);
+        for (int childIndex = 0; childIndex < partition.childCount(); childIndex++) {
+            fillDecodedNode(partition.child(childIndex), tileStartX4, tileStartY4);
         }
     }
 }

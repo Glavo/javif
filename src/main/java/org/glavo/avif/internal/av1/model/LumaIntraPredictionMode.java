@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// The thirteen AV1 luma intra prediction modes in bitstream order.
 @NotNullByDefault
@@ -46,6 +47,9 @@ public enum LumaIntraPredictionMode {
     SMOOTH_HORIZONTAL(2),
     /// Paeth prediction.
     PAETH(0);
+
+    /// The mode constants cached in bitstream symbol order.
+    private static final LumaIntraPredictionMode @Unmodifiable [] VALUES = values();
 
     /// The coarsened intra-mode context class used by key-frame Y-mode CDFs.
     private final int contextIndex;
@@ -93,10 +97,9 @@ public enum LumaIntraPredictionMode {
     /// @param symbolIndex the decoded bitstream symbol index
     /// @return the luma intra prediction mode for the supplied symbol index
     public static LumaIntraPredictionMode fromSymbolIndex(int symbolIndex) {
-        LumaIntraPredictionMode[] values = values();
-        if (symbolIndex < 0 || symbolIndex >= values.length) {
+        if (symbolIndex < 0 || symbolIndex >= VALUES.length) {
             throw new IllegalArgumentException("symbolIndex out of range: " + symbolIndex);
         }
-        return values[symbolIndex];
+        return VALUES[symbolIndex];
     }
 }

@@ -187,7 +187,6 @@ final class CdefApplierTest {
             Method detectDirection = declaredMethod(
                     "detectDirection",
                     DecodedPlane.class,
-                    short[].class,
                     int.class,
                     int.class,
                     int.class,
@@ -197,7 +196,6 @@ final class CdefApplierTest {
             Object direction = detectDirection.invoke(
                     null,
                     plane,
-                    plane.samples(),
                     startX,
                     startY,
                     plane.width(),
@@ -240,7 +238,6 @@ final class CdefApplierTest {
                     "filterUnit",
                     DecodedPlane.class,
                     short[].class,
-                    short[].class,
                     int.class,
                     int.class,
                     int.class,
@@ -253,11 +250,10 @@ final class CdefApplierTest {
                     int.class,
                     int.class
             );
-            short[] outputSamples = Arrays.copyOf(plane.samples(), plane.samples().length);
+            short[] outputSamples = plane.samples();
             filterUnit.invoke(
                     null,
                     plane,
-                    plane.samples(),
                     outputSamples,
                     startX,
                     startY,

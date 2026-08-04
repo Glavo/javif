@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// The AV1 inter-intra prediction modes in bitstream order.
 @NotNullByDefault
@@ -29,16 +30,18 @@ public enum InterIntraPredictionMode {
     /// Smooth inter-intra prediction.
     SMOOTH;
 
+    /// The mode constants cached in bitstream symbol order.
+    private static final InterIntraPredictionMode @Unmodifiable [] VALUES = values();
+
     /// Maps one decoded bitstream symbol index back to an inter-intra prediction mode.
     ///
     /// @param symbolIndex the decoded bitstream symbol index
     /// @return the inter-intra prediction mode for the supplied symbol index
     public static InterIntraPredictionMode fromSymbolIndex(int symbolIndex) {
-        InterIntraPredictionMode[] values = values();
-        if (symbolIndex < 0 || symbolIndex >= values.length) {
+        if (symbolIndex < 0 || symbolIndex >= VALUES.length) {
             throw new IllegalArgumentException("symbolIndex out of range: " + symbolIndex);
         }
-        return values[symbolIndex];
+        return VALUES[symbolIndex];
     }
 
     /// Returns the matching luma intra prediction mode used to build the secondary predictor.

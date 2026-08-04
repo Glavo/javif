@@ -22,7 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 /// Samples are stored as unsigned values in the low bits of each `short`. The mutable buffer uses
 /// a tightly packed sample stride equal to `width`.
 @NotNullByDefault
-final class MutablePlaneBuffer {
+final class MutablePlaneBuffer implements MutableSamplePlane {
     /// The plane width in samples.
     private final int width;
 
@@ -67,21 +67,24 @@ final class MutablePlaneBuffer {
     /// Returns the plane width in samples.
     ///
     /// @return the plane width in samples
-    int width() {
+    @Override
+    public int width() {
         return width;
     }
 
     /// Returns the plane height in samples.
     ///
     /// @return the plane height in samples
-    int height() {
+    @Override
+    public int height() {
         return height;
     }
 
     /// Returns the decoded sample bit depth.
     ///
     /// @return the decoded sample bit depth
-    int bitDepth() {
+    @Override
+    public int bitDepth() {
         return bitDepth;
     }
 
@@ -97,7 +100,8 @@ final class MutablePlaneBuffer {
     /// @param x the zero-based horizontal sample coordinate
     /// @param y the zero-based vertical sample coordinate
     /// @return one already reconstructed sample
-    int sample(int x, int y) {
+    @Override
+    public int sample(int x, int y) {
         if (x < 0 || x >= width) {
             throw new IndexOutOfBoundsException("x out of range: " + x);
         }
@@ -112,7 +116,8 @@ final class MutablePlaneBuffer {
     /// @param x the zero-based horizontal sample coordinate
     /// @param y the zero-based vertical sample coordinate
     /// @param value the reconstructed sample value
-    void setSample(int x, int y, int value) {
+    @Override
+    public void setSample(int x, int y, int value) {
         if (x < 0 || x >= width) {
             throw new IndexOutOfBoundsException("x out of range: " + x);
         }
@@ -170,6 +175,23 @@ final class MutablePlaneBuffer {
             return toDecodedPlane();
         }
         return new DecodedPlane(croppedWidth, croppedHeight, width, samples);
+    }
+
+    /// Transfers this buffer's sample storage into one immutable decoded plane.
+    ///
+    /// The caller must permanently discard this mutable buffer after the transfer.
+    ///
+    /// @param croppedWidth the visible plane width in samples
+    /// @param croppedHeight the visible plane height in samples
+    /// @return one immutable plane that owns this buffer's sample storage
+    DecodedPlane takeDecodedPlane(int croppedWidth, int croppedHeight) {
+        if (croppedWidth <= 0 || croppedWidth > width) {
+            throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
+        }
+        if (croppedHeight <= 0 || croppedHeight > height) {
+            throw new IllegalArgumentException("croppedHeight out of range: " + croppedHeight);
+        }
+        return DecodedPlane.fromOwnedSamples(croppedWidth, croppedHeight, width, samples);
     }
 
     /// Creates an independent mutable copy of this plane buffer.

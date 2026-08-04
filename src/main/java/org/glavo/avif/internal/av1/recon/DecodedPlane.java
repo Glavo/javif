@@ -52,6 +52,32 @@ public final class DecodedPlane {
     /// @param samples the stored unsigned sample values in row-major order; the array may include
     ///                complete padded rows below the visible plane
     public DecodedPlane(int width, int height, int stride, short[] samples) {
+        this(width, height, stride, samples, true);
+    }
+
+    /// Creates one immutable decoded plane by taking exclusive ownership of its sample storage.
+    ///
+    /// The caller must not access or modify `samples` after this method returns. This method exists
+    /// for decoder stages that have finished producing an otherwise unaliased output buffer;
+    /// callers that retain their array must use [#DecodedPlane(int, int, int, short[])].
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param stride the sample stride of one plane row
+    /// @param samples the exclusively owned stored samples, including any complete padded rows
+    /// @return one immutable decoded plane backed by `samples`
+    public static DecodedPlane fromOwnedSamples(int width, int height, int stride, short[] samples) {
+        return new DecodedPlane(width, height, stride, samples, false);
+    }
+
+    /// Creates one immutable decoded plane with copied or exclusively transferred sample storage.
+    ///
+    /// @param width the plane width in samples
+    /// @param height the plane height in samples
+    /// @param stride the sample stride of one plane row
+    /// @param samples the stored unsigned sample values in row-major order
+    /// @param copySamples whether to copy the supplied storage
+    private DecodedPlane(int width, int height, int stride, short[] samples, boolean copySamples) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -75,7 +101,7 @@ public final class DecodedPlane {
         this.height = height;
         this.stride = stride;
         this.storageHeight = checkedSamples.length / stride;
-        this.samples = Arrays.copyOf(checkedSamples, checkedSamples.length);
+        this.samples = copySamples ? Arrays.copyOf(checkedSamples, checkedSamples.length) : checkedSamples;
     }
 
     /// Returns the plane width in samples.
@@ -134,6 +160,21 @@ public final class DecodedPlane {
         }
         if (y < 0 || y >= height) {
             throw new IndexOutOfBoundsException("y out of range: " + y);
+        }
+        return samples[y * stride + x] & 0xFFFF;
+    }
+
+    /// Returns one stored sample, including right or bottom padding outside the visible plane.
+    ///
+    /// @param x the zero-based stored sample coordinate in `[0, stride)`
+    /// @param y the zero-based stored row coordinate in `[0, storageHeight)`
+    /// @return one unsigned stored sample value
+    public int storedSample(int x, int y) {
+        if (x < 0 || x >= stride) {
+            throw new IndexOutOfBoundsException("x out of stored range: " + x);
+        }
+        if (y < 0 || y >= storageHeight) {
+            throw new IndexOutOfBoundsException("y out of stored range: " + y);
         }
         return samples[y * stride + x] & 0xFFFF;
     }

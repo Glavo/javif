@@ -3,6 +3,7 @@ import java.lang.module.ModuleFinder
 
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.kotlin.dsl.attributes
+import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
 
 plugins {
     id("java-library")
@@ -258,6 +259,9 @@ tasks.register<Test>("aomAvifTest") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath + files(aomAvifTestResourcesDirectory)
     maxHeapSize = "2g"
+    extensions.configure<JacocoTaskExtension> {
+        isEnabled = false
+    }
 
     useJUnitPlatform {
         includeTags("aom-corpus")
@@ -281,6 +285,9 @@ tasks.register<Test>("argonAv1Test") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     maxHeapSize = providers.gradleProperty("argonAv1MaxHeap").getOrElse("4g")
+    extensions.configure<JacocoTaskExtension> {
+        isEnabled = false
+    }
 
     useJUnitPlatform {
         includeTags("argon-corpus")

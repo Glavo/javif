@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// The AV1 single-reference inter prediction modes in bitstream order.
 @NotNullByDefault
@@ -29,6 +30,9 @@ public enum SingleInterPredictionMode {
     /// The new-motion-vector mode.
     NEWMV;
 
+    /// The mode constants cached in bitstream symbol order.
+    private static final SingleInterPredictionMode @Unmodifiable [] VALUES = values();
+
     /// Returns the bitstream symbol index of this mode.
     ///
     /// @return the bitstream symbol index of this mode
@@ -41,10 +45,9 @@ public enum SingleInterPredictionMode {
     /// @param symbolIndex the decoded bitstream symbol index
     /// @return the single-reference inter prediction mode for the supplied symbol index
     public static SingleInterPredictionMode fromSymbolIndex(int symbolIndex) {
-        SingleInterPredictionMode[] values = values();
-        if (symbolIndex < 0 || symbolIndex >= values.length) {
+        if (symbolIndex < 0 || symbolIndex >= VALUES.length) {
             throw new IllegalArgumentException("symbolIndex out of range: " + symbolIndex);
         }
-        return values[symbolIndex];
+        return VALUES[symbolIndex];
     }
 }

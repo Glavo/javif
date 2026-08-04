@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// The AV1 block partition symbols in bitstream order.
 @NotNullByDefault
@@ -41,6 +42,9 @@ public enum PartitionType {
     /// Four vertical stripes.
     VERTICAL_4;
 
+    /// The partition constants cached in bitstream symbol order.
+    private static final PartitionType @Unmodifiable [] VALUES = values();
+
     /// Returns the bitstream symbol index of this partition type.
     ///
     /// @return the bitstream symbol index of this partition type
@@ -53,10 +57,9 @@ public enum PartitionType {
     /// @param symbolIndex the decoded bitstream symbol index
     /// @return the partition type for the supplied symbol index
     public static PartitionType fromSymbolIndex(int symbolIndex) {
-        PartitionType[] values = values();
-        if (symbolIndex < 0 || symbolIndex >= values.length) {
+        if (symbolIndex < 0 || symbolIndex >= VALUES.length) {
             throw new IllegalArgumentException("symbolIndex out of range: " + symbolIndex);
         }
-        return values[symbolIndex];
+        return VALUES[symbolIndex];
     }
 }

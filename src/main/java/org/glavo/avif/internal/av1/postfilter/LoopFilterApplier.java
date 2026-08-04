@@ -23,6 +23,7 @@ import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
+import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
@@ -43,6 +44,18 @@ public final class LoopFilterApplier {
 
     /// The maximum AV1 loop-filter level.
     private static final int MAX_LOOP_FILTER_LEVEL = 63;
+
+    /// Packed filter-mask bit indicating high edge variance.
+    private static final int FILTER_MASK_HIGH_EDGE_VARIANCE = 1;
+
+    /// Packed filter-mask bit indicating that filtering should be applied.
+    private static final int FILTER_MASK_FILTER = 1 << 1;
+
+    /// Packed filter-mask bit indicating a flat immediate neighborhood.
+    private static final int FILTER_MASK_FLAT = 1 << 2;
+
+    /// Packed filter-mask bit indicating a flat extended neighborhood.
+    private static final int FILTER_MASK_FLAT2 = 1 << 3;
 
     /// Applies loop filtering to one reconstructed frame.
     ///
@@ -234,11 +247,11 @@ public final class LoopFilterApplier {
                 pass
         );
         int level = filterLevel(frameHeader, current.header(), planeIndex, pass);
-        FilterStrength strength = filterStrength(level, frameHeader.loopFilter().sharpness());
-        if (strength.level() == 0) {
+        int strength = filterStrength(level, frameHeader.loopFilter().sharpness());
+        if (strengthLevel(strength) == 0) {
             strength = filterStrength(filterLevel(frameHeader, previous.header(), planeIndex, pass), frameHeader.loopFilter().sharpness());
         }
-        if (strength.level() == 0) {
+        if (strengthLevel(strength) == 0) {
             return;
         }
 
@@ -277,17 +290,17 @@ public final class LoopFilterApplier {
             int dx,
             int dy,
             int filterSize,
-            FilterStrength strength
+            int strength
     ) {
-        FilterMask mask = filterMask(plane, x, y, dx, dy, filterSize, strength);
-        if (!mask.filter()) {
+        int mask = filterMask(plane, x, y, dx, dy, filterSize, strength);
+        if ((mask & FILTER_MASK_FILTER) == 0) {
             return;
         }
-        if (filterSize == 4 || !mask.flat()) {
-            narrowFilter(plane, x, y, dx, dy, mask.highEdgeVariance());
+        if (filterSize == 4 || (mask & FILTER_MASK_FLAT) == 0) {
+            narrowFilter(plane, x, y, dx, dy, (mask & FILTER_MASK_HIGH_EDGE_VARIANCE) != 0);
         } else if (filterSize == 6) {
             wideFilterSix(plane, x, y, dx, dy);
-        } else if (filterSize == 8 || !mask.flat2()) {
+        } else if (filterSize == 8 || (mask & FILTER_MASK_FLAT2) == 0) {
             wideFilterEight(plane, x, y, dx, dy);
         } else {
             wideFilterSixteen(plane, x, y, dx, dy);
@@ -304,20 +317,20 @@ public final class LoopFilterApplier {
     /// @param filterSize the selected maximum filter size
     /// @param strength the derived filter strength parameters
     /// @return the filter masks for one boundary sample
-    private static FilterMask filterMask(
+    private static int filterMask(
             PlaneBuffer plane,
             int x,
             int y,
             int dx,
             int dy,
             int filterSize,
-            FilterStrength strength
+            int strength
     ) {
         int bitDepthShift = plane.bitDepth() - 8;
         int thresholdBd = 1 << bitDepthShift;
-        int limitBd = strength.limit() << bitDepthShift;
-        int blimitBd = strength.blimit() << bitDepthShift;
-        int threshBd = strength.threshold() << bitDepthShift;
+        int limitBd = strengthLimit(strength) << bitDepthShift;
+        int blimitBd = strengthBoundaryLimit(strength) << bitDepthShift;
+        int threshBd = strengthThreshold(strength) << bitDepthShift;
         int p0 = sampleRelative(plane, x, y, dx, dy, -1);
         int p1 = sampleRelative(plane, x, y, dx, dy, -2);
         int q0 = sampleRelative(plane, x, y, dx, dy, 0);
@@ -358,7 +371,10 @@ public final class LoopFilterApplier {
                     && Math.abs(sampleRelative(plane, x, y, dx, dy, -5) - p0) <= thresholdBd
                     && Math.abs(sampleRelative(plane, x, y, dx, dy, 4) - q0) <= thresholdBd;
         }
-        return new FilterMask(highEdgeVariance, filtered, flat, flat2);
+        return (highEdgeVariance ? FILTER_MASK_HIGH_EDGE_VARIANCE : 0)
+                | (filtered ? FILTER_MASK_FILTER : 0)
+                | (flat ? FILTER_MASK_FLAT : 0)
+                | (flat2 ? FILTER_MASK_FLAT2 : 0);
     }
 
     /// Applies the AV1 narrow loop filter to one boundary sample.
@@ -501,28 +517,26 @@ public final class LoopFilterApplier {
             int pass
     ) {
         int componentIndex = planeIndex == 0 ? pass : planeIndex + 1;
-        int baseLevel = planeFilterLevel(frameHeader.loopFilter(), planeIndex, pass);
-        int[] deltaLfValues = header.deltaLfValues();
+        FrameHeader.LoopFilterInfo loopFilter = frameHeader.loopFilter();
+        int baseLevel = planeFilterLevel(loopFilter, planeIndex, pass);
         int deltaLf = frameHeader.delta().deltaLfMulti()
-                ? deltaLfValues[componentIndex]
-                : deltaLfValues[0];
+                ? header.deltaLfValue(componentIndex)
+                : header.deltaLfValue(0);
         int level = clamp(baseLevel + deltaLf, 0, MAX_LOOP_FILTER_LEVEL);
         if (frameHeader.segmentation().enabled()) {
             FrameHeader.SegmentData segment = frameHeader.segmentation().segment(header.segmentId());
             level = clamp(level + segmentLoopFilterDelta(segment, componentIndex), 0, MAX_LOOP_FILTER_LEVEL);
         }
-        if (frameHeader.loopFilter().modeRefDeltaEnabled()) {
+        if (loopFilter.modeRefDeltaEnabled()) {
             int shift = level >> 5;
-            int[] referenceDeltas = frameHeader.loopFilter().referenceDeltas();
-            int[] modeDeltas = frameHeader.loopFilter().modeDeltas();
             int referenceIndex = header.intra() ? 0 : header.referenceFrame0() + 1;
-            if (referenceIndex >= 0 && referenceIndex < referenceDeltas.length) {
-                level += referenceDeltas[referenceIndex] << shift;
+            if (referenceIndex >= 0 && referenceIndex < loopFilter.referenceDeltaCount()) {
+                level += loopFilter.referenceDelta(referenceIndex) << shift;
             }
             if (!header.intra() && !header.useIntrabc()) {
                 int modeIndex = loopFilterModeIndex(header);
-                if (modeIndex >= 0 && modeIndex < modeDeltas.length) {
-                    level += modeDeltas[modeIndex] << shift;
+                if (modeIndex >= 0 && modeIndex < loopFilter.modeDeltaCount()) {
+                    level += loopFilter.modeDelta(modeIndex) << shift;
                 }
             }
             level = clamp(level, 0, MAX_LOOP_FILTER_LEVEL);
@@ -538,8 +552,7 @@ public final class LoopFilterApplier {
     /// @return the component-specific frame loop-filter level
     private static int planeFilterLevel(FrameHeader.LoopFilterInfo loopFilter, int planeIndex, int pass) {
         if (planeIndex == 0) {
-            int[] levelY = loopFilter.levelY();
-            return pass < levelY.length ? levelY[pass] : 0;
+            return loopFilter.levelY(pass);
         }
         return planeIndex == 1 ? loopFilter.levelU() : loopFilter.levelV();
     }
@@ -583,9 +596,9 @@ public final class LoopFilterApplier {
     /// @param level the effective loop-filter level
     /// @param sharpness the frame loop-filter sharpness
     /// @return AV1 loop-filter strength parameters
-    private static FilterStrength filterStrength(int level, int sharpness) {
+    private static int filterStrength(int level, int sharpness) {
         if (level <= 0) {
-            return new FilterStrength(0, 0, 0, 0);
+            return 0;
         }
         int shift = sharpness > 4 ? 2 : (sharpness > 0 ? 1 : 0);
         int limit = level >> shift;
@@ -594,7 +607,39 @@ public final class LoopFilterApplier {
         } else {
             limit = Math.max(1, limit);
         }
-        return new FilterStrength(level, limit, 2 * (level + 2) + limit, level >> 4);
+        return level | (limit << 6) | ((2 * (level + 2) + limit) << 12) | ((level >> 4) << 20);
+    }
+
+    /// Returns the effective level from packed loop-filter strength parameters.
+    ///
+    /// @param strength the packed strength parameters
+    /// @return the effective loop-filter level
+    private static int strengthLevel(int strength) {
+        return strength & 0x3F;
+    }
+
+    /// Returns the mask limit from packed loop-filter strength parameters.
+    ///
+    /// @param strength the packed strength parameters
+    /// @return the filter mask limit
+    private static int strengthLimit(int strength) {
+        return (strength >>> 6) & 0x3F;
+    }
+
+    /// Returns the boundary limit from packed loop-filter strength parameters.
+    ///
+    /// @param strength the packed strength parameters
+    /// @return the boundary limit
+    private static int strengthBoundaryLimit(int strength) {
+        return (strength >>> 12) & 0xFF;
+    }
+
+    /// Returns the high-edge-variance threshold from packed loop-filter strength parameters.
+    ///
+    /// @param strength the packed strength parameters
+    /// @return the high-edge-variance threshold
+    private static int strengthThreshold(int strength) {
+        return (strength >>> 20) & 0x03;
     }
 
     /// Returns the maximum filter size allowed by the transform sizes across one edge.
@@ -881,7 +926,7 @@ public final class LoopFilterApplier {
         ///
         /// @return one immutable decoded-plane snapshot from the current samples
         public DecodedPlane toDecodedPlane() {
-            return new DecodedPlane(width, height, stride, samples);
+            return DecodedPlane.fromOwnedSamples(width, height, stride, samples);
         }
     }
 
@@ -981,8 +1026,8 @@ public final class LoopFilterApplier {
                 return;
             }
             TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) node;
-            for (TilePartitionTreeReader.Node child : partitionNode.children()) {
-                addNode(child);
+            for (int childIndex = 0; childIndex < partitionNode.childCount(); childIndex++) {
+                addNode(partitionNode.child(childIndex));
             }
         }
 
@@ -1000,7 +1045,7 @@ public final class LoopFilterApplier {
                     startY4,
                     endX4,
                     endY4,
-                    leafNode.transformLayout().lumaUnits(),
+                    leafNode.transformLayout(),
                     leafNode.transformLayout().maxLumaTransformSize()
             );
             for (int y4 = startY4; y4 < endY4; y4++) {
@@ -1013,8 +1058,9 @@ public final class LoopFilterApplier {
                 }
             }
             if (header.hasChroma()) {
-                for (TransformUnit chromaUnit : leafNode.transformLayout().chromaUnits()) {
-                    fillChromaCells(header, chromaUnit);
+                TransformLayout transformLayout = leafNode.transformLayout();
+                for (int unitIndex = 0; unitIndex < transformLayout.chromaUnitCount(); unitIndex++) {
+                    fillChromaCells(header, transformLayout.chromaUnit(unitIndex));
                 }
             }
         }
@@ -1054,7 +1100,7 @@ public final class LoopFilterApplier {
         /// @param startY4 the leaf start Y in luma 4x4 units
         /// @param endX4 the exclusive leaf end X in luma 4x4 units
         /// @param endY4 the exclusive leaf end Y in luma 4x4 units
-        /// @param transformUnits the decoded transform units
+        /// @param transformLayout the decoded transform layout
         /// @param fallbackSize the fallback transform size
         /// @return transform-cell coverage for one leaf
         private static TransformCell[] transformCells(
@@ -1062,23 +1108,33 @@ public final class LoopFilterApplier {
                 int startY4,
                 int endX4,
                 int endY4,
-                TransformUnit[] transformUnits,
+                TransformLayout transformLayout,
                 TransformSize fallbackSize
         ) {
             int width = endX4 - startX4;
             int height = endY4 - startY4;
             TransformCell[] result = new TransformCell[width * height];
-            if (transformUnits.length == 0) {
+            if (transformLayout.lumaUnitCount() == 0) {
                 TransformUnit fallbackUnit = new TransformUnit(new BlockPosition(startX4, startY4), fallbackSize);
                 fillTransformCells(result, width, height, startX4, startY4, endX4, endY4, fallbackUnit);
                 return result;
             }
-            for (TransformUnit transformUnit : transformUnits) {
-                fillTransformCells(result, width, height, startX4, startY4, endX4, endY4, transformUnit);
+            for (int unitIndex = 0; unitIndex < transformLayout.lumaUnitCount(); unitIndex++) {
+                fillTransformCells(
+                        result,
+                        width,
+                        height,
+                        startX4,
+                        startY4,
+                        endX4,
+                        endY4,
+                        transformLayout.lumaUnit(unitIndex)
+                );
             }
+            TransformUnit firstUnit = transformLayout.lumaUnit(0);
             for (int i = 0; i < result.length; i++) {
                 if (result[i] == null) {
-                    result[i] = new TransformCell(transformUnits[0], transformUnits[0].size());
+                    result[i] = new TransformCell(firstUnit, firstUnit.size());
                 }
             }
             return result;
@@ -1186,117 +1242,4 @@ public final class LoopFilterApplier {
         }
     }
 
-    /// Derived AV1 loop-filter strength parameters.
-    @NotNullByDefault
-    private static final class FilterStrength {
-        /// The effective loop-filter level.
-        private final int level;
-
-        /// The limit parameter used by the filter mask.
-        private final int limit;
-
-        /// The boundary limit parameter used by the filter mask.
-        private final int blimit;
-
-        /// The high-edge-variance threshold.
-        private final int threshold;
-
-        /// Creates derived AV1 loop-filter strength parameters.
-        ///
-        /// @param level the effective loop-filter level
-        /// @param limit the limit parameter used by the filter mask
-        /// @param blimit the boundary limit parameter used by the filter mask
-        /// @param threshold the high-edge-variance threshold
-        private FilterStrength(int level, int limit, int blimit, int threshold) {
-            this.level = level;
-            this.limit = limit;
-            this.blimit = blimit;
-            this.threshold = threshold;
-        }
-
-        /// Returns the effective loop-filter level.
-        ///
-        /// @return the effective loop-filter level
-        public int level() {
-            return level;
-        }
-
-        /// Returns the limit parameter used by the filter mask.
-        ///
-        /// @return the limit parameter used by the filter mask
-        public int limit() {
-            return limit;
-        }
-
-        /// Returns the boundary limit parameter used by the filter mask.
-        ///
-        /// @return the boundary limit parameter used by the filter mask
-        public int blimit() {
-            return blimit;
-        }
-
-        /// Returns the high-edge-variance threshold.
-        ///
-        /// @return the high-edge-variance threshold
-        public int threshold() {
-            return threshold;
-        }
-    }
-
-    /// Filter masks derived around one boundary sample.
-    @NotNullByDefault
-    private static final class FilterMask {
-        /// Whether high edge variance was detected.
-        private final boolean highEdgeVariance;
-
-        /// Whether filtering should be applied.
-        private final boolean filter;
-
-        /// Whether the immediate samples around the boundary are flat.
-        private final boolean flat;
-
-        /// Whether the wider samples around the boundary are flat.
-        private final boolean flat2;
-
-        /// Creates filter masks derived around one boundary sample.
-        ///
-        /// @param highEdgeVariance whether high edge variance was detected
-        /// @param filter whether filtering should be applied
-        /// @param flat whether the immediate samples around the boundary are flat
-        /// @param flat2 whether the wider samples around the boundary are flat
-        private FilterMask(boolean highEdgeVariance, boolean filter, boolean flat, boolean flat2) {
-            this.highEdgeVariance = highEdgeVariance;
-            this.filter = filter;
-            this.flat = flat;
-            this.flat2 = flat2;
-        }
-
-        /// Returns whether high edge variance was detected.
-        ///
-        /// @return whether high edge variance was detected
-        public boolean highEdgeVariance() {
-            return highEdgeVariance;
-        }
-
-        /// Returns whether filtering should be applied.
-        ///
-        /// @return whether filtering should be applied
-        public boolean filter() {
-            return filter;
-        }
-
-        /// Returns whether the immediate samples around the boundary are flat.
-        ///
-        /// @return whether the immediate samples around the boundary are flat
-        public boolean flat() {
-            return flat;
-        }
-
-        /// Returns whether the wider samples around the boundary are flat.
-        ///
-        /// @return whether the wider samples around the boundary are flat
-        public boolean flat2() {
-            return flat2;
-        }
-    }
 }

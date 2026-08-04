@@ -62,14 +62,40 @@ public final class ResidualLayout {
             TransformResidualUnit[] chromaUUnits,
             TransformResidualUnit[] chromaVUnits
     ) {
+        this(position, blockSize, lumaUnits, chromaUUnits, chromaVUnits, true);
+    }
+
+    /// Creates one residual layout with copied or exclusively transferred unit arrays.
+    ///
+    /// @param position the local tile-relative luma-grid origin
+    /// @param blockSize the coded block size
+    /// @param lumaUnits the luma residual units
+    /// @param chromaUUnits the chroma U residual units
+    /// @param chromaVUnits the chroma V residual units
+    /// @param copyUnits whether to copy all unit arrays
+    private ResidualLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            TransformResidualUnit[] lumaUnits,
+            TransformResidualUnit[] chromaUUnits,
+            TransformResidualUnit[] chromaVUnits,
+            boolean copyUnits
+    ) {
         this.position = Objects.requireNonNull(position, "position");
         this.blockSize = Objects.requireNonNull(blockSize, "blockSize");
-        this.lumaUnits = Arrays.copyOf(Objects.requireNonNull(lumaUnits, "lumaUnits"), lumaUnits.length);
+        TransformResidualUnit[] checkedLumaUnits = Objects.requireNonNull(lumaUnits, "lumaUnits");
+        this.lumaUnits = copyUnits ? Arrays.copyOf(checkedLumaUnits, checkedLumaUnits.length) : checkedLumaUnits;
         if (this.lumaUnits.length == 0) {
             throw new IllegalArgumentException("lumaUnits must not be empty");
         }
-        this.chromaUUnits = Arrays.copyOf(Objects.requireNonNull(chromaUUnits, "chromaUUnits"), chromaUUnits.length);
-        this.chromaVUnits = Arrays.copyOf(Objects.requireNonNull(chromaVUnits, "chromaVUnits"), chromaVUnits.length);
+        TransformResidualUnit[] checkedChromaUUnits = Objects.requireNonNull(chromaUUnits, "chromaUUnits");
+        TransformResidualUnit[] checkedChromaVUnits = Objects.requireNonNull(chromaVUnits, "chromaVUnits");
+        this.chromaUUnits = copyUnits
+                ? Arrays.copyOf(checkedChromaUUnits, checkedChromaUUnits.length)
+                : checkedChromaUUnits;
+        this.chromaVUnits = copyUnits
+                ? Arrays.copyOf(checkedChromaVUnits, checkedChromaVUnits.length)
+                : checkedChromaVUnits;
         if (this.chromaUUnits.length != this.chromaVUnits.length) {
             throw new IllegalArgumentException("chromaUUnits and chromaVUnits must have the same length");
         }
@@ -96,7 +122,8 @@ public final class ResidualLayout {
                 blockSize,
                 offsetUnits(lumaUnits, deltaX4, deltaY4),
                 offsetUnits(chromaUUnits, deltaX4, deltaY4),
-                offsetUnits(chromaVUnits, deltaX4, deltaY4)
+                offsetUnits(chromaVUnits, deltaX4, deltaY4),
+                false
         );
     }
 
@@ -114,6 +141,21 @@ public final class ResidualLayout {
         return Arrays.copyOf(lumaUnits, lumaUnits.length);
     }
 
+    /// Returns the number of luma residual units.
+    ///
+    /// @return the number of luma residual units
+    public int lumaUnitCount() {
+        return lumaUnits.length;
+    }
+
+    /// Returns one luma residual unit without copying the complete unit array.
+    ///
+    /// @param index the zero-based unit index in bitstream order
+    /// @return the selected luma residual unit
+    public TransformResidualUnit lumaUnit(int index) {
+        return lumaUnits[index];
+    }
+
     /// Returns the chroma U transform residual units in bitstream order.
     ///
     /// @return the chroma U transform residual units in bitstream order
@@ -121,11 +163,34 @@ public final class ResidualLayout {
         return Arrays.copyOf(chromaUUnits, chromaUUnits.length);
     }
 
+    /// Returns one chroma U residual unit without copying the complete unit array.
+    ///
+    /// @param index the zero-based unit index in bitstream order
+    /// @return the selected chroma U residual unit
+    public TransformResidualUnit chromaUUnit(int index) {
+        return chromaUUnits[index];
+    }
+
     /// Returns the chroma V transform residual units in bitstream order.
     ///
     /// @return the chroma V transform residual units in bitstream order
     public TransformResidualUnit[] chromaVUnits() {
         return Arrays.copyOf(chromaVUnits, chromaVUnits.length);
+    }
+
+    /// Returns the number of residual units in each chroma plane.
+    ///
+    /// @return the number of chroma U and chroma V residual units
+    public int chromaUnitCount() {
+        return chromaUUnits.length;
+    }
+
+    /// Returns one chroma V residual unit without copying the complete unit array.
+    ///
+    /// @param index the zero-based unit index in bitstream order
+    /// @return the selected chroma V residual unit
+    public TransformResidualUnit chromaVUnit(int index) {
+        return chromaVUnits[index];
     }
 
     /// Returns whether this residual layout carries any modeled chroma residual units.

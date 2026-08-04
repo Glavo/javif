@@ -1089,7 +1089,7 @@ public final class BlockNeighborContext {
         if (scannedRows >= 0
                 && Math.max(blockWidth4, blockHeight4) <= 16
                 && x4 + blockWidth4 < tileWidth4) {
-            candidateCount = addExactSpatialCandidate(
+            long topRightResult = addExactSpatialCandidate(
                     storedBlockAtOrNull(x4 + blockWidth4, y4 - 1),
                     false,
                     INTRABC_REFERENCE_FRAME,
@@ -1098,7 +1098,8 @@ public final class BlockNeighborContext {
                     4,
                     candidates,
                     candidateCount
-            ).candidateCount();
+            );
+            candidateCount = spatialCandidateCount(topRightResult);
         }
 
         int nearestCandidateCount = candidateCount;
@@ -1107,7 +1108,7 @@ public final class BlockNeighborContext {
         }
 
         if (scannedRows >= 0 && scannedColumns >= 0) {
-            candidateCount = addExactSpatialCandidate(
+            long topLeftResult = addExactSpatialCandidate(
                     storedBlockAtOrNull(x4 - 1, y4 - 1),
                     false,
                     INTRABC_REFERENCE_FRAME,
@@ -1116,7 +1117,8 @@ public final class BlockNeighborContext {
                     4,
                     candidates,
                     candidateCount
-            ).candidateCount();
+            );
+            candidateCount = spatialCandidateCount(topLeftResult);
         }
 
         for (int spatialDepth = 2; spatialDepth <= 3; spatialDepth++) {
@@ -1375,7 +1377,7 @@ public final class BlockNeighborContext {
         if (scannedRows >= 0
                 && Math.max(blockWidth4, blockHeight4) <= 16
                 && x4 + blockWidth4 < tileWidth4) {
-            SpatialCandidateResult topRight = addExactSpatialCandidate(
+            long topRight = addExactSpatialCandidate(
                     storedBlockAtOrNull(x4 + blockWidth4, y4 - 1),
                     compoundReference,
                     referenceFrame0,
@@ -1385,10 +1387,10 @@ public final class BlockNeighborContext {
                     candidates,
                     candidateCount
             );
-            candidateCount = topRight.candidateCount();
-            directRowMatch |= topRight.referenceMatch();
-            rowReferenceMatch |= topRight.referenceMatch();
-            haveNewMotionVectorMatch |= topRight.haveNewMotionVectorMatch();
+            candidateCount = spatialCandidateCount(topRight);
+            directRowMatch |= spatialReferenceMatch(topRight);
+            rowReferenceMatch |= spatialReferenceMatch(topRight);
+            haveNewMotionVectorMatch |= spatialNewMotionVectorMatch(topRight);
         }
 
         int nearestCandidateCount = candidateCount;
@@ -1411,7 +1413,7 @@ public final class BlockNeighborContext {
         globalMotionContext = temporalScan.globalMotionContext();
 
         if (scannedRows >= 0 && scannedColumns >= 0) {
-            SpatialCandidateResult topLeft = addExactSpatialCandidate(
+            long topLeft = addExactSpatialCandidate(
                     storedBlockAtOrNull(x4 - 1, y4 - 1),
                     compoundReference,
                     referenceFrame0,
@@ -1421,8 +1423,8 @@ public final class BlockNeighborContext {
                     candidates,
                     candidateCount
             );
-            candidateCount = topLeft.candidateCount();
-            rowReferenceMatch |= topLeft.referenceMatch();
+            candidateCount = spatialCandidateCount(topLeft);
+            rowReferenceMatch |= spatialReferenceMatch(topLeft);
         }
 
         for (int spatialDepth = 2; spatialDepth <= 3; spatialDepth++) {
@@ -2737,9 +2739,6 @@ public final class BlockNeighborContext {
         byte segmentId = (byte) nonNullHeader.segmentId();
         byte paletteSize = (byte) nonNullHeader.yPaletteSize();
         byte chromaPaletteSize = (byte) nonNullHeader.uvPaletteSize();
-        int[] yPaletteColors = nonNullHeader.yPaletteColors();
-        int[] uPaletteColors = nonNullHeader.uPaletteColors();
-        int[] vPaletteColors = nonNullHeader.vPaletteColors();
         byte referenceFrame0 = (byte) nonNullHeader.referenceFrame0();
         byte referenceFrame1 = (byte) nonNullHeader.referenceFrame1();
         InterMotionVector motionVector0 = fallbackMotionVector(nonNullHeader.motionVector0());
@@ -2796,9 +2795,12 @@ public final class BlockNeighborContext {
             Arrays.fill(abovePaletteEntries[0][x4], 0);
             Arrays.fill(abovePaletteEntries[1][x4], 0);
             Arrays.fill(abovePaletteEntries[2][x4], 0);
-            System.arraycopy(yPaletteColors, 0, abovePaletteEntries[0][x4], 0, yPaletteColors.length);
-            System.arraycopy(uPaletteColors, 0, abovePaletteEntries[1][x4], 0, uPaletteColors.length);
-            System.arraycopy(vPaletteColors, 0, abovePaletteEntries[2][x4], 0, vPaletteColors.length);
+            copyPaletteEntries(
+                    nonNullHeader,
+                    abovePaletteEntries[0][x4],
+                    abovePaletteEntries[1][x4],
+                    abovePaletteEntries[2][x4]
+            );
             aboveMode[x4] = mode;
         }
         for (int y4 = position.y4(); y4 < endY4; y4++) {
@@ -2820,9 +2822,12 @@ public final class BlockNeighborContext {
             Arrays.fill(leftPaletteEntries[0][y4], 0);
             Arrays.fill(leftPaletteEntries[1][y4], 0);
             Arrays.fill(leftPaletteEntries[2][y4], 0);
-            System.arraycopy(yPaletteColors, 0, leftPaletteEntries[0][y4], 0, yPaletteColors.length);
-            System.arraycopy(uPaletteColors, 0, leftPaletteEntries[1][y4], 0, uPaletteColors.length);
-            System.arraycopy(vPaletteColors, 0, leftPaletteEntries[2][y4], 0, vPaletteColors.length);
+            copyPaletteEntries(
+                    nonNullHeader,
+                    leftPaletteEntries[0][y4],
+                    leftPaletteEntries[1][y4],
+                    leftPaletteEntries[2][y4]
+            );
             leftMode[y4] = mode;
         }
         for (int y4 = position.y4(); y4 < endY4; y4++) {
@@ -2831,6 +2836,29 @@ public final class BlockNeighborContext {
             }
         }
         updateDecodedTemporalMotionField(nonNullHeader, endX4, endY4, motionVector0, motionVector1);
+    }
+
+    /// Copies one block header's palette entries into fixed-size neighbor caches.
+    ///
+    /// The destination arrays must already be cleared because this method writes only active entries.
+    ///
+    /// @param header the source block header
+    /// @param yEntries the luma palette cache
+    /// @param uEntries the U chroma palette cache
+    /// @param vEntries the V chroma palette cache
+    private static void copyPaletteEntries(
+            TileBlockHeaderReader.BlockHeader header,
+            int[] yEntries,
+            int[] uEntries,
+            int[] vEntries
+    ) {
+        for (int index = 0; index < header.yPaletteSize(); index++) {
+            yEntries[index] = header.yPaletteColor(index);
+        }
+        for (int index = 0; index < header.uvPaletteSize(); index++) {
+            uEntries[index] = header.uPaletteColor(index);
+            vEntries[index] = header.vPaletteColor(index);
+        }
     }
 
     /// Updates the current-frame temporal motion field with one decoded block header.
@@ -3169,7 +3197,7 @@ public final class BlockNeighborContext {
             int weightFactor = blockWidth4 == 1
                     ? 2
                     : Math.max(2, Math.min(2 * maximumRows, firstHeight4));
-            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+            long candidateResult = addExactSpatialCandidate(
                     firstBlock,
                     compoundReference,
                     referenceFrame0,
@@ -3180,9 +3208,9 @@ public final class BlockNeighborContext {
                     count
             );
             return new ExactSpatialScanResult(
-                    candidateResult.candidateCount(),
-                    candidateResult.referenceMatch(),
-                    candidateResult.haveNewMotionVectorMatch(),
+                    spatialCandidateCount(candidateResult),
+                    spatialReferenceMatch(candidateResult),
+                    spatialNewMotionVectorMatch(candidateResult),
                     weightFactor >> 1
             );
         }
@@ -3191,7 +3219,7 @@ public final class BlockNeighborContext {
         boolean haveNewMotionVectorMatch = false;
         for (int offset4 = 0; ; ) {
             @Nullable StoredBlock block = storedBlockAtOrNull(startX4 + offset4, fixedY4);
-            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+            long candidateResult = addExactSpatialCandidate(
                     block,
                     compoundReference,
                     referenceFrame0,
@@ -3201,9 +3229,9 @@ public final class BlockNeighborContext {
                     destination,
                     count
             );
-            count = candidateResult.candidateCount();
-            referenceMatch |= candidateResult.referenceMatch();
-            haveNewMotionVectorMatch |= candidateResult.haveNewMotionVectorMatch();
+            count = spatialCandidateCount(candidateResult);
+            referenceMatch |= spatialReferenceMatch(candidateResult);
+            haveNewMotionVectorMatch |= spatialNewMotionVectorMatch(candidateResult);
             offset4 += length4;
             if (offset4 >= visibleWidth4) {
                 return new ExactSpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch, 1);
@@ -3250,7 +3278,7 @@ public final class BlockNeighborContext {
             int weightFactor = blockHeight4 == 1
                     ? 2
                     : Math.max(2, Math.min(2 * maximumColumns, firstWidth4));
-            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+            long candidateResult = addExactSpatialCandidate(
                     firstBlock,
                     compoundReference,
                     referenceFrame0,
@@ -3261,9 +3289,9 @@ public final class BlockNeighborContext {
                     count
             );
             return new ExactSpatialScanResult(
-                    candidateResult.candidateCount(),
-                    candidateResult.referenceMatch(),
-                    candidateResult.haveNewMotionVectorMatch(),
+                    spatialCandidateCount(candidateResult),
+                    spatialReferenceMatch(candidateResult),
+                    spatialNewMotionVectorMatch(candidateResult),
                     weightFactor >> 1
             );
         }
@@ -3272,7 +3300,7 @@ public final class BlockNeighborContext {
         boolean haveNewMotionVectorMatch = false;
         for (int offset4 = 0; ; ) {
             @Nullable StoredBlock block = storedBlockAtOrNull(fixedX4, startY4 + offset4);
-            SpatialCandidateResult candidateResult = addExactSpatialCandidate(
+            long candidateResult = addExactSpatialCandidate(
                     block,
                     compoundReference,
                     referenceFrame0,
@@ -3282,9 +3310,9 @@ public final class BlockNeighborContext {
                     destination,
                     count
             );
-            count = candidateResult.candidateCount();
-            referenceMatch |= candidateResult.referenceMatch();
-            haveNewMotionVectorMatch |= candidateResult.haveNewMotionVectorMatch();
+            count = spatialCandidateCount(candidateResult);
+            referenceMatch |= spatialReferenceMatch(candidateResult);
+            haveNewMotionVectorMatch |= spatialNewMotionVectorMatch(candidateResult);
             offset4 += length4;
             if (offset4 >= visibleHeight4) {
                 return new ExactSpatialScanResult(count, referenceMatch, haveNewMotionVectorMatch, 1);
@@ -3305,7 +3333,7 @@ public final class BlockNeighborContext {
     /// @param destination the destination candidate stack
     /// @param count the number of active candidates already stored
     /// @return the updated stack and reference-match state
-    private static SpatialCandidateResult addExactSpatialCandidate(
+    private static long addExactSpatialCandidate(
             @Nullable StoredBlock block,
             boolean compoundReference,
             int referenceFrame0,
@@ -3316,11 +3344,11 @@ public final class BlockNeighborContext {
             int count
     ) {
         if (block == null) {
-            return new SpatialCandidateResult(count, false, false);
+            return spatialCandidateResult(count, false, false);
         }
         if (referenceFrame0 == INTRABC_REFERENCE_FRAME) {
             if (!block.intrabc()) {
-                return new SpatialCandidateResult(count, false, false);
+                return spatialCandidateResult(count, false, false);
             }
             ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
                     new ProvisionalInterModeContext.ProvisionalMotionVectorCandidate(
@@ -3329,14 +3357,14 @@ public final class BlockNeighborContext {
                             null,
                             false
                     );
-            return new SpatialCandidateResult(
+            return spatialCandidateResult(
                     appendProvisionalCandidate(destination, count, candidate),
                     true,
                     false
             );
         }
         if (block.intra()) {
-            return new SpatialCandidateResult(count, false, false);
+            return spatialCandidateResult(count, false, false);
         }
         @Nullable ProvisionalInterModeContext.ProvisionalMotionVectorCandidate candidate =
                 provisionalMotionVectorCandidate(
@@ -3348,13 +3376,53 @@ public final class BlockNeighborContext {
                         weight
                 );
         if (candidate == null) {
-            return new SpatialCandidateResult(count, false, false);
+            return spatialCandidateResult(count, false, false);
         }
-        return new SpatialCandidateResult(
+        return spatialCandidateResult(
                 appendProvisionalCandidate(destination, count, candidate),
                 true,
                 block.usesNewMotionVector()
         );
+    }
+
+    /// Packs one spatial-candidate result into an allocation-free primitive value.
+    ///
+    /// @param candidateCount the updated candidate count
+    /// @param referenceMatch whether the reference selection matched
+    /// @param haveNewMotionVectorMatch whether the matching block used a new motion vector
+    /// @return the packed spatial-candidate result
+    private static long spatialCandidateResult(
+            int candidateCount,
+            boolean referenceMatch,
+            boolean haveNewMotionVectorMatch
+    ) {
+        return Integer.toUnsignedLong(candidateCount)
+                | (referenceMatch ? 1L << 32 : 0L)
+                | (haveNewMotionVectorMatch ? 1L << 33 : 0L);
+    }
+
+    /// Returns the candidate count from one packed spatial-candidate result.
+    ///
+    /// @param result the packed result
+    /// @return the updated candidate count
+    private static int spatialCandidateCount(long result) {
+        return (int) result;
+    }
+
+    /// Returns whether one packed spatial-candidate result matched the reference selection.
+    ///
+    /// @param result the packed result
+    /// @return whether the reference selection matched
+    private static boolean spatialReferenceMatch(long result) {
+        return (result & (1L << 32)) != 0;
+    }
+
+    /// Returns whether one packed result matched a block using a new motion vector.
+    ///
+    /// @param result the packed result
+    /// @return whether the matching block used a new motion vector
+    private static boolean spatialNewMotionVectorMatch(long result) {
+        return (result & (1L << 33)) != 0;
     }
 
     /// Returns one stored block without throwing when a coordinate is outside the tile.
@@ -4303,55 +4371,6 @@ public final class BlockNeighborContext {
         /// @return the spatial-depth contribution
         public int scanDistance() {
             return scanDistance;
-        }
-    }
-
-    /// The result of attempting to add one spatial motion-vector candidate.
-    @NotNullByDefault
-    private static final class SpatialCandidateResult {
-        /// The updated number of valid candidates.
-        private final int candidateCount;
-
-        /// Whether the block matched the requested reference selection.
-        private final boolean referenceMatch;
-
-        /// Whether the matching block used a `NEWMV`-carrying mode.
-        private final boolean haveNewMotionVectorMatch;
-
-        /// Creates one spatial candidate result.
-        ///
-        /// @param candidateCount the updated number of valid candidates
-        /// @param referenceMatch whether the block matched the requested reference selection
-        /// @param haveNewMotionVectorMatch whether the matching block used a `NEWMV`-carrying mode
-        private SpatialCandidateResult(
-                int candidateCount,
-                boolean referenceMatch,
-                boolean haveNewMotionVectorMatch
-        ) {
-            this.candidateCount = candidateCount;
-            this.referenceMatch = referenceMatch;
-            this.haveNewMotionVectorMatch = haveNewMotionVectorMatch;
-        }
-
-        /// Returns the updated candidate count.
-        ///
-        /// @return the updated candidate count
-        public int candidateCount() {
-            return candidateCount;
-        }
-
-        /// Returns whether the block matched the requested reference selection.
-        ///
-        /// @return whether the block matched the requested reference selection
-        public boolean referenceMatch() {
-            return referenceMatch;
-        }
-
-        /// Returns whether the matching block used a `NEWMV`-carrying mode.
-        ///
-        /// @return whether the matching block used a `NEWMV`-carrying mode
-        public boolean haveNewMotionVectorMatch() {
-            return haveNewMotionVectorMatch;
         }
     }
 

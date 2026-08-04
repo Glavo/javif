@@ -70,12 +70,15 @@ public final class BlockPosition {
         return y4 >> 1;
     }
 
-    /// Returns a new block position offset by the supplied 4x4-unit delta.
+    /// Returns this position offset by the supplied 4x4-unit delta.
     ///
     /// @param deltaX4 the X-axis offset in 4x4 units
     /// @param deltaY4 the Y-axis offset in 4x4 units
-    /// @return a new block position offset by the supplied 4x4-unit delta
+    /// @return the offset position, or this position when both deltas are zero
     public BlockPosition offset(int deltaX4, int deltaY4) {
+        if (deltaX4 == 0 && deltaY4 == 0) {
+            return this;
+        }
         return new BlockPosition(x4 + deltaX4, y4 + deltaY4);
     }
 

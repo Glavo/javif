@@ -2462,8 +2462,7 @@ final class FrameReconstructorTest {
         });
     }
 
-    /// Verifies that one monochrome single-reference inter block blends the sampled inter predictor
-    /// with the secondary intra predictor when inter-intra smooth blending is active.
+    /// Verifies that every inter-intra mode blends the sampled inter and secondary intra predictors.
     @Test
     void reconstructsSingleReferenceI400InterIntraBlendBlock() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -2484,31 +2483,33 @@ final class FrameReconstructorTest {
                 null,
                 null
         );
-        TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
-                createSingleReferenceInterIntraBlockHeader(
-                        position,
-                        size,
-                        false,
-                        0,
-                        MotionVector.zero(),
-                        InterIntraPredictionMode.VERTICAL,
-                        false,
-                        -1
-                ),
-                createTransformLayout(position, size, AvifPixelFormat.I400),
-                createResidualLayout(position, size, true)
-        );
+        for (InterIntraPredictionMode mode : InterIntraPredictionMode.values()) {
+            TilePartitionTreeReader.LeafNode leaf = new TilePartitionTreeReader.LeafNode(
+                    createSingleReferenceInterIntraBlockHeader(
+                            position,
+                            size,
+                            false,
+                            0,
+                            MotionVector.zero(),
+                            mode,
+                            false,
+                            -1
+                    ),
+                    createTransformLayout(position, size, AvifPixelFormat.I400),
+                    createResidualLayout(position, size, true)
+            );
 
-        DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 8, 8, 0, leaf),
-                createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
-        );
+            DecodedPlanes planes = new FrameReconstructor().reconstruct(
+                    createInterFrameSyntaxDecodeResult(AvifPixelFormat.I400, 8, 8, 0, leaf),
+                    createReferenceSurfaceSlots(0, referenceSurfaceSnapshot)
+            );
 
-        assertFalse(planes.hasChroma());
-        assertPlaneEquals(
-                planes.lumaPlane(),
-                expectedInterIntraBlend(referenceLuma, InterIntraPredictionMode.VERTICAL, false, -1, size, 0, 0)
-        );
+            assertFalse(planes.hasChroma());
+            assertPlaneEquals(
+                    planes.lumaPlane(),
+                    expectedInterIntraBlend(referenceLuma, mode, false, -1, size, 0, 0)
+            );
+        }
     }
 
     /// Verifies that one `I420` single-reference inter-intra block applies wedge blending to luma
@@ -2800,9 +2801,9 @@ final class FrameReconstructorTest {
         assertPlaneBlockEquals(requirePlane(planes.chromaVPlane()), 4, 0, expectedChromaV);
     }
 
-    /// Verifies bilinear `intrabc` sampling of reconstructed monochrome luma at fractional offsets.
+    /// Verifies reconstructed monochrome luma sampling at a non-block-aligned integer offset.
     @Test
-    void reconstructsIntrabcI400BlockWithFractionalMotionVector() {
+    void reconstructsIntrabcI400BlockWithIntegerPixelMotionVector() {
         BlockPosition sourcePosition = new BlockPosition(0, 0);
         BlockSize sourceSize = BlockSize.SIZE_16X8;
         int[][] sourcePaletteIndices = new int[][]{
@@ -2837,7 +2838,7 @@ final class FrameReconstructorTest {
                 createResidualLayout(sourcePosition, sourceSize, true)
         );
         BlockPosition intrabcPosition = new BlockPosition(4, 0);
-        MotionVector motionVector = new MotionVector(0, -124);
+        MotionVector motionVector = new MotionVector(0, -120);
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(intrabcPosition, BlockSize.SIZE_8X8, false, motionVector),
                 createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, AvifPixelFormat.I400),
@@ -2872,9 +2873,9 @@ final class FrameReconstructorTest {
         assertPlaneBlockEquals(planes.lumaPlane(), intrabcPosition.x4() << 2, intrabcPosition.y4() << 2, expectedCopiedSamples);
     }
 
-    /// Verifies bilinear `intrabc` sampling of `I420` chroma at fractional luma and chroma offsets.
+    /// Verifies bilinear `I420` chroma sampling from an integer luma displacement.
     @Test
-    void reconstructsIntrabcI420BlockWithFractionalMotionVector() {
+    void reconstructsIntrabcI420BlockWithFractionalChromaOffset() {
         BlockPosition sourcePosition = new BlockPosition(0, 0);
         BlockSize sourceSize = BlockSize.SIZE_16X8;
         int[][] chromaPaletteIndices = new int[][]{
@@ -2905,7 +2906,7 @@ final class FrameReconstructorTest {
                 createResidualLayout(sourcePosition, sourceSize, true)
         );
         BlockPosition intrabcPosition = new BlockPosition(4, 0);
-        MotionVector motionVector = new MotionVector(4, -124);
+        MotionVector motionVector = new MotionVector(8, -120);
         TilePartitionTreeReader.LeafNode intrabcLeaf = new TilePartitionTreeReader.LeafNode(
                 createIntrabcBlockHeader(intrabcPosition, BlockSize.SIZE_8X8, true, motionVector),
                 createTransformLayout(intrabcPosition, BlockSize.SIZE_8X8, AvifPixelFormat.I420),

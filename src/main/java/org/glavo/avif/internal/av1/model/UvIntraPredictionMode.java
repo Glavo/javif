@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// The AV1 chroma intra prediction modes in bitstream order.
 @NotNullByDefault
@@ -49,6 +50,9 @@ public enum UvIntraPredictionMode {
     /// Chroma-from-luma prediction.
     CFL;
 
+    /// The mode constants cached in bitstream symbol order.
+    private static final UvIntraPredictionMode @Unmodifiable [] VALUES = values();
+
     /// Returns the bitstream symbol index of this mode.
     ///
     /// @return the bitstream symbol index of this mode
@@ -78,10 +82,9 @@ public enum UvIntraPredictionMode {
     /// @param symbolIndex the decoded bitstream symbol index
     /// @return the chroma intra prediction mode for the supplied symbol index
     public static UvIntraPredictionMode fromSymbolIndex(int symbolIndex) {
-        UvIntraPredictionMode[] values = values();
-        if (symbolIndex < 0 || symbolIndex >= values.length) {
+        if (symbolIndex < 0 || symbolIndex >= VALUES.length) {
             throw new IllegalArgumentException("symbolIndex out of range: " + symbolIndex);
         }
-        return values[symbolIndex];
+        return VALUES[symbolIndex];
     }
 }

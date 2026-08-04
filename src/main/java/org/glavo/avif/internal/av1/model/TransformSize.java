@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// One AV1 rectangular transform size.
 ///
@@ -62,6 +63,9 @@ public enum TransformSize {
     RTX_16X64(4, 16, 2, 4, 2, 4, 3, RTX_16X32),
     /// A 64x16 transform.
     RTX_64X16(16, 4, 4, 2, 2, 4, 3, RTX_32X16);
+
+    /// The transform-size constants cached in declaration order.
+    private static final TransformSize @Unmodifiable [] VALUES = values();
 
     /// The transform width in 4x4 units.
     private final int width4;
@@ -210,7 +214,7 @@ public enum TransformSize {
     /// @param height4 the height in 4x4 units
     /// @return the transform size that exactly matches the supplied 4x4-unit dimensions, or `null`
     public static @Nullable TransformSize forDimensions(int width4, int height4) {
-        for (TransformSize value : values()) {
+        for (TransformSize value : VALUES) {
             if (value.width4 == width4 && value.height4 == height4) {
                 return value;
             }

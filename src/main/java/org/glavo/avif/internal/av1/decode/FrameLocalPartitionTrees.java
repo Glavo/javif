@@ -133,10 +133,9 @@ public final class FrameLocalPartitionTrees {
         }
 
         TilePartitionTreeReader.PartitionNode partitionNode = (TilePartitionTreeReader.PartitionNode) nonNullNode;
-        TilePartitionTreeReader.Node[] children = partitionNode.children();
-        TilePartitionTreeReader.Node[] offsetChildren = new TilePartitionTreeReader.Node[children.length];
-        for (int i = 0; i < children.length; i++) {
-            offsetChildren[i] = offsetNode(children[i], deltaX4, deltaY4);
+        TilePartitionTreeReader.Node[] offsetChildren = new TilePartitionTreeReader.Node[partitionNode.childCount()];
+        for (int i = 0; i < offsetChildren.length; i++) {
+            offsetChildren[i] = offsetNode(partitionNode.child(i), deltaX4, deltaY4);
         }
         return new TilePartitionTreeReader.PartitionNode(
                 partitionNode.position().offset(deltaX4, deltaY4),

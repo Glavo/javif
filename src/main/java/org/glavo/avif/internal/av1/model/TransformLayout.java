@@ -84,6 +84,50 @@ public final class TransformLayout {
             TransformUnit[] lumaUnits,
             TransformUnit[] chromaUnits
     ) {
+        this(
+                position,
+                blockSize,
+                visibleWidth4,
+                visibleHeight4,
+                visibleWidthPixels,
+                visibleHeightPixels,
+                maxLumaTransformSize,
+                chromaTransformSize,
+                variableLumaTransformTree,
+                lumaUnits,
+                chromaUnits,
+                true
+        );
+    }
+
+    /// Creates one decoded block-level transform layout with copied or transferred unit arrays.
+    ///
+    /// @param position the local tile-relative luma-grid origin
+    /// @param blockSize the coded block size
+    /// @param visibleWidth4 the visible width in 4x4 units
+    /// @param visibleHeight4 the visible height in 4x4 units
+    /// @param visibleWidthPixels the exact visible width in pixels
+    /// @param visibleHeightPixels the exact visible height in pixels
+    /// @param maxLumaTransformSize the largest luma transform size
+    /// @param chromaTransformSize the chroma transform size, or `null`
+    /// @param variableLumaTransformTree whether luma uses a variable transform tree
+    /// @param lumaUnits the luma transform units
+    /// @param chromaUnits the chroma transform units
+    /// @param copyUnits whether to copy both unit arrays
+    private TransformLayout(
+            BlockPosition position,
+            BlockSize blockSize,
+            int visibleWidth4,
+            int visibleHeight4,
+            int visibleWidthPixels,
+            int visibleHeightPixels,
+            TransformSize maxLumaTransformSize,
+            @Nullable TransformSize chromaTransformSize,
+            boolean variableLumaTransformTree,
+            TransformUnit[] lumaUnits,
+            TransformUnit[] chromaUnits,
+            boolean copyUnits
+    ) {
         this.position = Objects.requireNonNull(position, "position");
         this.blockSize = Objects.requireNonNull(blockSize, "blockSize");
         if (visibleWidth4 <= 0 || visibleWidth4 > blockSize.width4()) {
@@ -111,11 +155,13 @@ public final class TransformLayout {
         this.maxLumaTransformSize = Objects.requireNonNull(maxLumaTransformSize, "maxLumaTransformSize");
         this.chromaTransformSize = chromaTransformSize;
         this.variableLumaTransformTree = variableLumaTransformTree;
-        this.lumaUnits = Arrays.copyOf(Objects.requireNonNull(lumaUnits, "lumaUnits"), lumaUnits.length);
+        TransformUnit[] checkedLumaUnits = Objects.requireNonNull(lumaUnits, "lumaUnits");
+        this.lumaUnits = copyUnits ? Arrays.copyOf(checkedLumaUnits, checkedLumaUnits.length) : checkedLumaUnits;
         if (this.lumaUnits.length == 0) {
             throw new IllegalArgumentException("lumaUnits must not be empty");
         }
-        this.chromaUnits = Arrays.copyOf(Objects.requireNonNull(chromaUnits, "chromaUnits"), chromaUnits.length);
+        TransformUnit[] checkedChromaUnits = Objects.requireNonNull(chromaUnits, "chromaUnits");
+        this.chromaUnits = copyUnits ? Arrays.copyOf(checkedChromaUnits, checkedChromaUnits.length) : checkedChromaUnits;
         if (chromaTransformSize == null && this.chromaUnits.length != 0) {
             throw new IllegalArgumentException("chromaUnits must be empty when chromaTransformSize is null");
         }
@@ -231,7 +277,8 @@ public final class TransformLayout {
                 chromaTransformSize,
                 variableLumaTransformTree,
                 offsetUnits(lumaUnits, deltaX4, deltaY4),
-                offsetUnits(chromaUnits, deltaX4, deltaY4)
+                offsetUnits(chromaUnits, deltaX4, deltaY4),
+                false
         );
     }
 
@@ -298,11 +345,41 @@ public final class TransformLayout {
         return Arrays.copyOf(lumaUnits, lumaUnits.length);
     }
 
+    /// Returns the number of luma transform units.
+    ///
+    /// @return the number of luma transform units
+    public int lumaUnitCount() {
+        return lumaUnits.length;
+    }
+
+    /// Returns one luma transform unit without copying the complete unit array.
+    ///
+    /// @param index the zero-based unit index in bitstream order
+    /// @return the selected luma transform unit
+    public TransformUnit lumaUnit(int index) {
+        return lumaUnits[index];
+    }
+
     /// Returns the shared chroma transform units for the U and V planes in bitstream order.
     ///
     /// @return the shared chroma transform units for the U and V planes in bitstream order
     public TransformUnit[] chromaUnits() {
         return Arrays.copyOf(chromaUnits, chromaUnits.length);
+    }
+
+    /// Returns the number of shared chroma transform units.
+    ///
+    /// @return the number of chroma transform units
+    public int chromaUnitCount() {
+        return chromaUnits.length;
+    }
+
+    /// Returns one shared chroma transform unit without copying the complete unit array.
+    ///
+    /// @param index the zero-based unit index in bitstream order
+    /// @return the selected chroma transform unit
+    public TransformUnit chromaUnit(int index) {
+        return chromaUnits[index];
     }
 
     /// Returns the uniform luma transform size, or `null` when the layout mixes sizes.

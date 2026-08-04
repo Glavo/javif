@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 /// The AV1 recursive filter-intra modes in bitstream order.
 @NotNullByDefault
@@ -31,6 +32,9 @@ public enum FilterIntraMode {
     /// Recursive Paeth-style filter intra prediction.
     PAETH;
 
+    /// The mode constants cached in bitstream symbol order.
+    private static final FilterIntraMode @Unmodifiable [] VALUES = values();
+
     /// Returns the bitstream symbol index of this filter intra mode.
     ///
     /// @return the bitstream symbol index of this filter intra mode
@@ -43,10 +47,9 @@ public enum FilterIntraMode {
     /// @param symbolIndex the decoded bitstream symbol index
     /// @return the filter intra mode for the supplied symbol index
     public static FilterIntraMode fromSymbolIndex(int symbolIndex) {
-        FilterIntraMode[] values = values();
-        if (symbolIndex < 0 || symbolIndex >= values.length) {
+        if (symbolIndex < 0 || symbolIndex >= VALUES.length) {
             throw new IllegalArgumentException("symbolIndex out of range: " + symbolIndex);
         }
-        return values[symbolIndex];
+        return VALUES[symbolIndex];
     }
 }

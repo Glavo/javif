@@ -21,6 +21,7 @@ import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecoder;
+import org.glavo.avif.internal.av1.decode.InvalidFrameSyntaxException;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -550,10 +551,23 @@ public final class Av1ImageReader implements AutoCloseable {
     private @Nullable PendingOutput completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         @Nullable FrameSyntaxDecodeResult cdfReferenceResult = selectCdfReferenceFrameSyntaxResult(frameHeader);
-        FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(
-                cdfReferenceResult,
-                referenceFrameSyntaxResultsForDecoding()
-        ).decode(assembly);
+        FrameSyntaxDecodeResult syntaxDecodeResult;
+        try {
+            syntaxDecodeResult = new FrameSyntaxDecoder(
+                    cdfReferenceResult,
+                    referenceFrameSyntaxResultsForDecoding()
+            ).decode(assembly);
+        } catch (InvalidFrameSyntaxException exception) {
+            throw new DecodeException(
+                    DecodeErrorCode.INVALID_BITSTREAM,
+                    DecodeStage.FRAME_DECODE,
+                    exception.getMessage(),
+                    assembly.streamOffset(),
+                    assembly.obuIndex(),
+                    null,
+                    exception
+            );
+        }
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
         FrameSyntaxDecodeResult storedSyntaxDecodeResult =
                 storedReferenceFrameSyntaxResult(frameHeader, syntaxDecodeResult, cdfReferenceResult);

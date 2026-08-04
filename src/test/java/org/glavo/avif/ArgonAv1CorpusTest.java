@@ -24,6 +24,8 @@ import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -38,6 +40,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -91,27 +94,54 @@ final class ArgonAv1CorpusTest {
             ARCHIVE_ROOT + "profile2_not_annexb_special/streams/"
     );
 
+    /// The archive shared by inventory, discovery, and selected dynamic cases for this test class.
+    private static @Nullable ZipFile archive;
+
     /// Creates an Argon corpus test instance.
     ArgonAv1CorpusTest() {
     }
 
-    /// Verifies that the configured ZIP has the complete pinned stream inventory.
-    @Test
-    void archiveContainsExpectedStreamInventory() throws IOException {
+    /// Opens the configured Argon archive once for this test class.
+    ///
+    /// @throws IOException if the archive cannot be opened
+    @BeforeAll
+    static void openArchive() throws IOException {
         Path archivePath = archivePath();
         assertTrue(Files.isRegularFile(archivePath), () -> "Missing Argon Streams archive: " + archivePath);
+        archive = new ZipFile(archivePath.toFile());
+    }
 
-        try (ZipFile archive = new ZipFile(archivePath.toFile())) {
-            List<String> entryNames = archive.stream().map(ZipEntry::getName).toList();
-            long streamCount = entryNames.stream().filter(name -> name.endsWith(".obu")).count();
-            long lowOverheadStreamCount = entryNames.stream()
-                    .filter(name -> name.endsWith(".obu"))
-                    .filter(name -> LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
-                    .count();
-            assertEquals(EXPECTED_STREAM_COUNT, streamCount);
-            assertEquals(EXPECTED_LOW_OVERHEAD_STREAM_COUNT, lowOverheadStreamCount);
-            assertNotNull(archive.getEntry(ARCHIVE_ROOT + "P8005-R-005h (Argon Streams AV1 User Manual).pdf"));
+    /// Closes the shared Argon archive after all dynamic cases finish.
+    ///
+    /// @throws IOException if the archive cannot be closed
+    @AfterAll
+    static void closeArchive() throws IOException {
+        @Nullable ZipFile openArchive = archive;
+        archive = null;
+        if (openArchive != null) {
+            openArchive.close();
         }
+    }
+
+    /// Verifies that the configured ZIP has the complete pinned stream inventory.
+    @Test
+    void archiveContainsExpectedStreamInventory() {
+        ZipFile openArchive = archive();
+        long streamCount = 0;
+        long lowOverheadStreamCount = 0;
+        Enumeration<? extends ZipEntry> entries = openArchive.entries();
+        while (entries.hasMoreElements()) {
+            String entryName = entries.nextElement().getName();
+            if (entryName.endsWith(".obu")) {
+                streamCount++;
+                if (LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
+                    lowOverheadStreamCount++;
+                }
+            }
+        }
+        assertEquals(EXPECTED_STREAM_COUNT, streamCount);
+        assertEquals(EXPECTED_LOW_OVERHEAD_STREAM_COUNT, lowOverheadStreamCount);
+        assertNotNull(openArchive.getEntry(ARCHIVE_ROOT + "P8005-R-005h (Argon Streams AV1 User Manual).pdf"));
     }
 
     /// Verifies one-based shard parsing and deterministic round-robin selection.
@@ -139,9 +169,8 @@ final class ArgonAv1CorpusTest {
     /// Returns reference-output checks for the supported low-overhead streams in all AV1 profiles.
     ///
     /// @return the dynamic reference-output tests
-    /// @throws IOException if a diagnostic group selector cannot inspect the archive
     @TestFactory
-    Stream<DynamicTest> supportedLowOverheadStreamsMatchReferenceYuvDigests() throws IOException {
+    Stream<DynamicTest> supportedLowOverheadStreamsMatchReferenceYuvDigests() {
         return selectedReferenceCases().stream()
                 .map(testCase -> DynamicTest.dynamicTest(
                         testCase.category() + "/" + testCase.streamName(),
@@ -152,8 +181,7 @@ final class ArgonAv1CorpusTest {
     /// Returns the complete low-overhead gate, a diagnostic group, or one explicitly selected case.
     ///
     /// @return the immutable selected cases
-    /// @throws IOException if a diagnostic group selector cannot inspect the archive
-    private static @Unmodifiable List<CorpusCase> selectedReferenceCases() throws IOException {
+    private static @Unmodifiable List<CorpusCase> selectedReferenceCases() {
         @Nullable String selectedCase = System.getProperty(CASE_PROPERTY);
         if (selectedCase == null) {
             return selectConfiguredShard(allLowOverheadCases(null));
@@ -196,75 +224,71 @@ final class ArgonAv1CorpusTest {
     ///
     /// @param selectedCategory the exact category to select, or `null` for every profile
     /// @return the immutable sorted corpus cases
-    /// @throws IOException if the archive cannot be inspected
     private static @Unmodifiable List<CorpusCase> allLowOverheadCases(
             @Nullable String selectedCategory
-    ) throws IOException {
-        try (ZipFile archive = new ZipFile(archivePath().toFile())) {
-            return archive.stream()
-                    .map(ZipEntry::getName)
-                    .filter(name -> name.endsWith(".obu"))
-                    .filter(name -> LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
-                    .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
-                    .filter(testCase -> selectedCategory == null || testCase.category().equals(selectedCategory))
-                    .sorted((left, right) -> left.selector().compareTo(right.selector()))
-                    .toList();
-        }
+    ) {
+        return archive().stream()
+                .map(ZipEntry::getName)
+                .filter(name -> name.endsWith(".obu"))
+                .filter(name -> LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
+                .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
+                .filter(testCase -> selectedCategory == null || testCase.category().equals(selectedCategory))
+                .sorted((left, right) -> left.selector().compareTo(right.selector()))
+                .toList();
     }
 
     /// Decodes one selected stream and compares all visible pre-grain YUV planes with Argon's MD5.
     ///
     /// @param testCase the selected corpus stream
     private static void assertReferenceDigest(CorpusCase testCase) throws IOException, NoSuchAlgorithmException {
-        try (ZipFile archive = new ZipFile(archivePath().toFile())) {
-            String streamPath = ARCHIVE_ROOT + testCase.category() + "/streams/" + testCase.streamName();
-            String referencePath = ARCHIVE_ROOT + testCase.category() + "/md5_no_film_grain/"
-                    + testCase.baseName() + ".md5";
-            ZipEntry streamEntry = requireEntry(archive, streamPath);
-            String expectedDigest = readReferenceDigest(archive, requireEntry(archive, referencePath));
-            MessageDigest actualDigest = MessageDigest.getInstance("MD5");
-            Av1DecoderConfig config = Av1DecoderConfig.builder()
-                    .applyFilmGrain(false)
-                    .outputAllLayers(true)
-                    .build();
+        ZipFile archive = archive();
+        String streamPath = ARCHIVE_ROOT + testCase.category() + "/streams/" + testCase.streamName();
+        String referencePath = ARCHIVE_ROOT + testCase.category() + "/md5_no_film_grain/"
+                + testCase.baseName() + ".md5";
+        ZipEntry streamEntry = requireEntry(archive, streamPath);
+        String expectedDigest = readReferenceDigest(archive, requireEntry(archive, referencePath));
+        MessageDigest actualDigest = MessageDigest.getInstance("MD5");
+        Av1DecoderConfig config = Av1DecoderConfig.builder()
+                .applyFilmGrain(false)
+                .outputAllLayers(true)
+                .build();
 
-            int frameCount = 0;
-            @Nullable List<String> frameDiagnostics = Boolean.getBoolean(TRACE_FRAMES_PROPERTY)
-                    ? new ArrayList<>()
-                    : null;
-            try {
-                try (Av1ImageReader reader = Av1ImageReader.open(
-                        new BufferedInput.OfInputStream(archive.getInputStream(streamEntry)),
-                        config
-                )) {
-                    @Nullable DecodedPlanes decodedPlanes;
-                    while ((decodedPlanes = reader.readPlanes()) != null) {
-                        DecodedPlanes requiredPlanes = decodedPlanes;
-                        updateYuvDigest(actualDigest, requiredPlanes);
-                        if (frameDiagnostics != null) {
-                            frameDiagnostics.add(frameDiagnostic(frameCount, requiredPlanes));
-                        }
-                        frameCount++;
+        int frameCount = 0;
+        @Nullable List<String> frameDiagnostics = Boolean.getBoolean(TRACE_FRAMES_PROPERTY)
+                ? new ArrayList<>()
+                : null;
+        try {
+            try (Av1ImageReader reader = Av1ImageReader.open(
+                    new BufferedInput.OfInputStream(archive.getInputStream(streamEntry)),
+                    config
+            )) {
+                @Nullable DecodedPlanes decodedPlanes;
+                while ((decodedPlanes = reader.readPlanes()) != null) {
+                    DecodedPlanes requiredPlanes = decodedPlanes;
+                    updateYuvDigest(actualDigest, requiredPlanes);
+                    if (frameDiagnostics != null) {
+                        frameDiagnostics.add(frameDiagnostic(frameCount, requiredPlanes));
                     }
+                    frameCount++;
                 }
-            } catch (DecodeException exception) {
-                throw new AssertionError(
-                        streamPath + " failed at OBU " + exception.obuIndex()
-                                + " (offset " + exception.streamOffset() + ", stage " + exception.stage() + ")",
-                        exception
-                );
             }
-
-            assertTrue(frameCount > 0, () -> streamPath + " produced no visible frames");
-            String actualDigestHex = HexFormat.of().formatHex(actualDigest.digest());
-            assertEquals(
-                    expectedDigest,
-                    actualDigestHex,
-                    () -> frameDiagnostics == null
-                            ? streamPath
-                            : streamPath + System.lineSeparator() + String.join(System.lineSeparator(), frameDiagnostics)
+        } catch (DecodeException exception) {
+            throw new AssertionError(
+                    streamPath + " failed at OBU " + exception.obuIndex()
+                            + " (offset " + exception.streamOffset() + ", stage " + exception.stage() + ")",
+                    exception
             );
         }
+
+        assertTrue(frameCount > 0, () -> streamPath + " produced no visible frames");
+        String actualDigestHex = HexFormat.of().formatHex(actualDigest.digest());
+        assertEquals(
+                expectedDigest,
+                actualDigestHex,
+                () -> frameDiagnostics == null
+                        ? streamPath
+                        : streamPath + System.lineSeparator() + String.join(System.lineSeparator(), frameDiagnostics)
+        );
     }
 
     /// Returns one diagnostic summary containing the frame layout and complete YUV digest.
@@ -360,6 +384,13 @@ final class ArgonAv1CorpusTest {
                 System.getProperty(ARCHIVE_PROPERTY),
                 () -> "Missing system property: " + ARCHIVE_PROPERTY
         ));
+    }
+
+    /// Returns the archive opened for the current test-class lifecycle.
+    ///
+    /// @return the shared open Argon archive
+    private static ZipFile archive() {
+        return Objects.requireNonNull(archive, "Argon archive has not been opened");
     }
 
     /// Returns a required ZIP entry.
