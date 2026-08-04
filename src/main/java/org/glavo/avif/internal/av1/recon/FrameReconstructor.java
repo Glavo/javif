@@ -4948,7 +4948,10 @@ public final class FrameReconstructor {
             int subsamplingX,
             int subsamplingY
     ) {
-        int availableLength = width;
+        int availableLength = Math.max(0, Math.min(width, rightBoundary - x));
+        if (availableLength < width) {
+            return availableLength;
+        }
         if (!permitsTopRightExtensionWithinBlock(
                 x,
                 y,
@@ -5005,7 +5008,10 @@ public final class FrameReconstructor {
             int subsamplingX,
             int subsamplingY
     ) {
-        int availableLength = height;
+        int availableLength = Math.max(0, Math.min(height, bottomBoundary - y));
+        if (availableLength < height) {
+            return availableLength;
+        }
         if (!permitsBottomLeftExtensionWithinBlock(
                 x,
                 y,

@@ -68,6 +68,9 @@ final class ArgonAv1CorpusTest {
     /// Optional system property that selects one one-based deterministic test shard as `index/count`.
     private static final String SHARD_PROPERTY = "org.glavo.avif.argon.shard";
 
+    /// Optional system property that enables per-frame digest diagnostics on corpus failures.
+    private static final String TRACE_FRAMES_PROPERTY = "org.glavo.avif.argon.traceFrames";
+
     /// Root directory stored in the Argon Streams 2.1.1 ZIP.
     private static final String ARCHIVE_ROOT =
             "argon_coveragetool_av1_base_and_extended_profiles_v2.1/";
@@ -226,6 +229,9 @@ final class ArgonAv1CorpusTest {
                     .build();
 
             int frameCount = 0;
+            @Nullable List<String> frameDiagnostics = Boolean.getBoolean(TRACE_FRAMES_PROPERTY)
+                    ? new ArrayList<>()
+                    : null;
             try {
                 try (Av1ImageReader reader = Av1ImageReader.open(
                         new BufferedInput.OfInputStream(archive.getInputStream(streamEntry)),
@@ -235,6 +241,9 @@ final class ArgonAv1CorpusTest {
                     while ((decodedPlanes = reader.readPlanes()) != null) {
                         DecodedPlanes requiredPlanes = decodedPlanes;
                         updateYuvDigest(actualDigest, requiredPlanes);
+                        if (frameDiagnostics != null) {
+                            frameDiagnostics.add(frameDiagnostic(frameCount, requiredPlanes));
+                        }
                         frameCount++;
                     }
                 }
@@ -247,8 +256,47 @@ final class ArgonAv1CorpusTest {
             }
 
             assertTrue(frameCount > 0, () -> streamPath + " produced no visible frames");
-            assertEquals(expectedDigest, HexFormat.of().formatHex(actualDigest.digest()), streamPath);
+            String actualDigestHex = HexFormat.of().formatHex(actualDigest.digest());
+            assertEquals(
+                    expectedDigest,
+                    actualDigestHex,
+                    () -> frameDiagnostics == null
+                            ? streamPath
+                            : streamPath + System.lineSeparator() + String.join(System.lineSeparator(), frameDiagnostics)
+            );
         }
+    }
+
+    /// Returns one diagnostic summary containing the frame layout and complete YUV digest.
+    ///
+    /// @param frameIndex the zero-based output frame index
+    /// @param planes the decoded pre-grain planes
+    /// @return the frame diagnostic summary
+    private static String frameDiagnostic(int frameIndex, DecodedPlanes planes) throws NoSuchAlgorithmException {
+        MessageDigest frameDigest = MessageDigest.getInstance("MD5");
+        updateYuvDigest(frameDigest, planes);
+        return "frame=" + frameIndex
+                + " dimensions=" + planes.codedWidth() + "x" + planes.codedHeight()
+                + " format=" + planes.pixelFormat()
+                + " bitDepth=" + planes.bitDepth()
+                + " md5=" + HexFormat.of().formatHex(frameDigest.digest())
+                + " y=" + planeDigest(planes.lumaPlane(), planes.bitDepth())
+                + " u=" + planeDigest(planes.chromaUPlane(), planes.bitDepth())
+                + " v=" + planeDigest(planes.chromaVPlane(), planes.bitDepth());
+    }
+
+    /// Returns the visible-sample digest of one decoded plane, or `none` for an absent plane.
+    ///
+    /// @param plane the decoded plane, or `null`
+    /// @param bitDepth the decoded bit depth
+    /// @return the plane digest, or `none`
+    private static String planeDigest(@Nullable DecodedPlane plane, int bitDepth) throws NoSuchAlgorithmException {
+        if (plane == null) {
+            return "none";
+        }
+        MessageDigest digest = MessageDigest.getInstance("MD5");
+        updatePlaneDigest(digest, plane, bitDepth);
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     /// Reads the reference digest from one Argon MD5 file.

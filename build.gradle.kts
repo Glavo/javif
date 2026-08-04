@@ -295,6 +295,9 @@ tasks.register<Test>("argonAv1Test") {
     providers.gradleProperty("argonAv1Shard").orNull?.let { selectedShard ->
         systemProperty("org.glavo.avif.argon.shard", selectedShard)
     }
+    if (providers.gradleProperty("argonAv1TraceFrames").isPresent) {
+        systemProperty("org.glavo.avif.argon.traceFrames", "true")
+    }
 }
 
 tasks.processTestResources {

@@ -99,6 +99,7 @@ and can be combined with `category/all`:
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/all -PargonAv1Shard=1/8
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/test17.obu
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1MaxHeap=6g
+./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile1_not_annexb_special/test52.obu -PargonAv1TraceFrames
 ```
 
 ## License

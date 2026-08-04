@@ -849,6 +849,118 @@ final class IntraPredictorTest {
         assertBlockEquals(plane, x, y, expected);
     }
 
+    /// Verifies that zone-2 edge filtering excludes top references beyond the frame boundary.
+    @Test
+    void directionalZoneTwoFilteringIgnoresUnavailableTopReferences() {
+        MutablePlaneBuffer firstPlane = new MutablePlaneBuffer(40, 40, 8);
+        MutablePlaneBuffer secondPlane = new MutablePlaneBuffer(40, 40, 8);
+        int x = 4;
+        int y = 4;
+        firstPlane.setSample(x - 1, y - 1, 128);
+        secondPlane.setSample(x - 1, y - 1, 128);
+        for (int index = 0; index < 32; index++) {
+            int topSample = index < 8 ? 40 + index * 7 : 16 + index;
+            firstPlane.setSample(x + index, y - 1, topSample);
+            secondPlane.setSample(x + index, y - 1, index < 8 ? topSample : 240 - index);
+            int leftSample = 64 + index * 3;
+            firstPlane.setSample(x - 1, y + index, leftSample);
+            secondPlane.setSample(x - 1, y + index, leftSample);
+        }
+
+        IntraPredictor.predictLuma(
+                firstPlane,
+                x,
+                y,
+                32,
+                32,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT,
+                -1,
+                true,
+                false,
+                8,
+                32
+        );
+        IntraPredictor.predictLuma(
+                secondPlane,
+                x,
+                y,
+                32,
+                32,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT,
+                -1,
+                true,
+                false,
+                8,
+                32
+        );
+
+        for (int row = 0; row < 32; row++) {
+            for (int column = 0; column < 32; column++) {
+                assertEquals(
+                        firstPlane.sample(x + column, y + row),
+                        secondPlane.sample(x + column, y + row),
+                        "Mismatch at relative row " + row + ", column " + column
+                );
+            }
+        }
+    }
+
+    /// Verifies that zone-2 edge filtering excludes left references beyond the frame boundary.
+    @Test
+    void directionalZoneTwoFilteringIgnoresUnavailableLeftReferences() {
+        MutablePlaneBuffer firstPlane = new MutablePlaneBuffer(40, 40, 8);
+        MutablePlaneBuffer secondPlane = new MutablePlaneBuffer(40, 40, 8);
+        int x = 4;
+        int y = 4;
+        firstPlane.setSample(x - 1, y - 1, 128);
+        secondPlane.setSample(x - 1, y - 1, 128);
+        for (int index = 0; index < 32; index++) {
+            int topSample = 64 + index * 3;
+            firstPlane.setSample(x + index, y - 1, topSample);
+            secondPlane.setSample(x + index, y - 1, topSample);
+            int leftSample = index < 8 ? 40 + index * 7 : 16 + index;
+            firstPlane.setSample(x - 1, y + index, leftSample);
+            secondPlane.setSample(x - 1, y + index, index < 8 ? leftSample : 240 - index);
+        }
+
+        IntraPredictor.predictLuma(
+                firstPlane,
+                x,
+                y,
+                32,
+                32,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT,
+                1,
+                true,
+                false,
+                32,
+                8
+        );
+        IntraPredictor.predictLuma(
+                secondPlane,
+                x,
+                y,
+                32,
+                32,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT,
+                1,
+                true,
+                false,
+                32,
+                8
+        );
+
+        for (int row = 0; row < 32; row++) {
+            for (int column = 0; column < 32; column++) {
+                assertEquals(
+                        firstPlane.sample(x + column, y + row),
+                        secondPlane.sample(x + column, y + row),
+                        "Mismatch at relative row " + row + ", column " + column
+                );
+            }
+        }
+    }
+
     /// Verifies that zone-2 directional prediction samples the top-left/above edge when the
     /// projected top-edge base reaches `-1`.
     @Test

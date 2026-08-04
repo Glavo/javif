@@ -1380,6 +1380,8 @@ final class IntraPredictor {
                     defaultSample,
                     intraEdgeFilterEnabled,
                     smoothEdgeReferences,
+                    directionalTopReferenceLength,
+                    directionalLeftReferenceLength,
                     leftBoundary,
                     topBoundary,
                     rightBoundary,
@@ -1518,6 +1520,8 @@ final class IntraPredictor {
     /// @param defaultSample the frame-edge default sample
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
+    /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
+    /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
     private static void predictDirectionalZone2(
             MutablePlaneBuffer plane,
             int x,
@@ -1528,11 +1532,15 @@ final class IntraPredictor {
             int defaultSample,
             boolean intraEdgeFilterEnabled,
             boolean smoothEdgeReferences,
+            int directionalTopReferenceLength,
+            int directionalLeftReferenceLength,
             int leftBoundary,
             int topBoundary,
             int rightBoundary,
             int bottomBoundary
     ) {
+        int availableTopLength = directionalReferenceAvailability(directionalTopReferenceLength, width);
+        int availableLeftLength = directionalReferenceAvailability(directionalLeftReferenceLength, height);
         int[] topReferences = topDirectionalReferences(
                 plane,
                 x,
@@ -1587,9 +1595,19 @@ final class IntraPredictor {
             int filterStrength = intraEdgeFilterEnabled
                     ? directionalEdgeFilterStrength(referenceSpan, angle - 90, smoothEdgeReferences)
                     : 0;
-            topEdge = edgeWithTopLeft(filterStrength != 0
-                    ? filterDirectionalEdge(topReferences, topLeft, width, 0, width, -1, width, filterStrength)
-                    : topReferences, topLeft);
+            int[] filteredTopReferences = filterStrength != 0 && availableTopLength > 0
+                    ? filterDirectionalEdge(
+                            topReferences,
+                            topLeft,
+                            width,
+                            0,
+                            availableTopLength,
+                            -1,
+                            availableTopLength,
+                            filterStrength
+                    )
+                    : topReferences;
+            topEdge = edgeWithTopLeft(filteredTopReferences, topLeft);
             topBaseOffset = 1;
         }
         int[] leftEdge;
@@ -1609,9 +1627,19 @@ final class IntraPredictor {
             int filterStrength = intraEdgeFilterEnabled
                     ? directionalEdgeFilterStrength(referenceSpan, 180 - angle, smoothEdgeReferences)
                     : 0;
-            leftEdge = edgeWithTopLeft(filterStrength != 0
-                    ? filterDirectionalEdge(leftReferences, topLeft, height, 0, height, -1, height, filterStrength)
-                    : leftReferences, topLeft);
+            int[] filteredLeftReferences = filterStrength != 0 && availableLeftLength > 0
+                    ? filterDirectionalEdge(
+                            leftReferences,
+                            topLeft,
+                            height,
+                            0,
+                            availableLeftLength,
+                            -1,
+                            availableLeftLength,
+                            filterStrength
+                    )
+                    : leftReferences;
+            leftEdge = edgeWithTopLeft(filteredLeftReferences, topLeft);
             leftBaseOffset = 1;
         }
         int topMinimumBase = -topBaseOffset;
@@ -1764,6 +1792,18 @@ final class IntraPredictor {
             return defaultLength;
         }
         return clamp(requestedLength, minimumLength, defaultLength);
+    }
+
+    /// Returns the available portion of one zone-2 directional reference edge.
+    ///
+    /// @param requestedLength the requested available reference length, or a negative value for default
+    /// @param defaultLength the full edge length when availability is not explicitly constrained
+    /// @return the bounded number of available reference samples
+    private static int directionalReferenceAvailability(int requestedLength, int defaultLength) {
+        if (requestedLength < 0) {
+            return defaultLength;
+        }
+        return clamp(requestedLength, 0, defaultLength);
     }
 
     /// Returns the fallback top-left predictor sample for one block origin.
