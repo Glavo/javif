@@ -31,6 +31,7 @@ import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
+import org.glavo.avif.internal.av1.model.MotionMode;
 import org.glavo.avif.internal.av1.model.MotionVector;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
@@ -539,6 +540,49 @@ final class TileBlockHeaderReaderTest {
                 CdfContext.createDefault().mutableIntraCdf(0),
                 tileContext.cdfContext().mutableIntraCdf(0)
         );
+    }
+
+    /// Verifies that segment-level skip still permits local warped motion-mode signaling.
+    @Test
+    void readsWarpedMotionForSegmentSkipBlock() {
+        byte[] payload = findPayloadForSegmentSkipWarpedMotion();
+        FrameHeader.SegmentData[] segments = defaultSegments();
+        segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, true, false);
+        TileDecodeContext tileContext = createWarpedMotionTileContext(
+                payload,
+                createFixedSegmentationInfo(segments)
+        );
+        TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
+        BlockPosition position = new BlockPosition(4, 4);
+        seedInterReferenceNeighbors(neighborContext);
+
+        assertTrue(neighborContext.hasOverlappableCandidates(position, BlockSize.SIZE_16X16));
+        assertTrue(neighborContext.hasLocalWarpSamples(position, BlockSize.SIZE_16X16, 0));
+        CdfContext oracleCdf = CdfContext.createDefault();
+        MsacDecoder oracleDecoder = new MsacDecoder(payload, 0, payload.length, false);
+        assertTrue(oracleDecoder.decodeBooleanAdapt(
+                oracleCdf.mutableIntraCdf(neighborContext.intraContext(position))
+        ));
+        assertEquals(
+                MotionMode.LOCAL_WARPED,
+                MotionMode.fromSymbolIndex(oracleDecoder.decodeSymbolAdapt(
+                        oracleCdf.mutableMotionModeCdf(BlockSize.SIZE_16X16.cdfIndex()),
+                        2
+                ))
+        );
+
+        TileBlockHeaderReader.BlockHeader header = reader.read(
+                position,
+                BlockSize.SIZE_16X16,
+                neighborContext
+        );
+
+        assertTrue(header.skip());
+        assertFalse(header.skipMode());
+        assertFalse(header.intra());
+        assertEquals(SingleInterPredictionMode.GLOBALMV, header.singleInterMode());
+        assertEquals(MotionMode.LOCAL_WARPED, header.motionMode());
     }
 
     /// Verifies that segment-level `GLOBALMV` evaluates translation parameters and integer precision.
@@ -1485,6 +1529,13 @@ final class TileBlockHeaderReaderTest {
         return readTileBlockHeaderFixture("segment-ref-inter");
     }
 
+    /// Reads the fixed payload fixture that decodes local warped motion for a segment-skip block.
+    ///
+    /// @return the fixed payload fixture for segment-skip local warped motion
+    private static byte[] findPayloadForSegmentSkipWarpedMotion() {
+        return readTileBlockHeaderFixture("segment-skip-warped-motion");
+    }
+
     /// Reads the fixed payload fixture that decodes `skip = false` and `intra = false`.
     ///
     /// @return the fixed payload fixture that decodes `skip = false` and `intra = false`
@@ -2074,6 +2125,88 @@ final class TileBlockHeaderReaderTest {
             FrameHeader.DeltaInfo deltaInfo,
             FrameHeader.CdefInfo cdefInfo
     ) {
+        return createTileContext(
+                frameType,
+                allowIntrabc,
+                payload,
+                filterIntra,
+                segmentation,
+                allowScreenContentTools,
+                allLossless,
+                skipModeEnabled,
+                switchableCompoundReferences,
+                baseQIndex,
+                deltaInfo,
+                cdefInfo,
+                true,
+                true,
+                false
+        );
+    }
+
+    /// Creates a warped-motion tile context for segment-skip block-header tests.
+    ///
+    /// @param payload the collected tile entropy payload
+    /// @param segmentation the synthetic frame segmentation state
+    /// @return a warped-motion tile context used by block-header tests
+    private static TileDecodeContext createWarpedMotionTileContext(
+            byte[] payload,
+            FrameHeader.SegmentationInfo segmentation
+    ) {
+        return createTileContext(
+                FrameType.INTER,
+                false,
+                payload,
+                false,
+                segmentation,
+                false,
+                false,
+                false,
+                false,
+                0,
+                new FrameHeader.DeltaInfo(false, 0, false, 0, false),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                false,
+                false,
+                true
+        );
+    }
+
+    /// Creates a configurable tile context used by block-header tests.
+    ///
+    /// @param frameType the synthetic frame type
+    /// @param allowIntrabc whether the synthetic frame allows `intrabc`
+    /// @param payload the collected tile entropy payload
+    /// @param filterIntra whether the synthetic sequence enables filter intra
+    /// @param segmentation the synthetic frame segmentation state
+    /// @param allowScreenContentTools whether the synthetic frame enables screen-content tools
+    /// @param allLossless whether all segments in the synthetic frame are lossless
+    /// @param skipModeEnabled whether skip mode is enabled for the synthetic frame
+    /// @param switchableCompoundReferences whether compound-reference mode is switchable for the synthetic frame
+    /// @param baseQIndex the synthetic frame base quantizer index
+    /// @param deltaInfo the synthetic frame delta-q/delta-lf state
+    /// @param cdefInfo the synthetic frame CDEF state
+    /// @param forceIntegerMotionVectors whether the synthetic frame forces integer motion vectors
+    /// @param interIntra whether sequence inter-intra syntax is enabled
+    /// @param warpedMotion whether sequence and frame warped-motion syntax is enabled
+    /// @return a configurable tile context used by block-header tests
+    private static TileDecodeContext createTileContext(
+            FrameType frameType,
+            boolean allowIntrabc,
+            byte[] payload,
+            boolean filterIntra,
+            FrameHeader.SegmentationInfo segmentation,
+            boolean allowScreenContentTools,
+            boolean allLossless,
+            boolean skipModeEnabled,
+            boolean switchableCompoundReferences,
+            int baseQIndex,
+            FrameHeader.DeltaInfo deltaInfo,
+            FrameHeader.CdefInfo cdefInfo,
+            boolean forceIntegerMotionVectors,
+            boolean interIntra,
+            boolean warpedMotion
+    ) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -2093,9 +2226,9 @@ final class TileBlockHeaderReaderTest {
                         false,
                         filterIntra,
                         false,
-                        true,
+                        interIntra,
                         false,
-                        false,
+                        warpedMotion,
                         false,
                         false,
                         false,
@@ -2136,7 +2269,7 @@ final class TileBlockHeaderReaderTest {
                 true,
                 false,
                 allowScreenContentTools,
-                true,
+                forceIntegerMotionVectors,
                 false,
                 7,
                 0,
@@ -2148,7 +2281,7 @@ final class TileBlockHeaderReaderTest {
                 allowIntrabc,
                 false,
                 FrameHeader.InterpolationFilter.EIGHT_TAP_REGULAR,
-                false,
+                warpedMotion,
                 false,
                 true,
                 new FrameHeader.TilingInfo(
@@ -2195,7 +2328,7 @@ final class TileBlockHeaderReaderTest {
                 skipModeEnabled,
                 skipModeEnabled,
                 skipModeEnabled ? new int[]{0, 1} : new int[]{-1, -1},
-                false,
+                warpedMotion,
                 false,
                 false
         );

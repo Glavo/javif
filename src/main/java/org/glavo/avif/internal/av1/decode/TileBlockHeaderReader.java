@@ -958,7 +958,6 @@ public final class TileBlockHeaderReader {
     ) {
         FrameHeader frameHeader = tileContext.frameHeader();
         if (skipMode
-                || segmentData.skip()
                 || !frameHeader.switchableMotionMode()
                 || Math.min(size.widthPixels(), size.heightPixels()) < 8
                 || compoundReference

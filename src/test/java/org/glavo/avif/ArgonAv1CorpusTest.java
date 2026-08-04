@@ -81,19 +81,22 @@ final class ArgonAv1CorpusTest {
     /// Number of AV1 streams distributed in the pinned Argon Streams archive.
     private static final long EXPECTED_STREAM_COUNT = 3_921L;
 
-    /// Number of gated low-overhead and Annex B core-special streams across all three AV1 profiles.
-    private static final int EXPECTED_REFERENCE_STREAM_COUNT = 367;
+    /// Number of gated low-overhead and Annex B core streams across all three AV1 profiles.
+    private static final int EXPECTED_REFERENCE_STREAM_COUNT = 2_756;
 
-    /// Archive prefixes for gated low-overhead and Annex B core-special streams in all profiles.
+    /// Archive prefixes for gated low-overhead and Annex B core streams in all profiles.
     private static final @Unmodifiable List<String> REFERENCE_STREAM_PREFIXES = List.of(
             ARCHIVE_ROOT + "profile0_not_annexb/streams/",
             ARCHIVE_ROOT + "profile0_not_annexb_special/streams/",
+            ARCHIVE_ROOT + "profile0_core/streams/",
             ARCHIVE_ROOT + "profile0_core_special/streams/",
             ARCHIVE_ROOT + "profile1_not_annexb/streams/",
             ARCHIVE_ROOT + "profile1_not_annexb_special/streams/",
+            ARCHIVE_ROOT + "profile1_core/streams/",
             ARCHIVE_ROOT + "profile1_core_special/streams/",
             ARCHIVE_ROOT + "profile2_not_annexb/streams/",
             ARCHIVE_ROOT + "profile2_not_annexb_special/streams/",
+            ARCHIVE_ROOT + "profile2_core/streams/",
             ARCHIVE_ROOT + "profile2_core_special/streams/"
     );
 

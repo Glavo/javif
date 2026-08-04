@@ -47,7 +47,7 @@ final class ReferenceMotionVectorProjectionTest {
         assertFalse(ReferenceMotionVectorProjection.isSavedTemporalReference(3, 4, 4));
     }
 
-    /// Verifies temporal projection rejects intra sources and incompatible 4x4 frame grids.
+    /// Verifies temporal projection rejects intra sources and incompatible 8x8-aligned motion-field grids.
     @Test
     void requiresInterSourceWithMatchingMotionFieldGrid() {
         assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
@@ -66,10 +66,10 @@ final class ReferenceMotionVectorProjectionTest {
         ));
         assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
                 FrameType.INTER,
-                459,
-                2891,
-                460,
-                2892
+                23,
+                595,
+                19,
+                595
         ));
         assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
                 FrameType.SWITCH,
@@ -78,7 +78,7 @@ final class ReferenceMotionVectorProjectionTest {
                 460,
                 2892
         ));
-        assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+        assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
                 FrameType.INTER,
                 461,
                 2892,
@@ -87,8 +87,15 @@ final class ReferenceMotionVectorProjectionTest {
         ));
         assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
                 FrameType.INTER,
+                465,
+                2892,
                 460,
-                2893,
+                2892
+        ));
+        assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
+                FrameType.INTER,
+                460,
+                2897,
                 460,
                 2892
         ));

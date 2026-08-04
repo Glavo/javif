@@ -316,8 +316,8 @@ final class ReferenceMotionVectorProjection {
 
     /// Returns whether a saved frame can seed the current frame's temporal motion field.
     ///
-    /// Motion fields use the rounded-up 4x4 frame grid, so pixel dimensions may differ within the
-    /// same final grid cell without making the saved field incompatible.
+    /// Motion fields use an 8x8-aligned 4x4 frame grid, so pixel dimensions may differ within the
+    /// same final 8-pixel span without making the saved field incompatible.
     ///
     /// @param sourceFrameType the saved frame type
     /// @param sourceWidth the saved coded width in pixels
@@ -335,8 +335,8 @@ final class ReferenceMotionVectorProjection {
         FrameType nonNullSourceFrameType = Objects.requireNonNull(sourceFrameType, "sourceFrameType");
         return nonNullSourceFrameType != FrameType.KEY
                 && nonNullSourceFrameType != FrameType.INTRA
-                && ((sourceWidth + 3) >> 2) == ((currentWidth + 3) >> 2)
-                && ((sourceHeight + 3) >> 2) == ((currentHeight + 3) >> 2);
+                && ((sourceWidth + 7) >> 3) == ((currentWidth + 7) >> 3)
+                && ((sourceHeight + 7) >> 3) == ((currentHeight + 7) >> 3);
     }
 
     /// Selects the component that a decoded block saves in its reference-frame motion field.

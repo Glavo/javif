@@ -12,6 +12,7 @@ compound-reference = 5f9400000000
 single-reference = 06ba00000000
 segment-ref-intra = 000000000000
 segment-ref-inter = 06ba000000
+segment-skip-warped-motion = d2c200000000
 inter-no-skip-no-intra = 06ba000000
 single-inter-mode = 0c18a0000000
 compound-inter-mode = 63c819000000
