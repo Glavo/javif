@@ -258,6 +258,54 @@ final class Av1ImageReaderTest {
         }
     }
 
+    /// Verifies that the high-level Annex B entry point decodes externally delimited OBUs.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readFrameDecodesAnnexBStillPicture() throws IOException {
+        byte[] stream = annexBTemporalUnit(annexBFrameUnit(
+                obu(1, reducedStillPicturePayload()),
+                obu(6, reducedStillPictureCombinedFramePayload())
+        ));
+
+        try (Av1ImageReader reader = Av1ImageReader.openAnnexB(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
+            assertNull(reader.readFrame());
+        }
+    }
+
+    /// Verifies that Annex B temporal-unit lengths delimit collapsed spatial-layer outputs even
+    /// when the stream carries no temporal-delimiter OBU.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void readFrameUsesAnnexBTemporalUnitBoundaryForLayerSelection() throws IOException {
+        byte[] framePayload = fullStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD);
+        byte[] stream = concat(
+                annexBTemporalUnit(
+                        annexBFrameUnit(obu(1, fullSequenceHeaderPayloadWithOperatingPointIdc(0x301))),
+                        annexBFrameUnit(obu(6, 0, 0, framePayload)),
+                        annexBFrameUnit(obu(6, 0, 1, framePayload))
+                ),
+                annexBTemporalUnit(annexBFrameUnit(obu(6, 0, 0, framePayload)))
+        );
+
+        try (Av1ImageReader reader = Av1ImageReader.openAnnexB(
+                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
+        )) {
+            DecodedFrame firstTemporalUnit = reader.readFrame();
+            assertNotNull(firstTemporalUnit);
+            assertEquals(1, firstTemporalUnit.spatialId());
+
+            DecodedFrame secondTemporalUnit = reader.readFrame();
+            assertNotNull(secondTemporalUnit);
+            assertEquals(0, secondTemporalUnit.spatialId());
+            assertNull(reader.readFrame());
+        }
+    }
+
     /// Verifies that `outputAllLayers` exposes every selected spatial layer in decoding order.
     ///
     /// @throws IOException if the reader cannot consume the test stream
@@ -3981,6 +4029,38 @@ final class Av1ImageReaderTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         output.write((typeId << 3) | (1 << 2) | (1 << 1));
         output.write((temporalId << 5) | (spatialId << 3));
+        writeLeb128(output, payload.length);
+        output.writeBytes(payload);
+        return output.toByteArray();
+    }
+
+    /// Encodes one Annex B frame unit containing the supplied complete OBUs.
+    ///
+    /// @param obus the complete OBUs without external lengths
+    /// @return the frame unit including its length field
+    private static byte[] annexBFrameUnit(byte[]... obus) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        for (byte[] obu : obus) {
+            writeLeb128(payload, obu.length);
+            payload.writeBytes(obu);
+        }
+        return lengthDelimited(payload.toByteArray());
+    }
+
+    /// Encodes one Annex B temporal unit containing the supplied complete frame units.
+    ///
+    /// @param frameUnits the frame units including their length fields
+    /// @return the temporal unit including its length field
+    private static byte[] annexBTemporalUnit(byte[]... frameUnits) {
+        return lengthDelimited(concat(frameUnits));
+    }
+
+    /// Prefixes one byte sequence with its unsigned LEB128 length.
+    ///
+    /// @param payload the bytes to delimit
+    /// @return the length-delimited byte sequence
+    private static byte[] lengthDelimited(byte[] payload) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
         writeLeb128(output, payload.length);
         output.writeBytes(payload);
         return output.toByteArray();

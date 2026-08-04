@@ -467,7 +467,7 @@ final class ReferenceMotionVectorProjection {
         }
 
         for (int referenceFrame = 4; referenceFrame <= 5 && count < selected.length; referenceFrame++) {
-            if (isFutureTemporalSource(
+            if (isProjectableFutureTemporalSource(
                     assembly,
                     syntaxResult(currentHeader, referenceSyntaxResults, referenceFrame),
                     referenceFrame,
@@ -476,7 +476,7 @@ final class ReferenceMotionVectorProjection {
                 selected[count++] = referenceFrame;
             }
         }
-        if (count < targetCount && isFutureTemporalSource(
+        if (count < targetCount && isProjectableFutureTemporalSource(
                 assembly,
                 syntaxResult(currentHeader, referenceSyntaxResults, 6),
                 6,
@@ -508,14 +508,17 @@ final class ReferenceMotionVectorProjection {
         return slot >= 0 && slot < referenceSyntaxResults.length ? referenceSyntaxResults[slot] : null;
     }
 
-    /// Returns whether one backward reference is a usable future temporal source.
+    /// Returns whether one backward reference is a projectable future temporal source.
+    ///
+    /// An intra frame or incompatible motion-field grid does not consume one of the bounded
+    /// temporal projection slots, even when its order hint lies after the current frame.
     ///
     /// @param assembly the current frame assembly
     /// @param sourceResult the candidate source syntax result, or `null`
     /// @param referenceFrame the candidate reference in internal LAST..ALTREF order
     /// @param orderHintBits the sequence order-hint width
-    /// @return whether the candidate is a populated future temporal source
-    private static boolean isFutureTemporalSource(
+    /// @return whether the candidate is a populated and projectable future temporal source
+    private static boolean isProjectableFutureTemporalSource(
             FrameAssembly assembly,
             @Nullable FrameSyntaxDecodeResult sourceResult,
             int referenceFrame,
@@ -525,12 +528,21 @@ final class ReferenceMotionVectorProjection {
             return false;
         }
         @Nullable FrameHeader sourceHeader = assembly.referenceFrameHeader(referenceFrame);
+        FrameHeader currentHeader = assembly.frameHeader();
+        FrameHeader sourceSyntaxHeader = sourceResult.assembly().frameHeader();
         return sourceHeader != null
                 && orderHintDifference(
                 orderHintBits,
                 sourceHeader.frameOffset(),
-                assembly.frameHeader().frameOffset()
-        ) > 0;
+                currentHeader.frameOffset()
+        ) > 0
+                && canProjectSourceMotionField(
+                sourceSyntaxHeader.frameType(),
+                sourceSyntaxHeader.frameSize().codedWidth(),
+                sourceSyntaxHeader.frameSize().height(),
+                currentHeader.frameSize().codedWidth(),
+                currentHeader.frameSize().height()
+        );
     }
 
     /// Scales one motion vector by a signed order-hint ratio and applies AV1 rounding and clipping.

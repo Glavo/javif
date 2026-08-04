@@ -49,10 +49,13 @@ jobs:
         category:
           - profile0_not_annexb
           - profile0_not_annexb_special
+          - profile0_core_special
           - profile1_not_annexb
           - profile1_not_annexb_special
+          - profile1_core_special
           - profile2_not_annexb
           - profile2_not_annexb_special
+          - profile2_core_special
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5

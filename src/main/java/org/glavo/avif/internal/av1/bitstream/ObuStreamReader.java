@@ -27,7 +27,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.Objects;
 
-/// Sequential OBU reader for raw AV1 low-overhead bitstreams.
+/// Sequential OBU reader for raw AV1 low-overhead or Annex B bitstreams.
 @NotNullByDefault
 public final class ObuStreamReader {
     /// The largest OBU payload representable by the decoder's byte-array storage.
@@ -35,18 +35,43 @@ public final class ObuStreamReader {
 
     /// The forward-only buffered byte source.
     private final BufferedInput input;
+    /// Whether the source uses Annex B temporal-unit and frame-unit framing.
+    private final boolean annexB;
     /// The next unread byte offset in the source.
     private long streamOffset;
     /// The next unread OBU index in the source.
     private int obuIndex;
     /// Whether end-of-stream has already been observed.
     private boolean endOfStream;
+    /// The bytes following the current Annex B frame unit within its temporal unit.
+    private long temporalUnitRemaining;
+    /// The unread bytes within the current Annex B frame unit.
+    private long frameUnitRemaining;
+    /// Whether at least one Annex B temporal unit has been opened.
+    private boolean annexBStarted;
 
     /// Creates a sequential OBU reader.
     ///
     /// @param input the forward-only buffered byte source
     public ObuStreamReader(BufferedInput input) {
+        this(input, false);
+    }
+
+    /// Creates a sequential reader for an Annex B AV1 bitstream.
+    ///
+    /// @param input the forward-only buffered byte source
+    /// @return a reader that consumes Annex B temporal, frame, and OBU length fields
+    public static ObuStreamReader forAnnexB(BufferedInput input) {
+        return new ObuStreamReader(input, true);
+    }
+
+    /// Creates a sequential OBU reader for one framing mode.
+    ///
+    /// @param input the forward-only buffered byte source
+    /// @param annexB whether the source uses Annex B framing
+    private ObuStreamReader(BufferedInput input, boolean annexB) {
         this.input = Objects.requireNonNull(input, "input");
+        this.annexB = annexB;
     }
 
     /// Reads the next OBU packet from the source.
@@ -54,6 +79,25 @@ public final class ObuStreamReader {
     /// @return the next OBU packet, or `null` at end-of-stream
     /// @throws IOException if the source is truncated or the OBU is malformed
     public @Nullable ObuPacket readObu() throws IOException {
+        return annexB ? readAnnexBObu() : readLowOverheadObu();
+    }
+
+    /// Returns whether the reader is positioned between two Annex B temporal units.
+    ///
+    /// The result becomes `true` after the final OBU of a temporal unit is returned and remains
+    /// true until the next call to [#readObu()] starts another temporal unit. Low-overhead readers
+    /// always return `false` because that framing has no external temporal-unit boundary.
+    ///
+    /// @return whether an Annex B temporal unit has just been completed
+    public boolean atTemporalUnitBoundary() {
+        return annexB && annexBStarted && temporalUnitRemaining == 0L && frameUnitRemaining == 0L;
+    }
+
+    /// Reads the next OBU from a low-overhead source.
+    ///
+    /// @return the next OBU packet, or `null` at end-of-stream
+    /// @throws IOException if the source is truncated or malformed
+    private @Nullable ObuPacket readLowOverheadObu() throws IOException {
         if (endOfStream) {
             return null;
         }
@@ -70,6 +114,98 @@ public final class ObuStreamReader {
             return null;
         }
         streamOffset++;
+
+        return readObuPacket(firstByte, obuOffset, currentObuIndex, unitRemainingAtObuStart, false);
+    }
+
+    /// Reads the next OBU from an Annex B source.
+    ///
+    /// @return the next OBU packet, or `null` at end-of-stream
+    /// @throws IOException if an external length field or enclosed OBU is malformed
+    private @Nullable ObuPacket readAnnexBObu() throws IOException {
+        if (endOfStream) {
+            return null;
+        }
+
+        while (frameUnitRemaining == 0L) {
+            while (temporalUnitRemaining == 0L) {
+                @Nullable Leb128.ReadResult temporalUnitSize = readAnnexBLength(
+                        true,
+                        -1L,
+                        "temporal unit"
+                );
+                if (temporalUnitSize == null) {
+                    endOfStream = true;
+                    return null;
+                }
+                annexBStarted = true;
+                temporalUnitRemaining = temporalUnitSize.value();
+            }
+
+            Leb128.ReadResult frameUnitSize = Objects.requireNonNull(readAnnexBLength(
+                    false,
+                    temporalUnitRemaining,
+                    "frame unit"
+            ));
+            temporalUnitRemaining -= frameUnitSize.byteCount();
+            if (frameUnitSize.value() > temporalUnitRemaining) {
+                throw invalidAnnexBFraming(
+                        "Annex B frame unit exceeds its temporal unit: " + frameUnitSize.value()
+                                + " > " + temporalUnitRemaining,
+                        streamOffset - frameUnitSize.byteCount(),
+                        null
+                );
+            }
+            temporalUnitRemaining -= frameUnitSize.value();
+            frameUnitRemaining = frameUnitSize.value();
+        }
+
+        Leb128.ReadResult obuSize = Objects.requireNonNull(readAnnexBLength(
+                false,
+                frameUnitRemaining,
+                "OBU"
+        ));
+        frameUnitRemaining -= obuSize.byteCount();
+        if (obuSize.value() == 0L) {
+            throw invalidAnnexBFraming("Annex B OBU length must be positive", streamOffset - obuSize.byteCount(), null);
+        }
+        if (obuSize.value() > frameUnitRemaining) {
+            throw invalidAnnexBFraming(
+                    "Annex B OBU exceeds its frame unit: " + obuSize.value() + " > " + frameUnitRemaining,
+                    streamOffset - obuSize.byteCount(),
+                    null
+            );
+        }
+        frameUnitRemaining -= obuSize.value();
+
+        long obuOffset = streamOffset;
+        int currentObuIndex = obuIndex;
+        final int firstByte;
+        try {
+            firstByte = input.readUnsignedByte();
+        } catch (EOFException exception) {
+            throw unexpectedAnnexBEof("Unexpected end of Annex B OBU header", obuOffset, exception);
+        }
+        streamOffset++;
+        return readObuPacket(firstByte, obuOffset, currentObuIndex, obuSize.value(), true);
+    }
+
+    /// Parses one OBU after its first header byte has been consumed.
+    ///
+    /// @param firstByte the first OBU header byte
+    /// @param obuOffset the byte offset of that header byte
+    /// @param currentObuIndex the zero-based OBU index
+    /// @param unitRemainingAtObuStart the enclosing unit length starting at the header, or `-1`
+    /// @param requireExactUnitSize whether the OBU must consume the complete enclosing unit
+    /// @return the parsed OBU packet
+    /// @throws IOException if the header, size, or payload is malformed
+    private ObuPacket readObuPacket(
+            int firstByte,
+            long obuOffset,
+            int currentObuIndex,
+            long unitRemainingAtObuStart,
+            boolean requireExactUnitSize
+    ) throws IOException {
 
         if ((firstByte & 0x80) != 0) {
             throw invalidHeader("OBU forbidden bit must be zero", obuOffset, currentObuIndex);
@@ -162,6 +298,14 @@ public final class ObuStreamReader {
                     null
             );
         }
+        if (requireExactUnitSize && payloadSize != unitRemainingAtObuStart - headerSize) {
+            throw invalidAnnexBFraming(
+                    "Annex B OBU length does not match its header and payload: expected "
+                            + unitRemainingAtObuStart + " bytes but parsed " + (headerSize + payloadSize),
+                    obuOffset,
+                    null
+            );
+        }
         if (payloadSize > MAX_PAYLOAD_SIZE) {
             throw new DecodeException(
                     DecodeErrorCode.INVALID_BITSTREAM,
@@ -199,6 +343,67 @@ public final class ObuStreamReader {
                 payload,
                 obuOffset,
                 currentObuIndex
+        );
+    }
+
+    /// Reads one Annex B unsigned length field and accounts for its bytes in the stream offset.
+    ///
+    /// Padded encodings are accepted because the AV1 syntax permits any encoding of up to eight
+    /// bytes whose decoded value fits the unsigned 32-bit range.
+    ///
+    /// @param allowEndOfStream whether EOF before the first byte denotes normal stream completion
+    /// @param enclosingRemaining the unread enclosing-unit size, or `-1` when unbounded
+    /// @param description the length-field subject used in diagnostics
+    /// @return the decoded length, or `null` for permitted clean EOF
+    /// @throws IOException if the length is truncated, too long, out of range, or crosses its unit
+    private @Nullable Leb128.ReadResult readAnnexBLength(
+            boolean allowEndOfStream,
+            long enclosingRemaining,
+            String description
+    ) throws IOException {
+        long lengthOffset = streamOffset;
+        long value = 0L;
+        int shift = 0;
+        for (int byteCount = 1; byteCount <= 8; byteCount++) {
+            if (enclosingRemaining >= 0L && byteCount > enclosingRemaining) {
+                throw invalidAnnexBFraming(
+                        "Annex B " + description + " length field exceeds its enclosing unit",
+                        lengthOffset,
+                        null
+                );
+            }
+
+            final int current;
+            try {
+                current = input.readUnsignedByte();
+            } catch (EOFException exception) {
+                if (allowEndOfStream && byteCount == 1) {
+                    return null;
+                }
+                throw unexpectedAnnexBEof(
+                        "Unexpected end of Annex B " + description + " length field",
+                        lengthOffset,
+                        exception
+                );
+            }
+            streamOffset++;
+            value |= (long) (current & 0x7F) << shift;
+            if ((current & 0x80) == 0) {
+                if (value > 0xFFFF_FFFFL) {
+                    throw invalidAnnexBLeb128(
+                            "Annex B " + description + " length exceeds the unsigned 32-bit range: " + value,
+                            lengthOffset,
+                            null
+                    );
+                }
+                return new Leb128.ReadResult(value, byteCount);
+            }
+            shift += 7;
+        }
+        throw invalidAnnexBLeb128(
+                "Annex B " + description + " length exceeds eight bytes",
+                lengthOffset,
+                null
         );
     }
 
@@ -258,6 +463,60 @@ public final class ObuStreamReader {
                     ex
             );
         }
+    }
+
+    /// Creates a contextual exception for malformed Annex B unit nesting or lengths.
+    ///
+    /// @param message the detailed error message
+    /// @param offset the byte offset of the failing external length or enclosed OBU
+    /// @param cause the underlying I/O failure, or `null`
+    /// @return the contextual invalid-bitstream exception
+    private DecodeException invalidAnnexBFraming(String message, long offset, @Nullable Throwable cause) {
+        return new DecodeException(
+                DecodeErrorCode.INVALID_BITSTREAM,
+                DecodeStage.OBU_READ,
+                message,
+                offset,
+                obuIndex,
+                null,
+                cause
+        );
+    }
+
+    /// Creates a contextual exception for an invalid Annex B LEB128 length field.
+    ///
+    /// @param message the detailed error message
+    /// @param offset the byte offset of the failing length field
+    /// @param cause the underlying I/O failure, or `null`
+    /// @return the contextual invalid-LEB128 exception
+    private DecodeException invalidAnnexBLeb128(String message, long offset, @Nullable Throwable cause) {
+        return new DecodeException(
+                DecodeErrorCode.INVALID_LEB128,
+                DecodeStage.OBU_READ,
+                message,
+                offset,
+                obuIndex,
+                null,
+                cause
+        );
+    }
+
+    /// Creates a contextual exception for truncated Annex B framing.
+    ///
+    /// @param message the detailed error message
+    /// @param offset the byte offset where the truncated structure started
+    /// @param cause the underlying end-of-input exception
+    /// @return the contextual unexpected-EOF exception
+    private DecodeException unexpectedAnnexBEof(String message, long offset, EOFException cause) {
+        return new DecodeException(
+                DecodeErrorCode.UNEXPECTED_EOF,
+                DecodeStage.OBU_READ,
+                message,
+                offset,
+                obuIndex,
+                null,
+                cause
+        );
     }
 
     /// Creates a contextual invalid-header exception.

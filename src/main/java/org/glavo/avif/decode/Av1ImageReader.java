@@ -50,7 +50,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/// High-level sequential reader for raw AV1 OBU streams.
+/// High-level sequential reader for raw AV1 low-overhead and Annex B streams.
 @NotNullByDefault
 public final class Av1ImageReader implements AutoCloseable {
     /// The forward-only buffered byte source.
@@ -94,10 +94,11 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param source the forward-only buffered byte source
     /// @param config the immutable decoder configuration
-    private Av1ImageReader(BufferedInput source, Av1DecoderConfig config) {
+    /// @param annexB whether the source uses Annex B temporal-unit and frame-unit framing
+    private Av1ImageReader(BufferedInput source, Av1DecoderConfig config, boolean annexB) {
         this.source = Objects.requireNonNull(source, "source");
         this.config = Objects.requireNonNull(config, "config");
-        this.obuReader = new ObuStreamReader(source);
+        this.obuReader = annexB ? ObuStreamReader.forAnnexB(source) : new ObuStreamReader(source);
         this.sequenceHeaderParser = new SequenceHeaderParser();
         this.frameHeaderParser = new FrameHeaderParser();
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
@@ -122,7 +123,30 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param config the immutable decoder configuration
     /// @return the new AV1 image reader
     public static Av1ImageReader open(BufferedInput source, Av1DecoderConfig config) {
-        return new Av1ImageReader(source, config);
+        return new Av1ImageReader(source, config, false);
+    }
+
+    /// Opens an Annex B AV1 image reader using the default decoder configuration.
+    ///
+    /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
+    /// Annex B of the AV1 bitstream specification. The returned reader owns and closes `source`.
+    ///
+    /// @param source the forward-only buffered byte source
+    /// @return the new Annex B AV1 image reader
+    public static Av1ImageReader openAnnexB(BufferedInput source) {
+        return openAnnexB(source, Av1DecoderConfig.DEFAULT);
+    }
+
+    /// Opens an Annex B AV1 image reader using the supplied decoder configuration.
+    ///
+    /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
+    /// Annex B of the AV1 bitstream specification. The returned reader owns and closes `source`.
+    ///
+    /// @param source the forward-only buffered byte source
+    /// @param config the immutable decoder configuration
+    /// @return the new Annex B AV1 image reader
+    public static Av1ImageReader openAnnexB(BufferedInput source, Av1DecoderConfig config) {
+        return new Av1ImageReader(source, config, true);
     }
 
     /// Reads the next decoded frame from the source.
@@ -170,6 +194,11 @@ public final class Av1ImageReader implements AutoCloseable {
         ensureOpen();
 
         while (true) {
+            if (obuReader.atTemporalUnitBoundary() && pendingLayeredOutput != null) {
+                PendingOutput output = pendingLayeredOutput;
+                pendingLayeredOutput = null;
+                return output;
+            }
             ObuPacket packet = obuReader.readObu();
             if (packet == null) {
                 if (pendingFrameAssembly != null) {

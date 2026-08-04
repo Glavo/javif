@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies raw AV1 decoding against selected Argon Streams reference outputs.
+/// Verifies raw low-overhead and Annex B AV1 decoding against selected Argon reference outputs.
 ///
 /// The corpus remains in its downloaded ZIP. Tests open only the selected entries and compare the
 /// decoded pre-grain YUV planes with the MD5 digests distributed alongside the streams.
@@ -81,17 +81,20 @@ final class ArgonAv1CorpusTest {
     /// Number of AV1 streams distributed in the pinned Argon Streams archive.
     private static final long EXPECTED_STREAM_COUNT = 3_921L;
 
-    /// Number of regular and special low-overhead streams across all three AV1 profiles.
-    private static final int EXPECTED_LOW_OVERHEAD_STREAM_COUNT = 202;
+    /// Number of gated low-overhead and Annex B core-special streams across all three AV1 profiles.
+    private static final int EXPECTED_REFERENCE_STREAM_COUNT = 367;
 
-    /// Archive prefixes for regular and special low-overhead streams in all three profiles.
-    private static final @Unmodifiable List<String> LOW_OVERHEAD_STREAM_PREFIXES = List.of(
+    /// Archive prefixes for gated low-overhead and Annex B core-special streams in all profiles.
+    private static final @Unmodifiable List<String> REFERENCE_STREAM_PREFIXES = List.of(
             ARCHIVE_ROOT + "profile0_not_annexb/streams/",
             ARCHIVE_ROOT + "profile0_not_annexb_special/streams/",
+            ARCHIVE_ROOT + "profile0_core_special/streams/",
             ARCHIVE_ROOT + "profile1_not_annexb/streams/",
             ARCHIVE_ROOT + "profile1_not_annexb_special/streams/",
+            ARCHIVE_ROOT + "profile1_core_special/streams/",
             ARCHIVE_ROOT + "profile2_not_annexb/streams/",
-            ARCHIVE_ROOT + "profile2_not_annexb_special/streams/"
+            ARCHIVE_ROOT + "profile2_not_annexb_special/streams/",
+            ARCHIVE_ROOT + "profile2_core_special/streams/"
     );
 
     /// The archive shared by inventory, discovery, and selected dynamic cases for this test class.
@@ -128,19 +131,19 @@ final class ArgonAv1CorpusTest {
     void archiveContainsExpectedStreamInventory() {
         ZipFile openArchive = archive();
         long streamCount = 0;
-        long lowOverheadStreamCount = 0;
+        long referenceStreamCount = 0;
         Enumeration<? extends ZipEntry> entries = openArchive.entries();
         while (entries.hasMoreElements()) {
             String entryName = entries.nextElement().getName();
             if (entryName.endsWith(".obu")) {
                 streamCount++;
-                if (LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
-                    lowOverheadStreamCount++;
+                if (REFERENCE_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
+                    referenceStreamCount++;
                 }
             }
         }
         assertEquals(EXPECTED_STREAM_COUNT, streamCount);
-        assertEquals(EXPECTED_LOW_OVERHEAD_STREAM_COUNT, lowOverheadStreamCount);
+        assertEquals(EXPECTED_REFERENCE_STREAM_COUNT, referenceStreamCount);
         assertNotNull(openArchive.getEntry(ARCHIVE_ROOT + "P8005-R-005h (Argon Streams AV1 User Manual).pdf"));
     }
 
@@ -166,11 +169,11 @@ final class ArgonAv1CorpusTest {
         assertThrows(IllegalArgumentException.class, () -> new CorpusShard(4, 4).select(cases.subList(0, 3)));
     }
 
-    /// Returns reference-output checks for the supported low-overhead streams in all AV1 profiles.
+    /// Returns reference-output checks for gated low-overhead and Annex B streams in all profiles.
     ///
     /// @return the dynamic reference-output tests
     @TestFactory
-    Stream<DynamicTest> supportedLowOverheadStreamsMatchReferenceYuvDigests() {
+    Stream<DynamicTest> supportedStreamsMatchReferenceYuvDigests() {
         return selectedReferenceCases().stream()
                 .map(testCase -> DynamicTest.dynamicTest(
                         testCase.category() + "/" + testCase.streamName(),
@@ -178,23 +181,23 @@ final class ArgonAv1CorpusTest {
                 ));
     }
 
-    /// Returns the complete low-overhead gate, a diagnostic group, or one explicitly selected case.
+    /// Returns the complete reference gate, a diagnostic group, or one explicitly selected case.
     ///
     /// @return the immutable selected cases
     private static @Unmodifiable List<CorpusCase> selectedReferenceCases() {
         @Nullable String selectedCase = System.getProperty(CASE_PROPERTY);
         if (selectedCase == null) {
-            return selectConfiguredShard(allLowOverheadCases(null));
+            return selectConfiguredShard(allReferenceCases(null));
         }
         if (selectedCase.equals("all")) {
-            return selectConfiguredShard(allLowOverheadCases(null));
+            return selectConfiguredShard(allReferenceCases(null));
         }
         if (selectedCase.endsWith("/all")) {
             String category = selectedCase.substring(0, selectedCase.length() - "/all".length());
             if (category.isEmpty() || category.indexOf('/') >= 0) {
                 throw new IllegalArgumentException("Invalid Argon AV1 category selector: " + selectedCase);
             }
-            @Unmodifiable List<CorpusCase> cases = allLowOverheadCases(category);
+            @Unmodifiable List<CorpusCase> cases = allReferenceCases(category);
             if (cases.isEmpty()) {
                 throw new IllegalArgumentException("Unknown Argon AV1 category: " + category);
             }
@@ -220,17 +223,17 @@ final class ArgonAv1CorpusTest {
         return CorpusShard.parse(selectedShard).select(cases);
     }
 
-    /// Returns all regular and special low-overhead cases, optionally restricted to one category.
+    /// Returns all gated reference cases, optionally restricted to one category.
     ///
     /// @param selectedCategory the exact category to select, or `null` for every profile
     /// @return the immutable sorted corpus cases
-    private static @Unmodifiable List<CorpusCase> allLowOverheadCases(
+    private static @Unmodifiable List<CorpusCase> allReferenceCases(
             @Nullable String selectedCategory
     ) {
         return archive().stream()
                 .map(ZipEntry::getName)
                 .filter(name -> name.endsWith(".obu"))
-                .filter(name -> LOW_OVERHEAD_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
+                .filter(name -> REFERENCE_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
                 .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
                 .filter(testCase -> selectedCategory == null || testCase.category().equals(selectedCategory))
                 .sorted((left, right) -> left.selector().compareTo(right.selector()))
@@ -258,10 +261,10 @@ final class ArgonAv1CorpusTest {
                 ? new ArrayList<>()
                 : null;
         try {
-            try (Av1ImageReader reader = Av1ImageReader.open(
-                    new BufferedInput.OfInputStream(archive.getInputStream(streamEntry)),
-                    config
-            )) {
+            BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry));
+            try (Av1ImageReader reader = testCase.annexB()
+                    ? Av1ImageReader.openAnnexB(input, config)
+                    : Av1ImageReader.open(input, config)) {
                 @Nullable DecodedPlanes decodedPlanes;
                 while ((decodedPlanes = reader.readPlanes()) != null) {
                     DecodedPlanes requiredPlanes = decodedPlanes;
@@ -437,6 +440,13 @@ final class ArgonAv1CorpusTest {
         /// @return the `category/stream.obu` selector
         private String selector() {
             return category + "/" + streamName;
+        }
+
+        /// Returns whether this case uses Annex B external unit framing.
+        ///
+        /// @return whether the stream is Annex B rather than low-overhead
+        private boolean annexB() {
+            return !category.contains("_not_annexb");
         }
     }
 

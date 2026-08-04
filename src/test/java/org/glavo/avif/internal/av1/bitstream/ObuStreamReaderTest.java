@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `ObuStreamReader`.
 @NotNullByDefault
@@ -67,6 +68,120 @@ final class ObuStreamReaderTest {
 
             assertNull(reader.readObu());
         }
+    }
+
+    /// Verifies that Annex B temporal units, frame units, and externally sized OBUs are traversed
+    /// without exposing their length fields as OBU bytes.
+    ///
+    /// @throws IOException if the test payload cannot be read
+    @Test
+    void readsAnnexBTemporalAndFrameUnits() throws IOException {
+        byte[] delimiter = annexBObu(ObuType.TEMPORAL_DELIMITER, false, 0, 0, new byte[0]);
+        byte[] sequenceHeader = annexBObu(ObuType.SEQUENCE_HEADER, false, 0, 0, new byte[]{1, 2, 3});
+        byte[] firstMetadata = annexBObu(ObuType.METADATA, true, 5, 2, new byte[]{4, 5});
+        byte[] secondMetadata = annexBObu(ObuType.METADATA, false, 0, 0, new byte[]{6});
+        byte[] stream = concat(
+                annexBTemporalUnit(
+                        annexBFrameUnit(delimiter, sequenceHeader),
+                        annexBFrameUnit(firstMetadata)
+                ),
+                annexBTemporalUnit(annexBFrameUnit(secondMetadata))
+        );
+
+        try (BufferedInput input = new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))) {
+            ObuStreamReader reader = ObuStreamReader.forAnnexB(input);
+
+            ObuPacket first = reader.readObu();
+            assertNotNull(first);
+            assertEquals(ObuType.TEMPORAL_DELIMITER, first.header().type());
+            assertFalse(reader.atTemporalUnitBoundary());
+
+            ObuPacket second = reader.readObu();
+            assertNotNull(second);
+            assertEquals(ObuType.SEQUENCE_HEADER, second.header().type());
+            assertArrayEquals(new byte[]{1, 2, 3}, second.payload());
+            assertFalse(reader.atTemporalUnitBoundary());
+
+            ObuPacket third = reader.readObu();
+            assertNotNull(third);
+            assertEquals(ObuType.METADATA, third.header().type());
+            assertEquals(5, third.header().temporalId());
+            assertEquals(2, third.header().spatialId());
+            assertArrayEquals(new byte[]{4, 5}, third.payload());
+            assertEquals(2, third.obuIndex());
+            assertTrue(reader.atTemporalUnitBoundary());
+
+            ObuPacket fourth = reader.readObu();
+            assertNotNull(fourth);
+            assertArrayEquals(new byte[]{6}, fourth.payload());
+            assertTrue(reader.atTemporalUnitBoundary());
+            assertNull(reader.readObu());
+        }
+    }
+
+    /// Verifies that Annex B accepts an enclosed OBU that redundantly carries its own payload size.
+    ///
+    /// @throws IOException if the test payload cannot be read
+    @Test
+    void readsAnnexBObuWithInternalSizeField() throws IOException {
+        byte[] sizedObu = obu(ObuType.METADATA, false, 0, 0, new byte[]{7, 8});
+        byte[] stream = annexBTemporalUnit(annexBFrameUnit(sizedObu));
+
+        try (BufferedInput input = new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))) {
+            ObuPacket packet = ObuStreamReader.forAnnexB(input).readObu();
+
+            assertNotNull(packet);
+            assertEquals(ObuType.METADATA, packet.header().type());
+            assertTrue(packet.header().hasSizeField());
+            assertArrayEquals(new byte[]{7, 8}, packet.payload());
+        }
+    }
+
+    /// Verifies that Annex B rejects an OBU whose external length crosses its frame-unit boundary.
+    @Test
+    void rejectsAnnexBObuThatCrossesFrameUnit() {
+        byte[] malformedFrame = lengthDelimited(concat(new byte[]{4}, new byte[]{0x28}));
+        byte[] stream = annexBTemporalUnit(malformedFrame);
+
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (BufferedInput input = new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))) {
+                ObuStreamReader.forAnnexB(input).readObu();
+            }
+        });
+
+        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+    }
+
+    /// Verifies that an Annex B external OBU length must exactly match a redundant internal size.
+    @Test
+    void rejectsAnnexBObuWithMismatchedInternalSize() {
+        byte[] sizedObu = obu(ObuType.METADATA, false, 0, 0, new byte[]{7});
+        byte[] stream = annexBTemporalUnit(annexBFrameUnit(concat(sizedObu, new byte[]{8})));
+
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (BufferedInput input = new BufferedInput.OfByteBuffer(
+                    ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)
+            )) {
+                ObuStreamReader.forAnnexB(input).readObu();
+            }
+        });
+
+        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+    }
+
+    /// Verifies that physical EOF inside an otherwise consistent Annex B nesting is reported as
+    /// truncation rather than a clean temporal-unit boundary.
+    @Test
+    void reportsUnexpectedEofForTruncatedAnnexBPayload() {
+        byte[] stream = new byte[]{4, 3, 2, 0x28};
+
+        DecodeException exception = assertThrows(DecodeException.class, () -> {
+            try (BufferedInput input = new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))) {
+                ObuStreamReader.forAnnexB(input).readObu();
+            }
+        });
+
+        assertEquals(DecodeErrorCode.UNEXPECTED_EOF, exception.code());
     }
 
     /// Verifies that malformed OBU headers are rejected.
@@ -199,6 +314,66 @@ final class ObuStreamReaderTest {
             output.write((temporalId << 5) | (spatialId << 3));
         }
 
+        writeLeb128(output, payload.length);
+        output.writeBytes(payload);
+        return output.toByteArray();
+    }
+
+    /// Encodes one Annex B OBU without an internal payload-size field.
+    ///
+    /// @param type the OBU type
+    /// @param extensionFlag whether to emit an extension header
+    /// @param temporalId the temporal layer identifier
+    /// @param spatialId the spatial layer identifier
+    /// @param payload the raw payload bytes
+    /// @return the OBU header and payload without its external length
+    private static byte[] annexBObu(
+            ObuType type,
+            boolean extensionFlag,
+            int temporalId,
+            int spatialId,
+            byte[] payload
+    ) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        int header = type.id() << 3;
+        if (extensionFlag) {
+            header |= 1 << 2;
+        }
+        output.write(header);
+        if (extensionFlag) {
+            output.write((temporalId << 5) | (spatialId << 3));
+        }
+        output.writeBytes(payload);
+        return output.toByteArray();
+    }
+
+    /// Encodes one Annex B frame unit containing the supplied OBUs.
+    ///
+    /// @param obus the complete OBUs without external lengths
+    /// @return the encoded frame unit including its length field
+    private static byte[] annexBFrameUnit(byte[]... obus) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        for (byte[] obu : obus) {
+            writeLeb128(payload, obu.length);
+            payload.writeBytes(obu);
+        }
+        return lengthDelimited(payload.toByteArray());
+    }
+
+    /// Encodes one Annex B temporal unit containing the supplied frame units.
+    ///
+    /// @param frameUnits the complete frame units including their length fields
+    /// @return the encoded temporal unit including its length field
+    private static byte[] annexBTemporalUnit(byte[]... frameUnits) {
+        return lengthDelimited(concat(frameUnits));
+    }
+
+    /// Prefixes one byte sequence with its unsigned LEB128 length.
+    ///
+    /// @param payload the bytes to delimit
+    /// @return the length-delimited byte sequence
+    private static byte[] lengthDelimited(byte[] payload) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
         writeLeb128(output, payload.length);
         output.writeBytes(payload);
         return output.toByteArray();
