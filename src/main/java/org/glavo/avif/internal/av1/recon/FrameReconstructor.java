@@ -4973,23 +4973,22 @@ public final class FrameReconstructor {
         if (residualUnit.allZero()) {
             return;
         }
-        int[] dequantizedCoefficients = LumaDequantizer.dequantize(residualUnit, dequantizationContext);
-        int[] residualSamples = InverseTransformer.reconstructResidualBlock(
-                dequantizedCoefficients,
-                residualUnit.size(),
-                residualUnit.transformType(),
-                lumaPlane.bitDepth()
-        );
+        InverseTransformer.Workspace workspace = InverseTransformer.workspace();
+        int[] dequantizedCoefficients = workspace.coefficientBuffer(residualUnit.size());
+        LumaDequantizer.dequantize(residualUnit, dequantizationContext, dequantizedCoefficients);
         int destinationX = residualUnit.position().x4() << 2;
         int destinationY = residualUnit.position().y4() << 2;
-        InverseTransformer.addResidualBlock(
+        InverseTransformer.reconstructAndAddResidualBlock(
+                workspace,
                 lumaPlane,
                 destinationX,
                 destinationY,
                 residualUnit.size(),
+                residualUnit.transformType(),
+                lumaPlane.bitDepth(),
                 Math.min(residualUnit.size().widthPixels(), lumaPlane.width() - destinationX),
                 Math.min(residualUnit.size().heightPixels(), lumaPlane.height() - destinationY),
-                residualSamples
+                dequantizedCoefficients
         );
     }
 
@@ -5546,23 +5545,22 @@ public final class FrameReconstructor {
         if (residualUnit.allZero()) {
             return;
         }
-        int[] dequantizedCoefficients = ChromaDequantizer.dequantize(residualUnit, dequantizationContext);
-        int[] residualSamples = InverseTransformer.reconstructResidualBlock(
-                dequantizedCoefficients,
-                residualUnit.size(),
-                residualUnit.transformType(),
-                chromaPlane.bitDepth()
-        );
+        InverseTransformer.Workspace workspace = InverseTransformer.workspace();
+        int[] dequantizedCoefficients = workspace.coefficientBuffer(residualUnit.size());
+        ChromaDequantizer.dequantize(residualUnit, dequantizationContext, dequantizedCoefficients);
         int destinationX = residualUnit.position().x4() << (2 - chromaSubsamplingX);
         int destinationY = residualUnit.position().y4() << (2 - chromaSubsamplingY);
-        InverseTransformer.addResidualBlock(
+        InverseTransformer.reconstructAndAddResidualBlock(
+                workspace,
                 chromaPlane,
                 destinationX,
                 destinationY,
                 residualUnit.size(),
+                residualUnit.transformType(),
+                chromaPlane.bitDepth(),
                 Math.min(residualUnit.size().widthPixels(), chromaPlane.width() - destinationX),
                 Math.min(residualUnit.size().heightPixels(), chromaPlane.height() - destinationY),
-                residualSamples
+                dequantizedCoefficients
         );
     }
 

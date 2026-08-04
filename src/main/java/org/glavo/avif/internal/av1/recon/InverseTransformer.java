@@ -19,6 +19,7 @@ import org.glavo.avif.internal.av1.model.TransformKernel;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformType;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Objects;
@@ -48,11 +49,42 @@ final class InverseTransformer {
     /// The unrestricted clip range used by helper tests that do not supply bit-depth context.
     private static final ClipRange FULL_INT_CLIP_RANGE = new ClipRange(Integer.MIN_VALUE, Integer.MAX_VALUE);
 
+    /// The row-pass clip range for 8-bit samples.
+    private static final ClipRange ROW_CLIP_RANGE_8 = new ClipRange(Short.MIN_VALUE, Short.MAX_VALUE);
+
+    /// The row-pass clip range for 10-bit samples.
+    private static final ClipRange ROW_CLIP_RANGE_10 = new ClipRange(-(1 << 17), (1 << 17) - 1);
+
+    /// The row-pass clip range for 12-bit samples.
+    private static final ClipRange ROW_CLIP_RANGE_12 = new ClipRange(-(1 << 19), (1 << 19) - 1);
+
+    /// The column-pass clip range for 8-bit samples.
+    private static final ClipRange COLUMN_CLIP_RANGE_8 = ROW_CLIP_RANGE_8;
+
+    /// The column-pass clip range for 10-bit samples.
+    private static final ClipRange COLUMN_CLIP_RANGE_10 = ROW_CLIP_RANGE_8;
+
+    /// The column-pass clip range for 12-bit samples.
+    private static final ClipRange COLUMN_CLIP_RANGE_12 = ROW_CLIP_RANGE_10;
+
     /// The active stage-local clip range used by the exact inverse-transform kernels.
     private static final ThreadLocal<ClipRange> ACTIVE_CLIP_RANGE = ThreadLocal.withInitial(() -> FULL_INT_CLIP_RANGE);
 
+    /// Per-thread buffers used by the decode path while a residual is transformed and applied.
+    private static final ThreadLocal<Workspace> RECONSTRUCTION_WORKSPACE = ThreadLocal.withInitial(Workspace::new);
+
     /// Prevents instantiation of this utility class.
     private InverseTransformer() {
+    }
+
+    /// Returns the reusable inverse-transform workspace owned by the current thread.
+    ///
+    /// The returned workspace is invalidated by the next optimized residual reconstruction on the
+    /// same thread and must not escape the immediate decode operation.
+    ///
+    /// @return the current thread's reusable inverse-transform workspace
+    static Workspace workspace() {
+        return RECONSTRUCTION_WORKSPACE.get();
     }
 
     /// Reconstructs one residual sample block from dequantized `DCT_DCT` coefficients.
@@ -98,6 +130,30 @@ final class InverseTransformer {
             TransformType transformType,
             int bitDepth
     ) {
+        return reconstructResidualBlock(
+                dequantizedCoefficients,
+                transformSize,
+                transformType,
+                bitDepth,
+                null
+        );
+    }
+
+    /// Reconstructs one residual block using either isolated result storage or a reusable workspace.
+    ///
+    /// @param dequantizedCoefficients the dequantized coefficients in natural raster order
+    /// @param transformSize the transform size to reconstruct
+    /// @param transformType the transform type to reconstruct
+    /// @param bitDepth the decoded sample bit depth
+    /// @param workspace the reusable workspace, or `null` to return independently owned storage
+    /// @return one signed residual sample block in natural raster order
+    private static int[] reconstructResidualBlock(
+            int[] dequantizedCoefficients,
+            TransformSize transformSize,
+            TransformType transformType,
+            int bitDepth,
+            @Nullable Workspace workspace
+    ) {
         int[] nonNullCoefficients = Objects.requireNonNull(dequantizedCoefficients, "dequantizedCoefficients");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         TransformType nonNullTransformType = Objects.requireNonNull(transformType, "transformType");
@@ -110,7 +166,7 @@ final class InverseTransformer {
         }
 
         if (nonNullTransformType == TransformType.WHT_WHT) {
-            return reconstructWalshHadamard(nonNullCoefficients, nonNullTransformSize);
+            return reconstructWalshHadamard(nonNullCoefficients, nonNullTransformSize, workspace);
         }
 
         if (nonNullTransformType != TransformType.DCT_DCT) {
@@ -118,41 +174,49 @@ final class InverseTransformer {
                     nonNullCoefficients,
                     nonNullTransformSize,
                     nonNullTransformType,
-                    bitDepth
+                    bitDepth,
+                    workspace
             );
         }
 
-        return reconstructDctDct(nonNullCoefficients, nonNullTransformSize, bitDepth);
+        return reconstructDctDct(nonNullCoefficients, nonNullTransformSize, bitDepth, workspace);
     }
 
     /// Reconstructs one residual sample block from dequantized `DCT_DCT` coefficients.
     ///
     /// @param coefficients the dequantized `DCT_DCT` coefficients in natural raster order
     /// @param transformSize the transform size to reconstruct
+    /// @param bitDepth the decoded sample bit depth
+    /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed residual sample block in natural raster order
-    private static int[] reconstructDctDct(int[] coefficients, TransformSize transformSize, int bitDepth) {
+    private static int[] reconstructDctDct(
+            int[] coefficients,
+            TransformSize transformSize,
+            int bitDepth,
+            @Nullable Workspace workspace
+    ) {
         ClipRange rowClipRange = rowClipRange(bitDepth);
         ClipRange columnClipRange = columnClipRange(bitDepth);
         return switch (transformSize) {
-            case TX_4X4 -> reconstructFourByFour(coefficients, rowClipRange, columnClipRange);
-            case TX_8X8 -> reconstructEightByEight(coefficients, rowClipRange, columnClipRange);
-            case TX_16X16 -> reconstructSixteenBySixteen(coefficients, rowClipRange, columnClipRange);
-            case RTX_4X8 -> reconstructRectangularDctDct(coefficients, 4, 8, 0, rowClipRange, columnClipRange);
-            case RTX_8X4 -> reconstructRectangularDctDct(coefficients, 8, 4, 0, rowClipRange, columnClipRange);
-            case RTX_4X16 -> reconstructRectangularDctDct(coefficients, 4, 16, 1, rowClipRange, columnClipRange);
-            case RTX_16X4 -> reconstructRectangularDctDct(coefficients, 16, 4, 1, rowClipRange, columnClipRange);
-            case RTX_8X16 -> reconstructRectangularDctDct(coefficients, 8, 16, 1, rowClipRange, columnClipRange);
-            case RTX_16X8 -> reconstructRectangularDctDct(coefficients, 16, 8, 1, rowClipRange, columnClipRange);
-            case TX_32X32 -> reconstructRectangularDctDct(coefficients, 32, 32, 2, rowClipRange, columnClipRange);
-            case TX_64X64 -> reconstructRectangularDctDct(coefficients, 64, 64, 2, rowClipRange, columnClipRange);
-            case RTX_16X32 -> reconstructRectangularDctDct(coefficients, 16, 32, 1, rowClipRange, columnClipRange);
-            case RTX_32X16 -> reconstructRectangularDctDct(coefficients, 32, 16, 1, rowClipRange, columnClipRange);
-            case RTX_32X64 -> reconstructRectangularDctDct(coefficients, 32, 64, 1, rowClipRange, columnClipRange);
-            case RTX_64X32 -> reconstructRectangularDctDct(coefficients, 64, 32, 1, rowClipRange, columnClipRange);
-            case RTX_8X32 -> reconstructRectangularDctDct(coefficients, 8, 32, 2, rowClipRange, columnClipRange);
-            case RTX_32X8 -> reconstructRectangularDctDct(coefficients, 32, 8, 2, rowClipRange, columnClipRange);
-            case RTX_16X64 -> reconstructRectangularDctDct(coefficients, 16, 64, 2, rowClipRange, columnClipRange);
-            case RTX_64X16 -> reconstructRectangularDctDct(coefficients, 64, 16, 2, rowClipRange, columnClipRange);
+            case TX_4X4 -> reconstructFourByFour(coefficients, rowClipRange, columnClipRange, workspace);
+            case TX_8X8 -> reconstructEightByEight(coefficients, rowClipRange, columnClipRange, workspace);
+            case TX_16X16 -> reconstructSixteenBySixteen(coefficients, rowClipRange, columnClipRange, workspace);
+            case RTX_4X8 -> reconstructRectangularDctDct(coefficients, transformSize, 0, rowClipRange, columnClipRange, workspace);
+            case RTX_8X4 -> reconstructRectangularDctDct(coefficients, transformSize, 0, rowClipRange, columnClipRange, workspace);
+            case RTX_4X16 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case RTX_16X4 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case RTX_8X16 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case RTX_16X8 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case TX_32X32 -> reconstructRectangularDctDct(coefficients, transformSize, 2, rowClipRange, columnClipRange, workspace);
+            case TX_64X64 -> reconstructRectangularDctDct(coefficients, transformSize, 2, rowClipRange, columnClipRange, workspace);
+            case RTX_16X32 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case RTX_32X16 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case RTX_32X64 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case RTX_64X32 -> reconstructRectangularDctDct(coefficients, transformSize, 1, rowClipRange, columnClipRange, workspace);
+            case RTX_8X32 -> reconstructRectangularDctDct(coefficients, transformSize, 2, rowClipRange, columnClipRange, workspace);
+            case RTX_32X8 -> reconstructRectangularDctDct(coefficients, transformSize, 2, rowClipRange, columnClipRange, workspace);
+            case RTX_16X64 -> reconstructRectangularDctDct(coefficients, transformSize, 2, rowClipRange, columnClipRange, workspace);
+            case RTX_64X16 -> reconstructRectangularDctDct(coefficients, transformSize, 2, rowClipRange, columnClipRange, workspace);
         };
     }
 
@@ -230,15 +294,69 @@ final class InverseTransformer {
         }
     }
 
+    /// Reconstructs and immediately applies one residual block using reusable thread-local storage.
+    ///
+    /// The coefficient array must be the buffer returned by [Workspace#coefficientBuffer(TransformSize)]
+    /// or another exact-length array that is not modified until this method returns.
+    ///
+    /// @param workspace the current decode thread's reusable workspace
+    /// @param plane the destination predictor plane
+    /// @param x the zero-based destination x coordinate
+    /// @param y the zero-based destination y coordinate
+    /// @param transformSize the coded residual block size
+    /// @param transformType the transform type to reconstruct
+    /// @param bitDepth the decoded sample bit depth
+    /// @param writtenWidthPixels the residual width to write in pixels
+    /// @param writtenHeightPixels the residual height to write in pixels
+    /// @param dequantizedCoefficients the dequantized transform coefficients
+    static void reconstructAndAddResidualBlock(
+            Workspace workspace,
+            MutablePlaneBuffer plane,
+            int x,
+            int y,
+            TransformSize transformSize,
+            TransformType transformType,
+            int bitDepth,
+            int writtenWidthPixels,
+            int writtenHeightPixels,
+            int[] dequantizedCoefficients
+    ) {
+        Workspace nonNullWorkspace = Objects.requireNonNull(workspace, "workspace");
+        int[] residualSamples = reconstructResidualBlock(
+                dequantizedCoefficients,
+                transformSize,
+                transformType,
+                bitDepth,
+                nonNullWorkspace
+        );
+        addResidualBlock(
+                plane,
+                x,
+                y,
+                transformSize,
+                writtenWidthPixels,
+                writtenHeightPixels,
+                residualSamples
+        );
+    }
+
     /// Reconstructs one `TX_4X4` `DCT_DCT` residual block.
     ///
     /// @param coefficients the dequantized `TX_4X4` coefficients in natural raster order
+    /// @param rowClipRange the row-pass clip range
+    /// @param columnClipRange the column-pass clip range
+    /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed `TX_4X4` residual sample block
-    private static int[] reconstructFourByFour(int[] coefficients, ClipRange rowClipRange, ClipRange columnClipRange) {
-        int[] buffer = new int[16];
-        int[] output = new int[16];
-        int[] scratchIn = new int[4];
-        int[] scratchOut = new int[4];
+    private static int[] reconstructFourByFour(
+            int[] coefficients,
+            ClipRange rowClipRange,
+            ClipRange columnClipRange,
+            @Nullable Workspace workspace
+    ) {
+        int[] buffer = intermediateBuffer(workspace, TransformSize.TX_4X4);
+        int[] output = outputBuffer(workspace, TransformSize.TX_4X4);
+        int[] scratchIn = scratchInput(workspace, 4);
+        int[] scratchOut = scratchOutput(workspace, 4);
         for (int row = 0; row < 4; row++) {
             int rowOffset = row << 2;
             scratchIn[0] = coefficients[rowOffset];
@@ -269,12 +387,20 @@ final class InverseTransformer {
     /// Reconstructs one `TX_8X8` `DCT_DCT` residual block.
     ///
     /// @param coefficients the dequantized `TX_8X8` coefficients in natural raster order
+    /// @param rowClipRange the row-pass clip range
+    /// @param columnClipRange the column-pass clip range
+    /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed `TX_8X8` residual sample block
-    private static int[] reconstructEightByEight(int[] coefficients, ClipRange rowClipRange, ClipRange columnClipRange) {
-        int[] buffer = new int[64];
-        int[] output = new int[64];
-        int[] scratchIn = new int[8];
-        int[] scratchOut = new int[8];
+    private static int[] reconstructEightByEight(
+            int[] coefficients,
+            ClipRange rowClipRange,
+            ClipRange columnClipRange,
+            @Nullable Workspace workspace
+    ) {
+        int[] buffer = intermediateBuffer(workspace, TransformSize.TX_8X8);
+        int[] output = outputBuffer(workspace, TransformSize.TX_8X8);
+        int[] scratchIn = scratchInput(workspace, 8);
+        int[] scratchOut = scratchOutput(workspace, 8);
         for (int row = 0; row < 8; row++) {
             int rowOffset = row << 3;
             for (int column = 0; column < 8; column++) {
@@ -305,12 +431,20 @@ final class InverseTransformer {
     /// one column pass, and one final shift by `4`.
     ///
     /// @param coefficients the dequantized `TX_16X16` coefficients in natural raster order
+    /// @param rowClipRange the row-pass clip range
+    /// @param columnClipRange the column-pass clip range
+    /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed `TX_16X16` residual sample block
-    private static int[] reconstructSixteenBySixteen(int[] coefficients, ClipRange rowClipRange, ClipRange columnClipRange) {
-        int[] buffer = new int[256];
-        int[] output = new int[256];
-        int[] scratchIn = new int[16];
-        int[] scratchOut = new int[16];
+    private static int[] reconstructSixteenBySixteen(
+            int[] coefficients,
+            ClipRange rowClipRange,
+            ClipRange columnClipRange,
+            @Nullable Workspace workspace
+    ) {
+        int[] buffer = intermediateBuffer(workspace, TransformSize.TX_16X16);
+        int[] output = outputBuffer(workspace, TransformSize.TX_16X16);
+        int[] scratchIn = scratchInput(workspace, 16);
+        int[] scratchOut = scratchOutput(workspace, 16);
         for (int row = 0; row < 16; row++) {
             int rowOffset = row << 4;
             for (int column = 0; column < 16; column++) {
@@ -342,24 +476,29 @@ final class InverseTransformer {
     /// post-transform scaling.
     ///
     /// @param coefficients the dequantized coefficients in natural raster order
-    /// @param width the transform width in pixels
-    /// @param height the transform height in pixels
+    /// @param transformSize the transform size to reconstruct
     /// @param intermediateShift the AV1 size-specific intermediate shift applied after the first pass
+    /// @param rowClipRange the row-pass clip range
+    /// @param columnClipRange the column-pass clip range
+    /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed rectangular residual sample block
     private static int[] reconstructRectangularDctDct(
             int[] coefficients,
-            int width,
-            int height,
+            TransformSize transformSize,
             int intermediateShift,
             ClipRange rowClipRange,
-            ClipRange columnClipRange
+            ClipRange columnClipRange,
+            @Nullable Workspace workspace
     ) {
-        int[] buffer = new int[width * height];
-        int[] output = new int[width * height];
-        int[] rowScratchIn = new int[width];
-        int[] rowScratchOut = new int[width];
-        int[] columnScratchIn = new int[height];
-        int[] columnScratchOut = new int[height];
+        int width = transformSize.widthPixels();
+        int height = transformSize.heightPixels();
+        int[] buffer = intermediateBuffer(workspace, transformSize);
+        int[] output = outputBuffer(workspace, transformSize);
+        int scratchLength = Math.max(width, height);
+        int[] rowScratchIn = scratchInput(workspace, scratchLength);
+        int[] rowScratchOut = scratchOutput(workspace, scratchLength);
+        int[] columnScratchIn = rowScratchIn;
+        int[] columnScratchOut = rowScratchOut;
         boolean requiresRectangularPrescale = width * 2 == height || height * 2 == width;
 
         for (int row = 0; row < height; row++) {
@@ -396,12 +535,15 @@ final class InverseTransformer {
     /// @param coefficients the dequantized coefficients in natural raster order
     /// @param transformSize the transform size to reconstruct
     /// @param transformType the explicit transform type to reconstruct
+    /// @param bitDepth the decoded sample bit depth
+    /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed residual sample block in natural raster order
     private static int[] reconstructGenericTransform(
             int[] coefficients,
             TransformSize transformSize,
             TransformType transformType,
-            int bitDepth
+            int bitDepth,
+            @Nullable Workspace workspace
     ) {
         int width = transformSize.widthPixels();
         int height = transformSize.heightPixels();
@@ -409,12 +551,13 @@ final class InverseTransformer {
         boolean requiresRectangularPrescale = width * 2 == height || height * 2 == width;
         ClipRange rowClipRange = rowClipRange(bitDepth);
         ClipRange columnClipRange = columnClipRange(bitDepth);
-        int[] buffer = new int[width * height];
-        int[] output = new int[width * height];
-        int[] rowScratchIn = new int[width];
-        int[] rowScratchOut = new int[width];
-        int[] columnScratchIn = new int[height];
-        int[] columnScratchOut = new int[height];
+        int[] buffer = intermediateBuffer(workspace, transformSize);
+        int[] output = outputBuffer(workspace, transformSize);
+        int scratchLength = Math.max(width, height);
+        int[] rowScratchIn = scratchInput(workspace, scratchLength);
+        int[] rowScratchOut = scratchOutput(workspace, scratchLength);
+        int[] columnScratchIn = rowScratchIn;
+        int[] columnScratchOut = rowScratchOut;
 
         for (int row = 0; row < height; row++) {
             int rowOffset = row * width;
@@ -459,15 +602,20 @@ final class InverseTransformer {
     ///
     /// @param coefficients the dequantized lossless coefficients in natural raster order
     /// @param transformSize the active transform size
+    /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed `TX_4X4` residual sample block
-    private static int[] reconstructWalshHadamard(int[] coefficients, TransformSize transformSize) {
+    private static int[] reconstructWalshHadamard(
+            int[] coefficients,
+            TransformSize transformSize,
+            @Nullable Workspace workspace
+    ) {
         if (transformSize != TransformSize.TX_4X4) {
             throw new IllegalStateException("WHT_WHT is only valid for TX_4X4 lossless blocks");
         }
 
-        int[] tmp = new int[16];
-        int[] output = new int[16];
-        int[] scratch = new int[4];
+        int[] tmp = intermediateBuffer(workspace, TransformSize.TX_4X4);
+        int[] output = outputBuffer(workspace, TransformSize.TX_4X4);
+        int[] scratch = scratchInput(workspace, 4);
         for (int y = 0; y < 4; y++) {
             int rowOffset = y << 2;
             for (int x = 0; x < 4; x++) {
@@ -489,6 +637,46 @@ final class InverseTransformer {
             }
         }
         return output;
+    }
+
+    /// Returns the intermediate transform buffer for one isolated or reusable reconstruction.
+    ///
+    /// @param workspace the reusable workspace, or `null` for isolated storage
+    /// @param transformSize the transform size that determines the buffer length
+    /// @return the intermediate transform buffer
+    private static int[] intermediateBuffer(@Nullable Workspace workspace, TransformSize transformSize) {
+        return workspace == null
+                ? new int[checkedTransformArea(transformSize)]
+                : workspace.intermediateBuffer(transformSize);
+    }
+
+    /// Returns the output buffer for one isolated or reusable reconstruction.
+    ///
+    /// @param workspace the reusable workspace, or `null` for isolated storage
+    /// @param transformSize the transform size that determines the buffer length
+    /// @return the residual output buffer
+    private static int[] outputBuffer(@Nullable Workspace workspace, TransformSize transformSize) {
+        return workspace == null
+                ? new int[checkedTransformArea(transformSize)]
+                : workspace.outputBuffer(transformSize);
+    }
+
+    /// Returns one input scratch vector with at least the requested length.
+    ///
+    /// @param workspace the reusable workspace, or `null` for isolated storage
+    /// @param length the required vector length
+    /// @return the input scratch vector
+    private static int[] scratchInput(@Nullable Workspace workspace, int length) {
+        return workspace == null ? new int[length] : workspace.scratchInput(length);
+    }
+
+    /// Returns one output scratch vector with at least the requested length.
+    ///
+    /// @param workspace the reusable workspace, or `null` for isolated storage
+    /// @param length the required vector length
+    /// @return the output scratch vector
+    private static int[] scratchOutput(@Nullable Workspace workspace, int length) {
+        return workspace == null ? new int[length] : workspace.scratchOutput(length);
     }
 
     /// Applies one in-place AV1 inverse Walsh-Hadamard transform to four samples.
@@ -566,7 +754,7 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_4` input vector
     /// @param output the reconstructed output vector
     private static void inverseDct4(int[] input, int[] output) {
-        int[] step = new int[4];
+        int[] step = workspace().kernelStep();
 
         output[0] = input[0];
         output[1] = input[2];
@@ -592,7 +780,7 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_8` input vector
     /// @param output the reconstructed output vector
     private static void inverseDct8(int[] input, int[] output) {
-        int[] step = new int[8];
+        int[] step = workspace().kernelStep();
 
         output[0] = input[0];
         output[1] = input[4];
@@ -648,7 +836,7 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_16` input vector
     /// @param output the reconstructed output vector
     private static void inverseDct16(int[] input, int[] output) {
-        int[] step = new int[16];
+        int[] step = workspace().kernelStep();
 
         output[0] = input[0];
         output[1] = input[8];
@@ -779,8 +967,9 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_32` input vector
     /// @param output the reconstructed output vector
     private static void inverseDct32Dav1d(int[] input, int[] output) {
-        int[] evenInput = new int[16];
-        int[] evenOutput = new int[16];
+        Workspace workspace = workspace();
+        int[] evenInput = workspace.evenInput16();
+        int[] evenOutput = workspace.evenOutput16();
         for (int i = 0; i < 16; i++) {
             evenInput[i] = input[i << 1];
         }
@@ -960,8 +1149,9 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_8` input vector
     /// @param output the reconstructed output vector
     private static void inverseDct8Dav1d(int[] input, int[] output) {
-        int[] evenInput = new int[4];
-        int[] evenOutput = new int[4];
+        Workspace workspace = workspace();
+        int[] evenInput = workspace.evenInput4();
+        int[] evenOutput = workspace.evenOutput4();
         for (int i = 0; i < 4; i++) {
             evenInput[i] = input[i << 1];
         }
@@ -1001,8 +1191,9 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_16` input vector
     /// @param output the reconstructed output vector
     private static void inverseDct16Dav1d(int[] input, int[] output) {
-        int[] evenInput = new int[8];
-        int[] evenOutput = new int[8];
+        Workspace workspace = workspace();
+        int[] evenInput = workspace.evenInput8();
+        int[] evenOutput = workspace.evenOutput8();
         for (int i = 0; i < 8; i++) {
             evenInput[i] = input[i << 1];
         }
@@ -1080,7 +1271,7 @@ final class InverseTransformer {
     /// @param input the dequantized `DCT_64` input vector
     /// @param output the reconstructed output vector
     private static void inverseDct64Aom(int[] input, int[] output) {
-        int[] step = new int[64];
+        int[] step = workspace().kernelStep();
         int[] bf0;
         int[] bf1;
 
@@ -1785,7 +1976,7 @@ final class InverseTransformer {
     /// @param output the reconstructed output vector
     /// @param length the vector length in samples
     private static void inverseFlipAdst(int[] input, int[] output, int length) {
-        int[] scratch = new int[length];
+        int[] scratch = workspace().flipAdstScratch();
         inverseAdst(input, scratch, length);
         for (int i = 0; i < length; i++) {
             output[i] = scratch[length - 1 - i];
@@ -2134,8 +2325,12 @@ final class InverseTransformer {
     /// @param bitDepth the decoded sample bit depth
     /// @return the stage-local row-pass clip range
     private static ClipRange rowClipRange(int bitDepth) {
-        int minimum = -(1 << (bitDepth + 7));
-        return new ClipRange(minimum, -minimum - 1);
+        return switch (bitDepth) {
+            case 8 -> ROW_CLIP_RANGE_8;
+            case 10 -> ROW_CLIP_RANGE_10;
+            case 12 -> ROW_CLIP_RANGE_12;
+            default -> throw new IllegalArgumentException("Unsupported bitDepth: " + bitDepth);
+        };
     }
 
     /// Returns the dav1d column-domain clip range for one supported decoded bit depth.
@@ -2143,11 +2338,12 @@ final class InverseTransformer {
     /// @param bitDepth the decoded sample bit depth
     /// @return the stage-local column-domain clip range
     private static ClipRange columnClipRange(int bitDepth) {
-        if (bitDepth == 8) {
-            return new ClipRange(Short.MIN_VALUE, Short.MAX_VALUE);
-        }
-        int minimum = -(1 << (bitDepth + 5));
-        return new ClipRange(minimum, -minimum - 1);
+        return switch (bitDepth) {
+            case 8 -> COLUMN_CLIP_RANGE_8;
+            case 10 -> COLUMN_CLIP_RANGE_10;
+            case 12 -> COLUMN_CLIP_RANGE_12;
+            default -> throw new IllegalArgumentException("Unsupported bitDepth: " + bitDepth);
+        };
     }
 
     /// Returns the transform area in samples.
@@ -2156,6 +2352,179 @@ final class InverseTransformer {
     /// @return the transform area in samples
     private static int checkedTransformArea(TransformSize transformSize) {
         return transformSize.widthPixels() * transformSize.heightPixels();
+    }
+
+    /// Reusable per-thread storage for dequantization and inverse transforms.
+    ///
+    /// Arrays are allocated lazily per transform size and remain owned by the current decode
+    /// thread. Callers must consume their contents before beginning another residual operation.
+    @NotNullByDefault
+    static final class Workspace {
+        /// Exact-length dequantized-coefficient buffers indexed by transform-size ordinal.
+        private final int @Nullable [][] coefficientBuffers = new int[TransformSize.values().length][];
+
+        /// Exact-length intermediate transform buffers indexed by transform-size ordinal.
+        private final int @Nullable [][] intermediateBuffers = new int[TransformSize.values().length][];
+
+        /// Exact-length residual output buffers indexed by transform-size ordinal.
+        private final int @Nullable [][] outputBuffers = new int[TransformSize.values().length][];
+
+        /// Shared input vector for one-dimensional transform passes.
+        private final int[] scratchInput = new int[64];
+
+        /// Shared output vector for one-dimensional transform passes.
+        private final int[] scratchOutput = new int[64];
+
+        /// Shared staging vector for non-recursive AOM inverse-DCT kernels.
+        private final int[] kernelStep = new int[64];
+
+        /// Four-sample even-input vector used by the recursive dav1d inverse DCT.
+        private final int[] evenInput4 = new int[4];
+
+        /// Four-sample even-output vector used by the recursive dav1d inverse DCT.
+        private final int[] evenOutput4 = new int[4];
+
+        /// Eight-sample even-input vector used by the recursive dav1d inverse DCT.
+        private final int[] evenInput8 = new int[8];
+
+        /// Eight-sample even-output vector used by the recursive dav1d inverse DCT.
+        private final int[] evenOutput8 = new int[8];
+
+        /// Sixteen-sample even-input vector used by the recursive dav1d inverse DCT.
+        private final int[] evenInput16 = new int[16];
+
+        /// Sixteen-sample even-output vector used by the recursive dav1d inverse DCT.
+        private final int[] evenOutput16 = new int[16];
+
+        /// Shared output vector used before reversing one FLIPADST result.
+        private final int[] flipAdstScratch = new int[16];
+
+        /// Creates an initially empty reusable workspace.
+        private Workspace() {
+        }
+
+        /// Returns an exact-length coefficient buffer for one transform size.
+        ///
+        /// @param transformSize the transform size that determines the buffer length
+        /// @return the reusable coefficient buffer
+        int[] coefficientBuffer(TransformSize transformSize) {
+            return buffer(coefficientBuffers, transformSize);
+        }
+
+        /// Returns an exact-length intermediate buffer for one transform size.
+        ///
+        /// @param transformSize the transform size that determines the buffer length
+        /// @return the reusable intermediate buffer
+        private int[] intermediateBuffer(TransformSize transformSize) {
+            return buffer(intermediateBuffers, transformSize);
+        }
+
+        /// Returns an exact-length output buffer for one transform size.
+        ///
+        /// @param transformSize the transform size that determines the buffer length
+        /// @return the reusable output buffer
+        private int[] outputBuffer(TransformSize transformSize) {
+            return buffer(outputBuffers, transformSize);
+        }
+
+        /// Returns the shared input scratch vector after validating the requested length.
+        ///
+        /// @param length the required vector length
+        /// @return the shared input scratch vector
+        private int[] scratchInput(int length) {
+            requireScratchLength(length);
+            return scratchInput;
+        }
+
+        /// Returns the shared output scratch vector after validating the requested length.
+        ///
+        /// @param length the required vector length
+        /// @return the shared output scratch vector
+        private int[] scratchOutput(int length) {
+            requireScratchLength(length);
+            return scratchOutput;
+        }
+
+        /// Returns the shared staging vector for one non-recursive AOM inverse-DCT kernel.
+        ///
+        /// @return the shared 64-sample staging vector
+        private int[] kernelStep() {
+            return kernelStep;
+        }
+
+        /// Returns the four-sample recursive even-input vector.
+        ///
+        /// @return the shared four-sample input vector
+        private int[] evenInput4() {
+            return evenInput4;
+        }
+
+        /// Returns the four-sample recursive even-output vector.
+        ///
+        /// @return the shared four-sample output vector
+        private int[] evenOutput4() {
+            return evenOutput4;
+        }
+
+        /// Returns the eight-sample recursive even-input vector.
+        ///
+        /// @return the shared eight-sample input vector
+        private int[] evenInput8() {
+            return evenInput8;
+        }
+
+        /// Returns the eight-sample recursive even-output vector.
+        ///
+        /// @return the shared eight-sample output vector
+        private int[] evenOutput8() {
+            return evenOutput8;
+        }
+
+        /// Returns the sixteen-sample recursive even-input vector.
+        ///
+        /// @return the shared sixteen-sample input vector
+        private int[] evenInput16() {
+            return evenInput16;
+        }
+
+        /// Returns the sixteen-sample recursive even-output vector.
+        ///
+        /// @return the shared sixteen-sample output vector
+        private int[] evenOutput16() {
+            return evenOutput16;
+        }
+
+        /// Returns the shared FLIPADST reversal vector.
+        ///
+        /// @return the shared sixteen-sample reversal vector
+        private int[] flipAdstScratch() {
+            return flipAdstScratch;
+        }
+
+        /// Returns one lazily allocated exact-length transform buffer.
+        ///
+        /// @param buffers the per-transform-size buffer table
+        /// @param transformSize the transform size that selects the buffer
+        /// @return the selected reusable buffer
+        private static int[] buffer(int @Nullable [][] buffers, TransformSize transformSize) {
+            TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+            int index = nonNullTransformSize.ordinal();
+            int @Nullable [] buffer = buffers[index];
+            if (buffer == null) {
+                buffer = new int[checkedTransformArea(nonNullTransformSize)];
+                buffers[index] = buffer;
+            }
+            return buffer;
+        }
+
+        /// Validates one requested scratch-vector length.
+        ///
+        /// @param length the requested vector length
+        private static void requireScratchLength(int length) {
+            if (length < 0 || length > 64) {
+                throw new IllegalArgumentException("Unsupported scratch length: " + length);
+            }
+        }
     }
 
     /// One clip range used by the exact inverse-transform kernels.

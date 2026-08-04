@@ -19,6 +19,7 @@ import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.glavo.avif.internal.av1.model.LumaIntraPredictionMode;
 import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 /// Reconstructs AV1 intra-predicted luma and chroma blocks.
@@ -35,6 +36,33 @@ final class IntraPredictor {
 
     /// The maximum axis length passed to one AV1 intra-prediction kernel invocation.
     private static final int MAX_INTRA_PREDICTION_AXIS_SIZE = 64;
+
+    /// The largest reusable directional edge produced from a 64x64 prediction kernel.
+    private static final int MAX_REFERENCE_BUFFER_LENGTH = 255;
+
+    /// Workspace bank for unmodified top-edge references.
+    private static final int TOP_REFERENCE_BANK = 0;
+
+    /// Workspace bank for unmodified left-edge references.
+    private static final int LEFT_REFERENCE_BANK = 1;
+
+    /// Workspace bank for filtered or upsampled top-edge references.
+    private static final int PROCESSED_TOP_REFERENCE_BANK = 2;
+
+    /// Workspace bank for filtered or upsampled left-edge references.
+    private static final int PROCESSED_LEFT_REFERENCE_BANK = 3;
+
+    /// Workspace bank for zone-2 top edges that include the top-left sample.
+    private static final int TOP_EDGE_BANK = 4;
+
+    /// Workspace bank for zone-2 left edges that include the top-left sample.
+    private static final int LEFT_EDGE_BANK = 5;
+
+    /// Number of independently reusable reference-buffer banks.
+    private static final int REFERENCE_BUFFER_BANK_COUNT = 6;
+
+    /// Per-thread intra-reference buffers used only during one synchronous prediction call.
+    private static final ThreadLocal<Workspace> PREDICTION_WORKSPACE = ThreadLocal.withInitial(Workspace::new);
 
     /// The AV1 directional derivative table indexed by half-angle.
     private static final int @Unmodifiable [] DIRECTIONAL_DERIVATIVES = {
@@ -1467,7 +1495,8 @@ final class IntraPredictor {
                     -1,
                     availableTopLength,
                     plane.bitDepth(),
-                    false
+                    false,
+                    PROCESSED_TOP_REFERENCE_BANK
             );
             dx <<= 1;
             maxBase = top.length - 1;
@@ -1485,7 +1514,8 @@ final class IntraPredictor {
                         referenceSpan,
                         -1,
                         availableTopLength,
-                        filterStrength
+                        filterStrength,
+                        PROCESSED_TOP_REFERENCE_BANK
                 );
                 maxBase = referenceSpan - 1;
             } else {
@@ -1588,7 +1618,8 @@ final class IntraPredictor {
                     0,
                     width + 1,
                     plane.bitDepth(),
-                    true
+                    true,
+                    TOP_EDGE_BANK
             );
             topBaseOffset = 2;
         } else {
@@ -1604,10 +1635,11 @@ final class IntraPredictor {
                             availableTopLength,
                             -1,
                             availableTopLength,
-                            filterStrength
+                            filterStrength,
+                            PROCESSED_TOP_REFERENCE_BANK
                     )
                     : topReferences;
-            topEdge = edgeWithTopLeft(filteredTopReferences, topLeft);
+            topEdge = edgeWithTopLeft(filteredTopReferences, topLeft, TOP_EDGE_BANK);
             topBaseOffset = 1;
         }
         int[] leftEdge;
@@ -1620,7 +1652,8 @@ final class IntraPredictor {
                     0,
                     height + 1,
                     plane.bitDepth(),
-                    true
+                    true,
+                    LEFT_EDGE_BANK
             );
             leftBaseOffset = 2;
         } else {
@@ -1636,10 +1669,11 @@ final class IntraPredictor {
                             availableLeftLength,
                             -1,
                             availableLeftLength,
-                            filterStrength
+                            filterStrength,
+                            PROCESSED_LEFT_REFERENCE_BANK
                     )
                     : leftReferences;
-            leftEdge = edgeWithTopLeft(filteredLeftReferences, topLeft);
+            leftEdge = edgeWithTopLeft(filteredLeftReferences, topLeft, LEFT_EDGE_BANK);
             leftBaseOffset = 1;
         }
         int topMinimumBase = -topBaseOffset;
@@ -1738,7 +1772,8 @@ final class IntraPredictor {
                     -1,
                     availableLeftLength,
                     plane.bitDepth(),
-                    false
+                    false,
+                    PROCESSED_LEFT_REFERENCE_BANK
             );
             dy <<= 1;
             maxBase = left.length - 1;
@@ -1756,7 +1791,8 @@ final class IntraPredictor {
                         referenceSpan,
                         -1,
                         availableLeftLength,
-                        filterStrength
+                        filterStrength,
+                        PROCESSED_LEFT_REFERENCE_BANK
                 );
                 maxBase = referenceSpan - 1;
             } else {
@@ -2387,7 +2423,7 @@ final class IntraPredictor {
             int rightBoundary,
             int bottomBoundary
     ) {
-        int[] references = new int[length];
+        int[] references = referenceBuffer(TOP_REFERENCE_BANK, length);
         if (y <= topBoundary) {
             int sample = x > leftBoundary ? plane.sample(x - 1, y) : defaultSample - 1;
             fillReferences(references, sample);
@@ -2439,7 +2475,7 @@ final class IntraPredictor {
             int rightBoundary,
             int bottomBoundary
     ) {
-        int[] references = new int[length];
+        int[] references = referenceBuffer(LEFT_REFERENCE_BANK, length);
         if (x <= leftBoundary) {
             int sample = y > topBoundary ? plane.sample(x, y - 1) : defaultSample + 1;
             fillReferences(references, sample);
@@ -2562,6 +2598,7 @@ final class IntraPredictor {
     /// @param from the inclusive source clamp lower bound
     /// @param to the exclusive source clamp upper bound
     /// @param strength the AV1 intra-edge filter strength
+    /// @param bufferBank the workspace bank that owns the returned edge
     /// @return the filtered directional reference edge
     private static int[] filterDirectionalEdge(
             int[] references,
@@ -2571,9 +2608,10 @@ final class IntraPredictor {
             int limitTo,
             int from,
             int to,
-            int strength
+            int strength,
+            int bufferBank
     ) {
-        int[] output = new int[outputLength];
+        int[] output = referenceBuffer(bufferBank, outputLength);
         int[] kernel = INTRA_EDGE_FILTER_KERNELS[strength - 1];
         int index = 0;
         for (; index < Math.min(outputLength, limitFrom); index++) {
@@ -2602,6 +2640,7 @@ final class IntraPredictor {
     /// @param to the exclusive source clamp upper bound
     /// @param bitDepth the decoded sample bit depth
     /// @param includeTopLeft whether conceptual source index `0` addresses the top-left sample
+    /// @param bufferBank the workspace bank that owns the returned edge
     /// @return the upsampled directional reference edge
     private static int[] upsampleDirectionalEdge(
             int[] references,
@@ -2610,9 +2649,10 @@ final class IntraPredictor {
             int from,
             int to,
             int bitDepth,
-            boolean includeTopLeft
+            boolean includeTopLeft,
+            int bufferBank
     ) {
-        int[] output = new int[outputEvenCount * 2 - 1];
+        int[] output = referenceBuffer(bufferBank, outputEvenCount * 2 - 1);
         int topLeftIndex = includeTopLeft ? 0 : -1;
         int maximumSample = (1 << bitDepth) - 1;
         int index = 0;
@@ -2644,9 +2684,10 @@ final class IntraPredictor {
     ///
     /// @param references the top or left references excluding the top-left sample
     /// @param topLeft the top-left reference sample
+    /// @param bufferBank the workspace bank that owns the returned edge
     /// @return a reference edge with the top-left sample at index `0`
-    private static int[] edgeWithTopLeft(int[] references, int topLeft) {
-        int[] edge = new int[references.length + 1];
+    private static int[] edgeWithTopLeft(int[] references, int topLeft, int bufferBank) {
+        int[] edge = referenceBuffer(bufferBank, references.length + 1);
         edge[0] = topLeft;
         System.arraycopy(references, 0, edge, 1, references.length);
         return edge;
@@ -2733,6 +2774,15 @@ final class IntraPredictor {
         return Math.max(minimum, Math.min(maximum, value));
     }
 
+    /// Returns one exact-length reference buffer owned by the current prediction thread.
+    ///
+    /// @param bank the independently reusable workspace bank
+    /// @param length the exact required buffer length
+    /// @return the reusable reference buffer
+    private static int[] referenceBuffer(int bank, int length) {
+        return PREDICTION_WORKSPACE.get().referenceBuffer(bank, length);
+    }
+
     /// Returns the smooth-predictor weight array for one supported block dimension.
     ///
     /// @param size the block width or height in samples
@@ -2792,6 +2842,38 @@ final class IntraPredictor {
             throw new IllegalStateException("Directional derivative index out of range: " + halfAngleIndex);
         }
         return DIRECTIONAL_DERIVATIVES[halfAngleIndex];
+    }
+
+    /// Lazily allocated reference arrays separated by simultaneous prediction role and length.
+    @NotNullByDefault
+    private static final class Workspace {
+        /// Nullable exact-length buffers indexed first by bank and then by buffer length.
+        private final int @Nullable [][][] referenceBuffers =
+                new int[REFERENCE_BUFFER_BANK_COUNT][MAX_REFERENCE_BUFFER_LENGTH + 1][];
+
+        /// Creates an initially empty prediction workspace.
+        private Workspace() {
+        }
+
+        /// Returns one exact-length buffer from an independently reusable bank.
+        ///
+        /// @param bank the zero-based buffer bank
+        /// @param length the exact required buffer length
+        /// @return the selected reusable buffer
+        private int[] referenceBuffer(int bank, int length) {
+            if (bank < 0 || bank >= referenceBuffers.length) {
+                throw new IllegalArgumentException("Reference buffer bank out of range: " + bank);
+            }
+            if (length <= 0 || length > MAX_REFERENCE_BUFFER_LENGTH) {
+                throw new IllegalArgumentException("Reference buffer length out of range: " + length);
+            }
+            int @Nullable [] buffer = referenceBuffers[bank][length];
+            if (buffer == null) {
+                buffer = new int[length];
+                referenceBuffers[bank][length] = buffer;
+            }
+            return buffer;
+        }
     }
 
     /// Internal intra-prediction kernel identifiers.

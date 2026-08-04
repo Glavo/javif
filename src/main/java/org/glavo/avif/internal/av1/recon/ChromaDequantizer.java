@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Dequantizes AV1 chroma transform coefficients.
@@ -45,7 +46,27 @@ final class ChromaDequantizer {
     /// @return one dequantized transform-domain coefficient block in natural raster order
     static int[] dequantize(TransformResidualUnit residualUnit, Context context) {
         TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
+        int[] dequantizedCoefficients = new int[nonNullResidualUnit.coefficientCount()];
+        dequantize(nonNullResidualUnit, context, dequantizedCoefficients);
+        return dequantizedCoefficients;
+    }
+
+    /// Dequantizes one chroma transform residual unit into caller-owned exact-length storage.
+    ///
+    /// The complete destination array is overwritten. DC and AC use the plane-specific delta
+    /// quantizers supplied through the context.
+    ///
+    /// @param residualUnit the chroma residual unit to dequantize
+    /// @param context the block-local dequantization context
+    /// @param destination the exact-length destination in natural raster order
+    static void dequantize(
+            TransformResidualUnit residualUnit,
+            Context context,
+            int[] destination
+    ) {
+        TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         Context nonNullContext = Objects.requireNonNull(context, "context");
+        int[] nonNullDestination = Objects.requireNonNull(destination, "destination");
         if (nonNullContext.bitDepth() != 8
                 && nonNullContext.bitDepth() != 10
                 && nonNullContext.bitDepth() != 12) {
@@ -53,11 +74,14 @@ final class ChromaDequantizer {
         }
 
         int coefficientCount = nonNullResidualUnit.coefficientCount();
+        if (nonNullDestination.length != coefficientCount) {
+            throw new IllegalArgumentException("destination length does not match transform area");
+        }
         if (nonNullResidualUnit.allZero()) {
-            return new int[coefficientCount];
+            Arrays.fill(nonNullDestination, 0);
+            return;
         }
 
-        int[] dequantizedCoefficients = new int[coefficientCount];
         int dcQuantizer = QuantizerTables.dcQuantizer(
                 nonNullContext.qIndex() + nonNullContext.dcDelta(),
                 nonNullContext.bitDepth()
@@ -68,7 +92,7 @@ final class ChromaDequantizer {
         );
         int dequantizationShift = QuantizerTables.dequantizationShift(nonNullResidualUnit.size());
         byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(nonNullResidualUnit, nonNullContext);
-        dequantizedCoefficients[0] = scaledCoefficient(
+        nonNullDestination[0] = scaledCoefficient(
                 nonNullResidualUnit.coefficient(0),
                 dcQuantizer,
                 dequantizationShift,
@@ -76,7 +100,7 @@ final class ChromaDequantizer {
                 matrixValue(quantizationMatrix, nonNullResidualUnit.size(), 0)
         );
         for (int coefficientIndex = 1; coefficientIndex < coefficientCount; coefficientIndex++) {
-            dequantizedCoefficients[coefficientIndex] = scaledCoefficient(
+            nonNullDestination[coefficientIndex] = scaledCoefficient(
                     nonNullResidualUnit.coefficient(coefficientIndex),
                     acQuantizer,
                     dequantizationShift,
@@ -84,7 +108,6 @@ final class ChromaDequantizer {
                     matrixValue(quantizationMatrix, nonNullResidualUnit.size(), coefficientIndex)
             );
         }
-        return dequantizedCoefficients;
     }
 
     /// Returns the active quantization matrix for one residual unit, or `null` when no matrix applies.

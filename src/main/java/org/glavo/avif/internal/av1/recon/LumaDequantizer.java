@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Dequantizes AV1 luma transform coefficients.
@@ -44,7 +45,27 @@ final class LumaDequantizer {
     /// @return one dequantized transform-domain coefficient block in natural raster order
     static int[] dequantize(TransformResidualUnit residualUnit, Context context) {
         TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
+        int[] dequantizedCoefficients = new int[nonNullResidualUnit.coefficientCount()];
+        dequantize(nonNullResidualUnit, context, dequantizedCoefficients);
+        return dequantizedCoefficients;
+    }
+
+    /// Dequantizes one luma transform residual unit into caller-owned exact-length storage.
+    ///
+    /// The complete destination array is overwritten. DC uses the frame-level luma DC delta while
+    /// AC uses the block-local `qindex` unchanged.
+    ///
+    /// @param residualUnit the luma residual unit to dequantize
+    /// @param context the block-local dequantization context
+    /// @param destination the exact-length destination in natural raster order
+    static void dequantize(
+            TransformResidualUnit residualUnit,
+            Context context,
+            int[] destination
+    ) {
+        TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         Context nonNullContext = Objects.requireNonNull(context, "context");
+        int[] nonNullDestination = Objects.requireNonNull(destination, "destination");
         if (nonNullContext.bitDepth() != 8
                 && nonNullContext.bitDepth() != 10
                 && nonNullContext.bitDepth() != 12) {
@@ -52,16 +73,19 @@ final class LumaDequantizer {
         }
 
         int coefficientCount = nonNullResidualUnit.coefficientCount();
+        if (nonNullDestination.length != coefficientCount) {
+            throw new IllegalArgumentException("destination length does not match transform area");
+        }
         if (nonNullResidualUnit.allZero()) {
-            return new int[coefficientCount];
+            Arrays.fill(nonNullDestination, 0);
+            return;
         }
 
-        int[] dequantizedCoefficients = new int[coefficientCount];
         int dcQuantizer = lumaDcQuantizer(nonNullContext);
         int acQuantizer = lumaAcQuantizer(nonNullContext);
         int dequantizationShift = QuantizerTables.dequantizationShift(nonNullResidualUnit.size());
         byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(nonNullResidualUnit, nonNullContext);
-        dequantizedCoefficients[0] = scaledCoefficient(
+        nonNullDestination[0] = scaledCoefficient(
                 nonNullResidualUnit.coefficient(0),
                 dcQuantizer,
                 dequantizationShift,
@@ -69,7 +93,7 @@ final class LumaDequantizer {
                 matrixValue(quantizationMatrix, nonNullResidualUnit.size(), 0)
         );
         for (int coefficientIndex = 1; coefficientIndex < coefficientCount; coefficientIndex++) {
-            dequantizedCoefficients[coefficientIndex] = scaledCoefficient(
+            nonNullDestination[coefficientIndex] = scaledCoefficient(
                     nonNullResidualUnit.coefficient(coefficientIndex),
                     acQuantizer,
                     dequantizationShift,
@@ -77,7 +101,6 @@ final class LumaDequantizer {
                     matrixValue(quantizationMatrix, nonNullResidualUnit.size(), coefficientIndex)
             );
         }
-        return dequantizedCoefficients;
     }
 
     /// Returns the active luma DC quantizer after clamping the derived qindex.
