@@ -2194,22 +2194,39 @@ public final class BlockNeighborContext {
     /// @param transformUnit the current luma transform unit
     /// @return the luma coefficient skip-context in `[0, 7)`
     public int lumaCoefficientSkipContext(BlockSize blockSize, TransformUnit transformUnit) {
-        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
         TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
-        TransformSize transformSize = nonNullTransformUnit.size();
-        if (nonNullBlockSize.width4() == transformSize.width4() && nonNullBlockSize.height4() == transformSize.height4()) {
+        return lumaCoefficientSkipContext(
+                blockSize,
+                nonNullTransformUnit.position().x4(),
+                nonNullTransformUnit.position().y4(),
+                nonNullTransformUnit.size()
+        );
+    }
+
+    /// Returns the luma coefficient skip-context for one tile-local transform span.
+    ///
+    /// @param blockSize the coded block size that owns the current transform unit
+    /// @param x4 the tile-local transform origin on the luma-grid X axis
+    /// @param y4 the tile-local transform origin on the luma-grid Y axis
+    /// @param transformSize the current luma transform size
+    /// @return the luma coefficient skip-context in `[0, 7)`
+    int lumaCoefficientSkipContext(BlockSize blockSize, int x4, int y4, TransformSize transformSize) {
+        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
+        if (nonNullBlockSize.width4() == nonNullTransformSize.width4()
+                && nonNullBlockSize.height4() == nonNullTransformSize.height4()) {
             return 0;
         }
 
         int aboveContext = mergeCoefficientContext(
                 aboveLumaCoefficientContext,
-                nonNullTransformUnit.position().x4(),
-                transformSize.width4()
+                x4,
+                nonNullTransformSize.width4()
         );
         int leftContext = mergeCoefficientContext(
                 leftLumaCoefficientContext,
-                nonNullTransformUnit.position().y4(),
-                transformSize.height4()
+                y4,
+                nonNullTransformSize.height4()
         );
         return LUMA_COEFFICIENT_SKIP_CONTEXTS[Math.min(aboveContext & 0x3F, 4)][Math.min(leftContext & 0x3F, 4)];
     }
@@ -2223,15 +2240,29 @@ public final class BlockNeighborContext {
     /// @return the luma DC-sign context in `[0, 3)`
     public int lumaDcSignContext(TransformUnit transformUnit) {
         TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
-        TransformSize transformSize = nonNullTransformUnit.size();
+        return lumaDcSignContext(
+                nonNullTransformUnit.position().x4(),
+                nonNullTransformUnit.position().y4(),
+                nonNullTransformUnit.size()
+        );
+    }
+
+    /// Returns the luma DC-sign context for one tile-local transform span.
+    ///
+    /// @param x4 the tile-local transform origin on the luma-grid X axis
+    /// @param y4 the tile-local transform origin on the luma-grid Y axis
+    /// @param transformSize the current luma transform size
+    /// @return the luma DC-sign context in `[0, 3)`
+    int lumaDcSignContext(int x4, int y4, TransformSize transformSize) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         int signBalance = sumDcSignClasses(
                 aboveLumaCoefficientContext,
-                nonNullTransformUnit.position().x4(),
-                transformSize.width4()
+                x4,
+                nonNullTransformSize.width4()
         ) + sumDcSignClasses(
                 leftLumaCoefficientContext,
-                nonNullTransformUnit.position().y4(),
-                transformSize.height4()
+                y4,
+                nonNullTransformSize.height4()
         );
         return (signBalance != 0 ? 1 : 0) + (signBalance > 0 ? 1 : 0);
     }
@@ -2254,8 +2285,32 @@ public final class BlockNeighborContext {
             BlockPosition position,
             TransformSize transformSize
     ) {
-        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        return chromaCoefficientSkipContext(
+                plane,
+                blockSize,
+                nonNullPosition.x4(),
+                nonNullPosition.y4(),
+                transformSize
+        );
+    }
+
+    /// Returns the chroma coefficient skip-context for one tile-local transform span.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @param blockSize the coded block size that owns the current transform unit
+    /// @param x4 the tile-local transform origin on the luma-grid X axis
+    /// @param y4 the tile-local transform origin on the luma-grid Y axis
+    /// @param transformSize the current chroma transform size
+    /// @return the chroma coefficient skip-context in `[7, 13)`
+    int chromaCoefficientSkipContext(
+            int plane,
+            BlockSize blockSize,
+            int x4,
+            int y4,
+            TransformSize transformSize
+    ) {
+        BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         byte[] aboveContexts = selectAboveChromaCoefficientContext(plane);
         byte[] leftContexts = selectLeftChromaCoefficientContext(plane);
@@ -2263,12 +2318,12 @@ public final class BlockNeighborContext {
                 || chromaBlockLog2Height4(nonNullBlockSize) > nonNullTransformSize.log2Height4();
         boolean aboveHasNonZero = hasNonZeroCoefficientContext(
                 aboveContexts,
-                chromaX4(nonNullPosition),
+                x4 >> chromaSubsamplingX,
                 nonNullTransformSize.width4()
         );
         boolean leftHasNonZero = hasNonZeroCoefficientContext(
                 leftContexts,
-                chromaY4(nonNullPosition),
+                y4 >> chromaSubsamplingY,
                 nonNullTransformSize.height4()
         );
         return 7 + (notOneBlock ? 3 : 0) + (aboveHasNonZero ? 1 : 0) + (leftHasNonZero ? 1 : 0);
@@ -2282,16 +2337,27 @@ public final class BlockNeighborContext {
     /// @return the chroma DC-sign context in `[0, 3)`
     public int chromaDcSignContext(int plane, BlockPosition position, TransformSize transformSize) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        return chromaDcSignContext(plane, nonNullPosition.x4(), nonNullPosition.y4(), transformSize);
+    }
+
+    /// Returns the chroma DC-sign context for one tile-local transform span.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @param x4 the tile-local transform origin on the luma-grid X axis
+    /// @param y4 the tile-local transform origin on the luma-grid Y axis
+    /// @param transformSize the current chroma transform size
+    /// @return the chroma DC-sign context in `[0, 3)`
+    int chromaDcSignContext(int plane, int x4, int y4, TransformSize transformSize) {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         byte[] aboveContexts = selectAboveChromaCoefficientContext(plane);
         byte[] leftContexts = selectLeftChromaCoefficientContext(plane);
         int signBalance = sumDcSignClasses(
                 aboveContexts,
-                chromaX4(nonNullPosition),
+                x4 >> chromaSubsamplingX,
                 nonNullTransformSize.width4()
         ) + sumDcSignClasses(
                 leftContexts,
-                chromaY4(nonNullPosition),
+                y4 >> chromaSubsamplingY,
                 nonNullTransformSize.height4()
         );
         return (signBalance != 0 ? 1 : 0) + (signBalance > 0 ? 1 : 0);
@@ -2385,19 +2451,38 @@ public final class BlockNeighborContext {
     /// @param coefficientContextByte the coefficient-context byte written back for the decoded unit
     public void updateLumaCoefficientContext(TransformUnit transformUnit, int coefficientContextByte) {
         TransformUnit nonNullTransformUnit = Objects.requireNonNull(transformUnit, "transformUnit");
+        updateLumaCoefficientContext(
+                nonNullTransformUnit.position().x4(),
+                nonNullTransformUnit.position().y4(),
+                nonNullTransformUnit.size(),
+                coefficientContextByte
+        );
+    }
+
+    /// Updates the luma coefficient-context state for one tile-local transform span.
+    ///
+    /// @param x4 the tile-local transform origin on the luma-grid X axis
+    /// @param y4 the tile-local transform origin on the luma-grid Y axis
+    /// @param transformSize the decoded luma transform size
+    /// @param coefficientContextByte the coefficient-context byte written back for the decoded unit
+    void updateLumaCoefficientContext(
+            int x4,
+            int y4,
+            TransformSize transformSize,
+            int coefficientContextByte
+    ) {
+        TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
             throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
         }
-        BlockPosition position = nonNullTransformUnit.position();
-        TransformSize transformSize = nonNullTransformUnit.size();
-        int endX4 = Math.min(tileWidth4, position.x4() + transformSize.width4());
-        int endY4 = Math.min(tileHeight4, position.y4() + transformSize.height4());
+        int endX4 = Math.min(tileWidth4, x4 + nonNullTransformSize.width4());
+        int endY4 = Math.min(tileHeight4, y4 + nonNullTransformSize.height4());
         byte storedValue = (byte) coefficientContextByte;
-        for (int x4 = position.x4(); x4 < endX4; x4++) {
-            aboveLumaCoefficientContext[x4] = storedValue;
+        for (int currentX4 = x4; currentX4 < endX4; currentX4++) {
+            aboveLumaCoefficientContext[currentX4] = storedValue;
         }
-        for (int y4 = position.y4(); y4 < endY4; y4++) {
-            leftLumaCoefficientContext[y4] = storedValue;
+        for (int currentY4 = y4; currentY4 < endY4; currentY4++) {
+            leftLumaCoefficientContext[currentY4] = storedValue;
         }
     }
 
@@ -2414,22 +2499,45 @@ public final class BlockNeighborContext {
             int coefficientContextByte
     ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        updateChromaCoefficientContext(
+                plane,
+                nonNullPosition.x4(),
+                nonNullPosition.y4(),
+                transformSize,
+                coefficientContextByte
+        );
+    }
+
+    /// Updates the chroma coefficient-context state for one tile-local transform span.
+    ///
+    /// @param plane the chroma plane index, where `0` is U and `1` is V
+    /// @param x4 the tile-local transform origin on the luma-grid X axis
+    /// @param y4 the tile-local transform origin on the luma-grid Y axis
+    /// @param transformSize the decoded chroma transform size
+    /// @param coefficientContextByte the coefficient-context byte written back for the decoded unit
+    void updateChromaCoefficientContext(
+            int plane,
+            int x4,
+            int y4,
+            TransformSize transformSize,
+            int coefficientContextByte
+    ) {
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
         if (coefficientContextByte < 0 || coefficientContextByte > 0xFF) {
             throw new IllegalArgumentException("coefficientContextByte out of range: " + coefficientContextByte);
         }
         byte[] aboveContexts = selectAboveChromaCoefficientContext(plane);
         byte[] leftContexts = selectLeftChromaCoefficientContext(plane);
-        int startX4 = chromaX4(nonNullPosition);
-        int startY4 = chromaY4(nonNullPosition);
+        int startX4 = x4 >> chromaSubsamplingX;
+        int startY4 = y4 >> chromaSubsamplingY;
         int endX4 = Math.min(aboveContexts.length, startX4 + nonNullTransformSize.width4());
         int endY4 = Math.min(leftContexts.length, startY4 + nonNullTransformSize.height4());
         byte storedValue = (byte) coefficientContextByte;
-        for (int x4 = startX4; x4 < endX4; x4++) {
-            aboveContexts[x4] = storedValue;
+        for (int currentX4 = startX4; currentX4 < endX4; currentX4++) {
+            aboveContexts[currentX4] = storedValue;
         }
-        for (int y4 = startY4; y4 < endY4; y4++) {
-            leftContexts[y4] = storedValue;
+        for (int currentY4 = startY4; currentY4 < endY4; currentY4++) {
+            leftContexts[currentY4] = storedValue;
         }
     }
 

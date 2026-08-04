@@ -24,9 +24,11 @@ import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.ResidualLayout;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.testutil.HexFixtureResources;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -90,6 +92,30 @@ final class TilePartitionTreeReaderTest {
     /// Verifies that a non-origin tile retains frame-relative coordinates in its decoded tree.
     @Test
     void retainsFrameRelativeCoordinatesForOffsetTile() {
+        TileDecodeContext directContext = createContext(FrameType.KEY, 128, 64, FIXED_TILE_PAYLOAD, 2, 1);
+        BlockNeighborContext neighborContext = BlockNeighborContext.create(directContext);
+        TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader(directContext).read(
+                new BlockPosition(0, 0),
+                BlockSize.SIZE_64X64,
+                neighborContext,
+                false
+        );
+        TransformLayout directTransformLayout = new TileTransformLayoutReader(directContext).read(
+                header,
+                neighborContext
+        );
+        ResidualLayout directResidualLayout = new TileResidualSyntaxReader(directContext).read(
+                header,
+                directTransformLayout,
+                neighborContext
+        );
+
+        assertEquals(0, header.position().x4());
+        assertEquals(16, directTransformLayout.position().x4());
+        assertEquals(16, directTransformLayout.lumaUnits()[0].position().x4());
+        assertEquals(16, directResidualLayout.position().x4());
+        assertEquals(16, directResidualLayout.lumaUnits()[0].position().x4());
+
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
                 createContext(FrameType.KEY, 128, 64, FIXED_TILE_PAYLOAD, 2, 1)
         );

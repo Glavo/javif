@@ -35,6 +35,8 @@ import java.util.Objects;
 ///
 /// The reader decodes the luma, chroma-U, and chroma-V residual units exposed by
 /// `TransformLayout`, including pixel-clipped chroma footprints along the frame fringe.
+/// Retained transform and residual positions are frame-relative, while coefficient-neighbor
+/// contexts remain tile-local as required by AV1 tile entropy independence.
 /// `TX_4X4` keeps its dedicated context helpers, while larger transform sizes use the same
 /// coefficient-neighbor token contexts so multi-coefficient blocks do not fall back to fixed
 /// probabilities once AC residuals are present.
@@ -135,18 +137,26 @@ public final class TileResidualSyntaxReader {
     /// The typed syntax reader used to consume coefficient-side entropy symbols.
     private final TileSyntaxReader syntaxReader;
 
+    /// The tile origin on the frame luma-grid X axis.
+    private final int frameOffsetX4;
+
+    /// The tile origin on the frame luma-grid Y axis.
+    private final int frameOffsetY4;
+
     /// Creates one tile-local residual syntax reader.
     ///
     /// @param tileContext the tile-local decode state that owns the active tile bitstream
     public TileResidualSyntaxReader(TileDecodeContext tileContext) {
         this.tileContext = Objects.requireNonNull(tileContext, "tileContext");
         this.syntaxReader = new TileSyntaxReader(this.tileContext);
+        this.frameOffsetX4 = this.tileContext.startX() >> 2;
+        this.frameOffsetY4 = this.tileContext.startY() >> 2;
     }
 
     /// Decodes residual syntax for one already-decoded block.
     ///
-    /// @param header the decoded leaf block header
-    /// @param transformLayout the decoded transform layout for the same block
+    /// @param header the decoded leaf block header whose position is tile-local
+    /// @param transformLayout the frame-relative decoded transform layout for the same block
     /// @param neighborContext the mutable neighbor context that supplies coefficient skip contexts
     /// @return the decoded residual layout for the supplied block
     public ResidualLayout read(
@@ -157,7 +167,8 @@ public final class TileResidualSyntaxReader {
         TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
         TransformLayout nonNullTransformLayout = Objects.requireNonNull(transformLayout, "transformLayout");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
-        if (!nonNullHeader.position().equals(nonNullTransformLayout.position())
+        if (nonNullHeader.position().x4() + frameOffsetX4 != nonNullTransformLayout.position().x4()
+                || nonNullHeader.position().y4() + frameOffsetY4 != nonNullTransformLayout.position().y4()
                 || nonNullHeader.size() != nonNullTransformLayout.blockSize()) {
             throw new IllegalArgumentException("Header and transform layout must describe the same block");
         }
@@ -265,7 +276,12 @@ public final class TileResidualSyntaxReader {
                     ? createAllZeroUnit(transformUnit.position(), transformUnit.size(), visibleWidthPixels, visibleHeightPixels)
                     : readLumaResidualUnit(header, transformLayout, transformUnit, neighborContext);
             residualUnits[i] = residualUnit;
-            neighborContext.updateLumaCoefficientContext(transformUnit, residualUnit.coefficientContextByte());
+            neighborContext.updateLumaCoefficientContext(
+                    transformUnit.position().x4() - frameOffsetX4,
+                    transformUnit.position().y4() - frameOffsetY4,
+                    transformUnit.size(),
+                    residualUnit.coefficientContextByte()
+            );
         }
     }
 
@@ -309,9 +325,13 @@ public final class TileResidualSyntaxReader {
 
         int visibleWidthPixels = visibleLumaWidthPixels(nonNullTransformLayout, nonNullTransformUnit);
         int visibleHeightPixels = visibleLumaHeightPixels(nonNullTransformLayout, nonNullTransformUnit);
+        int localX4 = nonNullTransformUnit.position().x4() - frameOffsetX4;
+        int localY4 = nonNullTransformUnit.position().y4() - frameOffsetY4;
         int coefficientSkipContext = nonNullNeighborContext.lumaCoefficientSkipContext(
                 nonNullHeader.size(),
-                nonNullTransformUnit
+                localX4,
+                localY4,
+                nonNullTransformUnit.size()
         );
         if (syntaxReader.readCoefficientSkipFlag(nonNullTransformUnit.size(), coefficientSkipContext)) {
             return createAllZeroUnit(
@@ -329,7 +349,7 @@ public final class TileResidualSyntaxReader {
                 visibleHeightPixels,
                 false,
                 lumaTransformType(nonNullHeader, nonNullTransformUnit.size()),
-                nonNullNeighborContext.lumaDcSignContext(nonNullTransformUnit)
+                nonNullNeighborContext.lumaDcSignContext(localX4, localY4, nonNullTransformUnit.size())
         );
     }
 
@@ -378,6 +398,8 @@ public final class TileResidualSyntaxReader {
             }
             BlockPosition unitPosition = transformUnit.position();
             TransformSize unitSize = transformUnit.size();
+            int localX4 = unitPosition.x4() - frameOffsetX4;
+            int localY4 = unitPosition.y4() - frameOffsetY4;
             int visibleUnitWidthPixels = visibleChromaUnitWidthPixels(nonNullTransformLayout, transformUnit);
             int visibleUnitHeightPixels = visibleChromaUnitHeightPixels(nonNullTransformLayout, transformUnit);
             TransformResidualUnit residualUnit;
@@ -392,7 +414,8 @@ public final class TileResidualSyntaxReader {
                 int coefficientSkipContext = nonNullNeighborContext.chromaCoefficientSkipContext(
                         plane,
                         nonNullHeader.size(),
-                        unitPosition,
+                        localX4,
+                        localY4,
                         unitSize
                 );
                 boolean coefficientSkip = syntaxReader.readCoefficientSkipFlag(unitSize, coefficientSkipContext);
@@ -421,7 +444,8 @@ public final class TileResidualSyntaxReader {
                             ),
                             nonNullNeighborContext.chromaDcSignContext(
                                     plane,
-                                    unitPosition,
+                                    localX4,
+                                    localY4,
                                     unitSize
                             )
                     );
@@ -429,7 +453,8 @@ public final class TileResidualSyntaxReader {
             }
             nonNullNeighborContext.updateChromaCoefficientContext(
                     plane,
-                    unitPosition,
+                    localX4,
+                    localY4,
                     unitSize,
                     residualUnit.coefficientContextByte()
             );

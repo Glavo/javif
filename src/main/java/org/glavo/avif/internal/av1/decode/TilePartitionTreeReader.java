@@ -286,12 +286,8 @@ public final class TilePartitionTreeReader {
         if (frameOffsetX4 == 0 && frameOffsetY4 == 0) {
             return new LeafNode(header, transformLayout, residualLayout);
         }
-        header.relocatePosition(header.position().offset(frameOffsetX4, frameOffsetY4));
-        return new LeafNode(
-                header,
-                transformLayout.withOffset(frameOffsetX4, frameOffsetY4),
-                residualLayout.withOffset(frameOffsetX4, frameOffsetY4)
-        );
+        header.relocatePosition(transformLayout.position());
+        return new LeafNode(header, transformLayout, residualLayout);
     }
 
     /// Creates a partition node and drops children that fell fully outside the tile.

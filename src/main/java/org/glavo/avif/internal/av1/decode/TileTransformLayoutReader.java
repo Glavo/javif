@@ -34,6 +34,8 @@ import java.util.Objects;
 ///
 /// Handles uniform intra-like transform sizes, switchable transform-depth symbols, explicit chroma
 /// transform-unit tiling, lossless 4x4 tiling, and switchable inter variable-transform trees.
+/// Entropy contexts use tile-local positions, while returned layouts and units use frame-relative
+/// positions so callers can retain them without a second relocation pass.
 @NotNullByDefault
 public final class TileTransformLayoutReader {
     /// The width and height of one AV1 transform-processing region in 4x4 luma units.
@@ -45,6 +47,12 @@ public final class TileTransformLayoutReader {
     /// The typed syntax reader used for transform-size symbols.
     private final TileSyntaxReader syntaxReader;
 
+    /// The tile origin on the frame luma-grid X axis.
+    private final int frameOffsetX4;
+
+    /// The tile origin on the frame luma-grid Y axis.
+    private final int frameOffsetY4;
+
     /// Creates one block-level transform-layout reader.
     ///
     /// @param tileContext the tile-local decode state that owns the active frame and sequence headers
@@ -52,6 +60,8 @@ public final class TileTransformLayoutReader {
         TileDecodeContext nonNullTileContext = Objects.requireNonNull(tileContext, "tileContext");
         this.tileContext = nonNullTileContext;
         this.syntaxReader = new TileSyntaxReader(nonNullTileContext);
+        this.frameOffsetX4 = nonNullTileContext.startX() >> 2;
+        this.frameOffsetY4 = nonNullTileContext.startY() >> 2;
     }
 
     /// Returns the tile-local decode state that owns this transform-layout reader.
@@ -63,9 +73,9 @@ public final class TileTransformLayoutReader {
 
     /// Decodes the transform layout for one already-decoded leaf block header.
     ///
-    /// @param header the decoded leaf block header
+    /// @param header the decoded leaf block header whose position is tile-local
     /// @param neighborContext the mutable neighbor context that supplies transform-size contexts
-    /// @return the decoded transform layout for the supplied leaf block
+    /// @return the decoded transform layout with frame-relative retained positions
     public TransformLayout read(TileBlockHeaderReader.BlockHeader header, BlockNeighborContext neighborContext) {
         TileBlockHeaderReader.BlockHeader nonNullHeader = Objects.requireNonNull(header, "header");
         BlockNeighborContext nonNullNeighborContext = Objects.requireNonNull(neighborContext, "neighborContext");
@@ -121,7 +131,7 @@ public final class TileTransformLayoutReader {
         }
 
         return new TransformLayout(
-                position,
+                framePosition(position),
                 size,
                 visibleWidth4,
                 visibleHeight4,
@@ -327,8 +337,8 @@ public final class TileTransformLayoutReader {
     /// @param visibleWidth4 the visible block width in 4x4 units
     /// @param visibleHeight4 the visible block height in 4x4 units
     /// @param transformSize the repeated luma transform size
-    /// @return the repeated luma transform units that cover the visible block span
-    private static TransformUnit[] tileUniformUnits(
+    /// @return frame-relative luma transform units that cover the visible block span
+    private TransformUnit[] tileUniformUnits(
             BlockPosition position,
             int visibleWidth4,
             int visibleHeight4,
@@ -343,7 +353,13 @@ public final class TileTransformLayoutReader {
                 int regionEndX4 = Math.min(regionX4 + TRANSFORM_REGION_SIZE4, visibleWidth4);
                 for (int y4 = regionY4; y4 < regionEndY4; y4 += nonNullTransformSize.height4()) {
                     for (int x4 = regionX4; x4 < regionEndX4; x4 += nonNullTransformSize.width4()) {
-                        units.add(new TransformUnit(nonNullPosition.offset(x4, y4), nonNullTransformSize));
+                        units.add(new TransformUnit(
+                                new BlockPosition(
+                                        nonNullPosition.x4() + x4 + frameOffsetX4,
+                                        nonNullPosition.y4() + y4 + frameOffsetY4
+                                ),
+                                nonNullTransformSize
+                        ));
                     }
                 }
             }
@@ -353,8 +369,8 @@ public final class TileTransformLayoutReader {
 
     /// Tiles one visible block span with chroma transform units in AV1 processing order.
     ///
-    /// The returned unit positions are widened back into the shared luma-grid `BlockPosition`
-    /// coordinate space so downstream contexts and reconstruction can keep using one position type.
+    /// The returned unit positions are widened back into the frame-relative shared luma-grid
+    /// `BlockPosition` coordinate space so reconstruction can keep using one position type.
     ///
     /// @param position the local tile-relative luma-grid origin of the owning block
     /// @param blockSize the coded block size that owns the chroma units
@@ -362,8 +378,8 @@ public final class TileTransformLayoutReader {
     /// @param visibleHeightPixels the exact visible luma height in pixels
     /// @param transformSize the repeated chroma transform size
     /// @param pixelFormat the active decoded chroma layout
-    /// @return the repeated chroma transform units covering the visible chroma span
-    private static TransformUnit[] tileChromaUnits(
+    /// @return frame-relative chroma transform units covering the visible chroma span
+    private TransformUnit[] tileChromaUnits(
             BlockPosition position,
             BlockSize blockSize,
             int visibleWidthPixels,
@@ -378,7 +394,6 @@ public final class TileTransformLayoutReader {
         int subsamplingY = chromaSubsamplingY(pixelFormat);
         int originX4 = chromaOrigin4(nonNullPosition.x4(), nonNullBlockSize.width4(), subsamplingX);
         int originY4 = chromaOrigin4(nonNullPosition.y4(), nonNullBlockSize.height4(), subsamplingY);
-        BlockPosition chromaOrigin = new BlockPosition(originX4, originY4);
         int visibleChromaWidthPixels = chromaDimension(
                 ((nonNullPosition.x4() << 2) + visibleWidthPixels) - (originX4 << 2),
                 subsamplingX
@@ -397,7 +412,10 @@ public final class TileTransformLayoutReader {
                 for (int y = regionY; y < regionEndY; y += nonNullTransformSize.heightPixels()) {
                     for (int x = regionX; x < regionEndX; x += nonNullTransformSize.widthPixels()) {
                         units.add(new TransformUnit(
-                                chromaOrigin.offset((x >> 2) << subsamplingX, (y >> 2) << subsamplingY),
+                                new BlockPosition(
+                                        originX4 + ((x >> 2) << subsamplingX) + frameOffsetX4,
+                                        originY4 + ((y >> 2) << subsamplingY) + frameOffsetY4
+                                ),
                                 nonNullTransformSize
                         ));
                     }
@@ -405,6 +423,21 @@ public final class TileTransformLayoutReader {
             }
         }
         return units.toArray(new TransformUnit[0]);
+    }
+
+    /// Returns one tile-local position translated into the retained frame coordinate space.
+    ///
+    /// @param position the tile-local block position
+    /// @return the corresponding frame-relative block position
+    private BlockPosition framePosition(BlockPosition position) {
+        BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
+        if ((frameOffsetX4 | frameOffsetY4) == 0) {
+            return nonNullPosition;
+        }
+        return new BlockPosition(
+                nonNullPosition.x4() + frameOffsetX4,
+                nonNullPosition.y4() + frameOffsetY4
+        );
     }
 
     /// Returns the luma-grid origin for one chroma block span.
