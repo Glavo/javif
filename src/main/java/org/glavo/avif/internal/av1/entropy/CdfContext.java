@@ -992,6 +992,33 @@ public final class CdfContext {
     /// The mutable non-class-0 high-precision motion-vector CDFs for vertical and horizontal components.
     private final int[][] motionVectorClassNHpCdfs;
 
+    /// The mutable intrabc displacement-vector joint CDF.
+    private final int[] intrabcMotionVectorJointCdf;
+
+    /// The mutable intrabc displacement-vector class CDFs for vertical and horizontal components.
+    private final int[][] intrabcMotionVectorClassCdfs;
+
+    /// The mutable intrabc displacement-vector sign CDFs for vertical and horizontal components.
+    private final int[][] intrabcMotionVectorSignCdfs;
+
+    /// The mutable intrabc class-0 displacement-vector magnitude CDFs for vertical and horizontal components.
+    private final int[][] intrabcMotionVectorClass0Cdfs;
+
+    /// The mutable intrabc class-0 fractional displacement-vector CDFs for vertical and horizontal components.
+    private final int[][][] intrabcMotionVectorClass0FpCdfs;
+
+    /// The mutable intrabc class-0 high-precision displacement-vector CDFs for vertical and horizontal components.
+    private final int[][] intrabcMotionVectorClass0HpCdfs;
+
+    /// The mutable intrabc non-class-0 displacement-vector bit CDFs for vertical and horizontal components.
+    private final int[][][] intrabcMotionVectorClassNCdfs;
+
+    /// The mutable intrabc non-class-0 fractional displacement-vector CDFs for vertical and horizontal components.
+    private final int[][] intrabcMotionVectorClassNFpCdfs;
+
+    /// The mutable intrabc non-class-0 high-precision displacement-vector CDFs for vertical and horizontal components.
+    private final int[][] intrabcMotionVectorClassNHpCdfs;
+
     /// The mutable `intrabc` CDF.
     private final int[] intrabcCdf;
 
@@ -1100,6 +1127,15 @@ public final class CdfContext {
     /// @param motionVectorClassNCdfs the mutable non-class-0 motion-vector bit CDFs
     /// @param motionVectorClassNFpCdfs the mutable non-class-0 fractional motion-vector CDFs
     /// @param motionVectorClassNHpCdfs the mutable non-class-0 high-precision motion-vector CDFs
+    /// @param intrabcMotionVectorJointCdf the mutable intrabc displacement-vector joint CDF
+    /// @param intrabcMotionVectorClassCdfs the mutable intrabc displacement-vector class CDFs
+    /// @param intrabcMotionVectorSignCdfs the mutable intrabc displacement-vector sign CDFs
+    /// @param intrabcMotionVectorClass0Cdfs the mutable intrabc class-0 displacement-vector magnitude CDFs
+    /// @param intrabcMotionVectorClass0FpCdfs the mutable intrabc class-0 fractional displacement-vector CDFs
+    /// @param intrabcMotionVectorClass0HpCdfs the mutable intrabc class-0 high-precision displacement-vector CDFs
+    /// @param intrabcMotionVectorClassNCdfs the mutable intrabc non-class-0 displacement-vector bit CDFs
+    /// @param intrabcMotionVectorClassNFpCdfs the mutable intrabc non-class-0 fractional displacement-vector CDFs
+    /// @param intrabcMotionVectorClassNHpCdfs the mutable intrabc non-class-0 high-precision displacement-vector CDFs
     /// @param intrabcCdf the mutable `intrabc` CDF
     /// @param restorationWienerCdf the mutable Wiener restoration enable CDF
     /// @param restorationSelfGuidedCdf the mutable self-guided restoration enable CDF
@@ -1169,6 +1205,15 @@ public final class CdfContext {
             int[][][] motionVectorClassNCdfs,
             int[][] motionVectorClassNFpCdfs,
             int[][] motionVectorClassNHpCdfs,
+            int[] intrabcMotionVectorJointCdf,
+            int[][] intrabcMotionVectorClassCdfs,
+            int[][] intrabcMotionVectorSignCdfs,
+            int[][] intrabcMotionVectorClass0Cdfs,
+            int[][][] intrabcMotionVectorClass0FpCdfs,
+            int[][] intrabcMotionVectorClass0HpCdfs,
+            int[][][] intrabcMotionVectorClassNCdfs,
+            int[][] intrabcMotionVectorClassNFpCdfs,
+            int[][] intrabcMotionVectorClassNHpCdfs,
             int[] intrabcCdf,
             int[] restorationWienerCdf,
             int[] restorationSelfGuidedCdf,
@@ -1238,6 +1283,15 @@ public final class CdfContext {
         this.motionVectorClassNCdfs = Objects.requireNonNull(motionVectorClassNCdfs, "motionVectorClassNCdfs");
         this.motionVectorClassNFpCdfs = Objects.requireNonNull(motionVectorClassNFpCdfs, "motionVectorClassNFpCdfs");
         this.motionVectorClassNHpCdfs = Objects.requireNonNull(motionVectorClassNHpCdfs, "motionVectorClassNHpCdfs");
+        this.intrabcMotionVectorJointCdf = Objects.requireNonNull(intrabcMotionVectorJointCdf, "intrabcMotionVectorJointCdf");
+        this.intrabcMotionVectorClassCdfs = Objects.requireNonNull(intrabcMotionVectorClassCdfs, "intrabcMotionVectorClassCdfs");
+        this.intrabcMotionVectorSignCdfs = Objects.requireNonNull(intrabcMotionVectorSignCdfs, "intrabcMotionVectorSignCdfs");
+        this.intrabcMotionVectorClass0Cdfs = Objects.requireNonNull(intrabcMotionVectorClass0Cdfs, "intrabcMotionVectorClass0Cdfs");
+        this.intrabcMotionVectorClass0FpCdfs = Objects.requireNonNull(intrabcMotionVectorClass0FpCdfs, "intrabcMotionVectorClass0FpCdfs");
+        this.intrabcMotionVectorClass0HpCdfs = Objects.requireNonNull(intrabcMotionVectorClass0HpCdfs, "intrabcMotionVectorClass0HpCdfs");
+        this.intrabcMotionVectorClassNCdfs = Objects.requireNonNull(intrabcMotionVectorClassNCdfs, "intrabcMotionVectorClassNCdfs");
+        this.intrabcMotionVectorClassNFpCdfs = Objects.requireNonNull(intrabcMotionVectorClassNFpCdfs, "intrabcMotionVectorClassNFpCdfs");
+        this.intrabcMotionVectorClassNHpCdfs = Objects.requireNonNull(intrabcMotionVectorClassNHpCdfs, "intrabcMotionVectorClassNHpCdfs");
         this.intrabcCdf = Objects.requireNonNull(intrabcCdf, "intrabcCdf");
         this.restorationWienerCdf = Objects.requireNonNull(restorationWienerCdf, "restorationWienerCdf");
         this.restorationSelfGuidedCdf = Objects.requireNonNull(restorationSelfGuidedCdf, "restorationSelfGuidedCdf");
@@ -1313,6 +1367,15 @@ public final class CdfContext {
                 CoefficientCdfDefaults.highTokenCdfs(qcat),
                 Arrays.copyOf(DEFAULT_DELTA_Q_CDF, DEFAULT_DELTA_Q_CDF.length),
                 deepCopy(DEFAULT_DELTA_LF_CDFS),
+                Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
+                deepCopy(DEFAULT_MOTION_VECTOR_CLASS_CDFS),
+                deepCopy(DEFAULT_MOTION_VECTOR_SIGN_CDFS),
+                deepCopy(DEFAULT_MOTION_VECTOR_CLASS0_CDFS),
+                deepCopy(DEFAULT_MOTION_VECTOR_CLASS0_FP_CDFS),
+                deepCopy(DEFAULT_MOTION_VECTOR_CLASS0_HP_CDFS),
+                deepCopy(DEFAULT_MOTION_VECTOR_CLASSN_CDFS),
+                deepCopy(DEFAULT_MOTION_VECTOR_CLASSN_FP_CDFS),
+                deepCopy(DEFAULT_MOTION_VECTOR_CLASSN_HP_CDFS),
                 Arrays.copyOf(DEFAULT_MOTION_VECTOR_JOINT_CDF, DEFAULT_MOTION_VECTOR_JOINT_CDF.length),
                 deepCopy(DEFAULT_MOTION_VECTOR_CLASS_CDFS),
                 deepCopy(DEFAULT_MOTION_VECTOR_SIGN_CDFS),
@@ -1416,6 +1479,15 @@ public final class CdfContext {
                 deepCopy(motionVectorClassNCdfs, resetSymbolCounters),
                 deepCopy(motionVectorClassNFpCdfs, resetSymbolCounters),
                 deepCopy(motionVectorClassNHpCdfs, resetSymbolCounters),
+                copyCdf(intrabcMotionVectorJointCdf, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorClassCdfs, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorSignCdfs, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorClass0Cdfs, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorClass0FpCdfs, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorClass0HpCdfs, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorClassNCdfs, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorClassNFpCdfs, resetSymbolCounters),
+                deepCopy(intrabcMotionVectorClassNHpCdfs, resetSymbolCounters),
                 copyCdf(intrabcCdf, resetSymbolCounters),
                 copyCdf(restorationWienerCdf, resetSymbolCounters),
                 copyCdf(restorationSelfGuidedCdf, resetSymbolCounters),
@@ -1886,6 +1958,91 @@ public final class CdfContext {
     /// @return the live mutable non-class-0 high-precision motion-vector CDF for the supplied component
     public int[] mutableMotionVectorClassNHpCdf(int component) {
         return motionVectorClassNHpCdfs[Objects.checkIndex(component, motionVectorClassNHpCdfs.length)];
+    }
+
+    /// Returns the live mutable intrabc displacement-vector joint CDF.
+    ///
+    /// @return the live mutable intrabc displacement-vector joint CDF
+    public int[] mutableIntrabcMotionVectorJointCdf() {
+        return intrabcMotionVectorJointCdf;
+    }
+
+    /// Returns the live mutable intrabc displacement-vector class CDF for the supplied component.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @return the live mutable intrabc displacement-vector class CDF for the supplied component
+    public int[] mutableIntrabcMotionVectorClassCdf(int component) {
+        return intrabcMotionVectorClassCdfs[Objects.checkIndex(component, intrabcMotionVectorClassCdfs.length)];
+    }
+
+    /// Returns the live mutable intrabc displacement-vector sign CDF for the supplied component.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @return the live mutable intrabc displacement-vector sign CDF for the supplied component
+    public int[] mutableIntrabcMotionVectorSignCdf(int component) {
+        return intrabcMotionVectorSignCdfs[Objects.checkIndex(component, intrabcMotionVectorSignCdfs.length)];
+    }
+
+    /// Returns the live mutable intrabc class-0 displacement-vector magnitude CDF for the supplied component.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @return the live mutable intrabc class-0 displacement-vector magnitude CDF for the supplied component
+    public int[] mutableIntrabcMotionVectorClass0Cdf(int component) {
+        return intrabcMotionVectorClass0Cdfs[Objects.checkIndex(component, intrabcMotionVectorClass0Cdfs.length)];
+    }
+
+    /// Returns the live mutable intrabc class-0 fractional displacement-vector CDF.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @param integerBit the decoded class-0 integer bit in `[0, 2)`
+    /// @return the live mutable intrabc class-0 fractional displacement-vector CDF for the supplied inputs
+    public int[] mutableIntrabcMotionVectorClass0FpCdf(int component, int integerBit) {
+        int[][] tables = intrabcMotionVectorClass0FpCdfs[
+                Objects.checkIndex(component, intrabcMotionVectorClass0FpCdfs.length)
+                ];
+        return tables[Objects.checkIndex(integerBit, tables.length)];
+    }
+
+    /// Returns the live mutable intrabc class-0 high-precision displacement-vector CDF.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @return the live mutable intrabc class-0 high-precision displacement-vector CDF for the supplied component
+    public int[] mutableIntrabcMotionVectorClass0HpCdf(int component) {
+        return intrabcMotionVectorClass0HpCdfs[
+                Objects.checkIndex(component, intrabcMotionVectorClass0HpCdfs.length)
+                ];
+    }
+
+    /// Returns the live mutable intrabc non-class-0 displacement-vector bit CDF.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @param bitIndex the zero-based displacement-vector class bit index in `[0, 10)`
+    /// @return the live mutable intrabc non-class-0 displacement-vector bit CDF for the supplied inputs
+    public int[] mutableIntrabcMotionVectorClassNCdf(int component, int bitIndex) {
+        int[][] tables = intrabcMotionVectorClassNCdfs[
+                Objects.checkIndex(component, intrabcMotionVectorClassNCdfs.length)
+                ];
+        return tables[Objects.checkIndex(bitIndex, tables.length)];
+    }
+
+    /// Returns the live mutable intrabc non-class-0 fractional displacement-vector CDF.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @return the live mutable intrabc non-class-0 fractional displacement-vector CDF for the supplied component
+    public int[] mutableIntrabcMotionVectorClassNFpCdf(int component) {
+        return intrabcMotionVectorClassNFpCdfs[
+                Objects.checkIndex(component, intrabcMotionVectorClassNFpCdfs.length)
+                ];
+    }
+
+    /// Returns the live mutable intrabc non-class-0 high-precision displacement-vector CDF.
+    ///
+    /// @param component the zero-based displacement-vector component index, where `0` is vertical and `1` is horizontal
+    /// @return the live mutable intrabc non-class-0 high-precision displacement-vector CDF for the supplied component
+    public int[] mutableIntrabcMotionVectorClassNHpCdf(int component) {
+        return intrabcMotionVectorClassNHpCdfs[
+                Objects.checkIndex(component, intrabcMotionVectorClassNHpCdfs.length)
+                ];
     }
 
     /// Returns the live mutable `intrabc` CDF.

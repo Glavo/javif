@@ -593,25 +593,51 @@ public final class TileSyntaxReader {
     /// Decodes one motion-vector residual around the supplied predictor.
     ///
     /// The active frame header supplies the motion-vector precision mode. This syntax is available
-    /// for inter/switch frames and for key/intra frames when `allow_intrabc` is enabled. The
-    /// returned vector is the fully decoded motion vector in eighth-pel units.
+    /// for inter and switch frames. The returned vector is the fully decoded motion vector in
+    /// eighth-pel units.
     ///
     /// @param referenceMotionVector the predictor that the residual is added to
     /// @return the fully decoded motion vector in eighth-pel units
     public MotionVector readMotionVectorResidual(MotionVector referenceMotionVector) {
+        return readMotionVectorResidual(referenceMotionVector, false);
+    }
+
+    /// Decodes one intrabc displacement-vector residual around the supplied predictor.
+    ///
+    /// Intrabc displacement vectors use their own adaptive CDF state and integer-pel precision.
+    /// This syntax is available only when the active frame enables `allow_intrabc`.
+    ///
+    /// @param referenceMotionVector the predictor that the residual is added to
+    /// @return the fully decoded displacement vector in eighth-pel units
+    public MotionVector readIntrabcMotionVectorResidual(MotionVector referenceMotionVector) {
+        return readMotionVectorResidual(referenceMotionVector, true);
+    }
+
+    /// Decodes one motion- or displacement-vector residual from the selected adaptive CDF set.
+    ///
+    /// @param referenceMotionVector the predictor that the residual is added to
+    /// @param intrabc whether to use the independent intrabc displacement-vector CDFs
+    /// @return the fully decoded vector in eighth-pel units
+    private MotionVector readMotionVectorResidual(MotionVector referenceMotionVector, boolean intrabc) {
         MotionVector nonNullReferenceMotionVector = Objects.requireNonNull(referenceMotionVector, "referenceMotionVector");
         FrameType frameType = tileContext.frameHeader().frameType();
-        if (frameType != FrameType.INTER
-                && frameType != FrameType.SWITCH
-                && !tileContext.frameHeader().allowIntrabc()) {
+        if (intrabc && !tileContext.frameHeader().allowIntrabc()) {
+            throw new IllegalStateException("Intrabc displacement-vector residuals require allow_intrabc");
+        }
+        if (!intrabc && frameType != FrameType.INTER && frameType != FrameType.SWITCH) {
             throw new IllegalStateException(
-                    "Motion-vector residuals are only available in inter/switch frames or intrabc-enabled intra frames"
+                    "Motion-vector residuals are only available in inter and switch frames"
             );
         }
 
-        int motionVectorPrecision = (tileContext.frameHeader().allowHighPrecisionMotionVectors() ? 1 : 0)
+        int motionVectorPrecision = intrabc
+                ? -1
+                : (tileContext.frameHeader().allowHighPrecisionMotionVectors() ? 1 : 0)
                 - (tileContext.frameHeader().forceIntegerMotionVectors() ? 1 : 0);
-        int motionVectorJoint = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorJointCdf(), 3);
+        int[] jointCdf = intrabc
+                ? cdfContext.mutableIntrabcMotionVectorJointCdf()
+                : cdfContext.mutableMotionVectorJointCdf();
+        int motionVectorJoint = msacDecoder.decodeSymbolAdapt(jointCdf, 3);
         if (motionVectorJoint == MOTION_VECTOR_JOINT_NONE) {
             return nonNullReferenceMotionVector;
         }
@@ -619,10 +645,10 @@ public final class TileSyntaxReader {
         int rowEighthPel = nonNullReferenceMotionVector.rowEighthPel();
         int columnEighthPel = nonNullReferenceMotionVector.columnEighthPel();
         if ((motionVectorJoint & MOTION_VECTOR_JOINT_VERTICAL) != 0) {
-            rowEighthPel += readMotionVectorComponentDiff(0, motionVectorPrecision);
+            rowEighthPel += readMotionVectorComponentDiff(0, motionVectorPrecision, intrabc);
         }
         if ((motionVectorJoint & MOTION_VECTOR_JOINT_HORIZONTAL) != 0) {
-            columnEighthPel += readMotionVectorComponentDiff(1, motionVectorPrecision);
+            columnEighthPel += readMotionVectorComponentDiff(1, motionVectorPrecision, intrabc);
         }
         return new MotionVector(rowEighthPel, columnEighthPel);
     }
@@ -969,37 +995,62 @@ public final class TileSyntaxReader {
     /// @param component the zero-based motion-vector component index, where `0` is vertical and `1` is horizontal
     /// @param motionVectorPrecision the active motion-vector precision mode: `-1` forces integer,
     ///                              `0` disables high precision, and `1` allows high precision
+    /// @param intrabc whether to use the independent intrabc displacement-vector CDFs
     /// @return the signed motion-vector component residual in eighth-pel units
-    private int readMotionVectorComponentDiff(int component, int motionVectorPrecision) {
-        boolean negative = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorSignCdf(component));
-        int motionVectorClass = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassCdf(component), 10);
+    private int readMotionVectorComponentDiff(int component, int motionVectorPrecision, boolean intrabc) {
+        int[] signCdf = intrabc
+                ? cdfContext.mutableIntrabcMotionVectorSignCdf(component)
+                : cdfContext.mutableMotionVectorSignCdf(component);
+        int[] classCdf = intrabc
+                ? cdfContext.mutableIntrabcMotionVectorClassCdf(component)
+                : cdfContext.mutableMotionVectorClassCdf(component);
+        boolean negative = msacDecoder.decodeBooleanAdapt(signCdf);
+        int motionVectorClass = msacDecoder.decodeSymbolAdapt(classCdf, 10);
         int integerMagnitude;
         int fractionalPart = 3;
         int highPrecisionBit = 1;
 
         if (motionVectorClass == 0) {
-            integerMagnitude = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0Cdf(component)) ? 1 : 0;
+            int[] class0Cdf = intrabc
+                    ? cdfContext.mutableIntrabcMotionVectorClass0Cdf(component)
+                    : cdfContext.mutableMotionVectorClass0Cdf(component);
+            integerMagnitude = msacDecoder.decodeBooleanAdapt(class0Cdf) ? 1 : 0;
             if (motionVectorPrecision >= 0) {
+                int[] class0FpCdf = intrabc
+                        ? cdfContext.mutableIntrabcMotionVectorClass0FpCdf(component, integerMagnitude)
+                        : cdfContext.mutableMotionVectorClass0FpCdf(component, integerMagnitude);
                 fractionalPart = msacDecoder.decodeSymbolAdapt(
-                        cdfContext.mutableMotionVectorClass0FpCdf(component, integerMagnitude),
+                        class0FpCdf,
                         3
                 );
                 if (motionVectorPrecision > 0) {
-                    highPrecisionBit = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClass0HpCdf(component)) ? 1 : 0;
+                    int[] class0HpCdf = intrabc
+                            ? cdfContext.mutableIntrabcMotionVectorClass0HpCdf(component)
+                            : cdfContext.mutableMotionVectorClass0HpCdf(component);
+                    highPrecisionBit = msacDecoder.decodeBooleanAdapt(class0HpCdf) ? 1 : 0;
                 }
             }
         } else {
             integerMagnitude = 1 << motionVectorClass;
             for (int bitIndex = 0; bitIndex < motionVectorClass; bitIndex++) {
-                boolean bit = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNCdf(component, bitIndex));
+                int[] classNCdf = intrabc
+                        ? cdfContext.mutableIntrabcMotionVectorClassNCdf(component, bitIndex)
+                        : cdfContext.mutableMotionVectorClassNCdf(component, bitIndex);
+                boolean bit = msacDecoder.decodeBooleanAdapt(classNCdf);
                 if (bit) {
                     integerMagnitude |= 1 << bitIndex;
                 }
             }
             if (motionVectorPrecision >= 0) {
-                fractionalPart = msacDecoder.decodeSymbolAdapt(cdfContext.mutableMotionVectorClassNFpCdf(component), 3);
+                int[] classNFpCdf = intrabc
+                        ? cdfContext.mutableIntrabcMotionVectorClassNFpCdf(component)
+                        : cdfContext.mutableMotionVectorClassNFpCdf(component);
+                fractionalPart = msacDecoder.decodeSymbolAdapt(classNFpCdf, 3);
                 if (motionVectorPrecision > 0) {
-                    highPrecisionBit = msacDecoder.decodeBooleanAdapt(cdfContext.mutableMotionVectorClassNHpCdf(component)) ? 1 : 0;
+                    int[] classNHpCdf = intrabc
+                            ? cdfContext.mutableIntrabcMotionVectorClassNHpCdf(component)
+                            : cdfContext.mutableMotionVectorClassNHpCdf(component);
+                    highPrecisionBit = msacDecoder.decodeBooleanAdapt(classNHpCdf) ? 1 : 0;
                 }
             }
         }

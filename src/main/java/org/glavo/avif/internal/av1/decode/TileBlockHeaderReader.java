@@ -357,7 +357,7 @@ public final class TileBlockHeaderReader {
                     nonNullSize,
                     fallback
             );
-            motionVector0 = InterMotionVector.resolved(syntaxReader.readMotionVectorResidual(
+            motionVector0 = InterMotionVector.resolved(syntaxReader.readIntrabcMotionVectorResidual(
                     predictor
             ));
             yMode = LumaIntraPredictionMode.DC;

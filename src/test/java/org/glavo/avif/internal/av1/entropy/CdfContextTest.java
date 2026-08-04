@@ -93,6 +93,9 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{15360, 0}, context.mutableMotionVectorClassNCdf(0, 0));
         assertArrayEquals(new int[]{24576, 15360, 11520, 0}, context.mutableMotionVectorClassNFpCdf(0));
         assertArrayEquals(new int[]{16384, 0}, context.mutableMotionVectorClassNHpCdf(0));
+        assertArrayEquals(new int[]{28672, 21504, 13440, 0}, context.mutableIntrabcMotionVectorJointCdf());
+        assertArrayEquals(new int[]{4096, 1792, 910, 448, 217, 112, 28, 11, 6, 1, 0}, context.mutableIntrabcMotionVectorClassCdf(0));
+        assertArrayEquals(new int[]{16384, 0}, context.mutableIntrabcMotionVectorSignCdf(0));
         assertArrayEquals(new int[]{2237, 0}, context.mutableIntrabcCdf());
         assertArrayEquals(new int[]{16384, 0}, context.mutableSegmentPredictionCdf(0));
         assertArrayEquals(new int[]{27146, 24875, 16675, 14535, 4959, 4395, 235, 0}, context.mutableSegmentIdCdf(0));
@@ -134,6 +137,30 @@ final class CdfContextTest {
         assertArrayEquals(new int[]{2397, 0}, CdfContext.createDefault(21).mutableCoefficientSkipCdf(0, 0));
         assertArrayEquals(new int[]{3154, 0}, CdfContext.createDefault(61).mutableCoefficientSkipCdf(0, 0));
         assertArrayEquals(new int[]{5881, 0}, CdfContext.createDefault(121).mutableCoefficientSkipCdf(0, 0));
+    }
+
+    /// Verifies that inter motion vectors and intrabc displacement vectors retain independent adaptive state across copies.
+    @Test
+    void keepsInterAndIntrabcVectorCdfsIndependentAcrossCopies() {
+        CdfContext source = CdfContext.createDefault();
+        int[] motionVectorJointCdf = source.mutableMotionVectorJointCdf();
+        int[] intrabcMotionVectorJointCdf = source.mutableIntrabcMotionVectorJointCdf();
+
+        assertNotSame(motionVectorJointCdf, intrabcMotionVectorJointCdf);
+        motionVectorJointCdf[0] = 123;
+        motionVectorJointCdf[motionVectorJointCdf.length - 1] = 17;
+        intrabcMotionVectorJointCdf[1] = 456;
+        intrabcMotionVectorJointCdf[intrabcMotionVectorJointCdf.length - 1] = 23;
+
+        CdfContext copy = source.copy();
+        CdfContext resetCopy = source.copyWithResetSymbolCounters();
+
+        assertArrayEquals(new int[]{123, 21504, 13440, 17}, copy.mutableMotionVectorJointCdf());
+        assertArrayEquals(new int[]{28672, 456, 13440, 23}, copy.mutableIntrabcMotionVectorJointCdf());
+        assertNotSame(source.mutableMotionVectorJointCdf(), copy.mutableMotionVectorJointCdf());
+        assertNotSame(source.mutableIntrabcMotionVectorJointCdf(), copy.mutableIntrabcMotionVectorJointCdf());
+        assertArrayEquals(new int[]{123, 21504, 13440, 0}, resetCopy.mutableMotionVectorJointCdf());
+        assertArrayEquals(new int[]{28672, 456, 13440, 0}, resetCopy.mutableIntrabcMotionVectorJointCdf());
     }
 
     /// Verifies that frame-inheritance copies preserve thresholds and reset every table shape's count slot.
