@@ -54,12 +54,18 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /// High-level sequential reader for raw AV1 low-overhead and Annex B streams.
 @NotNullByDefault
 public final class Av1ImageReader implements AutoCloseable {
+    /// Maximum number of decoded Large Scale Tile syntax trees retained for near-term reuse.
+    private static final int LARGE_SCALE_TILE_SYNTAX_CACHE_SIZE = 8;
+
     /// The forward-only buffered byte source.
     private final BufferedInput source;
     /// The immutable decoder configuration.
@@ -945,6 +951,15 @@ public final class Av1ImageReader implements AutoCloseable {
         }
 
         List<TileList.Entry> entries = tileList.entries();
+        List<LargeScaleTileSyntaxKey> syntaxKeys = new ArrayList<>(entries.size());
+        Map<LargeScaleTileSyntaxKey, Integer> remainingSyntaxUses = new HashMap<>();
+        for (TileList.Entry entry : entries) {
+            LargeScaleTileSyntaxKey syntaxKey = new LargeScaleTileSyntaxKey(entry.bitstream());
+            syntaxKeys.add(syntaxKey);
+            remainingSyntaxUses.merge(syntaxKey, 1, Integer::sum);
+        }
+        Map<LargeScaleTileSyntaxKey, FrameSyntaxDecodeResult> decodedTileSyntax = new LinkedHashMap<>();
+        Map<LargeScaleTileDecodeKey, Integer> decodedTileOutputIndices = new HashMap<>();
         for (int outputTileIndex = 0; outputTileIndex < entries.size(); outputTileIndex++) {
             TileList.Entry entry = entries.get(outputTileIndex);
             if (entry.anchorFrameIndex() >= largeScaleTileAnchorFrames.size()) {
@@ -953,65 +968,99 @@ public final class Av1ImageReader implements AutoCloseable {
                         "Tile-list entry references unavailable anchor frame " + entry.anchorFrameIndex()
                 );
             }
-            ReferenceSurfaceSnapshot anchor = largeScaleTileAnchorFrames.get(entry.anchorFrameIndex());
-            FrameHeader[] referenceHeaders = cameraReferenceFrameHeaders(cameraAssembly);
-            ReferenceFrameSyntaxState[] referenceSyntaxStates = Arrays.copyOf(
-                    largeScaleTileCameraReferenceSyntaxStates,
-                    largeScaleTileCameraReferenceSyntaxStates.length
+            LargeScaleTileSyntaxKey syntaxKey = syntaxKeys.get(outputTileIndex);
+            int remainingSyntaxUseCount = Objects.requireNonNull(
+                    remainingSyntaxUses.get(syntaxKey),
+                    "remainingSyntaxUses"
             );
+            LargeScaleTileDecodeKey decodeKey = new LargeScaleTileDecodeKey(
+                    entry.anchorFrameIndex(),
+                    syntaxKey
+            );
+            @Nullable Integer decodedOutputTileIndex = decodedTileOutputIndices.get(decodeKey);
+            if (decodedOutputTileIndex != null) {
+                outputBuilder.copyOutputTile(decodedOutputTileIndex, outputTileIndex);
+                finishLargeScaleTileSyntaxUse(
+                        syntaxKey,
+                        remainingSyntaxUseCount,
+                        remainingSyntaxUses,
+                        decodedTileSyntax
+                );
+                continue;
+            }
+            ReferenceSurfaceSnapshot anchor = largeScaleTileAnchorFrames.get(entry.anchorFrameIndex());
             ReferenceSurfaceSnapshot[] referenceSurfaces = new ReferenceSurfaceSnapshot[referenceSlots.length];
             referenceSurfaces[lastReferenceSlot] = anchor;
 
-            FrameAssembly tileAssembly = new FrameAssembly(
-                    cameraSequenceHeader,
-                    cameraFrameHeader,
-                    referenceHeaders,
-                    packet.streamOffset(),
-                    packet.obuIndex()
-            );
             int sourceTileIndex = entry.bitstream().tileIndex();
-            TileGroupHeader tileHeader = new TileGroupHeader(
-                    false,
-                    sourceTileIndex,
-                    sourceTileIndex,
-                    tileAssembly.totalTiles()
-            );
-            tileAssembly.addTileGroup(
-                    packet,
-                    tileHeader,
-                    entry.bitstream().dataOffset(),
-                    entry.bitstream().dataLength(),
-                    new TileBitstream[]{entry.bitstream()}
-            );
-
+            @Nullable FrameSyntaxDecodeResult cachedSyntaxDecodeResult = decodedTileSyntax.get(syntaxKey);
             FrameSyntaxDecodeResult syntaxDecodeResult;
-            try {
-                syntaxDecodeResult = new FrameSyntaxDecoder(
-                        largeScaleTileCameraCdfReferenceState,
-                        referenceSyntaxStates,
-                        config.strictStdCompliance()
-                ).decodeTile(tileAssembly, sourceTileIndex);
-            } catch (InvalidFrameSyntaxException exception) {
-                throw new DecodeException(
-                        DecodeErrorCode.INVALID_BITSTREAM,
-                        DecodeStage.FRAME_DECODE,
-                        exception.getMessage(),
+            if (cachedSyntaxDecodeResult != null) {
+                syntaxDecodeResult = cachedSyntaxDecodeResult;
+            } else {
+                FrameAssembly tileAssembly = new FrameAssembly(
+                        cameraSequenceHeader,
+                        cameraFrameHeader,
+                        cameraReferenceFrameHeaders(cameraAssembly),
                         packet.streamOffset(),
-                        packet.obuIndex(),
-                        null,
-                        exception
+                        packet.obuIndex()
                 );
+                TileGroupHeader tileHeader = new TileGroupHeader(
+                        false,
+                        sourceTileIndex,
+                        sourceTileIndex,
+                        tileAssembly.totalTiles()
+                );
+                tileAssembly.addTileGroup(
+                        packet,
+                        tileHeader,
+                        entry.bitstream().dataOffset(),
+                        entry.bitstream().dataLength(),
+                        new TileBitstream[]{entry.bitstream()}
+                );
+
+                ReferenceFrameSyntaxState[] referenceSyntaxStates = Arrays.copyOf(
+                        largeScaleTileCameraReferenceSyntaxStates,
+                        largeScaleTileCameraReferenceSyntaxStates.length
+                );
+                try {
+                    syntaxDecodeResult = new FrameSyntaxDecoder(
+                            largeScaleTileCameraCdfReferenceState,
+                            referenceSyntaxStates,
+                            config.strictStdCompliance()
+                    ).decodeTile(tileAssembly, sourceTileIndex);
+                } catch (InvalidFrameSyntaxException exception) {
+                    throw new DecodeException(
+                            DecodeErrorCode.INVALID_BITSTREAM,
+                            DecodeStage.FRAME_DECODE,
+                            exception.getMessage(),
+                            packet.streamOffset(),
+                            packet.obuIndex(),
+                            null,
+                            exception
+                    );
+                }
+                if (config.strictStdCompliance()) {
+                    validateLargeScaleTileReferences(syntaxDecodeResult, sourceTileIndex, packet);
+                }
+                if (remainingSyntaxUseCount > 1) {
+                    cacheLargeScaleTileSyntax(decodedTileSyntax, syntaxKey, syntaxDecodeResult);
+                }
             }
             lastFrameSyntaxDecodeResult = syntaxDecodeResult;
-            if (config.strictStdCompliance()) {
-                validateLargeScaleTileReferences(syntaxDecodeResult, sourceTileIndex, packet);
-            }
+            finishLargeScaleTileSyntaxUse(
+                    syntaxKey,
+                    remainingSyntaxUseCount,
+                    remainingSyntaxUses,
+                    decodedTileSyntax
+            );
 
             DecodedPlanes reconstructed;
             try {
-                reconstructed = frameReconstructor.reconstruct(
+                reconstructed = frameReconstructor.reconstructTile(
                         syntaxDecodeResult,
                         referenceSurfaces,
+                        sourceTileIndex,
                         config.strictStdCompliance()
                 );
             } catch (InvalidFrameReconstructionException exception) {
@@ -1027,10 +1076,11 @@ public final class Av1ImageReader implements AutoCloseable {
             }
             outputBuilder.copyTile(
                     reconstructed,
-                    entry.tileColumn(),
-                    entry.tileRow(),
+                    0,
+                    0,
                     outputTileIndex
             );
+            decodedTileOutputIndices.put(decodeKey, outputTileIndex);
         }
 
         DecodedPlanes outputPlanes = outputBuilder.build();
@@ -1043,6 +1093,43 @@ public final class Av1ImageReader implements AutoCloseable {
                 nextPresentationIndex,
                 packet
         );
+    }
+
+    /// Retains one decoded syntax tree in the bounded insertion-order reuse cache.
+    ///
+    /// @param cache the mutable syntax cache
+    /// @param syntaxKey the exact compressed tile syntax identity
+    /// @param syntaxDecodeResult the decoded syntax tree to retain
+    private static void cacheLargeScaleTileSyntax(
+            Map<LargeScaleTileSyntaxKey, FrameSyntaxDecodeResult> cache,
+            LargeScaleTileSyntaxKey syntaxKey,
+            FrameSyntaxDecodeResult syntaxDecodeResult
+    ) {
+        if (cache.size() >= LARGE_SCALE_TILE_SYNTAX_CACHE_SIZE) {
+            LargeScaleTileSyntaxKey oldestKey = cache.keySet().iterator().next();
+            cache.remove(oldestKey);
+        }
+        cache.put(syntaxKey, syntaxDecodeResult);
+    }
+
+    /// Records one syntax-key use and releases state after its final occurrence.
+    ///
+    /// @param syntaxKey the exact compressed tile syntax identity
+    /// @param remainingUseCount the use count before consuming the current entry
+    /// @param remainingUses the mutable remaining-use counts
+    /// @param cache the mutable decoded syntax cache
+    private static void finishLargeScaleTileSyntaxUse(
+            LargeScaleTileSyntaxKey syntaxKey,
+            int remainingUseCount,
+            Map<LargeScaleTileSyntaxKey, Integer> remainingUses,
+            Map<LargeScaleTileSyntaxKey, FrameSyntaxDecodeResult> cache
+    ) {
+        if (remainingUseCount <= 1) {
+            remainingUses.remove(syntaxKey);
+            cache.remove(syntaxKey);
+        } else {
+            remainingUses.put(syntaxKey, remainingUseCount - 1);
+        }
     }
 
     /// Verifies that every inter block in one Large Scale Tile uses `LAST_FRAME`.
@@ -1490,6 +1577,90 @@ public final class Av1ImageReader implements AutoCloseable {
             snapshots[i] = referenceSlots[i].surfaceSnapshot();
         }
         return snapshots;
+    }
+
+    /// Identifies one exactly reusable decoded tile syntax result within a single Tile List OBU.
+    ///
+    /// Syntax decoding depends on the selected camera tile and compressed payload, but not on the
+    /// anchor's pixel surface. Reconstruction applies that surface separately.
+    @NotNullByDefault
+    private static final class LargeScaleTileSyntaxKey {
+        /// The immutable compressed camera-frame tile payload view.
+        private final TileBitstream bitstream;
+        /// The precomputed content hash code.
+        private final int hashCode;
+
+        /// Creates an exact tile-syntax reuse key.
+        ///
+        /// @param bitstream the compressed camera-frame tile payload
+        private LargeScaleTileSyntaxKey(TileBitstream bitstream) {
+            this.bitstream = Objects.requireNonNull(bitstream, "bitstream");
+            this.hashCode = 31 * (31 + bitstream.tileIndex()) + bitstream.payloadHashCode();
+        }
+
+        /// Returns whether another key selects the same source tile and payload bytes.
+        ///
+        /// @param other the object to compare, or `null`
+        /// @return whether the keys describe the same syntax decoding operation
+        @Override
+        public boolean equals(@Nullable Object other) {
+            return this == other
+                    || other instanceof LargeScaleTileSyntaxKey key
+                    && bitstream.tileIndex() == key.bitstream.tileIndex()
+                    && bitstream.hasSamePayload(key.bitstream);
+        }
+
+        /// Returns the precomputed content hash code.
+        ///
+        /// @return the content hash code
+        @Override
+        public int hashCode() {
+            return hashCode;
+        }
+    }
+
+    /// Identifies one exactly reusable reconstructed tile within a single Tile List OBU.
+    ///
+    /// The key adds the anchor selection to an exact syntax key, so reuse cannot change either the
+    /// compressed tile syntax or its reference surface.
+    @NotNullByDefault
+    private static final class LargeScaleTileDecodeKey {
+        /// The externally indexed anchor frame used as `LAST_FRAME`.
+        private final int anchorFrameIndex;
+        /// The exact compressed tile syntax identity.
+        private final LargeScaleTileSyntaxKey syntaxKey;
+        /// The precomputed content hash code.
+        private final int hashCode;
+
+        /// Creates an exact decoded-tile reuse key.
+        ///
+        /// @param anchorFrameIndex the externally indexed anchor frame
+        /// @param syntaxKey the exact compressed tile syntax identity
+        private LargeScaleTileDecodeKey(int anchorFrameIndex, LargeScaleTileSyntaxKey syntaxKey) {
+            this.anchorFrameIndex = anchorFrameIndex;
+            this.syntaxKey = Objects.requireNonNull(syntaxKey, "syntaxKey");
+            this.hashCode = 31 * (31 + anchorFrameIndex) + syntaxKey.hashCode();
+        }
+
+        /// Returns whether another key selects the same anchor, source tile, and payload bytes.
+        ///
+        /// @param other the object to compare, or `null`
+        /// @return whether the keys describe the same decoding operation
+        @Override
+        public boolean equals(@Nullable Object other) {
+            return this == other
+                    || other instanceof LargeScaleTileDecodeKey key
+                    && anchorFrameIndex == key.anchorFrameIndex
+                    && syntaxKey.equals(key.syntaxKey);
+        }
+
+        /// Returns the precomputed content hash code.
+        ///
+        /// @return the content hash code
+        @Override
+        public int hashCode() {
+            return hashCode;
+        }
     }
 
     /// Holds one decoded presentation output before optional RGB conversion.

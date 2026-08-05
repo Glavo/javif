@@ -174,6 +174,64 @@ public final class LargeScaleTileOutputBuilder {
         }
     }
 
+    /// Copies one previously written output tile to another output raster position.
+    ///
+    /// @param sourceOutputTileIndex the zero-based source tile index in raster order
+    /// @param outputTileIndex the zero-based destination tile index in raster order
+    public void copyOutputTile(int sourceOutputTileIndex, int outputTileIndex) {
+        ensureMutable();
+        validateOutputTileIndex(sourceOutputTileIndex, "sourceOutputTileIndex");
+        validateOutputTileIndex(outputTileIndex, "outputTileIndex");
+        if (sourceOutputTileIndex == outputTileIndex) {
+            return;
+        }
+
+        int sourceX = sourceOutputTileIndex % outputTileColumns * tileWidth;
+        int sourceY = sourceOutputTileIndex / outputTileColumns * tileHeight;
+        int destinationX = outputTileIndex % outputTileColumns * tileWidth;
+        int destinationY = outputTileIndex / outputTileColumns * tileHeight;
+        copyStoredPlane(
+                lumaSamples,
+                outputWidth,
+                sourceX,
+                sourceY,
+                tileWidth,
+                tileHeight,
+                destinationX,
+                destinationY
+        );
+
+        if (pixelFormat != AvifPixelFormat.I400) {
+            int chromaTileWidth = chromaWidth(pixelFormat, tileWidth);
+            int chromaTileHeight = chromaHeight(pixelFormat, tileHeight);
+            int outputChromaWidth = chromaWidth(pixelFormat, outputWidth);
+            int sourceChromaX = chromaWidth(pixelFormat, sourceX);
+            int sourceChromaY = chromaHeight(pixelFormat, sourceY);
+            int destinationChromaX = chromaWidth(pixelFormat, destinationX);
+            int destinationChromaY = chromaHeight(pixelFormat, destinationY);
+            copyStoredPlane(
+                    Objects.requireNonNull(chromaUSamples, "chromaUSamples"),
+                    outputChromaWidth,
+                    sourceChromaX,
+                    sourceChromaY,
+                    chromaTileWidth,
+                    chromaTileHeight,
+                    destinationChromaX,
+                    destinationChromaY
+            );
+            copyStoredPlane(
+                    Objects.requireNonNull(chromaVSamples, "chromaVSamples"),
+                    outputChromaWidth,
+                    sourceChromaX,
+                    sourceChromaY,
+                    chromaTileWidth,
+                    chromaTileHeight,
+                    destinationChromaX,
+                    destinationChromaY
+            );
+        }
+    }
+
     /// Transfers the accumulated samples into one immutable decoded-plane snapshot.
     ///
     /// This builder must not be used after this method returns.
@@ -241,6 +299,44 @@ public final class LargeScaleTileOutputBuilder {
             for (int x = 0; x < width; x++) {
                 destination[destinationOffset + x] = (short) source.sample(sourceX + x, sourceY + y);
             }
+        }
+    }
+
+    /// Copies one rectangular region within the builder's tightly packed plane storage.
+    ///
+    /// @param samples the mutable plane storage
+    /// @param stride the plane row stride
+    /// @param sourceX the source-region X coordinate
+    /// @param sourceY the source-region Y coordinate
+    /// @param width the copied width
+    /// @param height the copied height
+    /// @param destinationX the destination-region X coordinate
+    /// @param destinationY the destination-region Y coordinate
+    private static void copyStoredPlane(
+            short[] samples,
+            int stride,
+            int sourceX,
+            int sourceY,
+            int width,
+            int height,
+            int destinationX,
+            int destinationY
+    ) {
+        for (int y = 0; y < height; y++) {
+            int sourceOffset = (sourceY + y) * stride + sourceX;
+            int destinationOffset = (destinationY + y) * stride + destinationX;
+            System.arraycopy(samples, sourceOffset, samples, destinationOffset, width);
+        }
+    }
+
+    /// Validates one output tile index.
+    ///
+    /// @param outputTileIndex the index to validate
+    /// @param parameterName the parameter name used in an exception message
+    private void validateOutputTileIndex(int outputTileIndex, String parameterName) {
+        int outputTileCount = Math.multiplyExact(outputTileColumns, outputTileRows);
+        if (outputTileIndex < 0 || outputTileIndex >= outputTileCount) {
+            throw new IllegalArgumentException(parameterName + " out of range: " + outputTileIndex);
         }
     }
 

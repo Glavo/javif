@@ -20,14 +20,26 @@ import org.jetbrains.annotations.NotNullByDefault;
 /// Mutable decoded-plane buffer used while reconstruction is still in progress.
 ///
 /// Samples are stored as unsigned values in the low bits of each `short`. The mutable buffer uses
-/// a tightly packed sample stride equal to `width`.
+/// tightly packed storage for either the complete plane or one coordinate-preserving subregion.
 @NotNullByDefault
 final class MutablePlaneBuffer implements MutableSamplePlane {
-    /// The plane width in samples.
+    /// The containing plane width in samples.
     private final int width;
 
-    /// The plane height in samples.
+    /// The containing plane height in samples.
     private final int height;
+
+    /// The horizontal origin of the retained storage region.
+    private final int originX;
+
+    /// The vertical origin of the retained storage region.
+    private final int originY;
+
+    /// The retained storage width in samples.
+    private final int storageWidth;
+
+    /// The retained storage height in samples.
+    private final int storageHeight;
 
     /// The decoded sample bit depth.
     private final int bitDepth;
@@ -47,6 +59,27 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @param height the plane height in samples
     /// @param bitDepth the decoded sample bit depth
     MutablePlaneBuffer(int width, int height, int bitDepth) {
+        this(width, height, bitDepth, 0, 0, width, height);
+    }
+
+    /// Creates a mutable buffer that retains one subregion in containing-plane coordinates.
+    ///
+    /// @param width the containing plane width in samples
+    /// @param height the containing plane height in samples
+    /// @param bitDepth the decoded sample bit depth
+    /// @param originX the horizontal storage origin in containing-plane coordinates
+    /// @param originY the vertical storage origin in containing-plane coordinates
+    /// @param storageWidth the retained storage width in samples
+    /// @param storageHeight the retained storage height in samples
+    MutablePlaneBuffer(
+            int width,
+            int height,
+            int bitDepth,
+            int originX,
+            int originY,
+            int storageWidth,
+            int storageHeight
+    ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
         }
@@ -56,12 +89,23 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
         if (bitDepth <= 0 || bitDepth > 15) {
             throw new IllegalArgumentException("bitDepth out of range: " + bitDepth);
         }
+        if (originX < 0 || storageWidth <= 0 || originX + storageWidth > width) {
+            throw new IllegalArgumentException("Horizontal storage region is outside the plane");
+        }
+        if (originY < 0 || storageHeight <= 0 || originY + storageHeight > height) {
+            throw new IllegalArgumentException("Vertical storage region is outside the plane");
+        }
         this.width = width;
         this.height = height;
+        this.originX = originX;
+        this.originY = originY;
+        this.storageWidth = storageWidth;
+        this.storageHeight = storageHeight;
         this.bitDepth = bitDepth;
         this.maxSampleValue = (1 << bitDepth) - 1;
-        this.samples = new short[width * height];
-        this.writtenSamples = new boolean[width * height];
+        int sampleCount = Math.multiplyExact(storageWidth, storageHeight);
+        this.samples = new short[sampleCount];
+        this.writtenSamples = new boolean[sampleCount];
     }
 
     /// Returns the plane width in samples.
@@ -102,13 +146,7 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @return one already reconstructed sample
     @Override
     public int sample(int x, int y) {
-        if (x < 0 || x >= width) {
-            throw new IndexOutOfBoundsException("x out of range: " + x);
-        }
-        if (y < 0 || y >= height) {
-            throw new IndexOutOfBoundsException("y out of range: " + y);
-        }
-        return samples[y * width + x] & 0xFFFF;
+        return samples[storageIndex(x, y)] & 0xFFFF;
     }
 
     /// Stores one reconstructed sample after clipping it into the legal bit-depth range.
@@ -118,43 +156,47 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @param value the reconstructed sample value
     @Override
     public void setSample(int x, int y, int value) {
-        if (x < 0 || x >= width) {
-            throw new IndexOutOfBoundsException("x out of range: " + x);
-        }
-        if (y < 0 || y >= height) {
-            throw new IndexOutOfBoundsException("y out of range: " + y);
-        }
-        int index = y * width + x;
+        int index = storageIndex(x, y);
         samples[index] = (short) clipped(value);
         writtenSamples[index] = true;
     }
 
-    /// Returns whether one in-range sample has been written by reconstruction.
+    /// Returns whether one retained-region sample has been written by reconstruction.
     ///
     /// @param x the zero-based horizontal sample coordinate
     /// @param y the zero-based vertical sample coordinate
-    /// @return whether the sample has been written
+    /// @return whether the retained sample has been written, or `false` outside retained storage
     boolean hasWrittenSample(int x, int y) {
-        return x >= 0 && x < width && y >= 0 && y < height && writtenSamples[y * width + x];
+        int localX = x - originX;
+        int localY = y - originY;
+        return localX >= 0
+                && localX < storageWidth
+                && localY >= 0
+                && localY < storageHeight
+                && writtenSamples[localY * storageWidth + localX];
     }
 
-    /// Returns one sample when it lies inside the plane, or the supplied fallback value otherwise.
+    /// Returns one sample when it lies inside retained storage, or the fallback value otherwise.
     ///
     /// @param x the zero-based horizontal sample coordinate
     /// @param y the zero-based vertical sample coordinate
     /// @param fallbackValue the fallback value returned outside the plane bounds
-    /// @return one in-range sample, or the supplied fallback value
+    /// @return one retained sample, or the supplied fallback value
     int sampleOrFallback(int x, int y, int fallbackValue) {
-        if (x < 0 || x >= width || y < 0 || y >= height) {
+        int localX = x - originX;
+        int localY = y - originY;
+        if (localX < 0 || localX >= storageWidth || localY < 0 || localY >= storageHeight) {
             return fallbackValue;
         }
-        return samples[y * width + x] & 0xFFFF;
+        return samples[localY * storageWidth + localX] & 0xFFFF;
     }
 
     /// Converts this mutable reconstruction buffer into one immutable decoded-plane snapshot.
     ///
     /// @return one immutable decoded-plane snapshot
+    /// @throws IllegalStateException if this buffer retains only a plane subregion
     DecodedPlane toDecodedPlane() {
+        requireCompletePlaneStorage();
         return new DecodedPlane(width, height, width, samples);
     }
 
@@ -164,7 +206,9 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @param croppedHeight the cropped plane height in samples
     /// @return one immutable decoded-plane snapshot containing the requested top-left crop and
     ///         retaining internal right and bottom padding
+    /// @throws IllegalStateException if this buffer retains only a plane subregion
     DecodedPlane toDecodedPlane(int croppedWidth, int croppedHeight) {
+        requireCompletePlaneStorage();
         if (croppedWidth <= 0 || croppedWidth > width) {
             throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
         }
@@ -184,7 +228,9 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
     /// @param croppedWidth the visible plane width in samples
     /// @param croppedHeight the visible plane height in samples
     /// @return one immutable plane that owns this buffer's sample storage
+    /// @throws IllegalStateException if this buffer retains only a plane subregion
     DecodedPlane takeDecodedPlane(int croppedWidth, int croppedHeight) {
+        requireCompletePlaneStorage();
         if (croppedWidth <= 0 || croppedWidth > width) {
             throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
         }
@@ -194,14 +240,64 @@ final class MutablePlaneBuffer implements MutableSamplePlane {
         return DecodedPlane.fromOwnedSamples(croppedWidth, croppedHeight, width, samples);
     }
 
+    /// Transfers the retained storage region into one immutable coordinate-local decoded plane.
+    ///
+    /// The caller must permanently discard this mutable buffer after the transfer. The requested
+    /// dimensions are relative to the retained region and may omit its right or bottom padding.
+    ///
+    /// @param croppedWidth the visible retained-region width in samples
+    /// @param croppedHeight the visible retained-region height in samples
+    /// @return one immutable plane that owns the retained sample storage
+    DecodedPlane takeStoredDecodedPlane(int croppedWidth, int croppedHeight) {
+        if (croppedWidth <= 0 || croppedWidth > storageWidth) {
+            throw new IllegalArgumentException("croppedWidth out of range: " + croppedWidth);
+        }
+        if (croppedHeight <= 0 || croppedHeight > storageHeight) {
+            throw new IllegalArgumentException("croppedHeight out of range: " + croppedHeight);
+        }
+        return DecodedPlane.fromOwnedSamples(croppedWidth, croppedHeight, storageWidth, samples);
+    }
+
     /// Creates an independent mutable copy of this plane buffer.
     ///
     /// @return an independent mutable copy of this plane buffer
     MutablePlaneBuffer copy() {
-        MutablePlaneBuffer copy = new MutablePlaneBuffer(width, height, bitDepth);
+        MutablePlaneBuffer copy = new MutablePlaneBuffer(
+                width,
+                height,
+                bitDepth,
+                originX,
+                originY,
+                storageWidth,
+                storageHeight
+        );
         System.arraycopy(samples, 0, copy.samples, 0, samples.length);
         System.arraycopy(writtenSamples, 0, copy.writtenSamples, 0, writtenSamples.length);
         return copy;
+    }
+
+    /// Returns the compact storage index for one containing-plane coordinate.
+    ///
+    /// @param x the horizontal containing-plane coordinate
+    /// @param y the vertical containing-plane coordinate
+    /// @return the compact storage index
+    private int storageIndex(int x, int y) {
+        int localX = x - originX;
+        int localY = y - originY;
+        if (localX < 0 || localX >= storageWidth) {
+            throw new IndexOutOfBoundsException("x outside retained storage: " + x);
+        }
+        if (localY < 0 || localY >= storageHeight) {
+            throw new IndexOutOfBoundsException("y outside retained storage: " + y);
+        }
+        return localY * storageWidth + localX;
+    }
+
+    /// Ensures that snapshot operations requiring a top-left plane own complete storage.
+    private void requireCompletePlaneStorage() {
+        if (originX != 0 || originY != 0 || storageWidth != width || storageHeight != height) {
+            throw new IllegalStateException("Operation requires complete plane storage");
+        }
     }
 
     /// Clips one sample value into the legal bit-depth range.

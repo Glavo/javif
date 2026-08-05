@@ -19,8 +19,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 /// Provides the mutable sample operations required by intra prediction.
 ///
-/// Coordinates use the containing plane's sample grid. Implementations may store the whole plane
-/// or expose a writable overlay backed by another plane.
+/// Coordinates use the containing plane's sample grid. Implementations may store the whole plane,
+/// retain only the reconstruction region supplied to callers, or expose a writable overlay backed
+/// by another plane.
 @NotNullByDefault
 interface MutableSamplePlane {
     /// Returns the plane width in samples.

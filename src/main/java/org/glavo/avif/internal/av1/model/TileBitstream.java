@@ -99,4 +99,35 @@ public final class TileBitstream {
     public byte[] copyBytes() {
         return Arrays.copyOfRange(data, dataOffset, dataOffset + dataLength);
     }
+
+    /// Returns a content hash code for the tile payload bytes.
+    ///
+    /// @return the payload content hash code
+    public int payloadHashCode() {
+        int hashCode = 1;
+        int dataEnd = dataOffset + dataLength;
+        for (int index = dataOffset; index < dataEnd; index++) {
+            hashCode = 31 * hashCode + data[index];
+        }
+        return hashCode;
+    }
+
+    /// Returns whether another tile bitstream contains the same payload bytes.
+    ///
+    /// Tile indices are not compared.
+    ///
+    /// @param other the tile bitstream to compare
+    /// @return whether both payload byte ranges have identical contents
+    public boolean hasSamePayload(TileBitstream other) {
+        TileBitstream checkedOther = Objects.requireNonNull(other, "other");
+        return dataLength == checkedOther.dataLength
+                && Arrays.equals(
+                        data,
+                        dataOffset,
+                        dataOffset + dataLength,
+                        checkedOther.data,
+                        checkedOther.dataOffset,
+                        checkedOther.dataOffset + checkedOther.dataLength
+                );
+    }
 }

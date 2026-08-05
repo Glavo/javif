@@ -50,6 +50,29 @@ final class MutablePlaneBufferTest {
         assertEquals(13, snapshot.sample(1, 1));
     }
 
+    /// Verifies frame-relative access to compact retained subregion storage.
+    @Test
+    void retainsCoordinatePreservingSubregion() {
+        MutablePlaneBuffer plane = new MutablePlaneBuffer(12, 10, 8, 4, 2, 3, 4);
+
+        assertEquals(12, plane.width());
+        assertEquals(10, plane.height());
+        plane.setSample(4, 2, 11);
+        plane.setSample(6, 5, 22);
+
+        assertEquals(11, plane.sample(4, 2));
+        assertEquals(22, plane.sample(6, 5));
+        assertEquals(77, plane.sampleOrFallback(3, 2, 77));
+        assertThrows(IndexOutOfBoundsException.class, () -> plane.sample(7, 2));
+        assertThrows(IllegalStateException.class, plane::toDecodedPlane);
+
+        DecodedPlane retained = plane.takeStoredDecodedPlane(3, 4);
+        assertEquals(3, retained.width());
+        assertEquals(4, retained.height());
+        assertEquals(11, retained.sample(0, 0));
+        assertEquals(22, retained.sample(2, 3));
+    }
+
     /// Verifies that a block overlay reads through unwritten samples and isolates compact writes.
     @Test
     void blockOverlayReadsThroughBasePlaneAndStoresOnlyItsBlock() {

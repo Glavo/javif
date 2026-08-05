@@ -63,6 +63,54 @@ final class LargeScaleTileOutputBuilderTest {
         assertEquals(0, outputV.sample(3, 3));
     }
 
+    /// Verifies that a previously assembled tile can be reused without the camera-frame source.
+    @Test
+    void copiesPreviouslyWrittenOutputTile() {
+        DecodedPlanes source = sourcePlanes();
+        LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
+                10,
+                AvifPixelFormat.I420,
+                4,
+                4,
+                2,
+                2
+        );
+
+        builder.copyTile(source, 1, 0, 0);
+        builder.copyOutputTile(0, 3);
+        DecodedPlanes output = builder.build();
+
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                assertEquals(output.lumaPlane().sample(x, y), output.lumaPlane().sample(x + 4, y + 4));
+            }
+        }
+        DecodedPlane outputU = Objects.requireNonNull(output.chromaUPlane(), "output.chromaUPlane");
+        DecodedPlane outputV = Objects.requireNonNull(output.chromaVPlane(), "output.chromaVPlane");
+        for (int y = 0; y < 2; y++) {
+            for (int x = 0; x < 2; x++) {
+                assertEquals(outputU.sample(x, y), outputU.sample(x + 2, y + 2));
+                assertEquals(outputV.sample(x, y), outputV.sample(x + 2, y + 2));
+            }
+        }
+    }
+
+    /// Verifies validation of source and destination output tile indices.
+    @Test
+    void rejectsInvalidOutputTileCopyIndices() {
+        LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
+                10,
+                AvifPixelFormat.I420,
+                4,
+                4,
+                2,
+                2
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> builder.copyOutputTile(-1, 0));
+        assertThrows(IllegalArgumentException.class, () -> builder.copyOutputTile(0, 4));
+    }
+
     /// Verifies that ownership transfer permanently closes the mutable builder lifecycle.
     @Test
     void rejectsMutationAndRepeatedBuildAfterOwnershipTransfer() {
@@ -80,6 +128,7 @@ final class LargeScaleTileOutputBuilderTest {
 
         assertThrows(IllegalStateException.class, builder::build);
         assertThrows(IllegalStateException.class, () -> builder.copyTile(source, 0, 0, 0));
+        assertThrows(IllegalStateException.class, () -> builder.copyOutputTile(0, 0));
     }
 
     /// Creates deterministic 8x8 I420 camera-frame planes.

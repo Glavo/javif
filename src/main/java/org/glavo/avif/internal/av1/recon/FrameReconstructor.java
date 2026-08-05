@@ -274,6 +274,44 @@ public final class FrameReconstructor {
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             boolean strictStdCompliance
     ) {
+        return reconstructRegion(syntaxDecodeResult, referenceSurfaceSnapshots, strictStdCompliance, -1);
+    }
+
+    /// Reconstructs one decoded tile into compact tile-local output planes.
+    ///
+    /// The partition syntax and prediction coordinates remain frame-relative, but mutable sample
+    /// storage is allocated only for the selected tile. Prediction references remain full-frame
+    /// surfaces supplied by the caller.
+    ///
+    /// @param syntaxDecodeResult the structural frame result containing the decoded tile
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param tileIndex the zero-based tile index to reconstruct
+    /// @param strictStdCompliance whether malformed transform values must be rejected
+    /// @return compact decoded planes containing only the selected tile
+    /// @throws IllegalArgumentException if `tileIndex` is outside the decoded frame's tile range
+    /// @throws InvalidFrameReconstructionException if strict reconstruction detects a nonconformant value
+    public DecodedPlanes reconstructTile(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            int tileIndex,
+            boolean strictStdCompliance
+    ) {
+        return reconstructRegion(syntaxDecodeResult, referenceSurfaceSnapshots, strictStdCompliance, tileIndex);
+    }
+
+    /// Reconstructs either a complete frame or one selected tile.
+    ///
+    /// @param syntaxDecodeResult the structural frame result to reconstruct
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param strictStdCompliance whether malformed transform values must be rejected
+    /// @param selectedTileIndex the selected tile index, or `-1` for the complete frame
+    /// @return the reconstructed complete-frame or compact tile planes
+    private DecodedPlanes reconstructRegion(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            boolean strictStdCompliance,
+            int selectedTileIndex
+    ) {
         FrameSyntaxDecodeResult checkedSyntaxDecodeResult = Objects.requireNonNull(syntaxDecodeResult, "syntaxDecodeResult");
         @Nullable ReferenceSurfaceSnapshot[] checkedReferenceSurfaceSnapshots =
                 Objects.requireNonNull(referenceSurfaceSnapshots, "referenceSurfaceSnapshots");
@@ -284,36 +322,81 @@ public final class FrameReconstructor {
         AvifPixelFormat pixelFormat = sequenceHeader.colorConfig().pixelFormat();
 
         validateFrameConfiguration(sequenceHeader, frameHeader);
+        if (selectedTileIndex < -1 || selectedTileIndex >= checkedSyntaxDecodeResult.tileCount()) {
+            throw new IllegalArgumentException("selectedTileIndex out of range: " + selectedTileIndex);
+        }
 
         int alignedLumaWidth = alignedLumaDimension(frameSize.codedWidth());
         int alignedLumaHeight = alignedLumaDimension(frameSize.height());
+        int frameBoundaryWidth = alignedFrameBoundaryDimension(frameSize.codedWidth());
+        int frameBoundaryHeight = alignedFrameBoundaryDimension(frameSize.height());
+        @Nullable TileSampleBounds selectedTileBounds = selectedTileIndex >= 0
+                ? tileSampleBounds(
+                        assembly,
+                        selectedTileIndex,
+                        pixelFormat,
+                        frameBoundaryWidth,
+                        frameBoundaryHeight
+                )
+                : null;
+        int storageStartX = selectedTileBounds != null ? selectedTileBounds.lumaStartX() : 0;
+        int storageStartY = selectedTileBounds != null ? selectedTileBounds.lumaStartY() : 0;
+        int storageEndX = selectedTileBounds != null
+                ? paddedTileStorageEnd(selectedTileBounds.lumaEndX(), frameBoundaryWidth, alignedLumaWidth)
+                : alignedLumaWidth;
+        int storageEndY = selectedTileBounds != null
+                ? paddedTileStorageEnd(selectedTileBounds.lumaEndY(), frameBoundaryHeight, alignedLumaHeight)
+                : alignedLumaHeight;
+        int bitDepth = sequenceHeader.colorConfig().bitDepth();
         MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(
                 alignedLumaWidth,
                 alignedLumaHeight,
-                sequenceHeader.colorConfig().bitDepth()
+                bitDepth,
+                storageStartX,
+                storageStartY,
+                storageEndX - storageStartX,
+                storageEndY - storageStartY
         );
         @Nullable MutablePlaneBuffer chromaUPlane = createChromaPlane(
                 pixelFormat,
                 alignedLumaWidth,
                 alignedLumaHeight,
-                sequenceHeader.colorConfig().bitDepth()
+                bitDepth,
+                storageStartX,
+                storageStartY,
+                storageEndX,
+                storageEndY
         );
         @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(
                 pixelFormat,
                 alignedLumaWidth,
                 alignedLumaHeight,
-                sequenceHeader.colorConfig().bitDepth()
+                bitDepth,
+                storageStartX,
+                storageStartY,
+                storageEndX,
+                storageEndY
         );
 
         TilePartitionTreeReader.Node[][] tileRootsByTile = checkedSyntaxDecodeResult.tileRoots();
-        DecodedBlockMap decodedBlockMap = DecodedBlockMap.create(tileRootsByTile, alignedLumaWidth, alignedLumaHeight);
-        for (int tileIndex = 0; tileIndex < tileRootsByTile.length; tileIndex++) {
+        DecodedBlockMap decodedBlockMap = selectedTileBounds != null
+                ? DecodedBlockMap.createRegion(
+                        tileRootsByTile,
+                        selectedTileBounds.lumaStartX(),
+                        selectedTileBounds.lumaStartY(),
+                        selectedTileBounds.lumaEndX(),
+                        selectedTileBounds.lumaEndY()
+                )
+                : DecodedBlockMap.create(tileRootsByTile, alignedLumaWidth, alignedLumaHeight);
+        int firstTileIndex = selectedTileIndex >= 0 ? selectedTileIndex : 0;
+        int lastTileIndex = selectedTileIndex >= 0 ? selectedTileIndex + 1 : tileRootsByTile.length;
+        for (int tileIndex = firstTileIndex; tileIndex < lastTileIndex; tileIndex++) {
             TileSampleBounds tileBounds = tileSampleBounds(
                     assembly,
                     tileIndex,
                     pixelFormat,
-                    alignedFrameBoundaryDimension(frameSize.codedWidth()),
-                    alignedFrameBoundaryDimension(frameSize.height())
+                    frameBoundaryWidth,
+                    frameBoundaryHeight
             );
             TilePartitionTreeReader.Node[] tileRoots = tileRootsByTile[tileIndex];
             for (TilePartitionTreeReader.Node root : tileRoots) {
@@ -334,21 +417,29 @@ public final class FrameReconstructor {
             }
         }
 
-        DecodedPlane decodedLumaPlane = lumaPlane.takeDecodedPlane(frameSize.codedWidth(), frameSize.height());
+        int outputLumaWidth = selectedTileBounds != null
+                ? selectedTileBounds.lumaEndX() - selectedTileBounds.lumaStartX()
+                : frameSize.codedWidth();
+        int outputLumaHeight = selectedTileBounds != null
+                ? selectedTileBounds.lumaEndY() - selectedTileBounds.lumaStartY()
+                : frameSize.height();
+        int outputChromaWidth = chromaWidth(pixelFormat, outputLumaWidth);
+        int outputChromaHeight = chromaHeight(pixelFormat, outputLumaHeight);
+        DecodedPlane decodedLumaPlane = lumaPlane.takeStoredDecodedPlane(outputLumaWidth, outputLumaHeight);
         @Nullable DecodedPlane decodedChromaUPlane = chromaUPlane != null
-                ? chromaUPlane.takeDecodedPlane(chromaWidth(pixelFormat, frameSize.codedWidth()), chromaHeight(pixelFormat, frameSize.height()))
+                ? chromaUPlane.takeStoredDecodedPlane(outputChromaWidth, outputChromaHeight)
                 : null;
         @Nullable DecodedPlane decodedChromaVPlane = chromaVPlane != null
-                ? chromaVPlane.takeDecodedPlane(chromaWidth(pixelFormat, frameSize.codedWidth()), chromaHeight(pixelFormat, frameSize.height()))
+                ? chromaVPlane.takeStoredDecodedPlane(outputChromaWidth, outputChromaHeight)
                 : null;
 
         return new DecodedPlanes(
-                sequenceHeader.colorConfig().bitDepth(),
+                bitDepth,
                 pixelFormat,
-                frameSize.codedWidth(),
-                frameSize.height(),
-                frameSize.renderWidth(),
-                frameSize.renderHeight(),
+                outputLumaWidth,
+                outputLumaHeight,
+                selectedTileBounds != null ? outputLumaWidth : frameSize.renderWidth(),
+                selectedTileBounds != null ? outputLumaHeight : frameSize.renderHeight(),
                 decodedLumaPlane,
                 decodedChromaUPlane,
                 decodedChromaVPlane
@@ -454,31 +545,49 @@ public final class FrameReconstructor {
     /// @param alignedLumaWidth the aligned luma-plane width in samples
     /// @param alignedLumaHeight the aligned luma-plane height in samples
     /// @param bitDepth the decoded sample bit depth
+    /// @param lumaStorageStartX the inclusive luma storage X boundary
+    /// @param lumaStorageStartY the inclusive luma storage Y boundary
+    /// @param lumaStorageEndX the exclusive luma storage X boundary
+    /// @param lumaStorageEndY the exclusive luma storage Y boundary
     /// @return one mutable chroma plane for the supplied pixel format, or `null` for monochrome
     private static @Nullable MutablePlaneBuffer createChromaPlane(
             AvifPixelFormat pixelFormat,
             int alignedLumaWidth,
             int alignedLumaHeight,
-            int bitDepth
+            int bitDepth,
+            int lumaStorageStartX,
+            int lumaStorageStartY,
+            int lumaStorageEndX,
+            int lumaStorageEndY
     ) {
+        int planeWidth = chromaWidth(pixelFormat, alignedLumaWidth);
+        int planeHeight = chromaHeight(pixelFormat, alignedLumaHeight);
+        int originX = chromaWidth(pixelFormat, lumaStorageStartX);
+        int originY = chromaHeight(pixelFormat, lumaStorageStartY);
+        int storageEndX = chromaWidth(pixelFormat, lumaStorageEndX);
+        int storageEndY = chromaHeight(pixelFormat, lumaStorageEndY);
         return switch (pixelFormat) {
             case I400 -> null;
-            case I420 -> new MutablePlaneBuffer(
-                    alignedLumaWidth >> 1,
-                    alignedLumaHeight >> 1,
-                    bitDepth
-            );
-            case I422 -> new MutablePlaneBuffer(
-                    alignedLumaWidth >> 1,
-                    alignedLumaHeight,
-                    bitDepth
-            );
-            case I444 -> new MutablePlaneBuffer(
-                    alignedLumaWidth,
-                    alignedLumaHeight,
-                    bitDepth
+            case I420, I422, I444 -> new MutablePlaneBuffer(
+                    planeWidth,
+                    planeHeight,
+                    bitDepth,
+                    originX,
+                    originY,
+                    storageEndX - originX,
+                    storageEndY - originY
             );
         };
+    }
+
+    /// Extends an edge tile's retained storage through reconstruction padding.
+    ///
+    /// @param tileEnd the exclusive tile boundary
+    /// @param frameBoundary the exclusive MI-grid-aligned frame boundary
+    /// @param paddedFrameEnd the exclusive reconstruction-buffer boundary
+    /// @return the retained exclusive storage boundary
+    private static int paddedTileStorageEnd(int tileEnd, int frameBoundary, int paddedFrameEnd) {
+        return tileEnd == frameBoundary ? paddedFrameEnd : tileEnd;
     }
 
     /// Returns an AV1 luma dimension rounded up far enough to hold a complete edge inter-intra
@@ -535,10 +644,16 @@ public final class FrameReconstructor {
     /// Frame-local leaf lookup table indexed in 4x4 units.
     @NotNullByDefault
     private static final class DecodedBlockMap {
-        /// The frame width rounded up to 4x4 units.
+        /// The horizontal map origin in 4x4 units.
+        private final int originX4;
+
+        /// The vertical map origin in 4x4 units.
+        private final int originY4;
+
+        /// The retained map width in 4x4 units.
         private final int width4;
 
-        /// The frame height rounded up to 4x4 units.
+        /// The retained map height in 4x4 units.
         private final int height4;
 
         /// The leaf nodes indexed by 4x4 position.
@@ -552,15 +667,25 @@ public final class FrameReconstructor {
 
         /// Creates one decoded block map.
         ///
-        /// @param width4 the frame width rounded up to 4x4 units
-        /// @param height4 the frame height rounded up to 4x4 units
-        private DecodedBlockMap(int width4, int height4) {
+        /// @param originX4 the horizontal map origin in 4x4 units
+        /// @param originY4 the vertical map origin in 4x4 units
+        /// @param width4 the retained map width in 4x4 units
+        /// @param height4 the retained map height in 4x4 units
+        private DecodedBlockMap(int originX4, int originY4, int width4, int height4) {
+            if (originX4 < 0) {
+                throw new IllegalArgumentException("originX4 < 0: " + originX4);
+            }
+            if (originY4 < 0) {
+                throw new IllegalArgumentException("originY4 < 0: " + originY4);
+            }
             if (width4 <= 0) {
                 throw new IllegalArgumentException("width4 <= 0: " + width4);
             }
             if (height4 <= 0) {
                 throw new IllegalArgumentException("height4 <= 0: " + height4);
             }
+            this.originX4 = originX4;
+            this.originY4 = originY4;
             this.width4 = width4;
             this.height4 = height4;
             this.leaves = new TilePartitionTreeReader.LeafNode[Math.multiplyExact(width4, height4)];
@@ -579,7 +704,37 @@ public final class FrameReconstructor {
                 int frameWidth,
                 int frameHeight
         ) {
-            DecodedBlockMap map = new DecodedBlockMap((frameWidth + 3) >> 2, (frameHeight + 3) >> 2);
+            return createRegion(tileRootsByTile, 0, 0, frameWidth, frameHeight);
+        }
+
+        /// Creates one decoded block map retaining only one frame-relative rectangular region.
+        ///
+        /// @param tileRootsByTile the decoded partition roots grouped by tile
+        /// @param startX the inclusive horizontal region boundary in pixels
+        /// @param startY the inclusive vertical region boundary in pixels
+        /// @param endX the exclusive horizontal region boundary in pixels
+        /// @param endY the exclusive vertical region boundary in pixels
+        /// @return one decoded block map for the selected region
+        public static DecodedBlockMap createRegion(
+                TilePartitionTreeReader.Node[][] tileRootsByTile,
+                int startX,
+                int startY,
+                int endX,
+                int endY
+        ) {
+            if (startX < 0 || startY < 0 || endX <= startX || endY <= startY) {
+                throw new IllegalArgumentException("Invalid decoded block map region");
+            }
+            int originX4 = startX >> 2;
+            int originY4 = startY >> 2;
+            int endX4 = (endX + 3) >> 2;
+            int endY4 = (endY + 3) >> 2;
+            DecodedBlockMap map = new DecodedBlockMap(
+                    originX4,
+                    originY4,
+                    endX4 - originX4,
+                    endY4 - originY4
+            );
             for (TilePartitionTreeReader.Node[] tileRoots : Objects.requireNonNull(tileRootsByTile, "tileRootsByTile")) {
                 for (TilePartitionTreeReader.Node root : tileRoots) {
                     map.addNode(root);
@@ -609,11 +764,11 @@ public final class FrameReconstructor {
         private void addLeaf(TilePartitionTreeReader.LeafNode leafNode) {
             TileBlockHeaderReader.BlockHeader header = Objects.requireNonNull(leafNode, "leafNode").header();
             int decodeOrder = nextDecodeOrder++;
-            int endX4 = Math.min(width4, header.position().x4() + header.size().width4());
-            int endY4 = Math.min(height4, header.position().y4() + header.size().height4());
-            for (int y4 = Math.max(0, header.position().y4()); y4 < endY4; y4++) {
-                for (int x4 = Math.max(0, header.position().x4()); x4 < endX4; x4++) {
-                    int index = y4 * width4 + x4;
+            int endX4 = Math.min(originX4 + width4, header.position().x4() + header.size().width4());
+            int endY4 = Math.min(originY4 + height4, header.position().y4() + header.size().height4());
+            for (int y4 = Math.max(originY4, header.position().y4()); y4 < endY4; y4++) {
+                for (int x4 = Math.max(originX4, header.position().x4()); x4 < endX4; x4++) {
+                    int index = storageIndex(x4, y4);
                     leaves[index] = leafNode;
                     decodeOrders[index] = decodeOrder;
                 }
@@ -626,10 +781,13 @@ public final class FrameReconstructor {
         /// @param y4 the vertical 4x4 coordinate
         /// @return the decoded leaf that covers the position, or `null`
         public @Nullable TilePartitionTreeReader.LeafNode leafAt(int x4, int y4) {
-            if (x4 < 0 || y4 < 0 || x4 >= width4 || y4 >= height4) {
+            if (x4 < originX4
+                    || y4 < originY4
+                    || x4 >= originX4 + width4
+                    || y4 >= originY4 + height4) {
                 return null;
             }
-            return leaves[y4 * width4 + x4];
+            return leaves[storageIndex(x4, y4)];
         }
 
         /// Returns whether one candidate leaf precedes the current leaf in partition traversal.
@@ -643,8 +801,8 @@ public final class FrameReconstructor {
         ) {
             TileBlockHeaderReader.BlockHeader candidateHeader = Objects.requireNonNull(candidate, "candidate").header();
             TileBlockHeaderReader.BlockHeader currentHeader = Objects.requireNonNull(current, "current").header();
-            int candidateIndex = candidateHeader.position().y4() * width4 + candidateHeader.position().x4();
-            int currentIndex = currentHeader.position().y4() * width4 + currentHeader.position().x4();
+            int candidateIndex = storageIndex(candidateHeader.position().x4(), candidateHeader.position().y4());
+            int currentIndex = storageIndex(currentHeader.position().x4(), currentHeader.position().y4());
             return decodeOrders[candidateIndex] >= 0 && decodeOrders[candidateIndex] < decodeOrders[currentIndex];
         }
 
@@ -668,10 +826,10 @@ public final class FrameReconstructor {
             if (chromaX4 < 0 || chromaY4 < 0) {
                 return null;
             }
-            int startX4 = chromaX4 << chromaSubsamplingX;
-            int startY4 = chromaY4 << chromaSubsamplingY;
-            int endX4 = Math.min(width4, (chromaX4 + 1) << chromaSubsamplingX);
-            int endY4 = Math.min(height4, (chromaY4 + 1) << chromaSubsamplingY);
+            int startX4 = Math.max(originX4, chromaX4 << chromaSubsamplingX);
+            int startY4 = Math.max(originY4, chromaY4 << chromaSubsamplingY);
+            int endX4 = Math.min(originX4 + width4, (chromaX4 + 1) << chromaSubsamplingX);
+            int endY4 = Math.min(originY4 + height4, (chromaY4 + 1) << chromaSubsamplingY);
             for (int y4 = endY4 - 1; y4 >= startY4; y4--) {
                 for (int x4 = endX4 - 1; x4 >= startX4; x4--) {
                     @Nullable TilePartitionTreeReader.LeafNode leafNode = leafAt(x4, y4);
@@ -681,6 +839,20 @@ public final class FrameReconstructor {
                 }
             }
             return null;
+        }
+
+        /// Returns the compact map index for one retained frame-relative 4x4 coordinate.
+        ///
+        /// @param x4 the horizontal 4x4 coordinate
+        /// @param y4 the vertical 4x4 coordinate
+        /// @return the compact map index
+        private int storageIndex(int x4, int y4) {
+            int localX4 = x4 - originX4;
+            int localY4 = y4 - originY4;
+            if (localX4 < 0 || localX4 >= width4 || localY4 < 0 || localY4 >= height4) {
+                throw new IndexOutOfBoundsException("Block coordinate outside retained map: " + x4 + ", " + y4);
+            }
+            return localY4 * width4 + localX4;
         }
     }
 

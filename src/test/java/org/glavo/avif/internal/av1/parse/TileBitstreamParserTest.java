@@ -31,6 +31,8 @@ import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `TileBitstreamParser`.
 @NotNullByDefault
@@ -89,6 +91,18 @@ final class TileBitstreamParserTest {
         assertEquals(1, bitstreams.length);
         assertEquals(1, bitstreams[0].dataOffset());
         assertArrayEquals(new byte[]{0x7E}, bitstreams[0].copyBytes());
+    }
+
+    /// Verifies exact payload comparison across distinct backing arrays and slice offsets.
+    @Test
+    void comparesTilePayloadContentsWithoutCopying() {
+        TileBitstream first = new TileBitstream(1, new byte[]{9, 1, 2, 3, 8}, 1, 3);
+        TileBitstream samePayload = new TileBitstream(7, new byte[]{1, 2, 3}, 0, 3);
+        TileBitstream differentPayload = new TileBitstream(1, new byte[]{1, 2, 4}, 0, 3);
+
+        assertTrue(first.hasSamePayload(samePayload));
+        assertEquals(first.payloadHashCode(), samePayload.payloadHashCode());
+        assertFalse(first.hasSamePayload(differentPayload));
     }
 
     /// Wraps raw bytes in a synthetic tile-group OBU.
