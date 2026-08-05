@@ -88,12 +88,14 @@ archives are available or can be downloaded:
 ```
 
 The second archive is several gigabytes. The `Corpus Check` GitHub Actions workflow therefore keeps
-both corpus gates manual, caches their pinned archives independently, and runs the twelve Argon
+both corpus gates manual, caches their pinned archives independently, and runs the thirteen Argon
 categories as separate matrix jobs. The Argon gate covers all regular and special low-overhead
-streams plus the Annex B core and core-special streams for all three profiles, and uses a 4 GB test
-heap by default. It can be split by category or narrowed to one stream, and the heap remains
-configurable for constrained or unusually large workers. Shards are one-based and can be combined
-with `category/all`:
+streams, 88 Profile 0 decoder-mode-independent malformed conformance-test streams, and the Annex B
+core and core-special streams for all three profiles. The 26 malformed streams documented as
+Large Scale Tile-only remain deferred until that external decoder mode is supported. The gate uses
+a 4 GB test heap by default, can be split by category or narrowed to one stream, and keeps the heap
+configurable for constrained or unusually large workers. Shards are
+one-based and can be combined with `category/all`:
 
 ```text
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/all
@@ -101,6 +103,7 @@ with `category/all`:
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_not_annexb_special/test17.obu
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_core/all
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_core_special/all
+./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_error/all
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1MaxHeap=6g
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile1_not_annexb_special/test52.obu -PargonAv1TraceFrames
 ```

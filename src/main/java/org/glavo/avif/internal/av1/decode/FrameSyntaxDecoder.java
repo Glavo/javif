@@ -33,6 +33,9 @@ public final class FrameSyntaxDecoder {
     /// The compact reference-frame syntax states indexed by runtime reference slot.
     private final @Nullable ReferenceFrameSyntaxState @Unmodifiable [] referenceFrameSyntaxStates;
 
+    /// Whether decoded conformance values outside their specified ranges must be rejected.
+    private final boolean strictStdCompliance;
+
     /// Creates one structural frame decoder.
     ///
     /// @param referenceCdfFrameSyntaxResult the optional reference-frame syntax result that provides the inherited frame CDF context
@@ -53,6 +56,19 @@ public final class FrameSyntaxDecoder {
             @Nullable ReferenceFrameSyntaxState referenceCdfFrameSyntaxState,
             @Nullable ReferenceFrameSyntaxState[] referenceFrameSyntaxStates
     ) {
+        this(referenceCdfFrameSyntaxState, referenceFrameSyntaxStates, false);
+    }
+
+    /// Creates one structural frame decoder with runtime references and strict conformance policy.
+    ///
+    /// @param referenceCdfFrameSyntaxState the optional compact reference state that provides the inherited frame CDF context
+    /// @param referenceFrameSyntaxStates compact syntax states indexed by runtime reference slot
+    /// @param strictStdCompliance whether decoded conformance values outside their ranges must be rejected
+    public FrameSyntaxDecoder(
+            @Nullable ReferenceFrameSyntaxState referenceCdfFrameSyntaxState,
+            @Nullable ReferenceFrameSyntaxState[] referenceFrameSyntaxStates,
+            boolean strictStdCompliance
+    ) {
         this.referenceCdfFrameSyntaxState = referenceCdfFrameSyntaxState;
         @Nullable ReferenceFrameSyntaxState[] nonNullReferenceFrameSyntaxStates =
                 Objects.requireNonNull(referenceFrameSyntaxStates, "referenceFrameSyntaxStates");
@@ -62,6 +78,7 @@ public final class FrameSyntaxDecoder {
             );
         }
         this.referenceFrameSyntaxStates = nonNullReferenceFrameSyntaxStates.clone();
+        this.strictStdCompliance = strictStdCompliance;
     }
 
     /// Structurally decodes every collected tile in one completed frame assembly.
@@ -98,7 +115,7 @@ public final class FrameSyntaxDecoder {
                     referenceSegmentIdMap,
                     inheritedCdfContext
             );
-            TilePartitionTreeReader treeReader = new TilePartitionTreeReader(tileContext);
+            TilePartitionTreeReader treeReader = new TilePartitionTreeReader(tileContext, strictStdCompliance);
             try {
                 tileRoots[tileIndex] = treeReader.readTile();
             } catch (IntrabcDisplacementValidator.InvalidDisplacementVectorException exception) {

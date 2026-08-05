@@ -94,13 +94,25 @@ public final class TileBlockHeaderReader {
     /// The typed syntax reader used to consume entropy-coded syntax elements.
     private final TileSyntaxReader syntaxReader;
 
+    /// Whether decoded conformance values outside their specified ranges must be rejected.
+    private final boolean strictStdCompliance;
+
     /// Creates one leaf block header reader.
     ///
     /// @param tileContext the tile-local decode state that owns the active frame and sequence headers
     public TileBlockHeaderReader(TileDecodeContext tileContext) {
+        this(tileContext, false);
+    }
+
+    /// Creates one leaf block header reader with a strict conformance policy.
+    ///
+    /// @param tileContext the tile-local decode state that owns the active frame and sequence headers
+    /// @param strictStdCompliance whether decoded conformance values outside their ranges must be rejected
+    public TileBlockHeaderReader(TileDecodeContext tileContext, boolean strictStdCompliance) {
         TileDecodeContext nonNullTileContext = Objects.requireNonNull(tileContext, "tileContext");
         this.tileContext = nonNullTileContext;
         this.syntaxReader = new TileSyntaxReader(nonNullTileContext);
+        this.strictStdCompliance = strictStdCompliance;
     }
 
     /// Returns the tile-local decode state that owns this block header reader.
@@ -2001,6 +2013,12 @@ public final class TileBlockHeaderReader {
     private int decodeSegmentId(BlockNeighborContext.SegmentPrediction prediction, int lastActiveSegmentId) {
         int diff = syntaxReader.readSegmentId(prediction.context());
         int segmentId = negDeinterleave(diff, prediction.predictedSegmentId(), lastActiveSegmentId + 1);
+        if (strictStdCompliance && (segmentId < 0 || segmentId > lastActiveSegmentId || segmentId >= 8)) {
+            IllegalArgumentException cause = new IllegalArgumentException(
+                    "Decoded segment identifier exceeds LastActiveSegId"
+            );
+            throw new InvalidFrameSyntaxException(cause.getMessage(), cause);
+        }
         return validSegmentIdOrZero(segmentId, lastActiveSegmentId);
     }
 

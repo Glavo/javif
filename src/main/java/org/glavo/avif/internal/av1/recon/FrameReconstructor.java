@@ -259,6 +259,21 @@ public final class FrameReconstructor {
             FrameSyntaxDecodeResult syntaxDecodeResult,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
+        return reconstruct(syntaxDecodeResult, referenceSurfaceSnapshots, false);
+    }
+
+    /// Reconstructs one structural frame result with optional strict transform conformance checks.
+    ///
+    /// @param syntaxDecodeResult the structural frame result to reconstruct
+    /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
+    /// @param strictStdCompliance whether malformed transform values must be rejected
+    /// @return one decoded-plane snapshot
+    /// @throws InvalidFrameReconstructionException if strict reconstruction detects a nonconformant value
+    public DecodedPlanes reconstruct(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
+            boolean strictStdCompliance
+    ) {
         FrameSyntaxDecodeResult checkedSyntaxDecodeResult = Objects.requireNonNull(syntaxDecodeResult, "syntaxDecodeResult");
         @Nullable ReferenceSurfaceSnapshot[] checkedReferenceSurfaceSnapshots =
                 Objects.requireNonNull(referenceSurfaceSnapshots, "referenceSurfaceSnapshots");
@@ -313,7 +328,8 @@ public final class FrameReconstructor {
                         sequenceHeader.features().intraEdgeFilter(),
                         checkedReferenceSurfaceSnapshots,
                         decodedBlockMap,
-                        tileBounds
+                        tileBounds,
+                        strictStdCompliance
                 );
             }
         }
@@ -701,7 +717,8 @@ public final class FrameReconstructor {
                 intraEdgeFilterEnabled,
                 referenceSurfaceSnapshots,
                 DecodedBlockMap.create(new TilePartitionTreeReader.Node[][]{{node}}, lumaPlane.width(), lumaPlane.height()),
-                fullFrameSampleBounds(pixelFormat, lumaPlane.width(), lumaPlane.height())
+                fullFrameSampleBounds(pixelFormat, lumaPlane.width(), lumaPlane.height()),
+                false
         );
     }
 
@@ -718,6 +735,7 @@ public final class FrameReconstructor {
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructNode(
             TilePartitionTreeReader.Node node,
             MutablePlaneBuffer lumaPlane,
@@ -729,7 +747,8 @@ public final class FrameReconstructor {
             boolean intraEdgeFilterEnabled,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap,
-            TileSampleBounds tileBounds
+            TileSampleBounds tileBounds,
+            boolean strictStdCompliance
     ) {
         if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
             reconstructLeaf(
@@ -743,7 +762,8 @@ public final class FrameReconstructor {
                     intraEdgeFilterEnabled,
                     referenceSurfaceSnapshots,
                     decodedBlockMap,
-                    tileBounds
+                    tileBounds,
+                    strictStdCompliance
             );
             return;
         }
@@ -761,7 +781,8 @@ public final class FrameReconstructor {
                     intraEdgeFilterEnabled,
                     referenceSurfaceSnapshots,
                     decodedBlockMap,
-                    tileBounds
+                    tileBounds,
+                    strictStdCompliance
             );
         }
     }
@@ -777,6 +798,7 @@ public final class FrameReconstructor {
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructLeaf(
             TilePartitionTreeReader.LeafNode leafNode,
             MutablePlaneBuffer lumaPlane,
@@ -788,7 +810,8 @@ public final class FrameReconstructor {
             boolean intraEdgeFilterEnabled,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap,
-            TileSampleBounds tileBounds
+            TileSampleBounds tileBounds,
+            boolean strictStdCompliance
     ) {
         TileBlockHeaderReader.BlockHeader header = leafNode.header();
         TransformLayout transformLayout = leafNode.transformLayout();
@@ -836,7 +859,8 @@ public final class FrameReconstructor {
                         header,
                         frameHeader,
                         header.filterIntraMode(),
-                        tileBounds
+                        tileBounds,
+                        strictStdCompliance
                 );
                 lumaResidualsApplied = true;
             } else {
@@ -848,7 +872,8 @@ public final class FrameReconstructor {
                         frameHeader,
                         intraEdgeFilterEnabled,
                         smoothEdgeReferences,
-                        tileBounds
+                        tileBounds,
+                        strictStdCompliance
                 );
                 lumaResidualsApplied = true;
             }
@@ -869,7 +894,7 @@ public final class FrameReconstructor {
         }
 
         if (!lumaResidualsApplied) {
-            reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader);
+            reconstructLumaResiduals(lumaPlane, residualLayout, header, frameHeader, strictStdCompliance);
         }
 
         if (header.hasChroma() && chromaUPlane != null && chromaVPlane != null) {
@@ -953,7 +978,8 @@ public final class FrameReconstructor {
                             pixelFormat,
                             intraEdgeFilterEnabled,
                             chromaSmoothEdgeReferences(header, decodedBlockMap, pixelFormat, tileBounds),
-                            tileBounds
+                            tileBounds,
+                            strictStdCompliance
                     );
                     chromaResidualsApplied = true;
                 }
@@ -966,7 +992,8 @@ public final class FrameReconstructor {
                         residualLayout,
                         frameHeader,
                         pixelFormat,
-                        blockQIndex(header, frameHeader)
+                        blockQIndex(header, frameHeader),
+                        strictStdCompliance
                 );
             }
         }
@@ -4842,15 +4869,22 @@ public final class FrameReconstructor {
     /// @param residualLayout the decoded luma residual layout
     /// @param header the decoded block header that owns the residuals
     /// @param frameHeader the frame header that owns the active quantization state
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructLumaResiduals(
             MutablePlaneBuffer lumaPlane,
             ResidualLayout residualLayout,
             TileBlockHeaderReader.BlockHeader header,
-            FrameHeader frameHeader
+            FrameHeader frameHeader,
+            boolean strictStdCompliance
     ) {
         LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
         for (int unitIndex = 0; unitIndex < residualLayout.lumaUnitCount(); unitIndex++) {
-            reconstructLumaResidualUnit(lumaPlane, residualLayout.lumaUnit(unitIndex), dequantizationContext);
+            reconstructLumaResidualUnit(
+                    lumaPlane,
+                    residualLayout.lumaUnit(unitIndex),
+                    dequantizationContext,
+                    strictStdCompliance
+            );
         }
     }
 
@@ -4863,6 +4897,7 @@ public final class FrameReconstructor {
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructIntraLuma(
             MutablePlaneBuffer lumaPlane,
             ResidualLayout residualLayout,
@@ -4870,7 +4905,8 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             boolean intraEdgeFilterEnabled,
             boolean smoothEdgeReferences,
-            TileSampleBounds tileBounds
+            TileSampleBounds tileBounds,
+            boolean strictStdCompliance
     ) {
         LumaIntraPredictionMode yMode = Objects.requireNonNull(header.yMode(), "header.yMode()");
         LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
@@ -4921,7 +4957,7 @@ public final class FrameReconstructor {
                     tileBounds.lumaEndX(),
                     tileBounds.lumaEndY()
             );
-            reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext);
+            reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext, strictStdCompliance);
         }
     }
 
@@ -4933,13 +4969,15 @@ public final class FrameReconstructor {
     /// @param frameHeader the frame header that owns the active quantization state
     /// @param filterIntraMode the decoded filter-intra mode
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructFilterIntraLuma(
             MutablePlaneBuffer lumaPlane,
             ResidualLayout residualLayout,
             TileBlockHeaderReader.BlockHeader header,
             FrameHeader frameHeader,
             FilterIntraMode filterIntraMode,
-            TileSampleBounds tileBounds
+            TileSampleBounds tileBounds,
+            boolean strictStdCompliance
     ) {
         LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
         for (int unitIndex = 0; unitIndex < residualLayout.lumaUnitCount(); unitIndex++) {
@@ -4956,7 +4994,7 @@ public final class FrameReconstructor {
                     tileBounds.lumaEndX(),
                     tileBounds.lumaEndY()
             );
-            reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext);
+            reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext, strictStdCompliance);
         }
     }
 
@@ -4965,10 +5003,12 @@ public final class FrameReconstructor {
     /// @param lumaPlane the mutable luma destination plane
     /// @param residualUnit the decoded residual unit
     /// @param dequantizationContext the active luma dequantization context
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructLumaResidualUnit(
             MutablePlaneBuffer lumaPlane,
             TransformResidualUnit residualUnit,
-            LumaDequantizer.Context dequantizationContext
+            LumaDequantizer.Context dequantizationContext,
+            boolean strictStdCompliance
     ) {
         if (residualUnit.allZero()) {
             return;
@@ -4988,6 +5028,7 @@ public final class FrameReconstructor {
                 lumaPlane.bitDepth(),
                 Math.min(residualUnit.size().widthPixels(), lumaPlane.width() - destinationX),
                 Math.min(residualUnit.size().heightPixels(), lumaPlane.height() - destinationY),
+                strictStdCompliance,
                 dequantizedCoefficients
         );
     }
@@ -5270,7 +5311,8 @@ public final class FrameReconstructor {
             AvifPixelFormat pixelFormat,
             boolean intraEdgeFilterEnabled,
             boolean smoothEdgeReferences,
-            TileSampleBounds tileBounds
+            TileSampleBounds tileBounds,
+            boolean strictStdCompliance
     ) {
         UvIntraPredictionMode uvMode = Objects.requireNonNull(header.uvMode(), "header.uvMode()");
         FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
@@ -5295,7 +5337,8 @@ public final class FrameReconstructor {
                 ),
                 pixelFormat,
                 chromaUPlane,
-                tileBounds
+                tileBounds,
+                strictStdCompliance
         );
         reconstructIntraChromaPlane(
                 chromaVPlane,
@@ -5317,7 +5360,8 @@ public final class FrameReconstructor {
                 ),
                 pixelFormat,
                 chromaVPlane,
-                tileBounds
+                tileBounds,
+                strictStdCompliance
         );
     }
 
@@ -5336,6 +5380,7 @@ public final class FrameReconstructor {
     /// @param pixelFormat the active decoded chroma layout
     /// @param referencePlane the mutable plane whose written samples are tracked
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructIntraChromaPlane(
             MutablePlaneBuffer chromaPlane,
             TransformLayout transformLayout,
@@ -5349,7 +5394,8 @@ public final class FrameReconstructor {
             ChromaDequantizer.Context dequantizationContext,
             AvifPixelFormat pixelFormat,
             MutablePlaneBuffer referencePlane,
-            TileSampleBounds tileBounds
+            TileSampleBounds tileBounds,
+            boolean strictStdCompliance
     ) {
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
@@ -5411,7 +5457,8 @@ public final class FrameReconstructor {
                             residualUnit,
                             dequantizationContext,
                             chromaSubsamplingX,
-                            chromaSubsamplingY
+                            chromaSubsamplingY,
+                            strictStdCompliance
                     );
                     appliedResiduals[i] = true;
                 }
@@ -5425,7 +5472,8 @@ public final class FrameReconstructor {
                         chromaResidualUnit(residualLayout, i, chromaU),
                         dequantizationContext,
                         chromaSubsamplingX,
-                        chromaSubsamplingY
+                        chromaSubsamplingY,
+                        strictStdCompliance
                 );
             }
         }
@@ -5449,13 +5497,15 @@ public final class FrameReconstructor {
     /// @param frameHeader the frame header that owns the active quantization state
     /// @param pixelFormat the active decoded chroma layout
     /// @param qIndex the block-local quantizer index after delta-q updates
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructChromaResiduals(
             MutablePlaneBuffer chromaUPlane,
             MutablePlaneBuffer chromaVPlane,
             ResidualLayout residualLayout,
             FrameHeader frameHeader,
             AvifPixelFormat pixelFormat,
-            int qIndex
+            int qIndex,
+            boolean strictStdCompliance
     ) {
         FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
         reconstructChromaPlaneResiduals(
@@ -5470,7 +5520,8 @@ public final class FrameReconstructor {
                         quantization.useQuantizationMatrices(),
                         quantization.quantizationMatrixU()
                 ),
-                pixelFormat
+                pixelFormat,
+                strictStdCompliance
         );
         reconstructChromaPlaneResiduals(
                 chromaVPlane,
@@ -5484,7 +5535,8 @@ public final class FrameReconstructor {
                         quantization.useQuantizationMatrices(),
                         quantization.quantizationMatrixV()
                 ),
-                pixelFormat
+                pixelFormat,
+                strictStdCompliance
         );
     }
 
@@ -5494,12 +5546,15 @@ public final class FrameReconstructor {
     /// @param residualLayout the decoded transform residual layout
     /// @param chromaU whether to reconstruct the U plane rather than the V plane
     /// @param dequantizationContext the plane-local chroma dequantization context
+    /// @param pixelFormat the active decoded chroma layout
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructChromaPlaneResiduals(
             MutablePlaneBuffer chromaPlane,
             ResidualLayout residualLayout,
             boolean chromaU,
             ChromaDequantizer.Context dequantizationContext,
-            AvifPixelFormat pixelFormat
+            AvifPixelFormat pixelFormat,
+            boolean strictStdCompliance
     ) {
         int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
         int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
@@ -5509,7 +5564,8 @@ public final class FrameReconstructor {
                     chromaResidualUnit(residualLayout, unitIndex, chromaU),
                     dequantizationContext,
                     chromaSubsamplingX,
-                    chromaSubsamplingY
+                    chromaSubsamplingY,
+                    strictStdCompliance
             );
         }
     }
@@ -5535,12 +5591,14 @@ public final class FrameReconstructor {
     /// @param dequantizationContext the active chroma dequantization context
     /// @param chromaSubsamplingX the horizontal chroma subsampling shift
     /// @param chromaSubsamplingY the vertical chroma subsampling shift
+    /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructChromaResidualUnit(
             MutablePlaneBuffer chromaPlane,
             TransformResidualUnit residualUnit,
             ChromaDequantizer.Context dequantizationContext,
             int chromaSubsamplingX,
-            int chromaSubsamplingY
+            int chromaSubsamplingY,
+            boolean strictStdCompliance
     ) {
         if (residualUnit.allZero()) {
             return;
@@ -5560,6 +5618,7 @@ public final class FrameReconstructor {
                 chromaPlane.bitDepth(),
                 Math.min(residualUnit.size().widthPixels(), chromaPlane.width() - destinationX),
                 Math.min(residualUnit.size().heightPixels(), chromaPlane.height() - destinationY),
+                strictStdCompliance,
                 dequantizedCoefficients
         );
     }

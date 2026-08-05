@@ -90,11 +90,19 @@ public final class TilePartitionTreeReader {
     ///
     /// @param tileContext the tile-local decode state that owns the active tile bitstream
     public TilePartitionTreeReader(TileDecodeContext tileContext) {
+        this(tileContext, false);
+    }
+
+    /// Creates one recursive tile partition tree reader with a strict conformance policy.
+    ///
+    /// @param tileContext the tile-local decode state that owns the active tile bitstream
+    /// @param strictStdCompliance whether decoded conformance values outside their ranges must be rejected
+    public TilePartitionTreeReader(TileDecodeContext tileContext, boolean strictStdCompliance) {
         TileDecodeContext nonNullTileContext = Objects.requireNonNull(tileContext, "tileContext");
         this.tileContext = nonNullTileContext;
         this.neighborContext = BlockNeighborContext.create(nonNullTileContext);
         this.syntaxReader = new TileSyntaxReader(nonNullTileContext);
-        this.blockHeaderReader = new TileBlockHeaderReader(nonNullTileContext);
+        this.blockHeaderReader = new TileBlockHeaderReader(nonNullTileContext, strictStdCompliance);
         this.transformLayoutReader = new TileTransformLayoutReader(nonNullTileContext);
         this.residualSyntaxReader = new TileResidualSyntaxReader(nonNullTileContext);
         this.loopRestorationReader = new TileLoopRestorationReader(nonNullTileContext, syntaxReader);

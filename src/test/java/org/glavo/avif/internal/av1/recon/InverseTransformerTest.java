@@ -24,6 +24,7 @@ import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for minimal inverse-transform reconstruction.
@@ -269,6 +270,42 @@ final class InverseTransformerTest {
                         0, 0, 0, 0
                 },
                 residual
+        );
+    }
+
+    /// Verifies that strict lossless reconstruction rejects residuals wider than `1 + BitDepth` bits.
+    @Test
+    void rejectsOversizedStrictLosslessResidual() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 4_096;
+
+        assertThrows(
+                InvalidFrameReconstructionException.class,
+                () -> InverseTransformer.reconstructResidualBlock(
+                        coefficients,
+                        TransformSize.TX_4X4,
+                        TransformType.WHT_WHT,
+                        8,
+                        true
+                )
+        );
+    }
+
+    /// Verifies that strict inverse transforms reject an out-of-range staged DCT value.
+    @Test
+    void rejectsOversizedStrictInverseTransformIntermediate() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 1_000_000;
+
+        assertThrows(
+                InvalidFrameReconstructionException.class,
+                () -> InverseTransformer.reconstructResidualBlock(
+                        coefficients,
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        8,
+                        true
+                )
         );
     }
 

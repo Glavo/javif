@@ -37,6 +37,7 @@ import org.glavo.avif.internal.av1.postfilter.FilmGrainSynthesizer;
 import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
+import org.glavo.avif.internal.av1.recon.InvalidFrameReconstructionException;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.av1.runtime.FrameOutputPolicy;
 import org.glavo.avif.internal.av1.runtime.OutputFrameFactory;
@@ -214,6 +215,12 @@ public final class Av1ImageReader implements AutoCloseable {
             }
 
             ObuType type = packet.header().type();
+            if (config.strictStdCompliance() && type == ObuType.METADATA) {
+                validateMetadataType(packet);
+            }
+            if (type != ObuType.SEQUENCE_HEADER) {
+                validateRequiredObuExtension(packet);
+            }
             if (type == ObuType.TEMPORAL_DELIMITER) {
                 ensureNoPendingFrameAssembly(
                         packet,
@@ -473,6 +480,70 @@ public final class Av1ImageReader implements AutoCloseable {
         return (idc & temporalBit) != 0 && (idc & spatialBit) != 0;
     }
 
+    /// Validates the extension-header requirement imposed by non-zero operating-point masks.
+    ///
+    /// @param packet the current OBU packet
+    /// @throws DecodeException if strict mode requires an extension header that is absent
+    private void validateRequiredObuExtension(ObuPacket packet) throws DecodeException {
+        SequenceHeader activeSequenceHeader = sequenceHeader;
+        if (!config.strictStdCompliance() || activeSequenceHeader == null) {
+            return;
+        }
+        boolean hasLayeredOperatingPoint = false;
+        for (int index = 0; index < activeSequenceHeader.operatingPointCount(); index++) {
+            if (activeSequenceHeader.operatingPoint(index).idc() != 0) {
+                hasLayeredOperatingPoint = true;
+                break;
+            }
+        }
+        if (!hasLayeredOperatingPoint) {
+            if (packet.header().extensionFlag()) {
+                throw invalidBitstream(
+                        packet,
+                        "OBU extension headers are forbidden when every operating point IDC is zero"
+                );
+            }
+            return;
+        }
+        if (packet.header().extensionFlag()) {
+            return;
+        }
+        ObuType type = packet.header().type();
+        if (type != ObuType.FRAME_HEADER
+                && type != ObuType.FRAME
+                && type != ObuType.REDUNDANT_FRAME_HEADER
+                && type != ObuType.TILE_GROUP) {
+            return;
+        }
+        throw invalidBitstream(
+                packet,
+                "Frame and tile OBUs require extension headers when an operating point IDC is non-zero"
+        );
+    }
+
+    /// Validates the leading LEB128 metadata type in one metadata OBU.
+    ///
+    /// @param packet the metadata OBU packet
+    /// @throws DecodeException if the type is truncated, wider than 32 bits, or uses a ninth byte
+    private static void validateMetadataType(ObuPacket packet) throws DecodeException {
+        byte[] payload = packet.payload();
+        long value = 0;
+        for (int index = 0; index < 8; index++) {
+            if (index >= payload.length) {
+                throw invalidBitstream(packet, "Metadata OBU has a truncated metadata_type LEB128 value");
+            }
+            int currentByte = payload[index] & 0xFF;
+            value |= (long) (currentByte & 0x7F) << (index * 7);
+            if ((currentByte & 0x80) == 0) {
+                if (value > 0xFFFF_FFFFL) {
+                    throw invalidBitstream(packet, "Metadata type exceeds the unsigned 32-bit range");
+                }
+                return;
+            }
+        }
+        throw invalidBitstream(packet, "Metadata type LEB128 value continues beyond eight bytes");
+    }
+
     /// Returns the configured operating point from one sequence header.
     ///
     /// @param activeSequenceHeader the active sequence header
@@ -567,6 +638,9 @@ public final class Av1ImageReader implements AutoCloseable {
         );
         reader.byteAlign();
         TileGroupHeader tileGroupHeader = tileGroupHeaderParser.parse(reader, packet, frameHeader);
+        if (config.strictStdCompliance() && tileGroupHeader.explicitTilePositions()) {
+            throw invalidBitstream(packet, "Combined frame OBU must not signal explicit tile positions");
+        }
         reader.byteAlign();
         appendTileGroup(assembly, packet, tileGroupHeader, reader.byteOffset());
         return CombinedFrameStart.frameAssembly(assembly);
@@ -580,12 +654,16 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @return the pending presentation output, or `null` when current output filtering suppresses it
     private @Nullable PendingOutput completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
+        if (config.strictStdCompliance()) {
+            validateReferenceSequenceCompatibility(assembly, packet);
+        }
         @Nullable ReferenceFrameSyntaxState cdfReferenceState = selectCdfReferenceFrameSyntaxState(frameHeader);
         FrameSyntaxDecodeResult syntaxDecodeResult;
         try {
             syntaxDecodeResult = new FrameSyntaxDecoder(
                     cdfReferenceState,
-                    referenceFrameSyntaxStatesForDecoding()
+                    referenceFrameSyntaxStatesForDecoding(),
+                    config.strictStdCompliance()
             ).decode(assembly);
         } catch (InvalidFrameSyntaxException exception) {
             throw new DecodeException(
@@ -607,7 +685,23 @@ public final class Av1ImageReader implements AutoCloseable {
 
         @Nullable DecodedPlanes decodedPlanes = null;
         if (shouldOutput || needsSurfaceSnapshot) {
-            decodedPlanes = frameReconstructor.reconstruct(syntaxDecodeResult, currentReferenceSurfaceSnapshots());
+            try {
+                decodedPlanes = frameReconstructor.reconstruct(
+                        syntaxDecodeResult,
+                        currentReferenceSurfaceSnapshots(),
+                        config.strictStdCompliance()
+                );
+            } catch (InvalidFrameReconstructionException exception) {
+                throw new DecodeException(
+                        DecodeErrorCode.INVALID_BITSTREAM,
+                        DecodeStage.FRAME_DECODE,
+                        exception.getMessage(),
+                        assembly.streamOffset(),
+                        assembly.obuIndex(),
+                        null,
+                        exception
+                );
+            }
         }
 
         @Nullable DecodedPlanes postprocessedPlanes = null;
@@ -640,6 +734,56 @@ public final class Av1ImageReader implements AutoCloseable {
                 nextPresentationIndex,
                 packet
         );
+    }
+
+    /// Validates that every selected reference frame uses the current sequence profile and color configuration.
+    ///
+    /// @param assembly the completed current frame assembly
+    /// @param packet the OBU that completed the frame assembly
+    /// @throws DecodeException if a selected stored reference is incompatible with the current sequence
+    private void validateReferenceSequenceCompatibility(FrameAssembly assembly, ObuPacket packet)
+            throws DecodeException {
+        SequenceHeader currentSequence = assembly.sequenceHeader();
+        FrameHeader frameHeader = assembly.frameHeader();
+        for (int referenceIndex = 0; referenceIndex < 7; referenceIndex++) {
+            int slotIndex = frameHeader.referenceFrameIndex(referenceIndex);
+            if (slotIndex < 0 || slotIndex >= referenceSlots.length) {
+                continue;
+            }
+            @Nullable ReferenceFrameSyntaxState storedState = referenceSlots[slotIndex].syntaxState();
+            if (storedState == null) {
+                continue;
+            }
+            SequenceHeader storedSequence = storedState.sequenceHeader();
+            if (storedSequence.profile() != currentSequence.profile()) {
+                throw invalidBitstream(packet, "Selected reference frame profile differs from the current sequence");
+            }
+            if (!compatibleReferenceColorConfig(storedSequence.colorConfig(), currentSequence.colorConfig())) {
+                throw invalidBitstream(
+                        packet,
+                        "Selected reference frame bit depth or color configuration differs from the current sequence"
+                );
+            }
+        }
+    }
+
+    /// Returns whether two sequence color configurations may share reference frames.
+    ///
+    /// @param stored the color configuration used by the stored reference frame
+    /// @param current the current sequence color configuration
+    /// @return whether every reference-relevant color property matches
+    private static boolean compatibleReferenceColorConfig(
+            SequenceHeader.ColorConfig stored,
+            SequenceHeader.ColorConfig current
+    ) {
+        return stored.bitDepth() == current.bitDepth()
+                && stored.monochrome() == current.monochrome()
+                && stored.colorPrimaries() == current.colorPrimaries()
+                && stored.transferCharacteristics() == current.transferCharacteristics()
+                && stored.matrixCoefficients() == current.matrixCoefficients()
+                && stored.colorRange() == current.colorRange()
+                && stored.pixelFormat() == current.pixelFormat()
+                && stored.chromaSamplePosition() == current.chromaSamplePosition();
     }
 
     /// Parses and appends a standalone tile-group OBU to the current frame assembly.

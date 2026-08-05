@@ -45,6 +45,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -54,10 +55,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies raw low-overhead and Annex B AV1 decoding against selected Argon reference outputs.
+/// Verifies Argon reference outputs and strict rejection of selected malformed AV1 streams.
 ///
-/// The corpus remains in its downloaded ZIP. Tests open only the selected entries and compare the
-/// decoded pre-grain YUV planes with the MD5 digests distributed alongside the streams.
+/// The corpus remains in its downloaded ZIP. Tests open only the selected entries, compare valid
+/// streams with their pre-grain YUV MD5 digests, and fully consume malformed streams in strict mode.
 @Tag("argon-corpus")
 @NotNullByDefault
 final class ArgonAv1CorpusTest {
@@ -81,8 +82,14 @@ final class ArgonAv1CorpusTest {
     /// Number of AV1 streams distributed in the pinned Argon Streams archive.
     private static final long EXPECTED_STREAM_COUNT = 3_921L;
 
-    /// Number of gated low-overhead and Annex B core streams across all three AV1 profiles.
+    /// Number of gated streams that carry reference YUV digests.
     private static final int EXPECTED_REFERENCE_STREAM_COUNT = 2_756;
+
+    /// Number of gated malformed streams that strict decoding must reject.
+    private static final int EXPECTED_ERROR_STREAM_COUNT = 114;
+
+    /// Number of malformed streams whose constraints apply without Large Scale Tile decoder mode.
+    private static final int EXPECTED_STRICT_ERROR_STREAM_COUNT = 88;
 
     /// Archive prefixes for gated low-overhead and Annex B core streams in all profiles.
     private static final @Unmodifiable List<String> REFERENCE_STREAM_PREFIXES = List.of(
@@ -98,6 +105,41 @@ final class ArgonAv1CorpusTest {
             ARCHIVE_ROOT + "profile2_not_annexb_special/streams/",
             ARCHIVE_ROOT + "profile2_core/streams/",
             ARCHIVE_ROOT + "profile2_core_special/streams/"
+    );
+
+    /// Archive prefixes for malformed streams that strict decoding must reject.
+    private static final @Unmodifiable List<String> ERROR_STREAM_PREFIXES = List.of(
+            ARCHIVE_ROOT + "profile0_error/streams/"
+    );
+
+    /// Malformed streams whose documented constraint applies only in Large Scale Tile decoder mode.
+    private static final @Unmodifiable Set<String> LARGE_SCALE_TILE_ONLY_ERROR_STREAMS = Set.of(
+            "test265.obu",
+            "test268.obu",
+            "test269.obu",
+            "test270.obu",
+            "test271.obu",
+            "test272.obu",
+            "test273.obu",
+            "test275.obu",
+            "test276.obu",
+            "test278.obu",
+            "test279.obu",
+            "test280.obu",
+            "test281.obu",
+            "test283.obu",
+            "test285.obu",
+            "test286.obu",
+            "test287.obu",
+            "test288.obu",
+            "test289.obu",
+            "test290.obu",
+            "test291.obu",
+            "test292.obu",
+            "test294.obu",
+            "test295.obu",
+            "test298.obu",
+            "test300.obu"
     );
 
     /// The archive shared by inventory, discovery, and selected dynamic cases for this test class.
@@ -135,6 +177,8 @@ final class ArgonAv1CorpusTest {
         ZipFile openArchive = archive();
         long streamCount = 0;
         long referenceStreamCount = 0;
+        long errorStreamCount = 0;
+        long strictErrorStreamCount = 0;
         Enumeration<? extends ZipEntry> entries = openArchive.entries();
         while (entries.hasMoreElements()) {
             String entryName = entries.nextElement().getName();
@@ -143,10 +187,19 @@ final class ArgonAv1CorpusTest {
                 if (REFERENCE_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
                     referenceStreamCount++;
                 }
+                if (ERROR_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
+                    errorStreamCount++;
+                    String streamName = entryName.substring(entryName.lastIndexOf('/') + 1);
+                    if (!LARGE_SCALE_TILE_ONLY_ERROR_STREAMS.contains(streamName)) {
+                        strictErrorStreamCount++;
+                    }
+                }
             }
         }
         assertEquals(EXPECTED_STREAM_COUNT, streamCount);
         assertEquals(EXPECTED_REFERENCE_STREAM_COUNT, referenceStreamCount);
+        assertEquals(EXPECTED_ERROR_STREAM_COUNT, errorStreamCount);
+        assertEquals(EXPECTED_STRICT_ERROR_STREAM_COUNT, strictErrorStreamCount);
         assertNotNull(openArchive.getEntry(ARCHIVE_ROOT + "P8005-R-005h (Argon Streams AV1 User Manual).pdf"));
     }
 
@@ -172,35 +225,41 @@ final class ArgonAv1CorpusTest {
         assertThrows(IllegalArgumentException.class, () -> new CorpusShard(4, 4).select(cases.subList(0, 3)));
     }
 
-    /// Returns reference-output checks for gated low-overhead and Annex B streams in all profiles.
+    /// Returns reference-output checks and strict malformed-stream rejection checks.
     ///
-    /// @return the dynamic reference-output tests
+    /// @return the dynamic gated-stream tests
     @TestFactory
-    Stream<DynamicTest> supportedStreamsMatchReferenceYuvDigests() {
-        return selectedReferenceCases().stream()
+    Stream<DynamicTest> gatedStreamsMeetExpectedOutcome() {
+        return selectedGatedCases().stream()
                 .map(testCase -> DynamicTest.dynamicTest(
                         testCase.category() + "/" + testCase.streamName(),
-                        () -> assertReferenceDigest(testCase)
+                        () -> {
+                            if (testCase.errorStream()) {
+                                assertMalformedStreamRejected(testCase);
+                            } else {
+                                assertReferenceDigest(testCase);
+                            }
+                        }
                 ));
     }
 
-    /// Returns the complete reference gate, a diagnostic group, or one explicitly selected case.
+    /// Returns the complete gate, a diagnostic group, or one explicitly selected case.
     ///
     /// @return the immutable selected cases
-    private static @Unmodifiable List<CorpusCase> selectedReferenceCases() {
+    private static @Unmodifiable List<CorpusCase> selectedGatedCases() {
         @Nullable String selectedCase = System.getProperty(CASE_PROPERTY);
         if (selectedCase == null) {
-            return selectConfiguredShard(allReferenceCases(null));
+            return selectConfiguredShard(allGatedCases(null));
         }
         if (selectedCase.equals("all")) {
-            return selectConfiguredShard(allReferenceCases(null));
+            return selectConfiguredShard(allGatedCases(null));
         }
         if (selectedCase.endsWith("/all")) {
             String category = selectedCase.substring(0, selectedCase.length() - "/all".length());
             if (category.isEmpty() || category.indexOf('/') >= 0) {
                 throw new IllegalArgumentException("Invalid Argon AV1 category selector: " + selectedCase);
             }
-            @Unmodifiable List<CorpusCase> cases = allReferenceCases(category);
+            @Unmodifiable List<CorpusCase> cases = allGatedCases(category);
             if (cases.isEmpty()) {
                 throw new IllegalArgumentException("Unknown Argon AV1 category: " + category);
             }
@@ -226,21 +285,48 @@ final class ArgonAv1CorpusTest {
         return CorpusShard.parse(selectedShard).select(cases);
     }
 
-    /// Returns all gated reference cases, optionally restricted to one category.
+    /// Returns all gated digest and malformed-stream cases, optionally restricted to one category.
     ///
     /// @param selectedCategory the exact category to select, or `null` for every profile
     /// @return the immutable sorted corpus cases
-    private static @Unmodifiable List<CorpusCase> allReferenceCases(
+    private static @Unmodifiable List<CorpusCase> allGatedCases(
             @Nullable String selectedCategory
     ) {
         return archive().stream()
                 .map(ZipEntry::getName)
                 .filter(name -> name.endsWith(".obu"))
-                .filter(name -> REFERENCE_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
+                .filter(name -> REFERENCE_STREAM_PREFIXES.stream().anyMatch(name::startsWith)
+                        || ERROR_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
                 .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
+                .filter(testCase -> !testCase.largeScaleTileOnlyErrorStream())
                 .filter(testCase -> selectedCategory == null || testCase.category().equals(selectedCategory))
                 .sorted((left, right) -> left.selector().compareTo(right.selector()))
                 .toList();
+    }
+
+    /// Verifies that strict decoding rejects one malformed Argon stream before clean end of input.
+    ///
+    /// @param testCase the malformed corpus stream
+    private static void assertMalformedStreamRejected(CorpusCase testCase) {
+        ZipFile archive = archive();
+        String streamPath = ARCHIVE_ROOT + testCase.category() + "/streams/" + testCase.streamName();
+        ZipEntry streamEntry = requireEntry(archive, streamPath);
+        Av1DecoderConfig config = Av1DecoderConfig.builder()
+                .applyFilmGrain(false)
+                .strictStdCompliance(true)
+                .outputAllLayers(true)
+                .build();
+
+        assertThrows(DecodeException.class, () -> {
+            BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry));
+            try (Av1ImageReader reader = testCase.annexB()
+                    ? Av1ImageReader.openAnnexB(input, config)
+                    : Av1ImageReader.open(input, config)) {
+                while (reader.readPlanes() != null) {
+                    // Continue until strict decoding reaches the malformed portion of the stream.
+                }
+            }
+        }, streamPath);
     }
 
     /// Decodes one selected stream and compares all visible pre-grain YUV planes with Argon's MD5.
@@ -450,6 +536,20 @@ final class ArgonAv1CorpusTest {
         /// @return whether the stream is Annex B rather than low-overhead
         private boolean annexB() {
             return !category.contains("_not_annexb");
+        }
+
+        /// Returns whether this case belongs to an Argon malformed-stream category.
+        ///
+        /// @return whether strict decoding must reject this case
+        private boolean errorStream() {
+            return category.endsWith("_error");
+        }
+
+        /// Returns whether this case requires the unsupported Large Scale Tile decoder mode.
+        ///
+        /// @return whether the case must be deferred to a Large Scale Tile-specific gate
+        private boolean largeScaleTileOnlyErrorStream() {
+            return errorStream() && LARGE_SCALE_TILE_ONLY_ERROR_STREAMS.contains(streamName);
         }
     }
 

@@ -545,7 +545,11 @@ public final class FrameHeaderParser {
                 reducedTransformSet,
                 filmGrain
         );
-        return parsedHeader.withGlobalMotionParameters(globalMotionParameters);
+        parsedHeader = parsedHeader.withGlobalMotionParameters(globalMotionParameters);
+        if (strictStdCompliance) {
+            FrameHeaderConformanceValidator.validate(sequenceHeader, parsedHeader, referenceFrameHeaders);
+        }
+        return parsedHeader;
     }
 
     /// Validates the supplied reference-frame header array shape.

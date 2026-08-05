@@ -47,16 +47,16 @@ final class InverseTransformer {
     };
 
     /// The unrestricted clip range used by helper tests that do not supply bit-depth context.
-    private static final ClipRange FULL_INT_CLIP_RANGE = new ClipRange(Integer.MIN_VALUE, Integer.MAX_VALUE);
+    private static final ClipRange FULL_INT_CLIP_RANGE = new ClipRange(Integer.MIN_VALUE, Integer.MAX_VALUE, false);
 
     /// The row-pass clip range for 8-bit samples.
-    private static final ClipRange ROW_CLIP_RANGE_8 = new ClipRange(Short.MIN_VALUE, Short.MAX_VALUE);
+    private static final ClipRange ROW_CLIP_RANGE_8 = new ClipRange(Short.MIN_VALUE, Short.MAX_VALUE, false);
 
     /// The row-pass clip range for 10-bit samples.
-    private static final ClipRange ROW_CLIP_RANGE_10 = new ClipRange(-(1 << 17), (1 << 17) - 1);
+    private static final ClipRange ROW_CLIP_RANGE_10 = new ClipRange(-(1 << 17), (1 << 17) - 1, false);
 
     /// The row-pass clip range for 12-bit samples.
-    private static final ClipRange ROW_CLIP_RANGE_12 = new ClipRange(-(1 << 19), (1 << 19) - 1);
+    private static final ClipRange ROW_CLIP_RANGE_12 = new ClipRange(-(1 << 19), (1 << 19) - 1, false);
 
     /// The column-pass clip range for 8-bit samples.
     private static final ClipRange COLUMN_CLIP_RANGE_8 = ROW_CLIP_RANGE_8;
@@ -135,6 +135,32 @@ final class InverseTransformer {
                 transformSize,
                 transformType,
                 bitDepth,
+                false,
+                null
+        );
+    }
+
+    /// Reconstructs one residual block while optionally rejecting nonconformant transform ranges.
+    ///
+    /// @param dequantizedCoefficients the dequantized transform coefficients in natural raster order
+    /// @param transformSize the transform size to reconstruct
+    /// @param transformType the transform type to reconstruct
+    /// @param bitDepth the decoded sample bit depth
+    /// @param strictStdCompliance whether transform conformance ranges must be enforced
+    /// @return one signed residual sample block in natural raster order
+    static int[] reconstructResidualBlock(
+            int[] dequantizedCoefficients,
+            TransformSize transformSize,
+            TransformType transformType,
+            int bitDepth,
+            boolean strictStdCompliance
+    ) {
+        return reconstructResidualBlock(
+                dequantizedCoefficients,
+                transformSize,
+                transformType,
+                bitDepth,
+                strictStdCompliance,
                 null
         );
     }
@@ -145,6 +171,7 @@ final class InverseTransformer {
     /// @param transformSize the transform size to reconstruct
     /// @param transformType the transform type to reconstruct
     /// @param bitDepth the decoded sample bit depth
+    /// @param strictStdCompliance whether transform conformance ranges must be enforced
     /// @param workspace the reusable workspace, or `null` to return independently owned storage
     /// @return one signed residual sample block in natural raster order
     private static int[] reconstructResidualBlock(
@@ -152,6 +179,7 @@ final class InverseTransformer {
             TransformSize transformSize,
             TransformType transformType,
             int bitDepth,
+            boolean strictStdCompliance,
             @Nullable Workspace workspace
     ) {
         int[] nonNullCoefficients = Objects.requireNonNull(dequantizedCoefficients, "dequantizedCoefficients");
@@ -166,7 +194,13 @@ final class InverseTransformer {
         }
 
         if (nonNullTransformType == TransformType.WHT_WHT) {
-            return reconstructWalshHadamard(nonNullCoefficients, nonNullTransformSize, workspace);
+            return reconstructWalshHadamard(
+                    nonNullCoefficients,
+                    nonNullTransformSize,
+                    bitDepth,
+                    strictStdCompliance,
+                    workspace
+            );
         }
 
         if (nonNullTransformType != TransformType.DCT_DCT) {
@@ -175,11 +209,18 @@ final class InverseTransformer {
                     nonNullTransformSize,
                     nonNullTransformType,
                     bitDepth,
+                    strictStdCompliance,
                     workspace
             );
         }
 
-        return reconstructDctDct(nonNullCoefficients, nonNullTransformSize, bitDepth, workspace);
+        return reconstructDctDct(
+                nonNullCoefficients,
+                nonNullTransformSize,
+                bitDepth,
+                strictStdCompliance,
+                workspace
+        );
     }
 
     /// Reconstructs one residual sample block from dequantized `DCT_DCT` coefficients.
@@ -187,16 +228,18 @@ final class InverseTransformer {
     /// @param coefficients the dequantized `DCT_DCT` coefficients in natural raster order
     /// @param transformSize the transform size to reconstruct
     /// @param bitDepth the decoded sample bit depth
+    /// @param strictStdCompliance whether transform conformance ranges must be enforced
     /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed residual sample block in natural raster order
     private static int[] reconstructDctDct(
             int[] coefficients,
             TransformSize transformSize,
             int bitDepth,
+            boolean strictStdCompliance,
             @Nullable Workspace workspace
     ) {
-        ClipRange rowClipRange = rowClipRange(bitDepth);
-        ClipRange columnClipRange = columnClipRange(bitDepth);
+        ClipRange rowClipRange = conformanceClipRange(rowClipRange(bitDepth), strictStdCompliance);
+        ClipRange columnClipRange = conformanceClipRange(columnClipRange(bitDepth), strictStdCompliance);
         return switch (transformSize) {
             case TX_4X4 -> reconstructFourByFour(coefficients, rowClipRange, columnClipRange, workspace);
             case TX_8X8 -> reconstructEightByEight(coefficients, rowClipRange, columnClipRange, workspace);
@@ -308,6 +351,7 @@ final class InverseTransformer {
     /// @param bitDepth the decoded sample bit depth
     /// @param writtenWidthPixels the residual width to write in pixels
     /// @param writtenHeightPixels the residual height to write in pixels
+    /// @param strictStdCompliance whether transform conformance ranges must be enforced
     /// @param dequantizedCoefficients the dequantized transform coefficients
     static void reconstructAndAddResidualBlock(
             Workspace workspace,
@@ -319,6 +363,7 @@ final class InverseTransformer {
             int bitDepth,
             int writtenWidthPixels,
             int writtenHeightPixels,
+            boolean strictStdCompliance,
             int[] dequantizedCoefficients
     ) {
         Workspace nonNullWorkspace = Objects.requireNonNull(workspace, "workspace");
@@ -327,6 +372,7 @@ final class InverseTransformer {
                 transformSize,
                 transformType,
                 bitDepth,
+                strictStdCompliance,
                 nonNullWorkspace
         );
         addResidualBlock(
@@ -536,6 +582,7 @@ final class InverseTransformer {
     /// @param transformSize the transform size to reconstruct
     /// @param transformType the explicit transform type to reconstruct
     /// @param bitDepth the decoded sample bit depth
+    /// @param strictStdCompliance whether transform conformance ranges must be enforced
     /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed residual sample block in natural raster order
     private static int[] reconstructGenericTransform(
@@ -543,14 +590,15 @@ final class InverseTransformer {
             TransformSize transformSize,
             TransformType transformType,
             int bitDepth,
+            boolean strictStdCompliance,
             @Nullable Workspace workspace
     ) {
         int width = transformSize.widthPixels();
         int height = transformSize.heightPixels();
         int intermediateShift = intermediateTransformShift(transformSize);
         boolean requiresRectangularPrescale = width * 2 == height || height * 2 == width;
-        ClipRange rowClipRange = rowClipRange(bitDepth);
-        ClipRange columnClipRange = columnClipRange(bitDepth);
+        ClipRange rowClipRange = conformanceClipRange(rowClipRange(bitDepth), strictStdCompliance);
+        ClipRange columnClipRange = conformanceClipRange(columnClipRange(bitDepth), strictStdCompliance);
         int[] buffer = intermediateBuffer(workspace, transformSize);
         int[] output = outputBuffer(workspace, transformSize);
         int scratchLength = Math.max(width, height);
@@ -602,11 +650,15 @@ final class InverseTransformer {
     ///
     /// @param coefficients the dequantized lossless coefficients in natural raster order
     /// @param transformSize the active transform size
+    /// @param bitDepth the decoded sample bit depth
+    /// @param strictStdCompliance whether lossless residual ranges must be enforced
     /// @param workspace the reusable workspace, or `null` for isolated storage
     /// @return one signed `TX_4X4` residual sample block
     private static int[] reconstructWalshHadamard(
             int[] coefficients,
             TransformSize transformSize,
+            int bitDepth,
+            boolean strictStdCompliance,
             @Nullable Workspace workspace
     ) {
         if (transformSize != TransformSize.TX_4X4) {
@@ -636,7 +688,26 @@ final class InverseTransformer {
                 output[(y << 2) + x] = scratch[y];
             }
         }
+        if (strictStdCompliance) {
+            validateLosslessResidualRange(output, bitDepth);
+        }
         return output;
+    }
+
+    /// Validates that lossless residual samples fit a signed `1 + BitDepth`-bit value.
+    ///
+    /// @param residualSamples the reconstructed lossless residual samples
+    /// @param bitDepth the decoded sample bit depth
+    private static void validateLosslessResidualRange(int[] residualSamples, int bitDepth) {
+        int minimum = -(1 << bitDepth);
+        int maximum = (1 << bitDepth) - 1;
+        for (int residualSample : residualSamples) {
+            if (residualSample < minimum || residualSample > maximum) {
+                throw new InvalidFrameReconstructionException(
+                        "Lossless residual does not fit a signed " + (bitDepth + 1) + "-bit value"
+                );
+            }
+        }
     }
 
     /// Returns the intermediate transform buffer for one isolated or reusable reconstruction.
@@ -2294,16 +2365,36 @@ final class InverseTransformer {
     /// @return the saturated `int`
     private static int clip(long value) {
         ClipRange clipRange = ACTIVE_CLIP_RANGE.get();
-        return clipToRange(saturatedInt(value), clipRange);
+        return clipToRange(value, clipRange);
     }
 
     /// Clamps one intermediate value into one explicit inverse-transform clip range.
     ///
-    /// @param value the value to clamp
+    /// @param value the value to validate and clamp
     /// @param clipRange the active clip range
     /// @return the clamped value
-    private static int clipToRange(int value, ClipRange clipRange) {
-        return Math.max(clipRange.minimum(), Math.min(clipRange.maximum(), value));
+    private static int clipToRange(long value, ClipRange clipRange) {
+        if (clipRange.rejectOutOfRange()
+                && (value < clipRange.minimum() || value > clipRange.maximum())) {
+            throw new InvalidFrameReconstructionException(
+                    "Inverse-transform intermediate value exceeds its conformance range"
+            );
+        }
+        return Math.max(
+                clipRange.minimum(),
+                Math.min(clipRange.maximum(), saturatedInt(value))
+        );
+    }
+
+    /// Returns a clip range with strict overflow rejection enabled when requested.
+    ///
+    /// @param clipRange the base normative clip range
+    /// @param strictStdCompliance whether out-of-range values must be rejected
+    /// @return the base range or an equivalent strict conformance range
+    private static ClipRange conformanceClipRange(ClipRange clipRange, boolean strictStdCompliance) {
+        return strictStdCompliance
+                ? new ClipRange(clipRange.minimum(), clipRange.maximum(), true)
+                : clipRange;
     }
 
     /// Runs one exact inverse-transform stage while overriding the active clip range.
@@ -2531,7 +2622,8 @@ final class InverseTransformer {
     ///
     /// @param minimum the inclusive minimum value
     /// @param maximum the inclusive maximum value
-    private record ClipRange(int minimum, int maximum) {
+    /// @param rejectOutOfRange whether values outside the range must be rejected instead of clamped
+    private record ClipRange(int minimum, int maximum, boolean rejectOutOfRange) {
     }
 
     /// Functional interface for one clip-range-scoped inverse-transform stage.
