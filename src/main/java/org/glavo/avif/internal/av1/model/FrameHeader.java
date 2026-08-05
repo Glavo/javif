@@ -1345,6 +1345,9 @@ public final class FrameHeader {
                 int[] rowStartSuperblocks,
                 int updateTileIndex
         ) {
+            if (sizeBytes < 0 || sizeBytes > 4) {
+                throw new IllegalArgumentException("sizeBytes out of range: " + sizeBytes);
+            }
             this.uniform = uniform;
             this.sizeBytes = sizeBytes;
             this.minLog2Cols = minLog2Cols;

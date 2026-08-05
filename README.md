@@ -88,13 +88,13 @@ archives are available or can be downloaded:
 ```
 
 The second archive is several gigabytes. The `Corpus Check` GitHub Actions workflow therefore keeps
-both corpus gates manual, caches their pinned archives independently, and runs the fifteen Argon
-categories as separate matrix jobs. The Argon gate covers 2,756 regular, special low-overhead, and
-Annex B core streams plus 255 decoder-mode-independent malformed conformance streams across all
-three profiles, for 3,011 gated streams in total. The 80 malformed streams documented as Large
-Scale Tile-only remain deferred until that decoder mode is supported. The gate uses a 4 GB test
-heap by default, can be split by category or narrowed to one stream, and keeps the heap configurable
-for constrained or unusually large workers. Shards are
+both corpus gates manual, caches their pinned archives independently, and runs all 25 Argon
+categories as separate matrix jobs. The Argon gate covers all 3,586 reference streams—including
+regular, special low-overhead, Annex B core, Large Scale Tile, stress, and profile-switching
+streams—plus all 335 malformed conformance streams across the three profiles. The stress categories
+use separate long-running CI jobs. The gate uses a 4 GB test heap by default, can be split by category
+or narrowed to one stream, and keeps the heap configurable for constrained or unusually large
+workers. Shards are
 one-based and can be combined with `category/all`:
 
 ```text
@@ -106,6 +106,10 @@ one-based and can be combined with `category/all`:
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_error/all
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile1_error/all
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile2_error/all
+./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_large_scale_tile/all -PargonAv1Shard=1/20
+./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile2_large_scale_tile_special/all -PargonAv1Shard=1/12
+./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile_switching/all
+./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile0_stress/all -PargonAv1Shard=1/8
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1MaxHeap=6g
 ./gradlew -g .gradle-user-home argonAv1Test -PargonAv1Case=profile1_not_annexb_special/test52.obu -PargonAv1TraceFrames
 ```

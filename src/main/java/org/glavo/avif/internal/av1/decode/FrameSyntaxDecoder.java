@@ -91,6 +91,35 @@ public final class FrameSyntaxDecoder {
         if (!nonNullAssembly.isComplete()) {
             throw new IllegalArgumentException("Frame assembly is incomplete");
         }
+        return decodeTiles(nonNullAssembly, -1);
+    }
+
+    /// Structurally decodes one tile from a partial Large Scale Tile camera-frame assembly.
+    ///
+    /// Tiles other than `tileIndex` are represented by empty structural state in the returned
+    /// frame-sized result. The assembly must contain the selected tile bitstream but need not cover
+    /// any other camera-frame tile.
+    ///
+    /// @param assembly the partial camera-frame assembly containing the selected tile
+    /// @param tileIndex the zero-based source tile index in frame raster order
+    /// @return a frame-sized structural result containing the selected decoded tile
+    /// @throws InvalidFrameSyntaxException if decoded tile syntax violates AV1 constraints
+    public FrameSyntaxDecodeResult decodeTile(FrameAssembly assembly, int tileIndex) {
+        FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
+        if (tileIndex < 0 || tileIndex >= nonNullAssembly.totalTiles()) {
+            throw new IllegalArgumentException("tileIndex out of range: " + tileIndex);
+        }
+        nonNullAssembly.tileBitstream(tileIndex);
+        return decodeTiles(nonNullAssembly, tileIndex);
+    }
+
+    /// Decodes all tiles or one selected tile into frame-sized structural arrays.
+    ///
+    /// @param assembly the complete or partial frame assembly
+    /// @param selectedTileIndex the selected tile index, or `-1` to decode every tile
+    /// @return the frame-sized structural decode result
+    private FrameSyntaxDecodeResult decodeTiles(FrameAssembly assembly, int selectedTileIndex) {
+        FrameAssembly nonNullAssembly = Objects.requireNonNull(assembly, "assembly");
         int tileCount = nonNullAssembly.totalTiles();
         ReferenceMotionVectorProjection referenceMotionVectorProjection =
                 ReferenceMotionVectorProjection.create(nonNullAssembly, referenceFrameSyntaxStates);
@@ -107,6 +136,14 @@ public final class FrameSyntaxDecoder {
         RestorationUnitMap restorationUnitMap = RestorationUnitMap.createEmpty(nonNullAssembly);
         @Nullable CdfContext inheritedCdfContext = referenceCdfContext();
         for (int tileIndex = 0; tileIndex < tileCount; tileIndex++) {
+            tileRoots[tileIndex] = new TilePartitionTreeReader.Node[0];
+            decodedTemporalMotionFields[tileIndex] = new TileDecodeContext.TemporalMotionField(0, 0);
+            finalTileCdfContexts[tileIndex] = CdfContext.createDefault(
+                    nonNullAssembly.frameHeader().quantization().baseQIndex()
+            );
+            if (selectedTileIndex >= 0 && tileIndex != selectedTileIndex) {
+                continue;
+            }
             TileDecodeContext tileContext = createTileContext(
                     nonNullAssembly,
                     tileIndex,

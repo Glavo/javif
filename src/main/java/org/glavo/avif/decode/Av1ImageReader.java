@@ -23,21 +23,25 @@ import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecoder;
 import org.glavo.avif.internal.av1.decode.InvalidFrameSyntaxException;
 import org.glavo.avif.internal.av1.decode.ReferenceFrameSyntaxState;
+import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
 import org.glavo.avif.internal.av1.model.TileGroupHeader;
+import org.glavo.avif.internal.av1.model.TileList;
 import org.glavo.avif.internal.av1.parse.FrameHeaderParser;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
 import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
+import org.glavo.avif.internal.av1.parse.TileListParser;
 import org.glavo.avif.internal.av1.postfilter.FilmGrainSynthesizer;
 import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.InvalidFrameReconstructionException;
+import org.glavo.avif.internal.av1.recon.LargeScaleTileOutputBuilder;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.av1.runtime.FrameOutputPolicy;
 import org.glavo.avif.internal.av1.runtime.OutputFrameFactory;
@@ -49,6 +53,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -69,12 +74,22 @@ public final class Av1ImageReader implements AutoCloseable {
     private final TileGroupHeaderParser tileGroupHeaderParser;
     /// The parser used for per-tile bitstream views inside tile groups.
     private final TileBitstreamParser tileBitstreamParser;
+    /// The parser used for Large Scale Tile list OBUs.
+    private final TileListParser tileListParser;
     /// The most recently parsed sequence header.
     private @Nullable SequenceHeader sequenceHeader;
     /// The runtime reference slots used for syntax inheritance and stored-surface reuse.
     private final RuntimeReferenceSlot[] referenceSlots;
     /// The currently assembled frame when tile groups span multiple OBUs.
     private @Nullable FrameAssembly pendingFrameAssembly;
+    /// The common camera frame retained for Large Scale Tile list decoding.
+    private @Nullable FrameAssembly largeScaleTileCameraAssembly;
+    /// The internal syntax references captured when the common camera header was parsed.
+    private final @Nullable ReferenceFrameSyntaxState[] largeScaleTileCameraReferenceSyntaxStates;
+    /// The internal primary-reference syntax state inherited by the common camera frame.
+    private @Nullable ReferenceFrameSyntaxState largeScaleTileCameraCdfReferenceState;
+    /// The externally indexed anchor frames collected before Large Scale Tile output begins.
+    private final List<ReferenceSurfaceSnapshot> largeScaleTileAnchorFrames;
     /// The last selected spatial-layer output retained for the current temporal unit.
     private @Nullable PendingOutput pendingLayeredOutput;
     /// The most recently completed structural frame-decode result.
@@ -105,7 +120,10 @@ public final class Av1ImageReader implements AutoCloseable {
         this.frameHeaderParser = new FrameHeaderParser();
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
         this.tileBitstreamParser = new TileBitstreamParser();
+        this.tileListParser = new TileListParser();
         this.referenceSlots = createReferenceSlots(8);
+        this.largeScaleTileCameraReferenceSyntaxStates = new ReferenceFrameSyntaxState[8];
+        this.largeScaleTileAnchorFrames = new ArrayList<>();
         this.frameReconstructor = new FrameReconstructor();
         this.framePostprocessor = new FramePostprocessor();
         this.filmGrainSynthesizer = new FilmGrainSynthesizer();
@@ -222,10 +240,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 validateRequiredObuExtension(packet);
             }
             if (type == ObuType.TEMPORAL_DELIMITER) {
-                ensureNoPendingFrameAssembly(
-                        packet,
-                        "Temporal delimiter appeared before the current frame was completed"
-                );
+                retainLargeScaleTileCameraHeaderAtBoundary(packet);
                 if (pendingLayeredOutput != null) {
                     PendingOutput output = pendingLayeredOutput;
                     pendingLayeredOutput = null;
@@ -239,6 +254,13 @@ public final class Av1ImageReader implements AutoCloseable {
                 validateSelectedOperatingPoint(parsedSequenceHeader, packet);
                 sequenceHeader = parsedSequenceHeader;
                 continue;
+            }
+            if (type == ObuType.TILE_LIST) {
+                if (!config.largeScaleTileMode()) {
+                    throw invalidBitstream(packet, "Tile-list OBU requires Large Scale Tile decoder mode");
+                }
+                retainLargeScaleTileCameraHeader(packet);
+                return decodeLargeScaleTileList(packet);
             }
             if (!matchesSelectedOperatingPoint(packet)) {
                 continue;
@@ -677,14 +699,16 @@ public final class Av1ImageReader implements AutoCloseable {
             );
         }
         lastFrameSyntaxDecodeResult = syntaxDecodeResult;
-        boolean shouldOutput = FrameOutputPolicy.shouldOutputFrame(frameHeader, config);
+        boolean shouldOutput = !config.largeScaleTileMode()
+                && FrameOutputPolicy.shouldOutputFrame(frameHeader, config);
         boolean needsSurfaceSnapshot = frameHeader.refreshFrameFlags() != 0;
-        @Nullable ReferenceFrameSyntaxState storedSyntaxState = needsSurfaceSnapshot
+        boolean needsAnchorSnapshot = config.largeScaleTileMode() && frameHeader.showFrame();
+        @Nullable ReferenceFrameSyntaxState storedSyntaxState = needsSurfaceSnapshot || needsAnchorSnapshot
                 ? storedReferenceFrameSyntaxState(frameHeader, syntaxDecodeResult, cdfReferenceState)
                 : null;
 
         @Nullable DecodedPlanes decodedPlanes = null;
-        if (shouldOutput || needsSurfaceSnapshot) {
+        if (shouldOutput || needsSurfaceSnapshot || needsAnchorSnapshot) {
             try {
                 decodedPlanes = frameReconstructor.reconstruct(
                         syntaxDecodeResult,
@@ -707,15 +731,18 @@ public final class Av1ImageReader implements AutoCloseable {
         @Nullable DecodedPlanes postprocessedPlanes = null;
         if (decodedPlanes != null) {
             postprocessedPlanes = framePostprocessor.postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
-            if (needsSurfaceSnapshot) {
-                refreshReferenceState(
+            if (needsSurfaceSnapshot || needsAnchorSnapshot) {
+                ReferenceSurfaceSnapshot snapshot = new ReferenceSurfaceSnapshot(
                         frameHeader,
-                        new ReferenceSurfaceSnapshot(
-                                frameHeader,
-                                Objects.requireNonNull(storedSyntaxState, "storedSyntaxState"),
-                                postprocessedPlanes
-                        )
+                        Objects.requireNonNull(storedSyntaxState, "storedSyntaxState"),
+                        postprocessedPlanes
                 );
+                if (needsSurfaceSnapshot) {
+                    refreshReferenceState(frameHeader, snapshot);
+                }
+                if (needsAnchorSnapshot) {
+                    addLargeScaleTileAnchorFrame(snapshot, packet);
+                }
             }
         }
         if (!shouldOutput) {
@@ -803,6 +830,274 @@ public final class Av1ImageReader implements AutoCloseable {
         reader.byteAlign();
         appendTileGroup(assembly, packet, tileGroupHeader, reader.byteOffset());
         return assembly;
+    }
+
+    /// Converts a header-only pending frame into the common Large Scale Tile camera frame at a
+    /// temporal-unit boundary.
+    ///
+    /// @param packet the temporal delimiter that ended the camera-header temporal unit
+    /// @throws DecodeException if a partially tiled frame reached the boundary
+    private void retainLargeScaleTileCameraHeaderAtBoundary(ObuPacket packet) throws DecodeException {
+        if (pendingFrameAssembly == null) {
+            return;
+        }
+        if (config.largeScaleTileMode() && pendingFrameAssembly.tileGroupCount() == 0) {
+            retainLargeScaleTileCameraAssembly(pendingFrameAssembly, packet);
+            pendingFrameAssembly = null;
+            return;
+        }
+        ensureNoPendingFrameAssembly(
+                packet,
+                "Temporal delimiter appeared before the current frame was completed"
+        );
+    }
+
+    /// Retains a header-only pending camera frame immediately before a tile-list OBU.
+    ///
+    /// @param packet the tile-list OBU requiring the camera frame
+    /// @throws DecodeException if the pending frame contains tile data or no camera header exists
+    private void retainLargeScaleTileCameraHeader(ObuPacket packet) throws DecodeException {
+        if (pendingFrameAssembly != null) {
+            if (pendingFrameAssembly.tileGroupCount() != 0) {
+                throw invalidBitstream(packet, "Tile-list OBU appeared while a tiled frame was incomplete");
+            }
+            retainLargeScaleTileCameraAssembly(pendingFrameAssembly, packet);
+            pendingFrameAssembly = null;
+        }
+        if (largeScaleTileCameraAssembly == null) {
+            throw invalidBitstream(packet, "Tile-list OBU appeared before a common camera frame header");
+        }
+    }
+
+    /// Validates and retains one common Large Scale Tile camera frame.
+    ///
+    /// @param assembly the header-only camera-frame assembly
+    /// @param packet the OBU used for error context
+    /// @throws DecodeException if strict conformance validation rejects the camera frame
+    private void retainLargeScaleTileCameraAssembly(
+            FrameAssembly assembly,
+            ObuPacket packet
+    ) throws DecodeException {
+        tileListParser.validateCameraFrame(
+                packet,
+                assembly.sequenceHeader(),
+                assembly.frameHeader(),
+                config.strictStdCompliance()
+        );
+        largeScaleTileCameraAssembly = assembly;
+        ReferenceFrameSyntaxState[] referenceSyntaxStates = referenceFrameSyntaxStatesForDecoding();
+        System.arraycopy(
+                referenceSyntaxStates,
+                0,
+                largeScaleTileCameraReferenceSyntaxStates,
+                0,
+                referenceSyntaxStates.length
+        );
+        largeScaleTileCameraCdfReferenceState = selectCdfReferenceFrameSyntaxState(assembly.frameHeader());
+    }
+
+    /// Decodes and assembles one Large Scale Tile list output.
+    ///
+    /// @param packet the tile-list OBU
+    /// @return the assembled presentation output
+    /// @throws DecodeException if the list references unavailable anchors or contains invalid tile syntax
+    private PendingOutput decodeLargeScaleTileList(ObuPacket packet) throws DecodeException {
+        FrameAssembly cameraAssembly = Objects.requireNonNull(
+                largeScaleTileCameraAssembly,
+                "largeScaleTileCameraAssembly"
+        );
+        SequenceHeader cameraSequenceHeader = cameraAssembly.sequenceHeader();
+        FrameHeader cameraFrameHeader = cameraAssembly.frameHeader();
+        TileList tileList = tileListParser.parse(
+                packet,
+                cameraSequenceHeader,
+                cameraFrameHeader,
+                config.strictStdCompliance()
+        );
+
+        FrameHeader.TilingInfo tiling = cameraFrameHeader.tiling();
+        int superblockSize = cameraSequenceHeader.features().use128x128Superblocks() ? 128 : 64;
+        int tileWidth = (tiling.columnStartSuperblocks()[1] - tiling.columnStartSuperblocks()[0])
+                * superblockSize;
+        int tileHeight = (tiling.rowStartSuperblocks()[1] - tiling.rowStartSuperblocks()[0])
+                * superblockSize;
+        int outputWidth;
+        int outputHeight;
+        try {
+            outputWidth = Math.multiplyExact(tileWidth, tileList.outputTileColumns());
+            outputHeight = Math.multiplyExact(tileHeight, tileList.outputTileRows());
+        } catch (ArithmeticException exception) {
+            throw invalidBitstream(packet, "Large Scale Tile output dimensions overflow");
+        }
+        enforceFrameSizeLimit(outputWidth, outputHeight, packet);
+
+        LargeScaleTileOutputBuilder outputBuilder = new LargeScaleTileOutputBuilder(
+                cameraSequenceHeader.colorConfig().bitDepth(),
+                cameraSequenceHeader.colorConfig().pixelFormat(),
+                tileWidth,
+                tileHeight,
+                tileList.outputTileColumns(),
+                tileList.outputTileRows()
+        );
+        int lastReferenceSlot = cameraFrameHeader.referenceFrameIndex(0);
+        if (lastReferenceSlot < 0 || lastReferenceSlot >= referenceSlots.length) {
+            throw invalidBitstream(packet, "Large Scale Tile camera frame does not select a valid LAST slot");
+        }
+
+        List<TileList.Entry> entries = tileList.entries();
+        for (int outputTileIndex = 0; outputTileIndex < entries.size(); outputTileIndex++) {
+            TileList.Entry entry = entries.get(outputTileIndex);
+            if (entry.anchorFrameIndex() >= largeScaleTileAnchorFrames.size()) {
+                throw invalidBitstream(
+                        packet,
+                        "Tile-list entry references unavailable anchor frame " + entry.anchorFrameIndex()
+                );
+            }
+            ReferenceSurfaceSnapshot anchor = largeScaleTileAnchorFrames.get(entry.anchorFrameIndex());
+            FrameHeader[] referenceHeaders = cameraReferenceFrameHeaders(cameraAssembly);
+            ReferenceFrameSyntaxState[] referenceSyntaxStates = Arrays.copyOf(
+                    largeScaleTileCameraReferenceSyntaxStates,
+                    largeScaleTileCameraReferenceSyntaxStates.length
+            );
+            ReferenceSurfaceSnapshot[] referenceSurfaces = new ReferenceSurfaceSnapshot[referenceSlots.length];
+            referenceSurfaces[lastReferenceSlot] = anchor;
+
+            FrameAssembly tileAssembly = new FrameAssembly(
+                    cameraSequenceHeader,
+                    cameraFrameHeader,
+                    referenceHeaders,
+                    packet.streamOffset(),
+                    packet.obuIndex()
+            );
+            int sourceTileIndex = entry.bitstream().tileIndex();
+            TileGroupHeader tileHeader = new TileGroupHeader(
+                    false,
+                    sourceTileIndex,
+                    sourceTileIndex,
+                    tileAssembly.totalTiles()
+            );
+            tileAssembly.addTileGroup(
+                    packet,
+                    tileHeader,
+                    entry.bitstream().dataOffset(),
+                    entry.bitstream().dataLength(),
+                    new TileBitstream[]{entry.bitstream()}
+            );
+
+            FrameSyntaxDecodeResult syntaxDecodeResult;
+            try {
+                syntaxDecodeResult = new FrameSyntaxDecoder(
+                        largeScaleTileCameraCdfReferenceState,
+                        referenceSyntaxStates,
+                        config.strictStdCompliance()
+                ).decodeTile(tileAssembly, sourceTileIndex);
+            } catch (InvalidFrameSyntaxException exception) {
+                throw new DecodeException(
+                        DecodeErrorCode.INVALID_BITSTREAM,
+                        DecodeStage.FRAME_DECODE,
+                        exception.getMessage(),
+                        packet.streamOffset(),
+                        packet.obuIndex(),
+                        null,
+                        exception
+                );
+            }
+            lastFrameSyntaxDecodeResult = syntaxDecodeResult;
+            if (config.strictStdCompliance()) {
+                validateLargeScaleTileReferences(syntaxDecodeResult, sourceTileIndex, packet);
+            }
+
+            DecodedPlanes reconstructed;
+            try {
+                reconstructed = frameReconstructor.reconstruct(
+                        syntaxDecodeResult,
+                        referenceSurfaces,
+                        config.strictStdCompliance()
+                );
+            } catch (InvalidFrameReconstructionException exception) {
+                throw new DecodeException(
+                        DecodeErrorCode.INVALID_BITSTREAM,
+                        DecodeStage.FRAME_DECODE,
+                        exception.getMessage(),
+                        packet.streamOffset(),
+                        packet.obuIndex(),
+                        null,
+                        exception
+                );
+            }
+            outputBuilder.copyTile(
+                    reconstructed,
+                    entry.tileColumn(),
+                    entry.tileRow(),
+                    outputTileIndex
+            );
+        }
+
+        DecodedPlanes outputPlanes = outputBuilder.build();
+        lastPlanes = outputPlanes;
+        return PendingOutput.normal(
+                outputPlanes,
+                cameraSequenceHeader.colorConfig(),
+                cameraFrameHeader,
+                true,
+                nextPresentationIndex,
+                packet
+        );
+    }
+
+    /// Verifies that every inter block in one Large Scale Tile uses `LAST_FRAME`.
+    ///
+    /// @param syntaxDecodeResult the decoded camera-tile syntax
+    /// @param tileIndex the decoded source tile index
+    /// @param packet the source tile-list OBU
+    /// @throws DecodeException if a block selects another reference frame
+    private static void validateLargeScaleTileReferences(
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            int tileIndex,
+            ObuPacket packet
+    ) throws DecodeException {
+        for (TilePartitionTreeReader.Node root : syntaxDecodeResult.tileRoots(tileIndex)) {
+            validateLargeScaleTileReferences(root, packet);
+        }
+    }
+
+    /// Verifies the reference selection in one decoded partition subtree.
+    ///
+    /// @param node the decoded partition node
+    /// @param packet the source tile-list OBU
+    /// @throws DecodeException if an inter leaf does not use `LAST_FRAME`
+    private static void validateLargeScaleTileReferences(
+            TilePartitionTreeReader.Node node,
+            ObuPacket packet
+    ) throws DecodeException {
+        if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
+            int referenceFrame = leafNode.header().referenceFrame0();
+            if (referenceFrame >= 0 && referenceFrame != 0) {
+                throw invalidBitstream(packet, "Large Scale Tile blocks must use LAST_FRAME");
+            }
+            return;
+        }
+        TilePartitionTreeReader.PartitionNode partitionNode =
+                (TilePartitionTreeReader.PartitionNode) node;
+        for (int childIndex = 0; childIndex < partitionNode.childCount(); childIndex++) {
+            validateLargeScaleTileReferences(partitionNode.child(childIndex), packet);
+        }
+    }
+
+    /// Reconstructs the slot-indexed reference-header snapshot captured by one camera assembly.
+    ///
+    /// @param cameraAssembly the retained common camera-frame assembly
+    /// @return the selected reference headers indexed by runtime slot
+    private FrameHeader[] cameraReferenceFrameHeaders(FrameAssembly cameraAssembly) {
+        FrameHeader cameraFrameHeader = cameraAssembly.frameHeader();
+        FrameHeader[] headers = new FrameHeader[referenceSlots.length];
+        for (int referenceFrame = 0; referenceFrame < 7; referenceFrame++) {
+            int slot = cameraFrameHeader.referenceFrameIndex(referenceFrame);
+            if (slot >= 0 && slot < headers.length) {
+                headers[slot] = cameraAssembly.referenceFrameHeader(referenceFrame);
+            }
+        }
+        return headers;
     }
 
     /// Appends parsed tile-group metadata to the supplied frame assembly.
@@ -943,7 +1238,13 @@ public final class Av1ImageReader implements AutoCloseable {
                 slot.surfaceSnapshot(),
                 "populated reference slot"
         );
+        if (config.largeScaleTileMode()) {
+            addLargeScaleTileAnchorFrame(referenceSurfaceSnapshot, packet);
+        }
         refreshReferenceState(outputRequestHeader, referenceSurfaceSnapshot);
+        if (config.largeScaleTileMode()) {
+            return null;
+        }
         if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
             return null;
         }
@@ -956,6 +1257,21 @@ public final class Av1ImageReader implements AutoCloseable {
                 nextPresentationIndex,
                 packet
         );
+    }
+
+    /// Appends one externally indexed anchor surface for later tile-list decoding.
+    ///
+    /// @param snapshot the immutable anchor surface
+    /// @param packet the OBU that produced or showed the anchor
+    /// @throws DecodeException if the AV1 maximum of 128 anchor frames is exceeded
+    private void addLargeScaleTileAnchorFrame(
+            ReferenceSurfaceSnapshot snapshot,
+            ObuPacket packet
+    ) throws DecodeException {
+        if (largeScaleTileAnchorFrames.size() >= 128) {
+            throw invalidBitstream(packet, "Large Scale Tile anchor-frame count exceeds 128");
+        }
+        largeScaleTileAnchorFrames.add(Objects.requireNonNull(snapshot, "snapshot"));
     }
 
     /// Applies presentation-only output filters such as film grain.
@@ -1039,14 +1355,30 @@ public final class Av1ImageReader implements AutoCloseable {
         if (frameSizeLimit == 0 || frameHeader.showExistingFrame()) {
             return;
         }
+        enforceFrameSizeLimit(
+                frameHeader.frameSize().upscaledWidth(),
+                frameHeader.frameSize().height(),
+                packet
+        );
+    }
 
-        long pixelCount = (long) frameHeader.frameSize().upscaledWidth() * frameHeader.frameSize().height();
+    /// Enforces the configured frame size limit against explicit output dimensions.
+    ///
+    /// @param width the output luma width
+    /// @param height the output luma height
+    /// @param packet the source OBU packet
+    /// @throws DecodeException if the configured frame size limit is exceeded
+    private void enforceFrameSizeLimit(int width, int height, ObuPacket packet) throws DecodeException {
+        long frameSizeLimit = config.frameSizeLimit();
+        if (frameSizeLimit == 0) {
+            return;
+        }
+        long pixelCount = (long) width * height;
         if (pixelCount > frameSizeLimit) {
             throw new DecodeException(
                     DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED,
                     DecodeStage.FRAME_HEADER_PARSE,
-                    "Frame size exceeds the configured limit: " + frameHeader.frameSize().upscaledWidth()
-                            + "x" + frameHeader.frameSize().height(),
+                    "Frame size exceeds the configured limit: " + width + "x" + height,
                     packet.streamOffset(),
                     packet.obuIndex(),
                     null

@@ -35,6 +35,8 @@ public enum ObuType {
     FRAME(6),
     /// Redundant frame header OBU.
     REDUNDANT_FRAME_HEADER(7),
+    /// Large Scale Tile list OBU.
+    TILE_LIST(8),
     /// Padding OBU.
     PADDING(15);
 

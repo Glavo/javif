@@ -33,6 +33,8 @@ public final class Av1DecoderConfig {
     private final boolean outputInvisibleFrames;
     /// Whether every selected spatial layer should be exposed as a separate output.
     private final boolean outputAllLayers;
+    /// Whether frame payloads use the AV1 Large Scale Tile layout.
+    private final boolean largeScaleTileMode;
     /// Which frame categories should be decoded.
     private final DecodeFrameType decodeFrameType;
     /// The selected AV1 operating point.
@@ -48,6 +50,7 @@ public final class Av1DecoderConfig {
         this.strictStdCompliance = builder.strictStdCompliance;
         this.outputInvisibleFrames = builder.outputInvisibleFrames;
         this.outputAllLayers = builder.outputAllLayers;
+        this.largeScaleTileMode = builder.largeScaleTileMode;
         this.decodeFrameType = builder.decodeFrameType;
         this.operatingPoint = builder.operatingPoint;
         this.frameSizeLimit = builder.frameSizeLimit;
@@ -91,6 +94,17 @@ public final class Av1DecoderConfig {
         return outputAllLayers;
     }
 
+    /// Returns whether frame payloads use the AV1 Large Scale Tile layout.
+    ///
+    /// This is an external decoder-mode selection and is not signaled by the bitstream. When
+    /// enabled, leading decoded frames are retained as externally indexed anchors, the common
+    /// camera frame is not presented, and tile-list OBUs produce the visible outputs.
+    ///
+    /// @return whether Large Scale Tile mode is enabled
+    public boolean largeScaleTileMode() {
+        return largeScaleTileMode;
+    }
+
     /// Returns which frame categories should be decoded.
     ///
     /// @return the frame filtering mode
@@ -127,6 +141,7 @@ public final class Av1DecoderConfig {
                 .strictStdCompliance(strictStdCompliance)
                 .outputInvisibleFrames(outputInvisibleFrames)
                 .outputAllLayers(outputAllLayers)
+                .largeScaleTileMode(largeScaleTileMode)
                 .decodeFrameType(decodeFrameType)
                 .operatingPoint(value)
                 .frameSizeLimit(frameSizeLimit)
@@ -144,6 +159,8 @@ public final class Av1DecoderConfig {
         private boolean outputInvisibleFrames = false;
         /// Whether every selected spatial layer should be exposed as a separate output.
         private boolean outputAllLayers = false;
+        /// Whether frame payloads use the AV1 Large Scale Tile layout.
+        private boolean largeScaleTileMode = false;
         /// Which frame categories should be decoded.
         private DecodeFrameType decodeFrameType = DecodeFrameType.ALL;
         /// The selected AV1 operating point.
@@ -191,6 +208,19 @@ public final class Av1DecoderConfig {
         /// @return this builder
         public Builder outputAllLayers(boolean value) {
             this.outputAllLayers = value;
+            return this;
+        }
+
+    /// Sets whether frame payloads use the AV1 Large Scale Tile layout.
+    ///
+    /// The caller must select this mode only for streams packaged for Large Scale Tile decoder
+    /// operation. The mode determines how leading anchor frames and the common camera header are
+    /// consumed before tile-list outputs are exposed.
+        ///
+        /// @param value whether Large Scale Tile mode should be enabled
+        /// @return this builder
+        public Builder largeScaleTileMode(boolean value) {
+            this.largeScaleTileMode = value;
             return this;
         }
 

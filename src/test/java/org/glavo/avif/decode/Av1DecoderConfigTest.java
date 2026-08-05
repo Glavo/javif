@@ -36,6 +36,7 @@ final class Av1DecoderConfigTest {
         assertFalse(config.strictStdCompliance());
         assertFalse(config.outputInvisibleFrames());
         assertFalse(config.outputAllLayers());
+        assertFalse(config.largeScaleTileMode());
         assertEquals(DecodeFrameType.ALL, config.decodeFrameType());
         assertEquals(0, config.operatingPoint());
         assertEquals(0, config.frameSizeLimit());
@@ -56,6 +57,7 @@ final class Av1DecoderConfigTest {
                 .strictStdCompliance(true)
                 .outputInvisibleFrames(true)
                 .outputAllLayers(true)
+                .largeScaleTileMode(true)
                 .decodeFrameType(DecodeFrameType.REFERENCE)
                 .operatingPoint(2)
                 .frameSizeLimit(1234)
@@ -67,6 +69,7 @@ final class Av1DecoderConfigTest {
         assertTrue(changed.strictStdCompliance());
         assertTrue(changed.outputInvisibleFrames());
         assertTrue(changed.outputAllLayers());
+        assertTrue(changed.largeScaleTileMode());
         assertEquals(DecodeFrameType.REFERENCE, changed.decodeFrameType());
         assertEquals(7, changed.operatingPoint());
         assertEquals(1234, changed.frameSizeLimit());

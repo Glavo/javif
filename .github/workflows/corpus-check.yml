@@ -52,16 +52,23 @@ jobs:
           - profile0_error
           - profile0_core
           - profile0_core_special
+          - profile0_large_scale_tile
+          - profile0_large_scale_tile_special
           - profile1_not_annexb
           - profile1_not_annexb_special
           - profile1_error
           - profile1_core
           - profile1_core_special
+          - profile1_large_scale_tile
+          - profile1_large_scale_tile_special
           - profile2_not_annexb
           - profile2_not_annexb_special
           - profile2_error
           - profile2_core
           - profile2_core_special
+          - profile2_large_scale_tile
+          - profile2_large_scale_tile_special
+          - profile_switching
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -75,6 +82,36 @@ jobs:
           path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
           key: argon-av1-v2.1.1
       - name: Run Argon Streams AV1 corpus gate
+        run: >-
+          ./gradlew -g .gradle-user-home
+          argonAv1Test -PargonAv1Case=${{ matrix.category }}/all
+          --info --no-daemon --stacktrace
+
+  argon-stress:
+    if: ${{ inputs.corpus == 'argon' || inputs.corpus == 'all' }}
+    name: Argon stress (${{ matrix.category }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        category:
+          - profile0_stress
+          - profile1_stress
+          - profile2_stress
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Restore pinned Argon Streams archive
+        uses: actions/cache@v5
+        with:
+          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          key: argon-av1-v2.1.1
+      - name: Run Argon Streams AV1 stress gate
         run: >-
           ./gradlew -g .gradle-user-home
           argonAv1Test -PargonAv1Case=${{ matrix.category }}/all

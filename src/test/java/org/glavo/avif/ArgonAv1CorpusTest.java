@@ -18,6 +18,9 @@ package org.glavo.avif;
 import org.glavo.avif.decode.Av1DecoderConfig;
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.internal.av1.bitstream.ObuPacket;
+import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
+import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.io.BufferedInput;
@@ -84,13 +87,13 @@ final class ArgonAv1CorpusTest {
     private static final long EXPECTED_STREAM_COUNT = 3_921L;
 
     /// Number of gated streams that carry reference YUV digests.
-    private static final int EXPECTED_REFERENCE_STREAM_COUNT = 2_756;
+    private static final int EXPECTED_REFERENCE_STREAM_COUNT = 3_586;
 
     /// Number of gated malformed streams that strict decoding must reject.
     private static final int EXPECTED_ERROR_STREAM_COUNT = 335;
 
-    /// Number of malformed streams whose constraints apply without Large Scale Tile decoder mode.
-    private static final int EXPECTED_STRICT_ERROR_STREAM_COUNT = 255;
+    /// Number of malformed streams covered by the strict decoder gate.
+    private static final int EXPECTED_STRICT_ERROR_STREAM_COUNT = 335;
 
     /// Archive prefixes for gated low-overhead and Annex B core streams in all profiles.
     private static final @Unmodifiable List<String> REFERENCE_STREAM_PREFIXES = List.of(
@@ -98,14 +101,24 @@ final class ArgonAv1CorpusTest {
             ARCHIVE_ROOT + "profile0_not_annexb_special/streams/",
             ARCHIVE_ROOT + "profile0_core/streams/",
             ARCHIVE_ROOT + "profile0_core_special/streams/",
+            ARCHIVE_ROOT + "profile0_large_scale_tile/streams/",
+            ARCHIVE_ROOT + "profile0_large_scale_tile_special/streams/",
+            ARCHIVE_ROOT + "profile0_stress/streams/",
             ARCHIVE_ROOT + "profile1_not_annexb/streams/",
             ARCHIVE_ROOT + "profile1_not_annexb_special/streams/",
             ARCHIVE_ROOT + "profile1_core/streams/",
             ARCHIVE_ROOT + "profile1_core_special/streams/",
+            ARCHIVE_ROOT + "profile1_large_scale_tile/streams/",
+            ARCHIVE_ROOT + "profile1_large_scale_tile_special/streams/",
+            ARCHIVE_ROOT + "profile1_stress/streams/",
             ARCHIVE_ROOT + "profile2_not_annexb/streams/",
             ARCHIVE_ROOT + "profile2_not_annexb_special/streams/",
             ARCHIVE_ROOT + "profile2_core/streams/",
-            ARCHIVE_ROOT + "profile2_core_special/streams/"
+            ARCHIVE_ROOT + "profile2_core_special/streams/",
+            ARCHIVE_ROOT + "profile2_large_scale_tile/streams/",
+            ARCHIVE_ROOT + "profile2_large_scale_tile_special/streams/",
+            ARCHIVE_ROOT + "profile2_stress/streams/",
+            ARCHIVE_ROOT + "profile_switching/streams/"
     );
 
     /// Archive prefixes for malformed streams that strict decoding must reject.
@@ -253,12 +266,7 @@ final class ArgonAv1CorpusTest {
                 }
                 if (ERROR_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
                     errorStreamCount++;
-                    CorpusCase testCase = CorpusCase.parse(
-                            entryName.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")
-                    );
-                    if (!testCase.largeScaleTileOnlyErrorStream()) {
-                        strictErrorStreamCount++;
-                    }
+                    strictErrorStreamCount++;
                 }
             }
         }
@@ -364,7 +372,6 @@ final class ArgonAv1CorpusTest {
                 .filter(name -> REFERENCE_STREAM_PREFIXES.stream().anyMatch(name::startsWith)
                         || ERROR_STREAM_PREFIXES.stream().anyMatch(name::startsWith))
                 .map(name -> CorpusCase.parse(name.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")))
-                .filter(testCase -> !testCase.largeScaleTileOnlyErrorStream())
                 .filter(testCase -> selectedCategory == null || testCase.category().equals(selectedCategory))
                 .sorted((left, right) -> left.selector().compareTo(right.selector()))
                 .toList();
@@ -381,6 +388,7 @@ final class ArgonAv1CorpusTest {
                 .applyFilmGrain(false)
                 .strictStdCompliance(true)
                 .outputAllLayers(true)
+                .largeScaleTileMode(testCase.largeScaleTileMode())
                 .build();
 
         assertThrows(DecodeException.class, () -> {
@@ -406,9 +414,13 @@ final class ArgonAv1CorpusTest {
         ZipEntry streamEntry = requireEntry(archive, streamPath);
         String expectedDigest = readReferenceDigest(archive, requireEntry(archive, referencePath));
         MessageDigest actualDigest = MessageDigest.getInstance("MD5");
+        @Nullable List<LargeScaleTileDigestLayout> tileListLayouts = testCase.largeScaleTileMode()
+                ? readLargeScaleTileDigestLayouts(archive, streamEntry, testCase.annexB())
+                : null;
         Av1DecoderConfig config = Av1DecoderConfig.builder()
                 .applyFilmGrain(false)
                 .outputAllLayers(true)
+                .largeScaleTileMode(testCase.largeScaleTileMode())
                 .build();
 
         int frameCount = 0;
@@ -423,7 +435,12 @@ final class ArgonAv1CorpusTest {
                 @Nullable DecodedPlanes decodedPlanes;
                 while ((decodedPlanes = reader.readPlanes()) != null) {
                     DecodedPlanes requiredPlanes = decodedPlanes;
-                    updateYuvDigest(actualDigest, requiredPlanes);
+                    if (tileListLayouts == null) {
+                        updateYuvDigest(actualDigest, requiredPlanes);
+                    } else {
+                        assertTrue(frameCount < tileListLayouts.size(), streamPath + " produced too many tile lists");
+                        updateLargeScaleTileDigest(actualDigest, requiredPlanes, tileListLayouts.get(frameCount));
+                    }
                     if (frameDiagnostics != null) {
                         frameDiagnostics.add(frameDiagnostic(frameCount, requiredPlanes));
                     }
@@ -439,6 +456,9 @@ final class ArgonAv1CorpusTest {
         }
 
         assertTrue(frameCount > 0, () -> streamPath + " produced no visible frames");
+        if (tileListLayouts != null) {
+            assertEquals(tileListLayouts.size(), frameCount, streamPath + " tile-list output count");
+        }
         String actualDigestHex = HexFormat.of().formatHex(actualDigest.digest());
         assertEquals(
                 expectedDigest,
@@ -516,20 +536,150 @@ final class ArgonAv1CorpusTest {
         }
     }
 
+    /// Updates one digest in libaom's `YUV1D` Large Scale Tile output order.
+    ///
+    /// Each populated output tile contributes its complete Y, U, and V planes before the next
+    /// tile. Unpopulated cells in the rectangular output canvas are intentionally omitted.
+    ///
+    /// @param digest the digest to update
+    /// @param planes the rectangular decoded tile-list output
+    /// @param layout the output grid and populated tile count
+    private static void updateLargeScaleTileDigest(
+            MessageDigest digest,
+            DecodedPlanes planes,
+            LargeScaleTileDigestLayout layout
+    ) {
+        assertEquals(0, planes.codedWidth() % layout.outputColumns(), "tile-list luma width");
+        assertEquals(0, planes.codedHeight() % layout.outputRows(), "tile-list luma height");
+        int tileWidth = planes.codedWidth() / layout.outputColumns();
+        int tileHeight = planes.codedHeight() / layout.outputRows();
+        for (int tileIndex = 0; tileIndex < layout.tileCount(); tileIndex++) {
+            int tileColumn = tileIndex % layout.outputColumns();
+            int tileRow = tileIndex / layout.outputColumns();
+            updatePlaneRegionDigest(
+                    digest,
+                    planes.lumaPlane(),
+                    planes.bitDepth(),
+                    tileColumn * tileWidth,
+                    tileRow * tileHeight,
+                    tileWidth,
+                    tileHeight
+            );
+            @Nullable DecodedPlane chromaUPlane = planes.chromaUPlane();
+            @Nullable DecodedPlane chromaVPlane = planes.chromaVPlane();
+            if (chromaUPlane != null && chromaVPlane != null) {
+                assertEquals(0, chromaUPlane.width() % layout.outputColumns(), "tile-list chroma width");
+                assertEquals(0, chromaUPlane.height() % layout.outputRows(), "tile-list chroma height");
+                int chromaTileWidth = chromaUPlane.width() / layout.outputColumns();
+                int chromaTileHeight = chromaUPlane.height() / layout.outputRows();
+                updatePlaneRegionDigest(
+                        digest,
+                        chromaUPlane,
+                        planes.bitDepth(),
+                        tileColumn * chromaTileWidth,
+                        tileRow * chromaTileHeight,
+                        chromaTileWidth,
+                        chromaTileHeight
+                );
+                updatePlaneRegionDigest(
+                        digest,
+                        chromaVPlane,
+                        planes.bitDepth(),
+                        tileColumn * chromaTileWidth,
+                        tileRow * chromaTileHeight,
+                        chromaTileWidth,
+                        chromaTileHeight
+                );
+            }
+        }
+    }
+
+    /// Reads the lightweight output layout carried by every tile-list OBU in one stream.
+    ///
+    /// @param archive the open Argon archive
+    /// @param streamEntry the AV1 stream entry
+    /// @param annexB whether the stream uses Annex B framing
+    /// @return the tile-list layouts in decoding order
+    private static @Unmodifiable List<LargeScaleTileDigestLayout> readLargeScaleTileDigestLayouts(
+            ZipFile archive,
+            ZipEntry streamEntry,
+            boolean annexB
+    ) throws IOException {
+        List<LargeScaleTileDigestLayout> layouts = new ArrayList<>();
+        try (BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry))) {
+            ObuStreamReader obuReader = annexB ? ObuStreamReader.forAnnexB(input) : new ObuStreamReader(input);
+            @Nullable ObuPacket packet;
+            while ((packet = obuReader.readObu()) != null) {
+                if (packet.header().type() != ObuType.TILE_LIST) {
+                    continue;
+                }
+                byte[] payload = packet.payload();
+                if (payload.length < 4) {
+                    throw new IOException(streamEntry.getName() + " contains a truncated tile-list header");
+                }
+                layouts.add(new LargeScaleTileDigestLayout(
+                        Byte.toUnsignedInt(payload[0]) + 1,
+                        Byte.toUnsignedInt(payload[1]) + 1,
+                        (Byte.toUnsignedInt(payload[2]) << 8 | Byte.toUnsignedInt(payload[3])) + 1
+                ));
+            }
+        }
+        return List.copyOf(layouts);
+    }
+
     /// Updates one digest with the visible samples of one decoded plane.
     ///
     /// @param digest the digest to update
     /// @param plane the decoded plane
     /// @param bitDepth the decoded bit depth
     private static void updatePlaneDigest(MessageDigest digest, DecodedPlane plane, int bitDepth) {
+        updatePlaneRegionDigest(digest, plane, bitDepth, 0, 0, plane.width(), plane.height());
+    }
+
+    /// Updates one digest with a rectangular region of one decoded plane.
+    ///
+    /// @param digest the digest to update
+    /// @param plane the decoded plane
+    /// @param bitDepth the decoded bit depth
+    /// @param x the left sample coordinate
+    /// @param y the top sample coordinate
+    /// @param width the region width in samples
+    /// @param height the region height in samples
+    private static void updatePlaneRegionDigest(
+            MessageDigest digest,
+            DecodedPlane plane,
+            int bitDepth,
+            int x,
+            int y,
+            int width,
+            int height
+    ) {
         boolean highBitDepth = bitDepth > 8;
-        for (int y = 0; y < plane.height(); y++) {
-            for (int x = 0; x < plane.width(); x++) {
-                int sample = plane.sample(x, y);
+        for (int sampleY = y; sampleY < y + height; sampleY++) {
+            for (int sampleX = x; sampleX < x + width; sampleX++) {
+                int sample = plane.sample(sampleX, sampleY);
                 digest.update((byte) sample);
                 if (highBitDepth) {
                     digest.update((byte) (sample >>> 8));
                 }
+            }
+        }
+    }
+
+    /// Describes libaom's digest layout for one Large Scale Tile output.
+    ///
+    /// @param outputColumns the rectangular output width in tiles
+    /// @param outputRows the rectangular output height in tiles
+    /// @param tileCount the number of populated tiles written in raster order
+    @NotNullByDefault
+    private record LargeScaleTileDigestLayout(int outputColumns, int outputRows, int tileCount) {
+        /// Creates one validated digest layout.
+        private LargeScaleTileDigestLayout {
+            if (outputColumns <= 0 || outputRows <= 0) {
+                throw new IllegalArgumentException("Tile-list output grid must be positive");
+            }
+            if (tileCount <= 0 || tileCount > outputColumns * outputRows) {
+                throw new IllegalArgumentException("Tile-list tile count exceeds its output grid");
             }
         }
     }
@@ -611,10 +761,13 @@ final class ArgonAv1CorpusTest {
             return category.endsWith("_error");
         }
 
-        /// Returns whether this case requires the unsupported Large Scale Tile decoder mode.
+        /// Returns whether this case requires Large Scale Tile decoder mode.
         ///
-        /// @return whether the case must be deferred to a Large Scale Tile-specific gate
-        private boolean largeScaleTileOnlyErrorStream() {
+        /// @return whether Large Scale Tile mode must be enabled while decoding the case
+        private boolean largeScaleTileMode() {
+            if (category.contains("_large_scale_tile")) {
+                return true;
+            }
             @Nullable Set<String> streams = LARGE_SCALE_TILE_ONLY_ERROR_STREAMS.get(category);
             return streams != null && streams.contains(streamName);
         }

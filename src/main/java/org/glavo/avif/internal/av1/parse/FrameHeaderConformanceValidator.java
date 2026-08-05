@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
+import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -63,6 +64,114 @@ final class FrameHeaderConformanceValidator {
             if (referenceFrameHeader != null) {
                 validateReferenceDimensions(frameHeader.frameSize(), referenceFrameHeader.frameSize());
             }
+        }
+    }
+
+    /// Validates sequence and common-camera-frame requirements imposed by Large Scale Tile mode.
+    ///
+    /// @param sequenceHeader the active sequence header
+    /// @param frameHeader the parsed current frame header
+    /// @throws IOException if the frame violates a Large Scale Tile requirement
+    static void validateLargeScaleTileFrame(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader
+    ) throws IOException {
+        Objects.requireNonNull(sequenceHeader, "sequenceHeader");
+        Objects.requireNonNull(frameHeader, "frameHeader");
+        SequenceHeader.FeatureConfig features = sequenceHeader.features();
+        if (features.superResolution()) {
+            throw new IOException("Large Scale Tile mode requires enable_superres to be zero");
+        }
+        if (features.orderHint()) {
+            throw new IOException("Large Scale Tile mode requires enable_order_hint to be zero");
+        }
+        if (sequenceHeader.stillPicture()) {
+            throw new IOException("Large Scale Tile mode requires still_picture to be zero");
+        }
+        if (features.filmGrainPresent()) {
+            throw new IOException("Large Scale Tile mode requires film_grain_params_present to be zero");
+        }
+        if (sequenceHeader.timingInfo().present()) {
+            throw new IOException("Large Scale Tile mode requires timing_info_present_flag to be zero");
+        }
+        if (sequenceHeader.timingInfo().decoderModelInfoPresent()) {
+            throw new IOException("Large Scale Tile mode requires decoder_model_info_present_flag to be zero");
+        }
+        if (sequenceHeader.timingInfo().displayModelInfoPresent()) {
+            throw new IOException("Large Scale Tile mode requires initial_display_delay_present_flag to be zero");
+        }
+        if (features.restoration()) {
+            throw new IOException("Large Scale Tile mode requires enable_restoration to be zero");
+        }
+        if (features.cdef()) {
+            throw new IOException("Large Scale Tile mode requires enable_cdef to be zero");
+        }
+        if (sequenceHeader.colorConfig().monochrome()) {
+            throw new IOException("Large Scale Tile mode requires mono_chrome to be zero");
+        }
+
+        FrameHeader.TilingInfo tiling = frameHeader.tiling();
+        int[] columnStarts = tiling.columnStartSuperblocks();
+        int[] rowStarts = tiling.rowStartSuperblocks();
+        for (int row = 0; row < tiling.rows(); row++) {
+            if (rowStarts[row + 1] - rowStarts[row] != 1) {
+                throw new IOException("Large Scale Tile camera tiles must be exactly one superblock high");
+            }
+        }
+        int tileWidthSuperblocks = columnStarts[1] - columnStarts[0];
+        for (int column = 1; column < tiling.columns(); column++) {
+            if (columnStarts[column + 1] - columnStarts[column] != tileWidthSuperblocks) {
+                throw new IOException("Large Scale Tile camera tiles must have identical widths");
+            }
+        }
+
+        FrameHeader.FrameSize frameSize = frameHeader.frameSize();
+        int miColumns = ((frameSize.codedWidth() + 7) >> 3) << 1;
+        int miRows = ((frameSize.height() + 7) >> 3) << 1;
+        if (frameSize.codedWidth() != miColumns * 4 || frameSize.height() != miRows * 4) {
+            throw new IOException("Large Scale Tile frame dimensions must be integer MI units");
+        }
+        if (frameHeader.showExistingFrame()) {
+            throw new IOException("Large Scale Tile camera frames must not signal show_existing_frame");
+        }
+        if (frameHeader.frameType() != FrameType.INTER) {
+            throw new IOException("Large Scale Tile camera frames must use INTER_FRAME");
+        }
+        if (!frameHeader.showFrame()) {
+            throw new IOException("Large Scale Tile camera frames must set show_frame");
+        }
+        if (frameHeader.errorResilientMode()) {
+            throw new IOException("Large Scale Tile camera frames must disable error_resilient_mode");
+        }
+        if (!frameHeader.disableCdfUpdate()) {
+            throw new IOException("Large Scale Tile frames must disable CDF updates");
+        }
+        if (frameHeader.refreshContext()) {
+            throw new IOException("Large Scale Tile frames must disable frame-end CDF updates");
+        }
+        if (frameHeader.delta().deltaQPresent() || frameHeader.delta().deltaLfPresent()) {
+            throw new IOException("Large Scale Tile frames must not signal delta quantizer or loop-filter updates");
+        }
+        if (frameHeader.frameSizeOverride()) {
+            throw new IOException("Large Scale Tile camera frames must disable frame-size override");
+        }
+        if (frameHeader.refreshFrameFlags() != 0) {
+            throw new IOException("Large Scale Tile camera frames must not refresh reference slots");
+        }
+        if (frameHeader.useReferenceFrameMotionVectors()) {
+            throw new IOException("Large Scale Tile camera frames must not use reference-frame motion vectors");
+        }
+        if (frameHeader.segmentation().temporalUpdate()) {
+            throw new IOException("Large Scale Tile camera frames must disable temporal segmentation updates");
+        }
+        if (frameHeader.switchableCompoundReferences()) {
+            throw new IOException("Large Scale Tile camera frames must disable compound references");
+        }
+        if (frameHeader.loopFilter().levelY(0) != 0 || frameHeader.loopFilter().levelY(1) != 0) {
+            throw new IOException("Large Scale Tile camera frames must disable loop filtering");
+        }
+        if (frameHeader.superResolution().enabled()) {
+            throw new IOException("Large Scale Tile frames must not use super-resolution");
         }
     }
 
