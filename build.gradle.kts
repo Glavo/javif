@@ -302,6 +302,18 @@ tasks.register<Test>("argonAv1Test") {
     providers.gradleProperty("argonAv1Shard").orNull?.let { selectedShard ->
         systemProperty("org.glavo.avif.argon.shard", selectedShard)
     }
+    providers.gradleProperty("argonAv1Jfr").orNull?.let { recordingPath ->
+        val recordingFile = layout.projectDirectory.file(recordingPath).asFile
+        val recordingRepository = layout.buildDirectory.dir("jfr-repository").get().asFile
+        doFirst {
+            recordingFile.parentFile.mkdirs()
+            recordingRepository.mkdirs()
+        }
+        jvmArgs(
+            "-XX:FlightRecorderOptions=repository=${recordingRepository.absolutePath}",
+            "-XX:StartFlightRecording=filename=${recordingFile.absolutePath},settings=profile,dumponexit=true",
+        )
+    }
     if (providers.gradleProperty("argonAv1TraceFrames").isPresent) {
         systemProperty("org.glavo.avif.argon.traceFrames", "true")
     }

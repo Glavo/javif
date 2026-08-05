@@ -1039,6 +1039,108 @@ final class FramePostprocessorTest {
         }
     }
 
+    /// Verifies exact Wiener restoration when one unit spans multiple processing stripes.
+    @Test
+    void postprocessAppliesExactWienerRestorationAcrossProcessingStripes() {
+        int width = 17;
+        int height = 80;
+        int[][] sourceSamples = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                sourceSamples[y][x] = 24 + (x * 17 + y * 29 + x * y * 3) % 208;
+            }
+        }
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                sourceSamples,
+                null,
+                null
+        );
+        int @Unmodifiable [] @Unmodifiable [] wienerCoefficients = new int[][]{
+                {3, -7, 15},
+                {2, -5, 11}
+        };
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[8], new int[2]),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.WIENER,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        7,
+                        7
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(
+                frameHeader,
+                0,
+                RestorationUnit.wiener(wienerCoefficients)
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertWienerRestoredPlaneEquals(
+                decodedPlanes.lumaPlane(),
+                postprocessed.lumaPlane(),
+                8,
+                wienerCoefficients
+        );
+    }
+
+    /// Verifies that reusable self-guided fields preserve exact output across horizontal chunks.
+    @Test
+    void postprocessAppliesExactSelfGuidedRestorationAcrossProcessingChunks() {
+        int width = 130;
+        int height = 16;
+        int[][] sourceSamples = new int[height][width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                sourceSamples[y][x] = 16 + (x * 13 + y * 31 + x * y * 5) % 224;
+            }
+        }
+        DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
+                AvifPixelFormat.I400,
+                sourceSamples,
+                null,
+                null
+        );
+        int @Unmodifiable [] projectionCoefficients = new int[]{31, 31};
+        FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
+                AvifPixelFormat.I400,
+                new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[8], new int[2]),
+                new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
+                new FrameHeader.RestorationInfo(
+                        new FrameHeader.RestorationType[]{
+                                FrameHeader.RestorationType.SELF_GUIDED,
+                                FrameHeader.RestorationType.NONE,
+                                FrameHeader.RestorationType.NONE
+                        },
+                        7,
+                        7
+                ),
+                PostfilterTestFixtures.disabledFilmGrain()
+        );
+        FrameSyntaxDecodeResult syntaxDecodeResult = PostfilterTestFixtures.createSingleLeafSyntaxResult(
+                frameHeader,
+                0,
+                RestorationUnit.selfGuided(0, projectionCoefficients)
+        );
+
+        DecodedPlanes postprocessed = new FramePostprocessor().postprocess(decodedPlanes, frameHeader, syntaxDecodeResult);
+
+        assertSelfGuidedRestoredPlaneEquals(
+                decodedPlanes.lumaPlane(),
+                postprocessed.lumaPlane(),
+                8,
+                0,
+                projectionCoefficients
+        );
+    }
+
     /// Verifies that active loop restoration fails explicitly when decoded restoration units are unavailable.
     @Test
     void postprocessRejectsActiveRestoration() {
@@ -1438,10 +1540,28 @@ final class FramePostprocessorTest {
         int roundBitsV = 11 - (bitDepth == 12 ? 2 : 0);
         int sum = -(1 << (bitDepth + roundBitsV - 1));
         for (int tap = 0; tap < 7; tap++) {
-            int sourceY = clamp(y + tap - 3, 0, source.height() - 1);
+            int sourceY = expectedRestorationStripeSourceY(y + tap - 3, y, source.height());
             sum += verticalKernel[tap] * expectedWienerHorizontalSample(source, bitDepth, horizontalKernel, x, sourceY);
         }
         return (sum + (1 << (roundBitsV - 1))) >> roundBitsV;
+    }
+
+    /// Returns the expected luma source row after AV1 internal restoration-stripe substitution.
+    ///
+    /// @param sourceY the requested source row
+    /// @param outputY the output row being restored
+    /// @param height the visible luma height
+    /// @return the substituted and frame-clamped source row
+    private static int expectedRestorationStripeSourceY(int sourceY, int outputY, int height) {
+        int stripeStart = outputY < 56 ? 0 : 56 + ((outputY - 56) / 64) * 64;
+        int stripeEnd = Math.min(height, stripeStart + (stripeStart == 0 ? 56 : 64));
+        if (stripeStart != 0 && sourceY >= stripeStart - 3 && sourceY < stripeStart) {
+            sourceY = sourceY <= stripeStart - 2 ? stripeStart - 2 : stripeStart - 1;
+        }
+        if (stripeEnd < height && sourceY >= stripeEnd && sourceY < stripeEnd + 3) {
+            sourceY = sourceY == stripeEnd ? stripeEnd : stripeEnd + 1;
+        }
+        return clamp(sourceY, 0, height - 1);
     }
 
     /// Returns one expected horizontally filtered AV1 Wiener intermediate sample.

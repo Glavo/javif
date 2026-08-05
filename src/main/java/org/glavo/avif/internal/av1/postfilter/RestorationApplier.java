@@ -145,6 +145,7 @@ public final class RestorationApplier {
         }
 
         RestorationUnitMap unitMap = syntaxDecodeResult.restorationUnitMap();
+        RestorationWorkspace workspace = new RestorationWorkspace();
         DecodedPlane lumaPlane = applyPlane(
                 checkedDecodedPlanes.lumaPlane(),
                 checkedBoundaryPlanes.lumaPlane(),
@@ -152,7 +153,8 @@ public final class RestorationApplier {
                 checkedDecodedPlanes.pixelFormat(),
                 checkedRestoration,
                 unitMap,
-                0
+                0,
+                workspace
         );
 
         @Nullable DecodedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
@@ -165,7 +167,8 @@ public final class RestorationApplier {
                     checkedDecodedPlanes.pixelFormat(),
                     checkedRestoration,
                     unitMap,
-                    1
+                    1,
+                    workspace
             );
             chromaVPlane = applyPlane(
                     Objects.requireNonNull(chromaVPlane, "chromaVPlane"),
@@ -174,7 +177,8 @@ public final class RestorationApplier {
                     checkedDecodedPlanes.pixelFormat(),
                     checkedRestoration,
                     unitMap,
-                    2
+                    2,
+                    workspace
             );
         }
 
@@ -217,6 +221,7 @@ public final class RestorationApplier {
     /// @param restoration the frame-level restoration state
     /// @param unitMap the decoded restoration-unit map
     /// @param planeIndex the plane index
+    /// @param workspace the reusable per-frame restoration workspace
     /// @return the restored plane, or the original plane when all selected units are disabled
     private static DecodedPlane applyPlane(
             DecodedPlane plane,
@@ -225,7 +230,8 @@ public final class RestorationApplier {
             AvifPixelFormat pixelFormat,
             FrameHeader.RestorationInfo restoration,
             RestorationUnitMap unitMap,
-            int planeIndex
+            int planeIndex,
+            RestorationWorkspace workspace
     ) {
         FrameHeader.RestorationType frameType = restoration.types()[planeIndex];
         if (frameType == FrameHeader.RestorationType.NONE) {
@@ -278,7 +284,8 @@ public final class RestorationApplier {
                         endY,
                         processingStripeHeight,
                         verticalOffset,
-                        processingUnitWidth
+                        processingUnitWidth,
+                        workspace
                 );
                 changed = true;
             }
@@ -299,6 +306,7 @@ public final class RestorationApplier {
     /// @param processingStripeHeight the processing stripe height for this plane
     /// @param verticalOffset the vertical processing stripe offset for this plane
     /// @param processingUnitWidth the horizontal processing unit width for this plane
+    /// @param workspace the reusable per-frame restoration workspace
     private static void applyRestorationUnit(
             PlaneSampleSource source,
             PlaneSampleSource boundarySource,
@@ -310,7 +318,8 @@ public final class RestorationApplier {
             int endY,
             int processingStripeHeight,
             int verticalOffset,
-            int processingUnitWidth
+            int processingUnitWidth,
+            RestorationWorkspace workspace
     ) {
         int stripeStart = startY;
         while (stripeStart < endY) {
@@ -330,7 +339,7 @@ public final class RestorationApplier {
                     copyBelow
             );
             if (unit.type() == FrameHeader.RestorationType.WIENER) {
-                applyWienerUnit(stripeSource, destination, unit, startX, stripeStart, endX, stripeEnd);
+                applyWienerUnit(stripeSource, destination, unit, startX, stripeStart, endX, stripeEnd, workspace);
             } else if (unit.type() == FrameHeader.RestorationType.SELF_GUIDED) {
                 applySelfGuidedUnit(
                         stripeSource,
@@ -340,7 +349,8 @@ public final class RestorationApplier {
                         stripeStart,
                         endX,
                         stripeEnd,
-                        processingUnitWidth
+                        processingUnitWidth,
+                        workspace
                 );
             } else {
                 throw new IllegalStateException("Unsupported restoration unit type: " + unit.type());
@@ -358,6 +368,7 @@ public final class RestorationApplier {
     /// @param startY the inclusive unit start Y
     /// @param endX the exclusive unit end X
     /// @param endY the exclusive unit end Y
+    /// @param workspace the reusable per-frame restoration workspace
     private static void applyWienerUnit(
             PlaneSampleSource source,
             PlaneBuffer destination,
@@ -365,67 +376,59 @@ public final class RestorationApplier {
             int startX,
             int startY,
             int endX,
-            int endY
+            int endY,
+            RestorationWorkspace workspace
     ) {
         int[][] coefficients = unit.wienerCoefficients();
-        int @Unmodifiable [] horizontalKernel = wienerKernel(coefficients[0]);
-        int @Unmodifiable [] verticalKernel = wienerKernel(coefficients[1]);
-        for (int y = startY; y < endY; y++) {
-            for (int x = startX; x < endX; x++) {
-                destination.setSample(x, y, wienerSample(source, horizontalKernel, verticalKernel, x, y));
-            }
-        }
-    }
+        int[] horizontalKernel = workspace.horizontalWienerKernel;
+        int[] verticalKernel = workspace.verticalWienerKernel;
+        fillWienerKernel(coefficients[0], horizontalKernel);
+        fillWienerKernel(coefficients[1], verticalKernel);
 
-    /// Returns one AV1 Wiener-restored sample using separable two-stage rounding.
-    ///
-    /// @param source the immutable source plane view
-    /// @param horizontalKernel the seven-tap horizontal Wiener kernel
-    /// @param verticalKernel the seven-tap vertical Wiener kernel
-    /// @param x the sample X coordinate
-    /// @param y the sample Y coordinate
-    /// @return one restored sample before final bit-depth clipping
-    private static int wienerSample(
-            PlaneSampleSource source,
-            int @Unmodifiable [] horizontalKernel,
-            int @Unmodifiable [] verticalKernel,
-            int x,
-            int y
-    ) {
-        int bitDepth = source.bitDepth();
-        int roundBitsV = 11 - (bitDepth == 12 ? 2 : 0);
-        int roundingOffsetV = 1 << (roundBitsV - 1);
-        int roundOffset = 1 << (bitDepth + roundBitsV - 1);
-        int sum = -roundOffset;
-        for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
-            int sourceY = y + tap - WIENER_TAP_OFFSET;
-            sum += verticalKernel[tap] * wienerHorizontalSample(source, horizontalKernel, x, sourceY);
-        }
-        return (sum + roundingOffsetV) >> roundBitsV;
-    }
-
-    /// Returns one horizontally filtered AV1 Wiener intermediate sample.
-    ///
-    /// @param source the immutable source plane view
-    /// @param horizontalKernel the seven-tap horizontal Wiener kernel
-    /// @param x the sample X coordinate
-    /// @param y the sample Y coordinate
-    /// @return one clipped horizontal Wiener intermediate sample
-    private static int wienerHorizontalSample(
-            PlaneSampleSource source,
-            int @Unmodifiable [] horizontalKernel,
-            int x,
-            int y
-    ) {
+        int width = endX - startX;
+        int height = endY - startY;
+        int horizontalRowCount = height + WIENER_TAP_COUNT - 1;
+        int[] horizontalSamples = workspace.wienerIntermediate(width * horizontalRowCount);
         int bitDepth = source.bitDepth();
         int roundBitsH = 3 + (bitDepth == 12 ? 2 : 0);
         int roundingOffsetH = 1 << (roundBitsH - 1);
         int clipLimit = 1 << (bitDepth + 1 + FILTER_BITS - roundBitsH);
-        int sum = 1 << (bitDepth + 6);
-        for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
-            sum += horizontalKernel[tap] * source.sample(x + tap - WIENER_TAP_OFFSET, y);
+        int horizontalInitialSum = 1 << (bitDepth + 6);
+
+        // The vertical stage consumes seven adjacent horizontal rows. Compute each row once
+        // instead of recomputing the horizontal convolution for every vertical output tap.
+        for (int row = 0; row < horizontalRowCount; row++) {
+            int sourceY = startY + row - WIENER_TAP_OFFSET;
+            int rowOffset = row * width;
+            for (int localX = 0; localX < width; localX++) {
+                int x = startX + localX;
+                int sum = horizontalInitialSum;
+                for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
+                    sum += horizontalKernel[tap] * source.sample(x + tap - WIENER_TAP_OFFSET, sourceY);
+                }
+                horizontalSamples[rowOffset + localX] =
+                        clamp((sum + roundingOffsetH) >> roundBitsH, 0, clipLimit - 1);
+            }
         }
-        return clamp((sum + roundingOffsetH) >> roundBitsH, 0, clipLimit - 1);
+
+        int roundBitsV = 11 - (bitDepth == 12 ? 2 : 0);
+        int roundingOffsetV = 1 << (roundBitsV - 1);
+        int roundOffset = 1 << (bitDepth + roundBitsV - 1);
+        for (int y = startY; y < endY; y++) {
+            int firstHorizontalRow = y - startY;
+            for (int localX = 0; localX < width; localX++) {
+                int sum = -roundOffset;
+                for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
+                    sum += verticalKernel[tap]
+                            * horizontalSamples[(firstHorizontalRow + tap) * width + localX];
+                }
+                destination.setSample(
+                        startX + localX,
+                        y,
+                        (sum + roundingOffsetV) >> roundBitsV
+                );
+            }
+        }
     }
 
     /// Applies one self-guided restoration unit.
@@ -438,6 +441,7 @@ public final class RestorationApplier {
     /// @param endX the exclusive unit end X
     /// @param endY the exclusive unit end Y
     /// @param processingUnitWidth the horizontal processing unit width for this plane
+    /// @param workspace the reusable per-frame restoration workspace
     private static void applySelfGuidedUnit(
             PlaneSampleSource source,
             PlaneBuffer destination,
@@ -446,7 +450,8 @@ public final class RestorationApplier {
             int startY,
             int endX,
             int endY,
-            int processingUnitWidth
+            int processingUnitWidth,
+            RestorationWorkspace workspace
     ) {
         int @Unmodifiable [] params = SELF_GUIDED_PARAMS[unit.selfGuidedSet()];
         int @Unmodifiable [] projection = unit.selfGuidedProjectionCoefficients();
@@ -455,10 +460,12 @@ public final class RestorationApplier {
             int chunkWidth = chunkEndX - chunkStartX;
             int stripeHeight = endY - startY;
             @Nullable SelfGuidedIntermediate radius2Filter = params[0] != 0
-                    ? SelfGuidedIntermediate.create(source, chunkStartX, startY, chunkWidth, stripeHeight, 2, params[1])
+                    ? workspace.radius2Intermediate.compute(
+                            source, chunkStartX, startY, chunkWidth, stripeHeight, 2, params[1])
                     : null;
             @Nullable SelfGuidedIntermediate radius1Filter = params[2] != 0
-                    ? SelfGuidedIntermediate.create(source, chunkStartX, startY, chunkWidth, stripeHeight, 1, params[3])
+                    ? workspace.radius1Intermediate.compute(
+                            source, chunkStartX, startY, chunkWidth, stripeHeight, 1, params[3])
                     : null;
             int weight0 = radius2Filter != null ? projection[0] : 0;
             int weight1 = radius1Filter != null ? 128 - projection[0] - projection[1] : 0;
@@ -480,23 +487,21 @@ public final class RestorationApplier {
         }
     }
 
-    /// Builds one symmetric seven-tap Wiener filter kernel.
+    /// Fills one symmetric seven-tap Wiener filter kernel.
     ///
     /// @param coefficients the three coded Wiener coefficients
-    /// @return one symmetric seven-tap Wiener filter kernel
-    private static int @Unmodifiable [] wienerKernel(int @Unmodifiable [] coefficients) {
+    /// @param kernel the seven-element destination kernel
+    private static void fillWienerKernel(int @Unmodifiable [] coefficients, int[] kernel) {
         int c0 = coefficients[0];
         int c1 = coefficients[1];
         int c2 = coefficients[2];
-        return new int[]{
-                c0,
-                c1,
-                c2,
-                (1 << FILTER_BITS) - 2 * (c0 + c1 + c2),
-                c2,
-                c1,
-                c0
-        };
+        kernel[0] = c0;
+        kernel[1] = c1;
+        kernel[2] = c2;
+        kernel[3] = (1 << FILTER_BITS) - 2 * (c0 + c1 + c2);
+        kernel[4] = c2;
+        kernel[5] = c1;
+        kernel[6] = c0;
     }
 
     /// Clips one integer into inclusive bounds.
@@ -577,32 +582,63 @@ public final class RestorationApplier {
         };
     }
 
+    /// Reusable scratch storage shared by all restoration units in one frame.
+    @NotNullByDefault
+    private static final class RestorationWorkspace {
+        /// The horizontal Wiener intermediate rows.
+        private int[] wienerIntermediate = new int[0];
+
+        /// The reusable horizontal Wiener kernel.
+        private final int[] horizontalWienerKernel = new int[WIENER_TAP_COUNT];
+
+        /// The reusable vertical Wiener kernel.
+        private final int[] verticalWienerKernel = new int[WIENER_TAP_COUNT];
+
+        /// The reusable radius-two self-guided fields.
+        private final SelfGuidedIntermediate radius2Intermediate = new SelfGuidedIntermediate();
+
+        /// The reusable radius-one self-guided fields.
+        private final SelfGuidedIntermediate radius1Intermediate = new SelfGuidedIntermediate();
+
+        /// Creates an empty per-frame restoration workspace.
+        private RestorationWorkspace() {
+        }
+
+        /// Returns horizontal Wiener storage with at least the requested length.
+        ///
+        /// @param requiredLength the minimum number of intermediate samples
+        /// @return reusable intermediate storage
+        private int[] wienerIntermediate(int requiredLength) {
+            if (wienerIntermediate.length < requiredLength) {
+                wienerIntermediate = new int[requiredLength];
+            }
+            return wienerIntermediate;
+        }
+    }
+
     /// Self-guided A/B projection fields for one filter radius.
     @NotNullByDefault
     private static final class SelfGuidedIntermediate {
         /// The processing block width in samples.
-        private final int width;
+        private int width;
 
         /// The processing stripe height in samples.
-        private final int height;
+        private int height;
 
         /// The inverted A field used by the dav1d finish equations.
-        private final int @Unmodifiable [] a;
+        private int[] a = new int[0];
 
         /// The inverted B field used by the dav1d finish equations.
-        private final int @Unmodifiable [] b;
+        private int[] b = new int[0];
 
-        /// Creates one self-guided intermediate field.
-        ///
-        /// @param width the processing block width in samples
-        /// @param height the processing stripe height in samples
-        /// @param a the inverted A field
-        /// @param b the inverted B field
-        private SelfGuidedIntermediate(int width, int height, int @Unmodifiable [] a, int @Unmodifiable [] b) {
-            this.width = width;
-            this.height = height;
-            this.a = Objects.requireNonNull(a, "a");
-            this.b = Objects.requireNonNull(b, "b");
+        /// The reusable vertical box-filter column sums.
+        private int[] columnSums = new int[0];
+
+        /// The reusable vertical box-filter squared-sample sums.
+        private int[] columnSquareSums = new int[0];
+
+        /// Creates an empty reusable self-guided intermediate field.
+        private SelfGuidedIntermediate() {
         }
 
         /// Computes one self-guided intermediate field.
@@ -614,8 +650,8 @@ public final class RestorationApplier {
         /// @param height the processing stripe height in samples
         /// @param radius the self-guided filter radius
         /// @param strength the self-guided strength value from the AV1 parameter table
-        /// @return one self-guided intermediate field
-        public static SelfGuidedIntermediate create(
+        /// @return this populated reusable intermediate field
+        private SelfGuidedIntermediate compute(
                 PlaneSampleSource source,
                 int startX,
                 int startY,
@@ -627,27 +663,38 @@ public final class RestorationApplier {
             if (radius != 1 && radius != 2) {
                 throw new IllegalArgumentException("radius must be 1 or 2: " + radius);
             }
-            int[] a = new int[(width + 2) * (height + 2)];
-            int[] b = new int[(width + 2) * (height + 2)];
+            this.width = width;
+            this.height = height;
             int count = radius == 1 ? 9 : 25;
             int oneByX = radius == 1 ? 455 : 164;
             int bitDepthShift = source.bitDepth() - 8;
             int fieldWidth = width + 2;
             int fieldHeight = height + 2;
+            int fieldLength = fieldWidth * fieldHeight;
+            if (a.length < fieldLength) {
+                a = new int[fieldLength];
+                b = new int[fieldLength];
+            }
             int windowSize = radius * 2 + 1;
             int extendedWidth = fieldWidth + radius * 2;
             int firstSourceX = startX - 1 - radius;
             int firstCenterY = startY - 1;
-            int[] columnSums = new int[extendedWidth];
-            int[] columnSquareSums = new int[extendedWidth];
+            if (columnSums.length < extendedWidth) {
+                columnSums = new int[extendedWidth];
+                columnSquareSums = new int[extendedWidth];
+            }
             // Keep vertical column totals and slide them horizontally so each field sample is O(1).
             for (int column = 0; column < extendedWidth; column++) {
                 int sourceX = firstSourceX + column;
+                int sum = 0;
+                int sumSquares = 0;
                 for (int dy = -radius; dy <= radius; dy++) {
                     int sample = source.sample(sourceX, firstCenterY + dy);
-                    columnSums[column] += sample;
-                    columnSquareSums[column] += sample * sample;
+                    sum += sample;
+                    sumSquares += sample * sample;
                 }
+                columnSums[column] = sum;
+                columnSquareSums[column] = sumSquares;
             }
 
             for (int fieldY = 0; fieldY < fieldHeight; fieldY++) {
@@ -681,7 +728,7 @@ public final class RestorationApplier {
                     }
                 }
             }
-            return new SelfGuidedIntermediate(width, height, a, b);
+            return this;
         }
 
         /// Returns one 3x3 residual from the inverted A/B fields.
@@ -719,7 +766,7 @@ public final class RestorationApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return one clamped field value
-        private int value(int @Unmodifiable [] values, int x, int y) {
+        private int value(int[] values, int x, int y) {
             int clampedX = clamp(x, -1, width);
             int clampedY = clamp(y, -1, height);
             return values[(clampedY + 1) * (width + 2) + clampedX + 1];
@@ -731,7 +778,7 @@ public final class RestorationApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return the weighted field sum
-        private int eightNeighborWeight(int @Unmodifiable [] values, int x, int y) {
+        private int eightNeighborWeight(int[] values, int x, int y) {
             return (value(values, x, y)
                     + value(values, x - 1, y)
                     + value(values, x + 1, y)
@@ -749,7 +796,7 @@ public final class RestorationApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return the weighted field sum
-        private int sixNeighborPairWeight(int @Unmodifiable [] values, int x, int y) {
+        private int sixNeighborPairWeight(int[] values, int x, int y) {
             int topY = y - 1;
             int bottomY = y + 1;
             return (value(values, x, topY) + value(values, x, bottomY)) * 6
@@ -765,7 +812,7 @@ public final class RestorationApplier {
         /// @param x the sample X coordinate
         /// @param y the sample Y coordinate
         /// @return the weighted field sum
-        private int sixNeighborSingleWeight(int @Unmodifiable [] values, int x, int y) {
+        private int sixNeighborSingleWeight(int[] values, int x, int y) {
             return value(values, x, y) * 6
                     + (value(values, x - 1, y) + value(values, x + 1, y)) * 5;
         }
