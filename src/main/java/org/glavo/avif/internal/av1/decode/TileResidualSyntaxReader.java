@@ -147,8 +147,16 @@ public final class TileResidualSyntaxReader {
     ///
     /// @param tileContext the tile-local decode state that owns the active tile bitstream
     public TileResidualSyntaxReader(TileDecodeContext tileContext) {
+        this(tileContext, false);
+    }
+
+    /// Creates one tile-local residual syntax reader with a strict conformance policy.
+    ///
+    /// @param tileContext the tile-local decode state that owns the active tile bitstream
+    /// @param strictStdCompliance whether malformed coefficient syntax must be rejected
+    public TileResidualSyntaxReader(TileDecodeContext tileContext, boolean strictStdCompliance) {
         this.tileContext = Objects.requireNonNull(tileContext, "tileContext");
-        this.syntaxReader = new TileSyntaxReader(this.tileContext);
+        this.syntaxReader = new TileSyntaxReader(this.tileContext, strictStdCompliance);
         this.frameOffsetX4 = this.tileContext.startX() >> 2;
         this.frameOffsetY4 = this.tileContext.startY() >> 2;
     }

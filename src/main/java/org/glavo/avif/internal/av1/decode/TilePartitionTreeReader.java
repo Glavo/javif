@@ -104,7 +104,7 @@ public final class TilePartitionTreeReader {
         this.syntaxReader = new TileSyntaxReader(nonNullTileContext);
         this.blockHeaderReader = new TileBlockHeaderReader(nonNullTileContext, strictStdCompliance);
         this.transformLayoutReader = new TileTransformLayoutReader(nonNullTileContext);
-        this.residualSyntaxReader = new TileResidualSyntaxReader(nonNullTileContext);
+        this.residualSyntaxReader = new TileResidualSyntaxReader(nonNullTileContext, strictStdCompliance);
         this.loopRestorationReader = new TileLoopRestorationReader(nonNullTileContext, syntaxReader);
         this.tileWidth4 = nonNullTileContext.codedWidth4();
         this.tileHeight4 = nonNullTileContext.codedHeight4();

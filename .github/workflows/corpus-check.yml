@@ -54,10 +54,12 @@ jobs:
           - profile0_core_special
           - profile1_not_annexb
           - profile1_not_annexb_special
+          - profile1_error
           - profile1_core
           - profile1_core_special
           - profile2_not_annexb
           - profile2_not_annexb_special
+          - profile2_error
           - profile2_core
           - profile2_core_special
     steps:

@@ -45,6 +45,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `TileSyntaxReader`.
@@ -571,6 +572,22 @@ final class TileSyntaxReaderTest {
         assertEquals(expectedInitialIndex, reader.readPaletteInitialIndex(5));
         assertEquals(expectedColorMapSymbol, reader.readPaletteColorMapSymbol(1, 5, 2));
         assertArrayEquals(oracleCdf.mutableColorMapCdf(1, 3, 2), tileContext.cdfContext().mutableColorMapCdf(1, 3, 2));
+    }
+
+    /// Verifies that strict decoding rejects a coefficient Golomb code whose twentieth length bit is zero.
+    @Test
+    void strictModeRejectsOversizedCoefficientGolombCode() {
+        byte[] payload = new byte[16];
+        TileSyntaxReader reader = new TileSyntaxReader(
+                createTileContext(FrameType.INTER, false, payload),
+                true
+        );
+
+        InvalidFrameSyntaxException exception = assertThrows(
+                InvalidFrameSyntaxException.class,
+                reader::readCoefficientGolomb
+        );
+        assertEquals("Coefficient Golomb length exceeds the AV1 limit", exception.getMessage());
     }
 
     /// Decodes one signed CFL alpha value with the same sign rules as `TileSyntaxReader`.

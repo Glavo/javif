@@ -51,6 +51,8 @@ final class FrameHeaderConformanceValidator {
         if (frameHeader.allLossless() && frameHeader.delta().deltaQPresent()) {
             throw new IOException("Coded-lossless frames must not signal delta_q_present");
         }
+        validateSequenceFrameDimensions(sequenceHeader, frameHeader);
+        validateShortSignaledReferences(sequenceHeader, frameHeader, referenceFrameHeaders);
         validateLevelLimits(sequenceHeader, frameHeader);
         for (int referenceIndex = 0; referenceIndex < REFERENCES_PER_FRAME; referenceIndex++) {
             int slotIndex = frameHeader.referenceFrameIndex(referenceIndex);
@@ -62,6 +64,87 @@ final class FrameHeaderConformanceValidator {
                 validateReferenceDimensions(frameHeader.frameSize(), referenceFrameHeader.frameSize());
             }
         }
+    }
+
+    /// Validates explicitly signaled frame dimensions against the sequence-header maxima.
+    ///
+    /// @param sequenceHeader the active sequence header
+    /// @param frameHeader the parsed current frame header
+    /// @throws IOException if the frame exceeds either declared maximum dimension
+    private static void validateSequenceFrameDimensions(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader
+    ) throws IOException {
+        FrameHeader.FrameSize frameSize = frameHeader.frameSize();
+        if (frameSize.upscaledWidth() > sequenceHeader.maxWidth()) {
+            throw new IOException("Frame width exceeds the sequence-header maximum");
+        }
+        if (frameSize.height() > sequenceHeader.maxHeight()) {
+            throw new IOException("Frame height exceeds the sequence-header maximum");
+        }
+    }
+
+    /// Validates the LAST and GOLDEN order hints used by short reference signaling.
+    ///
+    /// @param sequenceHeader the active sequence header
+    /// @param frameHeader the parsed current frame header
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @throws IOException if either explicitly selected reference is not earlier in output order
+    private static void validateShortSignaledReferences(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader,
+            @Nullable FrameHeader[] referenceFrameHeaders
+    ) throws IOException {
+        if (!frameHeader.frameReferenceShortSignaling()) {
+            return;
+        }
+        validateEarlierReferenceOrderHint(sequenceHeader, frameHeader, referenceFrameHeaders, 0, "LAST");
+        validateEarlierReferenceOrderHint(sequenceHeader, frameHeader, referenceFrameHeaders, 3, "GOLDEN");
+    }
+
+    /// Validates one short-signaled reference against the current frame order hint.
+    ///
+    /// @param sequenceHeader the active sequence header
+    /// @param frameHeader the parsed current frame header
+    /// @param referenceFrameHeaders the refreshed reference-frame headers indexed by slot
+    /// @param referenceIndex the LAST..ALTREF reference position
+    /// @param referenceName the reference name used in diagnostics
+    /// @throws IOException if the reference is unavailable or is not earlier in output order
+    private static void validateEarlierReferenceOrderHint(
+            SequenceHeader sequenceHeader,
+            FrameHeader frameHeader,
+            @Nullable FrameHeader[] referenceFrameHeaders,
+            int referenceIndex,
+            String referenceName
+    ) throws IOException {
+        int slotIndex = frameHeader.referenceFrameIndex(referenceIndex);
+        if (slotIndex < 0 || slotIndex >= referenceFrameHeaders.length) {
+            throw new IOException(referenceName + " reference does not select a valid frame slot");
+        }
+        @Nullable FrameHeader referenceFrameHeader = referenceFrameHeaders[slotIndex];
+        if (referenceFrameHeader == null) {
+            throw new IOException(referenceName + " reference selects an unavailable frame slot");
+        }
+        int relativeDistance = relativeDistance(
+                sequenceHeader.features().orderHintBits(),
+                referenceFrameHeader.frameOffset(),
+                frameHeader.frameOffset()
+        );
+        if (relativeDistance >= 0) {
+            throw new IOException(referenceName + " reference order hint is not earlier than the current frame");
+        }
+    }
+
+    /// Returns the wrapped AV1 relative distance between two order hints.
+    ///
+    /// @param orderHintBits the number of order-hint bits declared by the sequence
+    /// @param first the first order hint
+    /// @param second the second order hint
+    /// @return the wrapped signed distance `first - second`
+    private static int relativeDistance(int orderHintBits, int first, int second) {
+        int mask = 1 << (orderHintBits - 1);
+        int difference = first - second;
+        return (difference & (mask - 1)) - (difference & mask);
     }
 
     /// Validates the current frame against each operating point that contains its layer.

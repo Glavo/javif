@@ -655,7 +655,7 @@ public final class Av1ImageReader implements AutoCloseable {
     private @Nullable PendingOutput completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         if (config.strictStdCompliance()) {
-            validateReferenceSequenceCompatibility(assembly, packet);
+            validateReferenceState(assembly, packet);
         }
         @Nullable ReferenceFrameSyntaxState cdfReferenceState = selectCdfReferenceFrameSyntaxState(frameHeader);
         FrameSyntaxDecodeResult syntaxDecodeResult;
@@ -736,23 +736,26 @@ public final class Av1ImageReader implements AutoCloseable {
         );
     }
 
-    /// Validates that every selected reference frame uses the current sequence profile and color configuration.
+    /// Validates that every selected reference frame is populated and sequence-compatible.
     ///
     /// @param assembly the completed current frame assembly
     /// @param packet the OBU that completed the frame assembly
-    /// @throws DecodeException if a selected stored reference is incompatible with the current sequence
-    private void validateReferenceSequenceCompatibility(FrameAssembly assembly, ObuPacket packet)
+    /// @throws DecodeException if a selected reference is unavailable or incompatible with the current sequence
+    private void validateReferenceState(FrameAssembly assembly, ObuPacket packet)
             throws DecodeException {
         SequenceHeader currentSequence = assembly.sequenceHeader();
         FrameHeader frameHeader = assembly.frameHeader();
+        if (frameHeader.frameType() != FrameType.INTER && frameHeader.frameType() != FrameType.SWITCH) {
+            return;
+        }
         for (int referenceIndex = 0; referenceIndex < 7; referenceIndex++) {
             int slotIndex = frameHeader.referenceFrameIndex(referenceIndex);
             if (slotIndex < 0 || slotIndex >= referenceSlots.length) {
-                continue;
+                throw invalidBitstream(packet, "Selected reference frame does not identify a valid slot");
             }
             @Nullable ReferenceFrameSyntaxState storedState = referenceSlots[slotIndex].syntaxState();
             if (storedState == null) {
-                continue;
+                throw invalidBitstream(packet, "Selected reference frame slot is not populated");
             }
             SequenceHeader storedSequence = storedState.sequenceHeader();
             if (storedSequence.profile() != currentSequence.profile()) {
@@ -933,6 +936,9 @@ public final class Av1ImageReader implements AutoCloseable {
         requireExistingFrameState(packet, existingFrameIndex);
         RuntimeReferenceSlot slot = referenceSlots[existingFrameIndex];
         FrameHeader referencedFrameHeader = Objects.requireNonNull(slot.frameHeader(), "referencedFrameHeader");
+        if (config.strictStdCompliance() && !referencedFrameHeader.showableFrame()) {
+            throw invalidBitstream(packet, "show_existing_frame references a frame that is not showable");
+        }
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(
                 slot.surfaceSnapshot(),
                 "populated reference slot"

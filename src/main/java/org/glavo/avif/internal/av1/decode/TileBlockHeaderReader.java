@@ -55,6 +55,12 @@ public final class TileBlockHeaderReader {
     /// The horizontal delay required by the default intrabc displacement vector, in luma pixels.
     private static final int INTRABC_DELAY_PIXELS = 256;
 
+    /// The exclusive lower bound for each AV1 motion-vector component in eighth-pel units.
+    private static final int MOTION_VECTOR_LOWER_BOUND = -(1 << 14);
+
+    /// The exclusive upper bound for each AV1 motion-vector component in eighth-pel units.
+    private static final int MOTION_VECTOR_UPPER_BOUND = 1 << 14;
+
     /// Sentinel used when a block does not carry an inter reference frame.
     private static final int NO_REFERENCE_FRAME = -1;
 
@@ -111,7 +117,7 @@ public final class TileBlockHeaderReader {
     public TileBlockHeaderReader(TileDecodeContext tileContext, boolean strictStdCompliance) {
         TileDecodeContext nonNullTileContext = Objects.requireNonNull(tileContext, "tileContext");
         this.tileContext = nonNullTileContext;
-        this.syntaxReader = new TileSyntaxReader(nonNullTileContext);
+        this.syntaxReader = new TileSyntaxReader(nonNullTileContext, strictStdCompliance);
         this.strictStdCompliance = strictStdCompliance;
     }
 
@@ -433,6 +439,12 @@ public final class TileBlockHeaderReader {
         if (uvPaletteSize > 0) {
             uvPaletteIndices = readPaletteIndices(1, uvPaletteSize, nonNullPosition, nonNullSize);
         }
+        if (strictStdCompliance && motionVector0 != null) {
+            validateMotionVector(motionVector0.vector());
+            if (compoundReference) {
+                validateMotionVector(Objects.requireNonNull(motionVector1, "motionVector1").vector());
+            }
+        }
         BlockHeader header = new BlockHeader(
                 nonNullPosition,
                 nonNullSize,
@@ -484,6 +496,24 @@ public final class TileBlockHeaderReader {
             nonNullNeighborContext.updateDefaultTransformContext(nonNullPosition, nonNullSize);
         }
         return header;
+    }
+
+    /// Validates one assigned motion vector against the AV1 component range.
+    ///
+    /// @param motionVector the assigned motion vector
+    static void validateMotionVector(MotionVector motionVector) {
+        MotionVector nonNullMotionVector = Objects.requireNonNull(motionVector, "motionVector");
+        int row = nonNullMotionVector.rowEighthPel();
+        int column = nonNullMotionVector.columnEighthPel();
+        if (row <= MOTION_VECTOR_LOWER_BOUND
+                || row >= MOTION_VECTOR_UPPER_BOUND
+                || column <= MOTION_VECTOR_LOWER_BOUND
+                || column >= MOTION_VECTOR_UPPER_BOUND) {
+            IllegalArgumentException cause = new IllegalArgumentException(
+                    "Assigned motion vector exceeds the AV1 component range"
+            );
+            throw new InvalidFrameSyntaxException(cause.getMessage(), cause);
+        }
     }
 
     /// Resolves the effective CDEF index for one block, decoding and caching it when needed.

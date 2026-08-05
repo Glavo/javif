@@ -1044,6 +1044,29 @@ final class Av1ImageReaderTest {
         });
     }
 
+    /// Verifies that strict mode rejects a `show_existing_frame` request for a stored frame that
+    /// was not marked showable.
+    ///
+    /// @throws Exception if the stored reference state cannot be captured or injected
+    @Test
+    void strictModeRejectsShowExistingFrameForNonShowableReference() throws Exception {
+        InjectedReferenceState referenceState = captureReferenceStateFromSupportedStillPicture();
+        byte[] stream = obu(3, showExistingFrameHeaderPayload(0));
+        Av1DecoderConfig config = Av1DecoderConfig.builder().strictStdCompliance(true).build();
+
+        assertAcrossBufferedInputs(stream, config, reader -> {
+            injectShowExistingReferenceState(reader, referenceState);
+
+            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
+            assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+            assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+            assertEquals(
+                    "show_existing_frame references a frame that is not showable",
+                    exception.getMessage()
+            );
+        });
+    }
+
     /// Verifies that a repeated sequence header within one coded video sequence preserves the
     /// reference surface required by a following `show_existing_frame` header.
     ///

@@ -20,6 +20,7 @@ import org.glavo.avif.decode.DecodeErrorCode;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodeStage;
 import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -114,6 +115,26 @@ final class FrameHeaderParserTest {
         assertEquals(0, header.existingFrameIndex());
         assertEquals(FrameType.KEY, header.frameType());
         assertEquals(0xFF, header.refreshFrameFlags());
+    }
+
+    /// Verifies that strict mode rejects `show_existing_frame` in a combined frame OBU.
+    @Test
+    void strictModeRejectsShowExistingFrameInCombinedFrameObu() {
+        byte[] payload = showExistingFrameHeaderPayload(0);
+        ObuPacket obu = frameObu(payload);
+
+        DecodeException exception = assertThrows(DecodeException.class, () ->
+                new FrameHeaderParser().parseFramePayload(
+                        new BitReader(payload),
+                        obu,
+                        fullInterSequenceHeader(),
+                        true,
+                        new FrameHeader[8]
+                )
+        );
+        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(DecodeStage.FRAME_HEADER_PARSE, exception.stage());
+        assertEquals("Combined frame OBUs must not signal show_existing_frame", exception.getMessage());
     }
 
     /// Verifies that an enabled segmentation feature remains active when its signed data is zero.
@@ -439,6 +460,14 @@ final class FrameHeaderParserTest {
     /// @return the synthetic frame header OBU packet
     private static ObuPacket frameHeaderObu(byte[] payload) {
         return new ObuPacket(new ObuHeader(ObuType.FRAME_HEADER, false, true, 0, 0), payload, 0, 1);
+    }
+
+    /// Wraps a payload in a synthetic combined frame OBU packet.
+    ///
+    /// @param payload the raw combined frame payload
+    /// @return the synthetic combined frame OBU packet
+    private static ObuPacket frameObu(byte[] payload) {
+        return new ObuPacket(new ObuHeader(ObuType.FRAME, false, true, 0, 0), payload, 0, 1);
     }
 
     /// Creates a reduced still-picture sequence header payload.

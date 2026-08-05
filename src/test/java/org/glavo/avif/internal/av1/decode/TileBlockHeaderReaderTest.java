@@ -46,9 +46,11 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for `TileBlockHeaderReader`.
@@ -66,6 +68,28 @@ final class TileBlockHeaderReaderTest {
     /// Classpath resource containing named entropy payload fixtures for block-header tests.
     private static final String TILE_BLOCK_HEADER_FIXTURE_RESOURCE =
             "av1/fixtures/generated/tile-block-header-fixtures.txt";
+
+    /// Verifies the exclusive AV1 bounds applied to assigned motion-vector components.
+    @Test
+    void validatesAssignedMotionVectorComponentBounds() {
+        assertDoesNotThrow(() -> TileBlockHeaderReader.validateMotionVector(new MotionVector(-16383, 16383)));
+        assertThrows(
+                InvalidFrameSyntaxException.class,
+                () -> TileBlockHeaderReader.validateMotionVector(new MotionVector(-16384, 0))
+        );
+        assertThrows(
+                InvalidFrameSyntaxException.class,
+                () -> TileBlockHeaderReader.validateMotionVector(new MotionVector(16384, 0))
+        );
+        assertThrows(
+                InvalidFrameSyntaxException.class,
+                () -> TileBlockHeaderReader.validateMotionVector(new MotionVector(0, -16384))
+        );
+        assertThrows(
+                InvalidFrameSyntaxException.class,
+                () -> TileBlockHeaderReader.validateMotionVector(new MotionVector(0, 16384))
+        );
+    }
 
     /// Verifies that a key-frame block header consumes skip and key-frame Y/UV modes with neighbor-aware contexts.
     @Test

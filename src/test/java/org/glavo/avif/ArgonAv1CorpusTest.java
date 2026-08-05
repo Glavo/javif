@@ -44,6 +44,7 @@ import java.util.Enumeration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -86,10 +87,10 @@ final class ArgonAv1CorpusTest {
     private static final int EXPECTED_REFERENCE_STREAM_COUNT = 2_756;
 
     /// Number of gated malformed streams that strict decoding must reject.
-    private static final int EXPECTED_ERROR_STREAM_COUNT = 114;
+    private static final int EXPECTED_ERROR_STREAM_COUNT = 335;
 
     /// Number of malformed streams whose constraints apply without Large Scale Tile decoder mode.
-    private static final int EXPECTED_STRICT_ERROR_STREAM_COUNT = 88;
+    private static final int EXPECTED_STRICT_ERROR_STREAM_COUNT = 255;
 
     /// Archive prefixes for gated low-overhead and Annex B core streams in all profiles.
     private static final @Unmodifiable List<String> REFERENCE_STREAM_PREFIXES = List.of(
@@ -109,37 +110,100 @@ final class ArgonAv1CorpusTest {
 
     /// Archive prefixes for malformed streams that strict decoding must reject.
     private static final @Unmodifiable List<String> ERROR_STREAM_PREFIXES = List.of(
-            ARCHIVE_ROOT + "profile0_error/streams/"
+            ARCHIVE_ROOT + "profile0_error/streams/",
+            ARCHIVE_ROOT + "profile1_error/streams/",
+            ARCHIVE_ROOT + "profile2_error/streams/"
     );
 
-    /// Malformed streams whose documented constraint applies only in Large Scale Tile decoder mode.
-    private static final @Unmodifiable Set<String> LARGE_SCALE_TILE_ONLY_ERROR_STREAMS = Set.of(
-            "test265.obu",
-            "test268.obu",
-            "test269.obu",
-            "test270.obu",
-            "test271.obu",
-            "test272.obu",
-            "test273.obu",
-            "test275.obu",
-            "test276.obu",
-            "test278.obu",
-            "test279.obu",
-            "test280.obu",
-            "test281.obu",
-            "test283.obu",
-            "test285.obu",
-            "test286.obu",
-            "test287.obu",
-            "test288.obu",
-            "test289.obu",
-            "test290.obu",
-            "test291.obu",
-            "test292.obu",
-            "test294.obu",
-            "test295.obu",
-            "test298.obu",
-            "test300.obu"
+    /// Malformed streams whose documented constraints apply only in Large Scale Tile decoder mode.
+    private static final @Unmodifiable Map<String, @Unmodifiable Set<String>>
+            LARGE_SCALE_TILE_ONLY_ERROR_STREAMS = Map.of(
+            "profile0_error", Set.of(
+                    "test265.obu",
+                    "test268.obu",
+                    "test269.obu",
+                    "test270.obu",
+                    "test271.obu",
+                    "test272.obu",
+                    "test273.obu",
+                    "test275.obu",
+                    "test276.obu",
+                    "test278.obu",
+                    "test279.obu",
+                    "test280.obu",
+                    "test281.obu",
+                    "test283.obu",
+                    "test285.obu",
+                    "test286.obu",
+                    "test287.obu",
+                    "test288.obu",
+                    "test289.obu",
+                    "test290.obu",
+                    "test291.obu",
+                    "test292.obu",
+                    "test294.obu",
+                    "test295.obu",
+                    "test298.obu",
+                    "test300.obu"
+            ),
+            "profile1_error", Set.of(
+                    "test413.obu",
+                    "test414.obu",
+                    "test415.obu",
+                    "test417.obu",
+                    "test420.obu",
+                    "test421.obu",
+                    "test424.obu",
+                    "test426.obu",
+                    "test428.obu",
+                    "test429.obu",
+                    "test430.obu",
+                    "test432.obu",
+                    "test433.obu",
+                    "test434.obu",
+                    "test435.obu",
+                    "test436.obu",
+                    "test438.obu",
+                    "test439.obu",
+                    "test442.obu",
+                    "test444.obu",
+                    "test448.obu",
+                    "test452.obu",
+                    "test454.obu",
+                    "test458.obu",
+                    "test459.obu",
+                    "test461.obu"
+            ),
+            "profile2_error", Set.of(
+                    "test303.obu",
+                    "test304.obu",
+                    "test305.obu",
+                    "test306.obu",
+                    "test307.obu",
+                    "test310.obu",
+                    "test312.obu",
+                    "test315.obu",
+                    "test316.obu",
+                    "test317.obu",
+                    "test319.obu",
+                    "test321.obu",
+                    "test324.obu",
+                    "test325.obu",
+                    "test326.obu",
+                    "test327.obu",
+                    "test328.obu",
+                    "test330.obu",
+                    "test331.obu",
+                    "test334.obu",
+                    "test336.obu",
+                    "test337.obu",
+                    "test338.obu",
+                    "test344.obu",
+                    "test345.obu",
+                    "test350.obu",
+                    "test358.obu",
+                    "test359.obu"
+            )
     );
 
     /// The archive shared by inventory, discovery, and selected dynamic cases for this test class.
@@ -189,8 +253,10 @@ final class ArgonAv1CorpusTest {
                 }
                 if (ERROR_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
                     errorStreamCount++;
-                    String streamName = entryName.substring(entryName.lastIndexOf('/') + 1);
-                    if (!LARGE_SCALE_TILE_ONLY_ERROR_STREAMS.contains(streamName)) {
+                    CorpusCase testCase = CorpusCase.parse(
+                            entryName.substring(ARCHIVE_ROOT.length()).replace("/streams/", "/")
+                    );
+                    if (!testCase.largeScaleTileOnlyErrorStream()) {
                         strictErrorStreamCount++;
                     }
                 }
@@ -549,7 +615,8 @@ final class ArgonAv1CorpusTest {
         ///
         /// @return whether the case must be deferred to a Large Scale Tile-specific gate
         private boolean largeScaleTileOnlyErrorStream() {
-            return errorStream() && LARGE_SCALE_TILE_ONLY_ERROR_STREAMS.contains(streamName);
+            @Nullable Set<String> streams = LARGE_SCALE_TILE_ONLY_ERROR_STREAMS.get(category);
+            return streams != null && streams.contains(streamName);
         }
     }
 

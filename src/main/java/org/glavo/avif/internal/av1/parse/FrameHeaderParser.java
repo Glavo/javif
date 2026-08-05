@@ -228,6 +228,9 @@ public final class FrameHeaderParser {
             showExistingFrame = reader.readFlag();
         }
         if (showExistingFrame) {
+            if (strictStdCompliance && obu.header().type() == ObuType.FRAME) {
+                fail("Combined frame OBUs must not signal show_existing_frame");
+            }
             existingFrameIndex = readInt(reader, 3);
             @Nullable FrameHeader existingFrameHeader = referenceFrameHeaders[existingFrameIndex];
             if (sequenceHeader.timingInfo().decoderModelInfoPresent()

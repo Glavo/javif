@@ -128,13 +128,25 @@ public final class TileSyntaxReader {
     /// The tile-local mutable CDF context.
     private final CdfContext cdfContext;
 
+    /// Whether malformed syntax outside conformance limits must be rejected.
+    private final boolean strictStdCompliance;
+
     /// Creates a typed syntax reader over one tile-local decode context.
     ///
     /// @param tileContext the tile-local decode context that owns the mutable decoder and CDF context
     public TileSyntaxReader(TileDecodeContext tileContext) {
+        this(tileContext, false);
+    }
+
+    /// Creates a typed syntax reader with a strict conformance policy.
+    ///
+    /// @param tileContext the tile-local decode context that owns the mutable decoder and CDF context
+    /// @param strictStdCompliance whether malformed syntax outside conformance limits must be rejected
+    public TileSyntaxReader(TileDecodeContext tileContext, boolean strictStdCompliance) {
         this.tileContext = Objects.requireNonNull(tileContext, "tileContext");
         this.msacDecoder = tileContext.msacDecoder();
         this.cdfContext = tileContext.cdfContext();
+        this.strictStdCompliance = strictStdCompliance;
     }
 
     /// Returns the tile-local decode context that owns this syntax reader.
@@ -556,7 +568,17 @@ public final class TileSyntaxReader {
     public int readCoefficientGolomb() {
         int length = 0;
         int value = 1;
-        while (!msacDecoder.decodeBooleanEqui() && length < 32) {
+        while (true) {
+            boolean lengthBit = msacDecoder.decodeBooleanEqui();
+            if (strictStdCompliance && length == 19 && !lengthBit) {
+                IllegalArgumentException cause = new IllegalArgumentException(
+                        "Coefficient Golomb length exceeds the AV1 limit"
+                );
+                throw new InvalidFrameSyntaxException(cause.getMessage(), cause);
+            }
+            if (lengthBit || length >= 32) {
+                break;
+            }
             length++;
         }
         while (length-- > 0) {
