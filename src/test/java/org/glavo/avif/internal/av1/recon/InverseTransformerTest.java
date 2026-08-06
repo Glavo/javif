@@ -511,6 +511,70 @@ final class InverseTransformerTest {
         }
     }
 
+    /// Verifies that skipped zero rows clear intermediate storage left by a previous workspace use.
+    @Test
+    void reusesWorkspaceAcrossSparseSixtyFourPointRows() {
+        TransformSize transformSize = TransformSize.RTX_64X16;
+        int width = transformSize.widthPixels();
+        int height = transformSize.heightPixels();
+        int area = width * height;
+        InverseTransformer.Workspace workspace = InverseTransformer.workspace();
+
+        int[] denseCoefficients = new int[area];
+        for (int row = 0; row < height; row++) {
+            denseCoefficients[row * width] = 512 + row;
+        }
+        MutablePlaneBuffer discardedPlane = new MutablePlaneBuffer(width, height, 8);
+        InverseTransformer.reconstructAndAddResidualBlock(
+                workspace,
+                discardedPlane,
+                0,
+                0,
+                transformSize,
+                TransformType.DCT_DCT,
+                8,
+                width,
+                height,
+                false,
+                denseCoefficients
+        );
+
+        int[] sparseCoefficients = new int[area];
+        sparseCoefficients[0] = 512;
+        int[] expectedResidual = InverseTransformer.reconstructResidualBlock(
+                sparseCoefficients,
+                transformSize,
+                TransformType.DCT_DCT,
+                8
+        );
+        MutablePlaneBuffer actualPlane = new MutablePlaneBuffer(width, height, 8);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                actualPlane.setSample(x, y, 128);
+            }
+        }
+        InverseTransformer.reconstructAndAddResidualBlock(
+                workspace,
+                actualPlane,
+                0,
+                0,
+                transformSize,
+                TransformType.DCT_DCT,
+                8,
+                width,
+                height,
+                false,
+                sparseCoefficients
+        );
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int sampleIndex = y * width + x;
+                assertEquals(128 + expectedResidual[sampleIndex], actualPlane.sample(x, y));
+            }
+        }
+    }
+
     /// Verifies that `TX_16X16` DC-only `DCT_DCT` reconstruction yields one constant residual block.
     @Test
     void reconstructsSixteenBySixteenDcOnlyResidualBlock() {

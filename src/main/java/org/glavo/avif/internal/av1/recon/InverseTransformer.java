@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /// Inverse-transform helper for the residual-producing reconstruction path.
@@ -549,11 +550,18 @@ final class InverseTransformer {
 
         for (int row = 0; row < height; row++) {
             int rowOffset = row * width;
+            int rowNonZero = 0;
             for (int column = 0; column < width; column++) {
                 int coefficient = coefficients[rowOffset + column];
-                rowScratchIn[column] = requiresRectangularPrescale
+                int transformInput = requiresRectangularPrescale
                         ? positiveRoundShift((long) coefficient * 181, 8)
                         : coefficient;
+                rowScratchIn[column] = transformInput;
+                rowNonZero |= transformInput;
+            }
+            if (rowNonZero == 0) {
+                Arrays.fill(buffer, rowOffset, rowOffset + width, 0);
+                continue;
             }
             withActiveClipRange(rowClipRange, () -> inverseDct(rowScratchIn, rowScratchOut, width));
             for (int column = 0; column < width; column++) {
@@ -2364,6 +2372,11 @@ final class InverseTransformer {
     /// @param value the intermediate transform value
     /// @return the saturated `int`
     private static int clip(long value) {
+        // Every supported stage range contains the signed 16-bit domain. Most transform
+        // intermediates stay inside it, so avoid consulting thread-local stage state there.
+        if (value >= Short.MIN_VALUE && value <= Short.MAX_VALUE) {
+            return (int) value;
+        }
         ClipRange clipRange = ACTIVE_CLIP_RANGE.get();
         return clipToRange(value, clipRange);
     }
