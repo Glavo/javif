@@ -24,12 +24,17 @@ import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for minimal inverse-transform reconstruction.
 @NotNullByDefault
 final class InverseTransformerTest {
+    /// The transformer under test with storage and clip state isolated to this test instance.
+    private final InverseTransformer transformer = new InverseTransformer();
+
     /// The side length in pixels of one `TX_16X16` block.
     private static final int TX_16X16_SIDE = 16;
 
@@ -48,13 +53,28 @@ final class InverseTransformerTest {
     /// The sample count of one `TX_64X64` block.
     private static final int TX_64X64_AREA = TX_64X64_SIDE * TX_64X64_SIDE;
 
+    /// Verifies that workspace reuse is scoped to one transformer instance.
+    @Test
+    void ownsReusableWorkspacePerTransformerInstance() {
+        InverseTransformer otherTransformer = new InverseTransformer();
+
+        assertSame(
+                transformer.coefficientBuffer(TransformSize.TX_4X4),
+                transformer.coefficientBuffer(TransformSize.TX_4X4)
+        );
+        assertNotSame(
+                transformer.coefficientBuffer(TransformSize.TX_4X4),
+                otherTransformer.coefficientBuffer(TransformSize.TX_4X4)
+        );
+    }
+
     /// Verifies that `TX_4X4` DC-only `DCT_DCT` reconstruction yields one constant residual block.
     @Test
     void reconstructsFourByFourDcOnlyResidualBlock() {
         int[] coefficients = new int[16];
         coefficients[0] = 128;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_4X4);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.TX_4X4);
 
         assertArrayEquals(
                 new int[]{
@@ -77,7 +97,7 @@ final class InverseTransformerTest {
                 62379, 0, 0, 0
         };
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(
+        int[] residual = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.DCT_DCT,
@@ -101,7 +121,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[64];
         coefficients[9] = 256;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_8X8);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.TX_8X8);
 
         assertArrayAlmostEquals(
                 new int[]{
@@ -125,7 +145,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[32];
         coefficients[0] = 256;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_4X8);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.RTX_4X8);
 
         assertBlockFilledWithPositiveValue(residual, 4, 8);
     }
@@ -137,7 +157,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[32];
         coefficients[1] = 4096;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_8X4);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.RTX_8X4);
 
         assertRowsMatchFirstRow(residual, 8, 4);
         assertHorizontalAntisymmetry(residual, 8, 4);
@@ -152,7 +172,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[32];
         coefficients[4] = 4096;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_4X8);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.RTX_4X8);
 
         assertColumnsMatchFirstColumn(residual, 4, 8);
         assertVerticalAntisymmetry(residual, 4, 8);
@@ -167,7 +187,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[128];
         coefficients[0] = 256;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_16X8);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.RTX_16X8);
 
         assertBlockFilledWithPositiveValue(residual, 16, 8);
     }
@@ -179,7 +199,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[16];
         coefficients[5] = 64;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(
+        int[] residual = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.IDTX
@@ -219,7 +239,7 @@ final class InverseTransformerTest {
                 0, 0, 0, 0
         };
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(
+        int[] residual = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.RTX_4X16,
                 TransformType.V_DCT,
@@ -256,7 +276,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[16];
         coefficients[0] = 4;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(
+        int[] residual = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.WHT_WHT
@@ -281,7 +301,7 @@ final class InverseTransformerTest {
 
         assertThrows(
                 InvalidFrameReconstructionException.class,
-                () -> InverseTransformer.reconstructResidualBlock(
+                () -> transformer.reconstructResidualBlock(
                         coefficients,
                         TransformSize.TX_4X4,
                         TransformType.WHT_WHT,
@@ -299,7 +319,7 @@ final class InverseTransformerTest {
 
         assertThrows(
                 InvalidFrameReconstructionException.class,
-                () -> InverseTransformer.reconstructResidualBlock(
+                () -> transformer.reconstructResidualBlock(
                         coefficients,
                         TransformSize.TX_4X4,
                         TransformType.DCT_DCT,
@@ -315,7 +335,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[16];
         coefficients[1] = 4;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(
+        int[] residual = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.WHT_WHT
@@ -339,7 +359,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[16];
         coefficients[1] = 4096;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(
+        int[] residual = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.H_DCT
@@ -361,7 +381,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[16];
         coefficients[4] = 4096;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(
+        int[] residual = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.V_ADST
@@ -382,12 +402,12 @@ final class InverseTransformerTest {
         int[] coefficients = new int[16];
         coefficients[4] = 4096;
 
-        int[] adst = InverseTransformer.reconstructResidualBlock(
+        int[] adst = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.V_ADST
         );
-        int[] flipAdst = InverseTransformer.reconstructResidualBlock(
+        int[] flipAdst = transformer.reconstructResidualBlock(
                 coefficients,
                 TransformSize.TX_4X4,
                 TransformType.V_FLIPADST
@@ -411,7 +431,7 @@ final class InverseTransformerTest {
             }
         }
 
-        InverseTransformer.addResidualBlock(
+        transformer.addResidualBlock(
                 plane,
                 0,
                 0,
@@ -442,7 +462,7 @@ final class InverseTransformerTest {
             }
         }
 
-        InverseTransformer.addResidualBlock(
+        transformer.addResidualBlock(
                 plane,
                 0,
                 0,
@@ -479,7 +499,7 @@ final class InverseTransformerTest {
             }
         }
 
-        InverseTransformer.addResidualBlock(
+        transformer.addResidualBlock(
                 plane,
                 2,
                 2,
@@ -506,7 +526,7 @@ final class InverseTransformerTest {
     void reconstructsZeroResidualBlockForEveryTransformSize() {
         for (TransformSize transformSize : TransformSize.values()) {
             int area = transformSize.widthPixels() * transformSize.heightPixels();
-            int[] residual = InverseTransformer.reconstructResidualBlock(new int[area], transformSize);
+            int[] residual = transformer.reconstructResidualBlock(new int[area], transformSize);
             assertArrayEquals(new int[area], residual, transformSize.name());
         }
     }
@@ -518,15 +538,12 @@ final class InverseTransformerTest {
         int width = transformSize.widthPixels();
         int height = transformSize.heightPixels();
         int area = width * height;
-        InverseTransformer.Workspace workspace = InverseTransformer.workspace();
-
         int[] denseCoefficients = new int[area];
         for (int row = 0; row < height; row++) {
             denseCoefficients[row * width] = 512 + row;
         }
         MutablePlaneBuffer discardedPlane = new MutablePlaneBuffer(width, height, 8);
-        InverseTransformer.reconstructAndAddResidualBlock(
-                workspace,
+        transformer.reconstructAndAddResidualBlock(
                 discardedPlane,
                 0,
                 0,
@@ -541,7 +558,7 @@ final class InverseTransformerTest {
 
         int[] sparseCoefficients = new int[area];
         sparseCoefficients[0] = 512;
-        int[] expectedResidual = InverseTransformer.reconstructResidualBlock(
+        int[] expectedResidual = transformer.reconstructResidualBlock(
                 sparseCoefficients,
                 transformSize,
                 TransformType.DCT_DCT,
@@ -553,8 +570,7 @@ final class InverseTransformerTest {
                 actualPlane.setSample(x, y, 128);
             }
         }
-        InverseTransformer.reconstructAndAddResidualBlock(
-                workspace,
+        transformer.reconstructAndAddResidualBlock(
                 actualPlane,
                 0,
                 0,
@@ -581,7 +597,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[TX_16X16_AREA];
         coefficients[0] = 512;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
 
         assertArrayEquals(filledSamples(TX_16X16_AREA, 4), residual);
     }
@@ -593,7 +609,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[TX_16X16_AREA];
         coefficients[1] = 4096;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.TX_16X16);
 
         assertRowsMatchFirstRow(residual, TX_16X16_SIDE);
         assertHorizontalAntisymmetry(residual, TX_16X16_SIDE);
@@ -608,7 +624,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[TX_32X32_AREA];
         coefficients[0] = 512;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_32X32);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.TX_32X32);
 
         assertArrayEquals(filledSamples(TX_32X32_AREA, 4), residual);
     }
@@ -620,7 +636,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[TX_32X32_AREA];
         coefficients[1] = 16384;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_32X32);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.TX_32X32);
 
         assertRowsMatchFirstRow(residual, TX_32X32_SIDE);
         assertHorizontalAntisymmetry(residual, TX_32X32_SIDE);
@@ -635,7 +651,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[TX_64X64_AREA];
         coefficients[0] = 512;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.TX_64X64);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.TX_64X64);
 
         assertArrayEquals(filledSamples(TX_64X64_AREA, 4), residual);
     }
@@ -647,7 +663,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[32 * 64];
         coefficients[0] = 4096;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_32X64);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.RTX_32X64);
 
         assertBlockFilledWithPositiveValue(residual, 32, 64);
     }
@@ -659,7 +675,7 @@ final class InverseTransformerTest {
         int[] coefficients = new int[64 * 16];
         coefficients[1] = 16384;
 
-        int[] residual = InverseTransformer.reconstructResidualBlock(coefficients, TransformSize.RTX_64X16);
+        int[] residual = transformer.reconstructResidualBlock(coefficients, TransformSize.RTX_64X16);
 
         assertRowsMatchFirstRow(residual, 64, 16);
         assertHorizontalAntisymmetry(residual, 64, 16);

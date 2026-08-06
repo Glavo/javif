@@ -113,8 +113,8 @@ final class MutablePlaneBufferTest {
         MutablePlaneBuffer expectedPlane = basePlane.copy();
         BlockOverlayPlane overlay = new BlockOverlayPlane(basePlane, 2, 2, 4, 4);
 
-        IntraPredictor.predictFilterIntraLuma(expectedPlane, 2, 2, 4, 4, FilterIntraMode.PAETH);
-        IntraPredictor.predictFilterIntraLuma(overlay, 2, 2, 4, 4, FilterIntraMode.PAETH);
+        new IntraPredictor().predictFilterIntraLuma(expectedPlane, 2, 2, 4, 4, FilterIntraMode.PAETH);
+        new IntraPredictor().predictFilterIntraLuma(overlay, 2, 2, 4, 4, FilterIntraMode.PAETH);
 
         for (int y = 2; y < 6; y++) {
             for (int x = 2; x < 6; x++) {

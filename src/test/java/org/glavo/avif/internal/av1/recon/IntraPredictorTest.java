@@ -28,6 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for the currently supported intra-prediction paths.
 @NotNullByDefault
 final class IntraPredictorTest {
+    /// The predictor under test with storage isolated to this test instance.
+    private final IntraPredictor predictor = new IntraPredictor();
+
     /// Verifies that DC prediction averages the available top and left reference samples.
     @Test
     void dcPredictionAveragesAvailableTopAndLeftNeighbors() {
@@ -38,7 +41,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 1, 30);
         plane.setSample(0, 2, 40);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 2, 2, LumaIntraPredictionMode.DC, 0);
+        predictor.predictLuma(plane, 1, 1, 2, 2, LumaIntraPredictionMode.DC, 0);
 
         assertBlockEquals(
                 plane,
@@ -59,7 +62,7 @@ final class IntraPredictorTest {
         plane.setSample(2, 0, 50);
         plane.setSample(3, 0, 70);
 
-        IntraPredictor.predictLuma(
+        predictor.predictLuma(
                 plane,
                 2,
                 1,
@@ -96,7 +99,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 2, 80);
         plane.setSample(0, 3, 100);
 
-        IntraPredictor.predictLuma(
+        predictor.predictLuma(
                 plane,
                 1,
                 2,
@@ -134,7 +137,7 @@ final class IntraPredictorTest {
         plane.setSample(4, 0, 128);
         plane.setSample(5, 0, 160);
 
-        assertDoesNotThrow(() -> IntraPredictor.predictFilterIntraLuma(
+        assertDoesNotThrow(() -> predictor.predictFilterIntraLuma(
                 plane,
                 3,
                 1,
@@ -159,7 +162,7 @@ final class IntraPredictorTest {
         seedDirectionalReferences(clippedBoundaryPlane, 1, 1, 127, top, left);
         seedDirectionalReferences(extendedBoundaryPlane, 1, 1, 127, top, left);
 
-        IntraPredictor.predictFilterIntraLuma(
+        predictor.predictFilterIntraLuma(
                 clippedBoundaryPlane,
                 1,
                 1,
@@ -171,7 +174,7 @@ final class IntraPredictorTest {
                 12,
                 5
         );
-        IntraPredictor.predictFilterIntraLuma(
+        predictor.predictFilterIntraLuma(
                 extendedBoundaryPlane,
                 1,
                 1,
@@ -203,7 +206,7 @@ final class IntraPredictorTest {
         plane.setSample(2, 0, 22);
         plane.setSample(3, 0, 33);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 3, 2, LumaIntraPredictionMode.VERTICAL, 0);
+        predictor.predictLuma(plane, 1, 1, 3, 2, LumaIntraPredictionMode.VERTICAL, 0);
 
         assertBlockEquals(
                 plane,
@@ -222,7 +225,7 @@ final class IntraPredictorTest {
         MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
         plane.setSample(0, 0, 51);
 
-        IntraPredictor.predictLuma(plane, 1, 0, 3, 2, LumaIntraPredictionMode.VERTICAL, 0);
+        predictor.predictLuma(plane, 1, 0, 3, 2, LumaIntraPredictionMode.VERTICAL, 0);
 
         assertBlockEquals(
                 plane,
@@ -243,7 +246,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 2, 9);
         plane.setSample(0, 3, 11);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 2, 3, LumaIntraPredictionMode.HORIZONTAL, 0);
+        predictor.predictLuma(plane, 1, 1, 2, 3, LumaIntraPredictionMode.HORIZONTAL, 0);
 
         assertBlockEquals(
                 plane,
@@ -263,7 +266,7 @@ final class IntraPredictorTest {
         MutablePlaneBuffer plane = new MutablePlaneBuffer(4, 4, 8);
         plane.setSample(0, 0, 76);
 
-        IntraPredictor.predictLuma(plane, 0, 1, 2, 3, LumaIntraPredictionMode.HORIZONTAL, 0);
+        predictor.predictLuma(plane, 0, 1, 2, 3, LumaIntraPredictionMode.HORIZONTAL, 0);
 
         assertBlockEquals(
                 plane,
@@ -287,7 +290,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 1, 0);
         plane.setSample(0, 2, 80);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 2, 2, LumaIntraPredictionMode.PAETH, 0);
+        predictor.predictLuma(plane, 1, 1, 2, 2, LumaIntraPredictionMode.PAETH, 0);
 
         assertBlockEquals(
                 plane,
@@ -308,7 +311,7 @@ final class IntraPredictorTest {
         plane.setSample(1, 0, 51);
         plane.setSample(2, 0, 99);
 
-        IntraPredictor.predictLuma(plane, 0, 1, 3, 2, LumaIntraPredictionMode.PAETH, 0);
+        predictor.predictLuma(plane, 0, 1, 3, 2, LumaIntraPredictionMode.PAETH, 0);
 
         assertBlockEquals(
                 plane,
@@ -328,7 +331,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 0, 90);
         plane.setSample(0, 1, 80);
 
-        IntraPredictor.predictLuma(plane, 1, 0, 2, 2, LumaIntraPredictionMode.PAETH, 0);
+        predictor.predictLuma(plane, 1, 0, 2, 2, LumaIntraPredictionMode.PAETH, 0);
 
         assertBlockEquals(
                 plane,
@@ -350,7 +353,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 1, 50);
         plane.setSample(0, 2, 150);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 2, 2, LumaIntraPredictionMode.SMOOTH, 0);
+        predictor.predictLuma(plane, 1, 1, 2, 2, LumaIntraPredictionMode.SMOOTH, 0);
 
         assertBlockEquals(
                 plane,
@@ -374,7 +377,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 2, 70);
         plane.setSample(0, 3, 80);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH, 0);
+        predictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH, 0);
 
         assertBlockEquals(
                 plane,
@@ -400,7 +403,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 2, 70);
         plane.setSample(0, 3, 80);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH_VERTICAL, 0);
+        predictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH_VERTICAL, 0);
 
         assertBlockEquals(
                 plane,
@@ -426,7 +429,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 2, 70);
         plane.setSample(0, 3, 80);
 
-        IntraPredictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH_HORIZONTAL, 0);
+        predictor.predictLuma(plane, 1, 1, 3, 3, LumaIntraPredictionMode.SMOOTH_HORIZONTAL, 0);
 
         assertBlockEquals(
                 plane,
@@ -449,7 +452,7 @@ final class IntraPredictorTest {
             plane.setSample(0, i, 160);
         }
 
-        IntraPredictor.predictLuma(plane, 1, 1, 128, 128, LumaIntraPredictionMode.SMOOTH, 0);
+        predictor.predictLuma(plane, 1, 1, 128, 128, LumaIntraPredictionMode.SMOOTH, 0);
 
         assertEquals(128, plane.sample(1, 1));
         assertTrue(plane.sample(64, 1) > 0);
@@ -471,7 +474,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 3, 80);
         plane.setSample(0, 4, 90);
 
-        IntraPredictor.predictFilterIntraLuma(plane, 1, 1, 4, 4, FilterIntraMode.DC);
+        predictor.predictFilterIntraLuma(plane, 1, 1, 4, 4, FilterIntraMode.DC);
 
         assertBlockEquals(
                 plane,
@@ -499,7 +502,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 2, 70);
         plane.setSample(0, 3, 80);
 
-        IntraPredictor.predictFilterIntraLuma(plane, 1, 1, 3, 3, FilterIntraMode.DC);
+        predictor.predictFilterIntraLuma(plane, 1, 1, 3, 3, FilterIntraMode.DC);
 
         assertBlockEquals(
                 plane,
@@ -520,7 +523,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 0, 51);
         plane.setSample(0, 1, 51);
 
-        IntraPredictor.predictFilterIntraLuma(plane, 1, 0, 2, 2, FilterIntraMode.DC);
+        predictor.predictFilterIntraLuma(plane, 1, 0, 2, 2, FilterIntraMode.DC);
 
         assertBlockEquals(
                 plane,
@@ -540,7 +543,7 @@ final class IntraPredictorTest {
         plane.setSample(0, 0, 76);
         plane.setSample(1, 0, 76);
 
-        IntraPredictor.predictFilterIntraLuma(plane, 0, 1, 2, 2, FilterIntraMode.DC);
+        predictor.predictFilterIntraLuma(plane, 0, 1, 2, 2, FilterIntraMode.DC);
 
         assertBlockEquals(
                 plane,
@@ -559,7 +562,7 @@ final class IntraPredictorTest {
     void filterIntraPredictionAdvancesTopLeftReferenceBetweenRecursiveUnits() {
         MutablePlaneBuffer plane = new MutablePlaneBuffer(8, 4, 8);
 
-        IntraPredictor.predictFilterIntraLuma(plane, 0, 0, 8, 4, FilterIntraMode.VERTICAL);
+        predictor.predictFilterIntraLuma(plane, 0, 0, 8, 4, FilterIntraMode.VERTICAL);
 
         assertBlockEquals(
                 plane,
@@ -591,7 +594,7 @@ final class IntraPredictorTest {
         }
 
         MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(2, 2, 8);
-        IntraPredictor.predictChromaCflI420(chromaPlane, lumaPlane, 0, 0, 0, 0, 2, 2, 4);
+        predictor.predictChromaCflI420(chromaPlane, lumaPlane, 0, 0, 0, 0, 2, 2, 4);
 
         assertBlockEquals(
                 chromaPlane,
@@ -621,7 +624,7 @@ final class IntraPredictorTest {
         }
 
         MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(4, 2, 8);
-        IntraPredictor.predictChromaCfl(
+        predictor.predictChromaCfl(
                 chromaPlane,
                 lumaPlane,
                 0,
@@ -670,7 +673,7 @@ final class IntraPredictorTest {
         }
 
         MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(2, 4, 8);
-        IntraPredictor.predictChromaCfl(chromaPlane, lumaPlane, 0, 0, 0, 0, 2, 4, 4, 1, 0);
+        predictor.predictChromaCfl(chromaPlane, lumaPlane, 0, 0, 0, 0, 2, 4, 4, 1, 0);
 
         assertBlockEquals(
                 chromaPlane,
@@ -703,7 +706,7 @@ final class IntraPredictorTest {
         }
 
         MutablePlaneBuffer chromaPlane = new MutablePlaneBuffer(4, 4, 8);
-        IntraPredictor.predictChromaCfl(chromaPlane, lumaPlane, 0, 0, 0, 0, 4, 4, 4, 0, 0);
+        predictor.predictChromaCfl(chromaPlane, lumaPlane, 0, 0, 0, 0, 4, 4, 4, 0, 0);
 
         assertBlockEquals(
                 chromaPlane,
@@ -742,7 +745,7 @@ final class IntraPredictorTest {
                 1
         );
 
-        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, 1);
+        predictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, 1);
 
         assertBlockEquals(plane, x, y, expected);
     }
@@ -772,7 +775,7 @@ final class IntraPredictorTest {
                 -1
         );
 
-        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, -1);
+        predictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, -1);
 
         assertBlockEquals(plane, x, y, expected);
     }
@@ -792,7 +795,7 @@ final class IntraPredictorTest {
                 new int[]{34, 58, 101, 88, 145, 179, 152, 214}
         );
 
-        IntraPredictor.predictLuma(plane, x, y, 8, 8, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, 0, true, false);
+        predictor.predictLuma(plane, x, y, 8, 8, LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT, 0, true, false);
 
         assertEquals(60, plane.sample(x, y));
         assertEquals(80, plane.sample(x + 1, y));
@@ -815,7 +818,7 @@ final class IntraPredictorTest {
                 new int[]{34, 58, 101, 88, 145, 179, 152, 214}
         );
 
-        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.VERTICAL_LEFT, 0, true, false);
+        predictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.VERTICAL_LEFT, 0, true, false);
 
         assertEquals(115, plane.sample(x, y));
     }
@@ -844,7 +847,7 @@ final class IntraPredictorTest {
                 0
         );
 
-        IntraPredictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT, 0);
+        predictor.predictLuma(plane, x, y, 4, 4, LumaIntraPredictionMode.DIAGONAL_DOWN_RIGHT, 0);
 
         assertBlockEquals(plane, x, y, expected);
     }
@@ -867,7 +870,7 @@ final class IntraPredictorTest {
             secondPlane.setSample(x - 1, y + index, leftSample);
         }
 
-        IntraPredictor.predictLuma(
+        predictor.predictLuma(
                 firstPlane,
                 x,
                 y,
@@ -880,7 +883,7 @@ final class IntraPredictorTest {
                 8,
                 32
         );
-        IntraPredictor.predictLuma(
+        predictor.predictLuma(
                 secondPlane,
                 x,
                 y,
@@ -923,7 +926,7 @@ final class IntraPredictorTest {
             secondPlane.setSample(x - 1, y + index, index < 8 ? leftSample : 240 - index);
         }
 
-        IntraPredictor.predictLuma(
+        predictor.predictLuma(
                 firstPlane,
                 x,
                 y,
@@ -936,7 +939,7 @@ final class IntraPredictorTest {
                 32,
                 8
         );
-        IntraPredictor.predictLuma(
+        predictor.predictLuma(
                 secondPlane,
                 x,
                 y,
@@ -977,7 +980,7 @@ final class IntraPredictorTest {
                 new int[]{200, 180, 160, 140, 120, 100, 80, 60}
         );
 
-        IntraPredictor.predictChroma(plane, x, y, 4, 4, UvIntraPredictionMode.VERTICAL_RIGHT, 0);
+        predictor.predictChroma(plane, x, y, 4, 4, UvIntraPredictionMode.VERTICAL_RIGHT, 0);
 
         assertBlockEquals(
                 plane,
@@ -1016,7 +1019,7 @@ final class IntraPredictorTest {
                 -2
         );
 
-        IntraPredictor.predictChroma(plane, x, y, 4, 4, UvIntraPredictionMode.HORIZONTAL_UP, -2);
+        predictor.predictChroma(plane, x, y, 4, 4, UvIntraPredictionMode.HORIZONTAL_UP, -2);
 
         assertBlockEquals(plane, x, y, expected);
     }
@@ -1037,7 +1040,7 @@ final class IntraPredictorTest {
                 new int[]{287, 287, 287, 287, 280, 287, 287, 287, 286, 287, 287, 287, 286, 287, 287, 287}
         );
 
-        IntraPredictor.predictLuma(plane, x, y, 8, 16, LumaIntraPredictionMode.VERTICAL, 1, true, false);
+        predictor.predictLuma(plane, x, y, 8, 16, LumaIntraPredictionMode.VERTICAL, 1, true, false);
 
         assertEquals(291, plane.sample(x, y + 2));
     }

@@ -1569,7 +1569,7 @@ final class FrameReconstructorTest {
                 residualUnit,
                 new LumaDequantizer.Context(0, 0, 8)
         );
-        int[] expectedResidual = InverseTransformer.reconstructResidualBlock(
+        int[] expectedResidual = new InverseTransformer().reconstructResidualBlock(
                 dequantizedCoefficients,
                 transformSize,
                 TransformType.IDTX
@@ -6820,9 +6820,9 @@ final class FrameReconstructorTest {
             }
         }
         if (subsamplingX == 0 && subsamplingY == 0) {
-            IntraPredictor.predictLuma(intraPlane, 0, 0, width, height, mode.toLumaPredictionMode(), 0);
+            new IntraPredictor().predictLuma(intraPlane, 0, 0, width, height, mode.toLumaPredictionMode(), 0);
         } else {
-            IntraPredictor.predictChroma(intraPlane, 0, 0, width, height, mode.toUvPredictionMode(), 0);
+            new IntraPredictor().predictChroma(intraPlane, 0, 0, width, height, mode.toUvPredictionMode(), 0);
         }
         int[][] expected = new int[height][width];
         for (int y = 0; y < height; y++) {
@@ -7299,8 +7299,20 @@ final class FrameReconstructorTest {
                     ReferenceSurfaceSnapshot[].class
             );
             reconstructNode.setAccessible(true);
+            FrameReconstructor reconstructor = new FrameReconstructor();
             for (TilePartitionTreeReader.Node root : roots) {
-                reconstructNode.invoke(null, root, sharedLumaPlane, null, null, pixelFormat, frameHeader, 0, false, null);
+                reconstructNode.invoke(
+                        reconstructor,
+                        root,
+                        sharedLumaPlane,
+                        null,
+                        null,
+                        pixelFormat,
+                        frameHeader,
+                        0,
+                        false,
+                        null
+                );
             }
         } catch (ReflectiveOperationException exception) {
             throw new AssertionError("Failed to reconstruct synthetic tile roots into one shared plane", exception);

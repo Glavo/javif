@@ -22,11 +22,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-/// Reconstructs AV1 intra-predicted luma and chroma blocks.
+/// Reconstructs AV1 intra-predicted luma and chroma blocks with instance-owned scratch storage.
 ///
 /// This predictor implements non-directional modes, directional prediction with signed
 /// `angle_delta`, luma filter-intra, and CFL chroma prediction for `I420`, `I422`, and `I444`.
 /// Frame edges use midpoint samples when top or left neighbors are unavailable.
+/// One instance must not execute prediction calls concurrently.
 @NotNullByDefault
 final class IntraPredictor {
     /// The AV1 directional base angles in `VERTICAL`-through-`VERTICAL_LEFT` order.
@@ -61,8 +62,8 @@ final class IntraPredictor {
     /// Number of independently reusable reference-buffer banks.
     private static final int REFERENCE_BUFFER_BANK_COUNT = 6;
 
-    /// Per-thread intra-reference buffers used only during one synchronous prediction call.
-    private static final ThreadLocal<Workspace> PREDICTION_WORKSPACE = ThreadLocal.withInitial(Workspace::new);
+    /// Lazily created reusable intra-reference buffers owned by this predictor.
+    private @Nullable Workspace predictionWorkspace;
 
     /// The AV1 directional derivative table indexed by half-angle.
     private static final int @Unmodifiable [] DIRECTIONAL_DERIVATIVES = {
@@ -204,8 +205,8 @@ final class IntraPredictor {
             7, 6, 6, 5, 5, 4, 4, 4
     };
 
-    /// Prevents instantiation of this utility class.
-    private IntraPredictor() {
+    /// Creates an intra predictor with isolated reusable scratch storage.
+    IntraPredictor() {
     }
 
     /// Reconstructs one luma intra-predicted block directly into the destination plane.
@@ -217,7 +218,7 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param mode the luma intra prediction mode
     /// @param angleDelta the signed directional angle delta
-    static void predictLuma(
+    void predictLuma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -240,7 +241,7 @@ final class IntraPredictor {
     /// @param angleDelta the signed directional angle delta
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
-    static void predictLuma(
+    void predictLuma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -284,7 +285,7 @@ final class IntraPredictor {
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
     /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
-    static void predictLuma(
+    void predictLuma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -334,7 +335,7 @@ final class IntraPredictor {
     /// @param topBoundary the first sample row available to this tile
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
-    static void predictLuma(
+    void predictLuma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -381,7 +382,7 @@ final class IntraPredictor {
     /// @param width the block width in samples
     /// @param height the block height in samples
     /// @param mode the filter-intra mode
-    static void predictFilterIntraLuma(
+    void predictFilterIntraLuma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -404,7 +405,7 @@ final class IntraPredictor {
     /// @param topBoundary the first sample row available to this tile
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
-    static void predictFilterIntraLuma(
+    void predictFilterIntraLuma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -551,7 +552,7 @@ final class IntraPredictor {
     /// @param topReferenceY the top reference row for this recursive unit
     /// @param defaultSample the midpoint frame-edge default sample
     /// @return one filter-intra top-left reference sample
-    private static int filterIntraTopLeftReference(
+    private int filterIntraTopLeftReference(
             MutableSamplePlane plane,
             int blockX,
             int blockY,
@@ -604,7 +605,7 @@ final class IntraPredictor {
     /// @param topReferenceY the top reference row for this recursive unit
     /// @param defaultSample the midpoint frame-edge default sample
     /// @return one filter-intra top reference sample
-    private static int filterIntraTopReference(
+    private int filterIntraTopReference(
             MutableSamplePlane plane,
             int blockX,
             int blockY,
@@ -636,7 +637,7 @@ final class IntraPredictor {
     /// @param sampleY the left reference Y coordinate
     /// @param defaultSample the midpoint frame-edge default sample
     /// @return one filter-intra left reference sample
-    private static int filterIntraLeftReference(
+    private int filterIntraLeftReference(
             MutableSamplePlane plane,
             int blockX,
             int blockY,
@@ -668,7 +669,7 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param mode the chroma intra prediction mode
     /// @param angleDelta the signed directional angle delta
-    static void predictChroma(
+    void predictChroma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -691,7 +692,7 @@ final class IntraPredictor {
     /// @param angleDelta the signed directional angle delta
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
-    static void predictChroma(
+    void predictChroma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -731,7 +732,7 @@ final class IntraPredictor {
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
     /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
-    static void predictChroma(
+    void predictChroma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -781,7 +782,7 @@ final class IntraPredictor {
     /// @param topBoundary the first sample row available to this tile
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
-    static void predictChroma(
+    void predictChroma(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -833,7 +834,7 @@ final class IntraPredictor {
     /// @param alpha the signed CFL alpha
     /// @param subsamplingX the horizontal chroma subsampling shift
     /// @param subsamplingY the vertical chroma subsampling shift
-    static void predictChromaCfl(
+    void predictChromaCfl(
             MutableSamplePlane chromaPlane,
             MutableSamplePlane lumaPlane,
             int chromaX,
@@ -883,7 +884,7 @@ final class IntraPredictor {
     /// @param topBoundary the first chroma sample row available to this tile
     /// @param rightBoundary the exclusive chroma sample column available to this tile
     /// @param bottomBoundary the exclusive chroma sample row available to this tile
-    static void predictChromaCfl(
+    void predictChromaCfl(
             MutableSamplePlane chromaPlane,
             MutableSamplePlane lumaPlane,
             int chromaX,
@@ -944,7 +945,7 @@ final class IntraPredictor {
     /// @param topBoundary the first chroma sample row available to this tile
     /// @param rightBoundary the exclusive chroma sample column available to this tile
     /// @param bottomBoundary the exclusive chroma sample row available to this tile
-    static void predictChromaCfl(
+    void predictChromaCfl(
             MutableSamplePlane chromaPlane,
             MutableSamplePlane lumaPlane,
             int chromaX,
@@ -1023,7 +1024,7 @@ final class IntraPredictor {
     /// @param width the chroma block width in samples
     /// @param height the chroma block height in samples
     /// @param alpha the signed CFL alpha
-    static void predictChromaCflI420(
+    void predictChromaCflI420(
             MutableSamplePlane chromaPlane,
             MutableSamplePlane lumaPlane,
             int chromaX,
@@ -1041,7 +1042,7 @@ final class IntraPredictor {
     ///
     /// @param mode the luma intra prediction mode
     /// @return the internal prediction mode
-    private static PredictionMode predictionMode(LumaIntraPredictionMode mode) {
+    private PredictionMode predictionMode(LumaIntraPredictionMode mode) {
         return switch (mode) {
             case DC -> PredictionMode.DC;
             case VERTICAL -> PredictionMode.VERTICAL;
@@ -1063,7 +1064,7 @@ final class IntraPredictor {
     ///
     /// @param mode the chroma intra prediction mode
     /// @return the internal prediction mode
-    private static PredictionMode predictionMode(UvIntraPredictionMode mode) {
+    private PredictionMode predictionMode(UvIntraPredictionMode mode) {
         return switch (mode) {
             case DC -> PredictionMode.DC;
             case VERTICAL -> PredictionMode.VERTICAL;
@@ -1095,7 +1096,7 @@ final class IntraPredictor {
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
     /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
-    private static void predict(
+    private void predict(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1145,7 +1146,7 @@ final class IntraPredictor {
     /// @param topBoundary the first sample row available to this tile
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
-    private static void predict(
+    private void predict(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1251,7 +1252,7 @@ final class IntraPredictor {
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
     /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
-    private static void predictLargeBlock(
+    private void predictLargeBlock(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1309,7 +1310,7 @@ final class IntraPredictor {
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
     /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
-    private static void predictDirectional(
+    private void predictDirectional(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1446,7 +1447,7 @@ final class IntraPredictor {
     /// @param defaultSample the frame-edge default sample
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
-    private static void predictDirectionalZone1(
+    private void predictDirectionalZone1(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1552,7 +1553,7 @@ final class IntraPredictor {
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param directionalTopReferenceLength the available top-edge directional reference length, or `-1` for default
     /// @param directionalLeftReferenceLength the available left-edge directional reference length, or `-1` for default
-    private static void predictDirectionalZone2(
+    private void predictDirectionalZone2(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1723,7 +1724,7 @@ final class IntraPredictor {
     /// @param defaultSample the frame-edge default sample
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
-    private static void predictDirectionalZone3(
+    private void predictDirectionalZone3(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1823,7 +1824,7 @@ final class IntraPredictor {
     /// @param minimumLength the minimum number of references required by the predictor
     /// @param defaultLength the default reference length when availability is not explicitly constrained
     /// @return the bounded directional reference length
-    private static int directionalReferenceLength(int requestedLength, int minimumLength, int defaultLength) {
+    private int directionalReferenceLength(int requestedLength, int minimumLength, int defaultLength) {
         if (requestedLength < 0) {
             return defaultLength;
         }
@@ -1835,7 +1836,7 @@ final class IntraPredictor {
     /// @param requestedLength the requested available reference length, or a negative value for default
     /// @param defaultLength the full edge length when availability is not explicitly constrained
     /// @return the bounded number of available reference samples
-    private static int directionalReferenceAvailability(int requestedLength, int defaultLength) {
+    private int directionalReferenceAvailability(int requestedLength, int defaultLength) {
         if (requestedLength < 0) {
             return defaultLength;
         }
@@ -1849,7 +1850,7 @@ final class IntraPredictor {
     /// @param y the zero-based vertical sample coordinate
     /// @param defaultSample the frame-edge default sample
     /// @return the fallback top-left predictor sample for one block origin
-    private static int defaultTopLeft(MutableSamplePlane plane, int x, int y, int defaultSample) {
+    private int defaultTopLeft(MutableSamplePlane plane, int x, int y, int defaultSample) {
         return defaultTopLeft(plane, x, y, defaultSample, 0, 0);
     }
 
@@ -1862,7 +1863,7 @@ final class IntraPredictor {
     /// @param leftBoundary the first sample column available to this tile
     /// @param topBoundary the first sample row available to this tile
     /// @return the fallback top-left predictor sample for one block origin with tile boundaries
-    private static int defaultTopLeft(
+    private int defaultTopLeft(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1889,7 +1890,7 @@ final class IntraPredictor {
     /// @param top the top reference samples, including the smooth right-edge reference when clipped
     /// @param left the left reference samples, including the smooth bottom-edge reference when clipped
     /// @param defaultSample the frame-edge default sample
-    private static void predictDc(
+    private void predictDc(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1913,7 +1914,7 @@ final class IntraPredictor {
     /// @param width the block width in samples
     /// @param height the block height in samples
     /// @return the stable DC predictor value for one block
-    private static int dcPredictionValue(MutableSamplePlane plane, int x, int y, int width, int height) {
+    private int dcPredictionValue(MutableSamplePlane plane, int x, int y, int width, int height) {
         return dcPredictionValue(plane, x, y, width, height, 0, 0, plane.width(), plane.height());
     }
 
@@ -1929,7 +1930,7 @@ final class IntraPredictor {
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
     /// @return the stable DC predictor value for one block with tile-boundary availability
-    private static int dcPredictionValue(
+    private int dcPredictionValue(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -1957,7 +1958,7 @@ final class IntraPredictor {
     /// @param left the left reference samples
     /// @param defaultSample the frame-edge default sample
     /// @return the stable DC predictor value for one block using caller-supplied edge samples
-    private static int dcPredictionValue(int x, int y, int width, int height, int[] top, int[] left, int defaultSample) {
+    private int dcPredictionValue(int x, int y, int width, int height, int[] top, int[] left, int defaultSample) {
         return dcPredictionValue(width, height, top, left, defaultSample, y > 0, x > 0);
     }
 
@@ -1972,7 +1973,7 @@ final class IntraPredictor {
     /// @param haveTop whether the top edge is available
     /// @param haveLeft whether the left edge is available
     /// @return the stable DC predictor value for one block
-    private static int dcPredictionValue(
+    private int dcPredictionValue(
             int width,
             int height,
             int[] top,
@@ -2023,7 +2024,7 @@ final class IntraPredictor {
     /// @param subsamplingX the horizontal chroma subsampling shift
     /// @param subsamplingY the vertical chroma subsampling shift
     /// @return the signed CFL AC buffer for one subsampled chroma block
-    private static int[] cflAc(
+    private int[] cflAc(
             MutableSamplePlane lumaPlane,
             int lumaX,
             int lumaY,
@@ -2079,7 +2080,7 @@ final class IntraPredictor {
     /// @param magnitude the unsigned magnitude
     /// @param signedSource the value whose sign should be copied
     /// @return the signed magnitude
-    private static int applySign(int magnitude, int signedSource) {
+    private int applySign(int magnitude, int signedSource) {
         return signedSource < 0 ? -magnitude : magnitude;
     }
 
@@ -2089,7 +2090,7 @@ final class IntraPredictor {
     /// @param x the requested horizontal coordinate
     /// @param y the requested vertical coordinate
     /// @return the nearest in-buffer sample
-    private static int edgeExtendedSample(MutableSamplePlane plane, int x, int y) {
+    private int edgeExtendedSample(MutableSamplePlane plane, int x, int y) {
         int clampedX = Math.max(0, Math.min(x, plane.width() - 1));
         int clampedY = Math.max(0, Math.min(y, plane.height() - 1));
         return plane.sample(clampedX, clampedY);
@@ -2104,7 +2105,7 @@ final class IntraPredictor {
     /// @param x the zero-based horizontal sample coordinate
     /// @param y the zero-based vertical sample coordinate
     /// @param value the predicted sample value
-    private static void setSampleIfInside(MutableSamplePlane plane, int x, int y, int value) {
+    private void setSampleIfInside(MutableSamplePlane plane, int x, int y, int value) {
         if (x >= 0 && x < plane.width() && y >= 0 && y < plane.height()) {
             plane.setSample(x, y, value);
         }
@@ -2118,7 +2119,7 @@ final class IntraPredictor {
     /// @param width the block width in samples
     /// @param height the block height in samples
     /// @param top the top reference samples
-    private static void predictVertical(
+    private void predictVertical(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2141,7 +2142,7 @@ final class IntraPredictor {
     /// @param width the block width in samples
     /// @param height the block height in samples
     /// @param left the left reference samples
-    private static void predictHorizontal(
+    private void predictHorizontal(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2167,7 +2168,7 @@ final class IntraPredictor {
     /// @param top the top reference samples
     /// @param left the left reference samples
     /// @param topLeft the top-left reference sample
-    private static void predictPaeth(
+    private void predictPaeth(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2202,7 +2203,7 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param top the top reference samples
     /// @param left the left reference samples
-    private static void predictSmooth(
+    private void predictSmooth(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2235,7 +2236,7 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param top the top reference samples
     /// @param left the left reference samples, including the smooth bottom-edge reference when clipped
-    private static void predictSmoothVertical(
+    private void predictSmoothVertical(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2264,7 +2265,7 @@ final class IntraPredictor {
     /// @param height the block height in samples
     /// @param top the top reference samples, including the smooth right-edge reference when clipped
     /// @param left the left reference samples
-    private static void predictSmoothHorizontal(
+    private void predictSmoothHorizontal(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2294,7 +2295,7 @@ final class IntraPredictor {
     /// @param defaultSample the frame-edge default sample
     /// @param length the required reference-buffer length
     /// @return one top-edge directional reference buffer with top-right extension
-    private static int[] topDirectionalReferences(
+    private int[] topDirectionalReferences(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2320,7 +2321,7 @@ final class IntraPredictor {
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
     /// @return one top-edge directional reference buffer with tile-bounded top-right extension
-    private static int[] topDirectionalReferences(
+    private int[] topDirectionalReferences(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2346,7 +2347,7 @@ final class IntraPredictor {
     /// @param defaultSample the frame-edge default sample
     /// @param length the required reference-buffer length
     /// @return one left-edge directional reference buffer with bottom-left extension
-    private static int[] leftDirectionalReferences(
+    private int[] leftDirectionalReferences(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2372,7 +2373,7 @@ final class IntraPredictor {
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
     /// @return one left-edge directional reference buffer with tile-bounded bottom-left extension
-    private static int[] leftDirectionalReferences(
+    private int[] leftDirectionalReferences(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2396,7 +2397,7 @@ final class IntraPredictor {
     /// @param length the required reference-buffer length
     /// @param defaultSample the midpoint frame-edge default sample
     /// @return one top-edge reference buffer with AV1 frame-edge fallback and right extension
-    private static int[] topReferenceSamples(MutableSamplePlane plane, int x, int y, int length, int defaultSample) {
+    private int[] topReferenceSamples(MutableSamplePlane plane, int x, int y, int length, int defaultSample) {
         return topReferenceSamples(plane, x, y, length, defaultSample, 0, 0, plane.width(), plane.height());
     }
 
@@ -2412,7 +2413,7 @@ final class IntraPredictor {
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
     /// @return one top-edge reference buffer with AV1 tile-edge fallback and right extension
-    private static int[] topReferenceSamples(
+    private int[] topReferenceSamples(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2448,7 +2449,7 @@ final class IntraPredictor {
     /// @param length the required reference-buffer length
     /// @param defaultSample the midpoint frame-edge default sample
     /// @return one left-edge reference buffer with AV1 frame-edge fallback and bottom extension
-    private static int[] leftReferenceSamples(MutableSamplePlane plane, int x, int y, int length, int defaultSample) {
+    private int[] leftReferenceSamples(MutableSamplePlane plane, int x, int y, int length, int defaultSample) {
         return leftReferenceSamples(plane, x, y, length, defaultSample, 0, 0, plane.width(), plane.height());
     }
 
@@ -2464,7 +2465,7 @@ final class IntraPredictor {
     /// @param rightBoundary the exclusive sample column available to this tile
     /// @param bottomBoundary the exclusive sample row available to this tile
     /// @return one left-edge reference buffer with AV1 tile-edge fallback and bottom extension
-    private static int[] leftReferenceSamples(
+    private int[] leftReferenceSamples(
             MutableSamplePlane plane,
             int x,
             int y,
@@ -2496,7 +2497,7 @@ final class IntraPredictor {
     ///
     /// @param references the reference buffer to fill
     /// @param sample the sample value to store
-    private static void fillReferences(int[] references, int sample) {
+    private void fillReferences(int[] references, int sample) {
         for (int i = 0; i < references.length; i++) {
             references[i] = sample;
         }
@@ -2508,7 +2509,7 @@ final class IntraPredictor {
     /// @param edgeAngle the acute angle between the prediction ray and the sampled reference edge
     /// @param smoothEdgeReferences whether neighboring smooth predictors reduce filtering strength
     /// @return whether the edge should be upsampled
-    private static boolean useDirectionalEdgeUpsample(int edgeSpan, int edgeAngle, boolean smoothEdgeReferences) {
+    private boolean useDirectionalEdgeUpsample(int edgeSpan, int edgeAngle, boolean smoothEdgeReferences) {
         return edgeAngle < 40 && edgeSpan <= (16 >> (smoothEdgeReferences ? 1 : 0));
     }
 
@@ -2518,7 +2519,7 @@ final class IntraPredictor {
     /// @param edgeAngle the acute angle between the prediction ray and the sampled reference edge
     /// @param smoothEdgeReferences whether neighboring smooth predictors reduce filtering strength
     /// @return the filter strength in `[0, 3]`
-    private static int directionalEdgeFilterStrength(int edgeSpan, int edgeAngle, boolean smoothEdgeReferences) {
+    private int directionalEdgeFilterStrength(int edgeSpan, int edgeAngle, boolean smoothEdgeReferences) {
         if (smoothEdgeReferences) {
             if (edgeSpan <= 8) {
                 if (edgeAngle >= 64) {
@@ -2581,7 +2582,7 @@ final class IntraPredictor {
     /// @param topReference the first top-edge reference sample
     /// @param leftReference the first left-edge reference sample
     /// @return the filtered shared top-left corner sample
-    private static int filterDirectionalEdgeCorner(int topLeft, int topReference, int leftReference) {
+    private int filterDirectionalEdgeCorner(int topLeft, int topReference, int leftReference) {
         return (leftReference * 5 + topLeft * 6 + topReference * 5 + 8) >> 4;
     }
 
@@ -2600,7 +2601,7 @@ final class IntraPredictor {
     /// @param strength the AV1 intra-edge filter strength
     /// @param bufferBank the workspace bank that owns the returned edge
     /// @return the filtered directional reference edge
-    private static int[] filterDirectionalEdge(
+    private int[] filterDirectionalEdge(
             int[] references,
             int topLeft,
             int outputLength,
@@ -2642,7 +2643,7 @@ final class IntraPredictor {
     /// @param includeTopLeft whether conceptual source index `0` addresses the top-left sample
     /// @param bufferBank the workspace bank that owns the returned edge
     /// @return the upsampled directional reference edge
-    private static int[] upsampleDirectionalEdge(
+    private int[] upsampleDirectionalEdge(
             int[] references,
             int topLeft,
             int outputEvenCount,
@@ -2686,7 +2687,7 @@ final class IntraPredictor {
     /// @param topLeft the top-left reference sample
     /// @param bufferBank the workspace bank that owns the returned edge
     /// @return a reference edge with the top-left sample at index `0`
-    private static int[] edgeWithTopLeft(int[] references, int topLeft, int bufferBank) {
+    private int[] edgeWithTopLeft(int[] references, int topLeft, int bufferBank) {
         int[] edge = referenceBuffer(bufferBank, references.length + 1);
         edge[0] = topLeft;
         System.arraycopy(references, 0, edge, 1, references.length);
@@ -2698,7 +2699,7 @@ final class IntraPredictor {
     /// @param edge the edge array to read
     /// @param index the requested conceptual edge index
     /// @return the edge sample at the requested index
-    private static int edgeSample(int[] edge, int index) {
+    private int edgeSample(int[] edge, int index) {
         if (index <= 0) {
             return edge[0];
         }
@@ -2715,7 +2716,7 @@ final class IntraPredictor {
     /// @param topLeftIndex the conceptual source index that addresses the top-left sample
     /// @param index the requested conceptual source index
     /// @return the requested directional-edge source sample
-    private static int directionalEdgeSourceSample(int[] references, int topLeft, int topLeftIndex, int index) {
+    private int directionalEdgeSourceSample(int[] references, int topLeft, int topLeftIndex, int index) {
         if (index == topLeftIndex) {
             return topLeft;
         }
@@ -2735,7 +2736,7 @@ final class IntraPredictor {
     /// @param sample1 the second edge sample
     /// @param fraction the AV1 fractional interpolation position in `[0, 62]`
     /// @return one directional interpolation result between two edge samples
-    private static int interpolate(int sample0, int sample1, int fraction) {
+    private int interpolate(int sample0, int sample1, int fraction) {
         return (sample0 * (64 - fraction) + sample1 * fraction + 32) >> 6;
     }
 
@@ -2744,7 +2745,7 @@ final class IntraPredictor {
     /// @param projectedCoordinate the signed projected coordinate in 1/64 sample units
     /// @param upsampled whether the sampled edge has been upsampled by two
     /// @return the interpolation fraction in `[0, 62]`
-    private static int directionalFraction(int projectedCoordinate, boolean upsampled) {
+    private int directionalFraction(int projectedCoordinate, boolean upsampled) {
         return (projectedCoordinate << (upsampled ? 1 : 0)) & 0x3E;
     }
 
@@ -2756,7 +2757,7 @@ final class IntraPredictor {
     /// @param width the block width in samples
     /// @param height the block height in samples
     /// @param value the constant sample value
-    private static void fillBlock(MutableSamplePlane plane, int x, int y, int width, int height, int value) {
+    private void fillBlock(MutableSamplePlane plane, int x, int y, int width, int height, int value) {
         for (int row = 0; row < height; row++) {
             for (int column = 0; column < width; column++) {
                 setSampleIfInside(plane, x + column, y + row, value);
@@ -2770,24 +2771,29 @@ final class IntraPredictor {
     /// @param minimum the inclusive lower bound
     /// @param maximum the inclusive upper bound
     /// @return the clamped value
-    private static int clamp(int value, int minimum, int maximum) {
+    private int clamp(int value, int minimum, int maximum) {
         return Math.max(minimum, Math.min(maximum, value));
     }
 
-    /// Returns one exact-length reference buffer owned by the current prediction thread.
+    /// Returns one exact-length reference buffer owned by this predictor.
     ///
     /// @param bank the independently reusable workspace bank
     /// @param length the exact required buffer length
     /// @return the reusable reference buffer
-    private static int[] referenceBuffer(int bank, int length) {
-        return PREDICTION_WORKSPACE.get().referenceBuffer(bank, length);
+    private int[] referenceBuffer(int bank, int length) {
+        @Nullable Workspace workspace = predictionWorkspace;
+        if (workspace == null) {
+            workspace = new Workspace();
+            predictionWorkspace = workspace;
+        }
+        return workspace.referenceBuffer(bank, length);
     }
 
     /// Returns the smooth-predictor weight array for one supported block dimension.
     ///
     /// @param size the block width or height in samples
     /// @return the smooth-predictor weight array for one supported block dimension
-    private static int[] smoothWeights(int size) {
+    private int[] smoothWeights(int size) {
         return switch (size) {
             case 1 -> SMOOTH_WEIGHTS_1;
             case 2 -> SMOOTH_WEIGHTS_2;
@@ -2808,7 +2814,7 @@ final class IntraPredictor {
     ///
     /// @param visibleSize the visible edge length in samples
     /// @return the smooth-prediction axis used to select weights and the far-edge reference
-    private static int smoothWeightAxisSize(int visibleSize) {
+    private int smoothWeightAxisSize(int visibleSize) {
         if (visibleSize <= 1) {
             return 1;
         }
@@ -2837,7 +2843,7 @@ final class IntraPredictor {
     ///
     /// @param halfAngleIndex the zero-based half-angle table index
     /// @return one AV1 directional derivative table entry
-    private static int directionalDerivative(int halfAngleIndex) {
+    private int directionalDerivative(int halfAngleIndex) {
         if (halfAngleIndex < 0 || halfAngleIndex >= DIRECTIONAL_DERIVATIVES.length) {
             throw new IllegalStateException("Directional derivative index out of range: " + halfAngleIndex);
         }

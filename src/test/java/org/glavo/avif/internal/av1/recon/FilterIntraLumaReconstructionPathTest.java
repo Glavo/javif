@@ -56,7 +56,7 @@ final class FilterIntraLumaReconstructionPathTest {
         plane.setSample(0, 0, 60);
         plane.setSample(0, 1, 100);
 
-        IntraPredictor.predictLuma(plane, 1, 0, 3, 2, LumaIntraPredictionMode.DC, 0);
+        new IntraPredictor().predictLuma(plane, 1, 0, 3, 2, LumaIntraPredictionMode.DC, 0);
 
         assertMutableBlockFilled(plane, 1, 0, 3, 2, 80);
     }
@@ -68,7 +68,7 @@ final class FilterIntraLumaReconstructionPathTest {
         plane.setSample(0, 0, 30);
         plane.setSample(1, 0, 70);
 
-        IntraPredictor.predictLuma(plane, 0, 1, 2, 3, LumaIntraPredictionMode.DC, 0);
+        new IntraPredictor().predictLuma(plane, 0, 1, 2, 3, LumaIntraPredictionMode.DC, 0);
 
         assertMutableBlockFilled(plane, 0, 1, 2, 3, 50);
     }
