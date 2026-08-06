@@ -229,11 +229,13 @@ final class CdefApplierTest {
             int endY,
             int damping,
             int encodedStrength,
-            int direction
+        int direction
     ) {
         try {
-            Method decodeStrength = declaredMethod("decodeStrength", int.class, int.class);
-            Object strength = decodeStrength.invoke(null, encodedStrength, 0);
+            Method decodePrimaryStrength = declaredMethod("decodePrimaryStrength", int.class, int.class);
+            Method decodeSecondaryStrength = declaredMethod("decodeSecondaryStrength", int.class, int.class);
+            int primaryStrength = (int) decodePrimaryStrength.invoke(null, encodedStrength, 0);
+            int secondaryStrength = (int) decodeSecondaryStrength.invoke(null, encodedStrength, 0);
             Method filterUnit = declaredMethod(
                     "filterUnit",
                     DecodedPlane.class,
@@ -245,7 +247,8 @@ final class CdefApplierTest {
                     int.class,
                     int.class,
                     int.class,
-                    strength.getClass(),
+                    int.class,
+                    int.class,
                     int.class,
                     int.class,
                     int.class
@@ -262,7 +265,8 @@ final class CdefApplierTest {
                     plane.width(),
                     plane.height(),
                     damping,
-                    strength,
+                    primaryStrength,
+                    secondaryStrength,
                     direction,
                     0,
                     255
