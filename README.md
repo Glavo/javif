@@ -55,6 +55,25 @@ try (AvifImageReader reader = AvifImageReader.open(Path.of("image.avif"))) {
 Use `AvifImageReader.readRawColorPlanes(int)` when a caller needs the decoded YUV planes instead of
 the built-in CICP-to-RGB conversion.
 
+Create a reusable immutable factory when decoding options must differ from the defaults:
+
+```java
+import org.glavo.avif.AvifFrame;
+import org.glavo.avif.AvifImageReader;
+import org.glavo.avif.AvifImageReaderFactory;
+import org.glavo.avif.AvifPixelFormat;
+
+import java.nio.file.Path;
+
+AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+        .withPixelFormatOverride(AvifPixelFormat.ARGB_8888)
+        .withInputSizeLimit(64L * 1024 * 1024);
+
+try (AvifImageReader reader = factory.open(Path.of("image.avif"))) {
+    AvifFrame frame = reader.readFrame(0);
+}
+```
+
 The JPMS module name is `org.glavo.avif`. Its supported public packages are:
 
 - `org.glavo.avif` for AVIF and AVIS decoding;

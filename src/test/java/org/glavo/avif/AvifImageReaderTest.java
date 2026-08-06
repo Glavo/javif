@@ -248,8 +248,8 @@ final class AvifImageReaderTest {
 
     /// Verifies that negative configured input-size limits are rejected.
     @Test
-    void decoderConfigRejectsNegativeInputSizeLimit() {
-        assertThrows(IllegalArgumentException.class, () -> AvifDecoderConfig.builder().inputSizeLimit(-1));
+    void readerFactoryRejectsNegativeInputSizeLimit() {
+        assertThrows(IllegalArgumentException.class, () -> AvifImageReaderFactory.DEFAULT.withInputSizeLimit(-1));
     }
 
     /// Verifies that the default packed pixel format follows the decoded source bit depth.
@@ -262,19 +262,34 @@ final class AvifImageReaderTest {
 
     /// Verifies that the pixel-format override is absent by default and can be explicitly cleared.
     @Test
-    void decoderConfigPixelFormatOverrideIsOptionalAndClearable() {
-        assertNull(AvifDecoderConfig.DEFAULT.pixelFormatOverride());
+    void readerFactoryPixelFormatOverrideIsOptionalAndClearable() {
+        assertNull(AvifImageReaderFactory.DEFAULT.pixelFormatOverride());
 
-        AvifDecoderConfig explicit = AvifDecoderConfig.builder()
-                .pixelFormatOverride(AvifPixelFormat.ARGB_8888)
-                .build();
+        AvifImageReaderFactory explicit = AvifImageReaderFactory.DEFAULT
+                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888);
         assertEquals(AvifPixelFormat.ARGB_8888, explicit.pixelFormatOverride());
 
-        AvifDecoderConfig cleared = AvifDecoderConfig.builder()
-                .pixelFormatOverride(AvifPixelFormat.ARGB_16161616)
-                .pixelFormatOverride(null)
-                .build();
+        AvifImageReaderFactory cleared = AvifImageReaderFactory.DEFAULT
+                .withPixelFormatOverride(AvifPixelFormat.ARGB_16161616)
+                .withPixelFormatOverride(null);
         assertNull(cleared.pixelFormatOverride());
+    }
+
+    /// Verifies that factory withers return configured values without mutating the default factory.
+    @Test
+    void readerFactoryWithersPreserveDefaultOptions() {
+        Av1DecoderConfig av1Config = Av1DecoderConfig.builder().frameSizeLimit(4096).build();
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withAv1DecoderConfig(av1Config)
+                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888)
+                .withInputSizeLimit(8192);
+
+        assertEquals(av1Config, factory.av1DecoderConfig());
+        assertEquals(AvifPixelFormat.ARGB_8888, factory.pixelFormatOverride());
+        assertEquals(8192, factory.inputSizeLimit());
+        assertEquals(Av1DecoderConfig.DEFAULT, AvifImageReaderFactory.DEFAULT.av1DecoderConfig());
+        assertNull(AvifImageReaderFactory.DEFAULT.pixelFormatOverride());
+        assertEquals(0, AvifImageReaderFactory.DEFAULT.inputSizeLimit());
     }
 
     /// Verifies that every public input type rejects encoded data above the configured limit.
@@ -283,17 +298,16 @@ final class AvifImageReaderTest {
     @Test
     void openRejectsInputsAboveConfiguredInputSizeLimit() throws IOException {
         byte[] bytes = minimalAvifStillImage();
-        AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .inputSizeLimit(bytes.length - 1L)
-                .build();
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withInputSizeLimit(bytes.length - 1L);
 
-        assertInputTooLarge(() -> AvifImageReader.open(bytes, config));
-        assertInputTooLarge(() -> AvifImageReader.open(ByteBuffer.wrap(bytes), config));
-        assertInputTooLarge(() -> AvifImageReader.open(new ByteArrayInputStream(bytes), config));
-        assertInputTooLarge(() -> AvifImageReader.open(Channels.newChannel(new ByteArrayInputStream(bytes)), config));
+        assertInputTooLarge(() -> factory.open(bytes));
+        assertInputTooLarge(() -> factory.open(ByteBuffer.wrap(bytes)));
+        assertInputTooLarge(() -> factory.open(new ByteArrayInputStream(bytes)));
+        assertInputTooLarge(() -> factory.open(Channels.newChannel(new ByteArrayInputStream(bytes))));
 
         Path path = writeWorkspaceTempFile("oversized", bytes);
-        assertInputTooLarge(() -> AvifImageReader.open(path, config));
+        assertInputTooLarge(() -> factory.open(path));
     }
 
     /// Verifies that the configured input-size limit is inclusive.
@@ -302,28 +316,26 @@ final class AvifImageReaderTest {
     @Test
     void openAcceptsInputsAtConfiguredInputSizeLimit() throws IOException {
         byte[] bytes = minimalAvifStillImage();
-        AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .inputSizeLimit(bytes.length)
-                .build();
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withInputSizeLimit(bytes.length);
 
-        try (AvifImageReader reader = AvifImageReader.open(bytes, config)) {
+        try (AvifImageReader reader = factory.open(bytes)) {
             assertEquals(64, reader.info().width());
         }
-        try (AvifImageReader reader = AvifImageReader.open(ByteBuffer.wrap(bytes), config)) {
+        try (AvifImageReader reader = factory.open(ByteBuffer.wrap(bytes))) {
             assertEquals(64, reader.info().width());
         }
-        try (AvifImageReader reader = AvifImageReader.open(new ByteArrayInputStream(bytes), config)) {
+        try (AvifImageReader reader = factory.open(new ByteArrayInputStream(bytes))) {
             assertEquals(64, reader.info().width());
         }
-        try (AvifImageReader reader = AvifImageReader.open(
-                Channels.newChannel(new ByteArrayInputStream(bytes)),
-                config
+        try (AvifImageReader reader = factory.open(
+                Channels.newChannel(new ByteArrayInputStream(bytes))
         )) {
             assertEquals(64, reader.info().width());
         }
 
         Path path = writeWorkspaceTempFile("exact-limit", bytes);
-        try (AvifImageReader reader = AvifImageReader.open(path, config)) {
+        try (AvifImageReader reader = factory.open(path)) {
             assertEquals(64, reader.info().width());
         }
     }
@@ -410,10 +422,9 @@ final class AvifImageReaderTest {
     /// @throws IOException if the reader cannot decode the test stream
     @Test
     void readFrameCanForceLongRgbOutputForEightBitStillImage() throws IOException {
-        AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .pixelFormatOverride(AvifPixelFormat.ARGB_16161616)
-                .build();
-        try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage(), config)) {
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withPixelFormatOverride(AvifPixelFormat.ARGB_16161616);
+        try (AvifImageReader reader = factory.open(minimalAvifStillImage())) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
 
@@ -438,10 +449,9 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameCanForceIntRgbOutputForTenBitStillImage() throws IOException {
-        AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .pixelFormatOverride(AvifPixelFormat.ARGB_8888)
-                .build();
-        try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_COLORS_HDR_SRGB_FIXTURE), config)) {
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888);
+        try (AvifImageReader reader = factory.open(testResourceBytes(LIBAVIF_COLORS_HDR_SRGB_FIXTURE))) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
 
@@ -465,12 +475,10 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or decoded
     @Test
     void readFrameCanForceIntRgbOutputForHighBitDepthGridWithAlpha() throws IOException {
-        AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .pixelFormatOverride(AvifPixelFormat.ARGB_8888)
-                .build();
-        try (AvifImageReader reader = AvifImageReader.open(
-                testResourceBytes(LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE),
-                config
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888);
+        try (AvifImageReader reader = factory.open(
+                testResourceBytes(LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE)
         )) {
             AvifImageInfo info = reader.info();
             assertEquals(AvifBitDepth.TEN_BITS, info.bitDepth());
@@ -1943,10 +1951,9 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be parsed
     @Test
     void readFrameReportsConfiguredFrameSizeLimit() throws IOException {
-        AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .av1DecoderConfig(Av1DecoderConfig.builder().frameSizeLimit(4_095).build())
-                .build();
-        try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage(), config)) {
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withAv1DecoderConfig(Av1DecoderConfig.builder().frameSizeLimit(4_095).build());
+        try (AvifImageReader reader = factory.open(minimalAvifStillImage())) {
             AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
             assertEquals(AvifErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
         }
@@ -1957,12 +1964,10 @@ final class AvifImageReaderTest {
     /// @throws IOException if the fixture cannot be read or parsed
     @Test
     void readFrameRejectsGridCanvasAboveConfiguredFrameSizeLimit() throws IOException {
-        AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .av1DecoderConfig(Av1DecoderConfig.builder().frameSizeLimit(200_000).build())
-                .build();
-        try (AvifImageReader reader = AvifImageReader.open(
-                testResourceBytes(LIBAVIF_SOFA_GRID_1X5_FIXTURE),
-                config
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withAv1DecoderConfig(Av1DecoderConfig.builder().frameSizeLimit(200_000).build());
+        try (AvifImageReader reader = factory.open(
+                testResourceBytes(LIBAVIF_SOFA_GRID_1X5_FIXTURE)
         )) {
             AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
             assertEquals(AvifErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
