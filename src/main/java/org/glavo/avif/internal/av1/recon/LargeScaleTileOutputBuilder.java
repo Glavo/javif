@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,7 +27,7 @@ public final class LargeScaleTileOutputBuilder {
     /// The output sample bit depth.
     private final int bitDepth;
     /// The output chroma layout.
-    private final AvifPixelFormat pixelFormat;
+    private final Av1ChromaFormat chromaFormat;
     /// The source and destination tile width in luma samples.
     private final int tileWidth;
     /// The source and destination tile height in luma samples.
@@ -52,14 +52,14 @@ public final class LargeScaleTileOutputBuilder {
     /// Creates an empty zero-initialized output tile grid.
     ///
     /// @param bitDepth the output sample bit depth
-    /// @param pixelFormat the output chroma layout
+    /// @param chromaFormat the output chroma layout
     /// @param tileWidth the tile width in luma samples
     /// @param tileHeight the tile height in luma samples
     /// @param outputTileColumns the output width in tiles
     /// @param outputTileRows the output height in tiles
     public LargeScaleTileOutputBuilder(
             int bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int tileWidth,
             int tileHeight,
             int outputTileColumns,
@@ -75,7 +75,7 @@ public final class LargeScaleTileOutputBuilder {
             throw new IllegalArgumentException("Output tile dimensions must be positive");
         }
         this.bitDepth = bitDepth;
-        this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.tileWidth = tileWidth;
         this.tileHeight = tileHeight;
         this.outputTileColumns = outputTileColumns;
@@ -84,9 +84,9 @@ public final class LargeScaleTileOutputBuilder {
         this.outputHeight = Math.multiplyExact(tileHeight, outputTileRows);
         this.lumaSamples = new short[Math.multiplyExact(outputWidth, outputHeight)];
 
-        int chromaWidth = chromaWidth(pixelFormat, outputWidth);
-        int chromaHeight = chromaHeight(pixelFormat, outputHeight);
-        if (pixelFormat == AvifPixelFormat.I400) {
+        int chromaWidth = chromaWidth(chromaFormat, outputWidth);
+        int chromaHeight = chromaHeight(chromaFormat, outputHeight);
+        if (chromaFormat == Av1ChromaFormat.MONOCHROME) {
             this.chromaUSamples = null;
             this.chromaVSamples = null;
         } else {
@@ -110,7 +110,7 @@ public final class LargeScaleTileOutputBuilder {
     ) {
         ensureMutable();
         DecodedPlanes checkedSource = Objects.requireNonNull(source, "source");
-        if (checkedSource.bitDepth() != bitDepth || checkedSource.pixelFormat() != pixelFormat) {
+        if (checkedSource.bitDepth() != bitDepth || checkedSource.chromaFormat() != chromaFormat) {
             throw new IllegalArgumentException("Source tile color configuration differs from the output");
         }
         if (sourceTileColumn < 0 || sourceTileRow < 0) {
@@ -141,14 +141,14 @@ public final class LargeScaleTileOutputBuilder {
                 destinationY
         );
 
-        if (pixelFormat != AvifPixelFormat.I400) {
-            int chromaTileWidth = chromaWidth(pixelFormat, tileWidth);
-            int chromaTileHeight = chromaHeight(pixelFormat, tileHeight);
-            int sourceChromaX = chromaWidth(pixelFormat, sourceX);
-            int sourceChromaY = chromaHeight(pixelFormat, sourceY);
-            int destinationChromaX = chromaWidth(pixelFormat, destinationX);
-            int destinationChromaY = chromaHeight(pixelFormat, destinationY);
-            int outputChromaWidth = chromaWidth(pixelFormat, outputWidth);
+        if (chromaFormat != Av1ChromaFormat.MONOCHROME) {
+            int chromaTileWidth = chromaWidth(chromaFormat, tileWidth);
+            int chromaTileHeight = chromaHeight(chromaFormat, tileHeight);
+            int sourceChromaX = chromaWidth(chromaFormat, sourceX);
+            int sourceChromaY = chromaHeight(chromaFormat, sourceY);
+            int destinationChromaX = chromaWidth(chromaFormat, destinationX);
+            int destinationChromaY = chromaHeight(chromaFormat, destinationY);
+            int outputChromaWidth = chromaWidth(chromaFormat, outputWidth);
             copyPlane(
                     Objects.requireNonNull(checkedSource.chromaUPlane(), "source.chromaUPlane"),
                     sourceChromaX,
@@ -201,14 +201,14 @@ public final class LargeScaleTileOutputBuilder {
                 destinationY
         );
 
-        if (pixelFormat != AvifPixelFormat.I400) {
-            int chromaTileWidth = chromaWidth(pixelFormat, tileWidth);
-            int chromaTileHeight = chromaHeight(pixelFormat, tileHeight);
-            int outputChromaWidth = chromaWidth(pixelFormat, outputWidth);
-            int sourceChromaX = chromaWidth(pixelFormat, sourceX);
-            int sourceChromaY = chromaHeight(pixelFormat, sourceY);
-            int destinationChromaX = chromaWidth(pixelFormat, destinationX);
-            int destinationChromaY = chromaHeight(pixelFormat, destinationY);
+        if (chromaFormat != Av1ChromaFormat.MONOCHROME) {
+            int chromaTileWidth = chromaWidth(chromaFormat, tileWidth);
+            int chromaTileHeight = chromaHeight(chromaFormat, tileHeight);
+            int outputChromaWidth = chromaWidth(chromaFormat, outputWidth);
+            int sourceChromaX = chromaWidth(chromaFormat, sourceX);
+            int sourceChromaY = chromaHeight(chromaFormat, sourceY);
+            int destinationChromaX = chromaWidth(chromaFormat, destinationX);
+            int destinationChromaY = chromaHeight(chromaFormat, destinationY);
             copyStoredPlane(
                     Objects.requireNonNull(chromaUSamples, "chromaUSamples"),
                     outputChromaWidth,
@@ -243,9 +243,9 @@ public final class LargeScaleTileOutputBuilder {
         DecodedPlane luma = DecodedPlane.fromOwnedSamples(outputWidth, outputHeight, outputWidth, lumaSamples);
         @Nullable DecodedPlane chromaU = null;
         @Nullable DecodedPlane chromaV = null;
-        if (pixelFormat != AvifPixelFormat.I400) {
-            int width = chromaWidth(pixelFormat, outputWidth);
-            int height = chromaHeight(pixelFormat, outputHeight);
+        if (chromaFormat != Av1ChromaFormat.MONOCHROME) {
+            int width = chromaWidth(chromaFormat, outputWidth);
+            int height = chromaHeight(chromaFormat, outputHeight);
             chromaU = DecodedPlane.fromOwnedSamples(
                     width,
                     height,
@@ -261,7 +261,7 @@ public final class LargeScaleTileOutputBuilder {
         }
         return new DecodedPlanes(
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 outputWidth,
                 outputHeight,
                 outputWidth,
@@ -345,11 +345,11 @@ public final class LargeScaleTileOutputBuilder {
     /// @param format the chroma layout
     /// @param lumaWidth the luma width
     /// @return the chroma width
-    private static int chromaWidth(AvifPixelFormat format, int lumaWidth) {
+    private static int chromaWidth(Av1ChromaFormat format, int lumaWidth) {
         return switch (format) {
-            case I400 -> 0;
-            case I420, I422 -> lumaWidth >> 1;
-            case I444 -> lumaWidth;
+            case MONOCHROME -> 0;
+            case YUV420, YUV422 -> lumaWidth >> 1;
+            case YUV444 -> lumaWidth;
         };
     }
 
@@ -358,11 +358,11 @@ public final class LargeScaleTileOutputBuilder {
     /// @param format the chroma layout
     /// @param lumaHeight the luma height
     /// @return the chroma height
-    private static int chromaHeight(AvifPixelFormat format, int lumaHeight) {
+    private static int chromaHeight(Av1ChromaFormat format, int lumaHeight) {
         return switch (format) {
-            case I400 -> 0;
-            case I420 -> lumaHeight >> 1;
-            case I422, I444 -> lumaHeight;
+            case MONOCHROME -> 0;
+            case YUV420 -> lumaHeight >> 1;
+            case YUV422, YUV444 -> lumaHeight;
         };
     }
 

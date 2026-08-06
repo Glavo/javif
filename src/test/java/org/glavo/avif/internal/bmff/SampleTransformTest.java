@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifPlane;
 import org.glavo.avif.AvifPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -324,7 +324,7 @@ final class SampleTransformTest {
     private static AvifPlanes monochromePlanes(int sample) {
         return new AvifPlanes(
                 AvifBitDepth.SIXTEEN_BITS,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 1,
                 1,
                 1,
@@ -342,7 +342,7 @@ final class SampleTransformTest {
         AvifPlane plane = new AvifPlane(1, 1, 1, new short[]{0});
         return new AvifPlanes(
                 AvifBitDepth.EIGHT_BITS,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 1,
                 1,
                 1,

@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.model;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -277,27 +277,27 @@ public enum BlockSize {
         return MAX_LUMA_TRANSFORM_SIZES[ordinal()];
     }
 
-    /// Returns the largest chroma transform size allowed for this block size and pixel format.
+    /// Returns the largest chroma transform size allowed for this block size and chroma format.
     ///
     /// The mapping follows the `dav1d` lookup tables. For 4:2:2 entries without a direct table
     /// value, it derives the exact transform size from the horizontally subsampled block
     /// dimensions.
     ///
-    /// @param pixelFormat the active sequence pixel format
-    /// @return the largest chroma transform size allowed for this block size and pixel format, or `null`
-    public @Nullable TransformSize maxChromaTransformSize(AvifPixelFormat pixelFormat) {
-        AvifPixelFormat nonNullPixelFormat = java.util.Objects.requireNonNull(pixelFormat, "pixelFormat");
-        return switch (nonNullPixelFormat) {
-            case I400 -> null;
-            case I420 -> MAX_CHROMA_420_TRANSFORM_SIZES[ordinal()];
-            case I422 -> {
+    /// @param chromaFormat the active sequence chroma format
+    /// @return the largest chroma transform size allowed for this block size and chroma format, or `null`
+    public @Nullable TransformSize maxChromaTransformSize(Av1ChromaFormat chromaFormat) {
+        Av1ChromaFormat nonNullChromaFormat = java.util.Objects.requireNonNull(chromaFormat, "chromaFormat");
+        return switch (nonNullChromaFormat) {
+            case MONOCHROME -> null;
+            case YUV420 -> MAX_CHROMA_420_TRANSFORM_SIZES[ordinal()];
+            case YUV422 -> {
                 @Nullable TransformSize mapped = MAX_CHROMA_422_TRANSFORM_SIZES[ordinal()];
                 if (mapped != null) {
                     yield mapped;
                 }
                 yield TransformSize.forDimensions(Math.max(1, width4 >> 1), height4);
             }
-            case I444 -> MAX_CHROMA_444_TRANSFORM_SIZES[ordinal()];
+            case YUV444 -> MAX_CHROMA_444_TRANSFORM_SIZES[ordinal()];
         };
     }
 }

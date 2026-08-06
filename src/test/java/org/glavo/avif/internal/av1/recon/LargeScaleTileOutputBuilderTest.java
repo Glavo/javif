@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +33,7 @@ final class LargeScaleTileOutputBuilderTest {
         DecodedPlanes source = sourcePlanes();
         LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
                 10,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 4,
                 4,
                 2,
@@ -69,7 +69,7 @@ final class LargeScaleTileOutputBuilderTest {
         DecodedPlanes source = sourcePlanes();
         LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
                 10,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 4,
                 4,
                 2,
@@ -100,7 +100,7 @@ final class LargeScaleTileOutputBuilderTest {
     void rejectsInvalidOutputTileCopyIndices() {
         LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
                 10,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 4,
                 4,
                 2,
@@ -117,7 +117,7 @@ final class LargeScaleTileOutputBuilderTest {
         DecodedPlanes source = sourcePlanes();
         LargeScaleTileOutputBuilder builder = new LargeScaleTileOutputBuilder(
                 10,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 4,
                 4,
                 1,
@@ -131,13 +131,13 @@ final class LargeScaleTileOutputBuilderTest {
         assertThrows(IllegalStateException.class, () -> builder.copyOutputTile(0, 0));
     }
 
-    /// Creates deterministic 8x8 I420 camera-frame planes.
+    /// Creates deterministic 8x8 YUV420 camera-frame planes.
     ///
     /// @return the synthetic camera-frame planes
     private static DecodedPlanes sourcePlanes() {
         return new DecodedPlanes(
                 10,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 8,
                 8,
                 8,

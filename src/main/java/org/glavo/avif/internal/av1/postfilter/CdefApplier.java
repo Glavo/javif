@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -57,7 +57,7 @@ public final class CdefApplier {
             {{0, 1}, {-1, 2}}
     };
 
-    /// Chroma direction remapping used by AV1 for `I422`.
+    /// Chroma direction remapping used by AV1 for `YUV422`.
     private static final int @Unmodifiable [] I422_UV_DIRECTIONS = {7, 0, 2, 4, 5, 6, 6, 6};
 
     /// Applies CDEF to one decoded frame.
@@ -128,9 +128,9 @@ public final class CdefApplier {
         @Nullable DecodedPlane chromaUPlane = decodedPlanes.chromaUPlane();
         @Nullable DecodedPlane chromaVPlane = decodedPlanes.chromaVPlane();
         if (decodedPlanes.hasChroma()) {
-            int chromaUnitWidth = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingX(decodedPlanes.pixelFormat()));
-            int chromaUnitHeight = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingY(decodedPlanes.pixelFormat()));
-            boolean i422Chroma = decodedPlanes.pixelFormat() == AvifPixelFormat.I422;
+            int chromaUnitWidth = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingX(decodedPlanes.chromaFormat()));
+            int chromaUnitHeight = Math.max(1, CDEF_UNIT_SIZE >> chromaSubsamplingY(decodedPlanes.chromaFormat()));
+            boolean i422Chroma = decodedPlanes.chromaFormat() == Av1ChromaFormat.YUV422;
             chromaUPlane = applyPlane(
                     Objects.requireNonNull(chromaUPlane, "chromaUPlane"),
                     bitDepthShift,
@@ -168,7 +168,7 @@ public final class CdefApplier {
         }
         return new DecodedPlanes(
                 decodedPlanes.bitDepth(),
-                decodedPlanes.pixelFormat(),
+                decodedPlanes.chromaFormat(),
                 decodedPlanes.codedWidth(),
                 decodedPlanes.codedHeight(),
                 decodedPlanes.renderWidth(),
@@ -384,7 +384,7 @@ public final class CdefApplier {
     /// @param unitWidth the plane-local CDEF-unit width
     /// @param unitHeight the plane-local CDEF-unit height
     /// @param luma whether this invocation filters the luma plane
-    /// @param i422Chroma whether this invocation filters an `I422` chroma plane
+    /// @param i422Chroma whether this invocation filters an `YUV422` chroma plane
     /// @return the filtered plane, or the original plane when all selected units are inactive
     private static DecodedPlane applyPlane(
             DecodedPlane plane,
@@ -842,25 +842,25 @@ public final class CdefApplier {
         return (extent + CDEF_UNIT_SIZE - 1) / CDEF_UNIT_SIZE;
     }
 
-    /// Returns the horizontal chroma subsampling shift for one pixel format.
+    /// Returns the horizontal chroma subsampling shift for one chroma format.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @return the horizontal chroma subsampling shift
-    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
-        return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+    private static int chromaSubsamplingX(Av1ChromaFormat chromaFormat) {
+        return switch (Objects.requireNonNull(chromaFormat, "chromaFormat")) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
-    /// Returns the vertical chroma subsampling shift for one pixel format.
+    /// Returns the vertical chroma subsampling shift for one chroma format.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @return the vertical chroma subsampling shift
-    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
-        return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+    private static int chromaSubsamplingY(Av1ChromaFormat chromaFormat) {
+        return switch (Objects.requireNonNull(chromaFormat, "chromaFormat")) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 

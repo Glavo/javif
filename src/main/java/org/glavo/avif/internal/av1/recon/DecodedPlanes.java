@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,7 +33,7 @@ public final class DecodedPlanes {
     private final int bitDepth;
 
     /// The chroma layout of the decoded planes.
-    private final AvifPixelFormat pixelFormat;
+    private final Av1ChromaFormat chromaFormat;
 
     /// The stored luma width in samples.
     private final int codedWidth;
@@ -59,7 +59,7 @@ public final class DecodedPlanes {
     /// Creates one immutable decoded-plane snapshot.
     ///
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the chroma layout of the decoded planes
+    /// @param chromaFormat the chroma layout of the decoded planes
     /// @param codedWidth the stored luma width in samples
     /// @param codedHeight the stored luma height in samples
     /// @param renderWidth the presentation render width
@@ -69,7 +69,7 @@ public final class DecodedPlanes {
     /// @param chromaVPlane the decoded chroma V plane, or `null` for monochrome output
     public DecodedPlanes(
             int bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int codedWidth,
             int codedHeight,
             int renderWidth,
@@ -95,7 +95,7 @@ public final class DecodedPlanes {
         }
 
         this.bitDepth = bitDepth;
-        this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.codedWidth = codedWidth;
         this.codedHeight = codedHeight;
         this.renderWidth = renderWidth;
@@ -121,8 +121,8 @@ public final class DecodedPlanes {
     /// Returns the chroma layout of the decoded planes.
     ///
     /// @return the chroma layout of the decoded planes
-    public AvifPixelFormat pixelFormat() {
-        return pixelFormat;
+    public Av1ChromaFormat chromaFormat() {
+        return chromaFormat;
     }
 
     /// Returns the stored luma width in samples.
@@ -181,52 +181,52 @@ public final class DecodedPlanes {
         return chromaUPlane != null && chromaVPlane != null;
     }
 
-    /// Validates the stored chroma-plane arrangement against the pixel format.
+    /// Validates the stored chroma-plane arrangement against the chroma format.
     private void validateChromaPlanes() {
-        if (pixelFormat == AvifPixelFormat.I400) {
+        if (chromaFormat == Av1ChromaFormat.MONOCHROME) {
             if (chromaUPlane != null || chromaVPlane != null) {
-                throw new IllegalArgumentException("I400 output must not carry chroma planes");
+                throw new IllegalArgumentException("MONOCHROME output must not carry chroma planes");
             }
             return;
         }
 
         if (chromaUPlane == null || chromaVPlane == null) {
-            throw new IllegalArgumentException("Chroma planes are required for " + pixelFormat);
+            throw new IllegalArgumentException("Chroma planes are required for " + chromaFormat);
         }
 
-        int expectedWidth = expectedChromaWidth(pixelFormat, codedWidth);
-        int expectedHeight = expectedChromaHeight(pixelFormat, codedHeight);
+        int expectedWidth = expectedChromaWidth(chromaFormat, codedWidth);
+        int expectedHeight = expectedChromaHeight(chromaFormat, codedHeight);
         if (chromaUPlane.width() != expectedWidth || chromaUPlane.height() != expectedHeight) {
-            throw new IllegalArgumentException("chromaUPlane dimensions do not match pixel format");
+            throw new IllegalArgumentException("chromaUPlane dimensions do not match chroma format");
         }
         if (chromaVPlane.width() != expectedWidth || chromaVPlane.height() != expectedHeight) {
-            throw new IllegalArgumentException("chromaVPlane dimensions do not match pixel format");
+            throw new IllegalArgumentException("chromaVPlane dimensions do not match chroma format");
         }
     }
 
-    /// Returns the expected chroma width for one pixel format.
+    /// Returns the expected chroma width for one chroma format.
     ///
-    /// @param pixelFormat the chroma layout of the decoded planes
+    /// @param chromaFormat the chroma layout of the decoded planes
     /// @param codedWidth the coded luma width in samples
-    /// @return the expected chroma width for one pixel format
-    private static int expectedChromaWidth(AvifPixelFormat pixelFormat, int codedWidth) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420, I422 -> (codedWidth + 1) / 2;
-            case I444 -> codedWidth;
+    /// @return the expected chroma width for one chroma format
+    private static int expectedChromaWidth(Av1ChromaFormat chromaFormat, int codedWidth) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420, YUV422 -> (codedWidth + 1) / 2;
+            case YUV444 -> codedWidth;
         };
     }
 
-    /// Returns the expected chroma height for one pixel format.
+    /// Returns the expected chroma height for one chroma format.
     ///
-    /// @param pixelFormat the chroma layout of the decoded planes
+    /// @param chromaFormat the chroma layout of the decoded planes
     /// @param codedHeight the coded luma height in samples
-    /// @return the expected chroma height for one pixel format
-    private static int expectedChromaHeight(AvifPixelFormat pixelFormat, int codedHeight) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420 -> (codedHeight + 1) / 2;
-            case I422, I444 -> codedHeight;
+    /// @return the expected chroma height for one chroma format
+    private static int expectedChromaHeight(Av1ChromaFormat chromaFormat, int codedHeight) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420 -> (codedHeight + 1) / 2;
+            case YUV422, YUV444 -> codedHeight;
         };
     }
 }

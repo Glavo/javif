@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -111,7 +111,7 @@ final class TileTransformLayoutReaderTest {
     void readsSwitchableKeyFrameTransformLayout() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.KEY,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
                 KEY_FRAME_DEPTH_TWO_PAYLOAD,
@@ -146,7 +146,7 @@ final class TileTransformLayoutReaderTest {
     void buildsLosslessTransformLayoutFromRepeatedFourByFourUnits() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.KEY,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 true,
                 new byte[8],
@@ -178,7 +178,7 @@ final class TileTransformLayoutReaderTest {
     void buildsWideLosslessTransformUnitsInSixtyFourSampleRegionOrder() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.INTER,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 true,
                 new byte[8],
@@ -203,13 +203,13 @@ final class TileTransformLayoutReaderTest {
         assertEquals(new BlockPosition(31, 15), units[511].position());
     }
 
-    /// Verifies that clipped `I422` layouts expose exact chroma transform units on the wider
+    /// Verifies that clipped `YUV422` layouts expose exact chroma transform units on the wider
     /// chroma plane.
     @Test
     void buildsClippedI422ChromaTransformUnits() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.KEY,
-                AvifPixelFormat.I422,
+                Av1ChromaFormat.YUV422,
                 FrameHeader.TransformMode.LARGEST,
                 false,
                 new byte[8],
@@ -236,13 +236,13 @@ final class TileTransformLayoutReaderTest {
         assertEquals(TransformSize.RTX_4X8, chromaUnits[0].size());
     }
 
-    /// Verifies that a smaller lossless `I444` chroma transform layout tiles the unsubsampled
+    /// Verifies that a smaller lossless `YUV444` chroma transform layout tiles the unsubsampled
     /// chroma plane in raster order.
     @Test
     void buildsLosslessI444ChromaTransformUnitsInRasterOrder() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.KEY,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 true,
                 new byte[8],
@@ -275,7 +275,7 @@ final class TileTransformLayoutReaderTest {
     void readsSwitchableInterEightByEightTransformTree() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.INTER,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
                 INTER_8X8_SPLIT_PAYLOAD,
@@ -306,7 +306,7 @@ final class TileTransformLayoutReaderTest {
     void readsSwitchableInterSixteenBySixteenTransformTree() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.INTER,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
                 INTER_16X16_SPLIT_PAYLOAD,
@@ -338,7 +338,7 @@ final class TileTransformLayoutReaderTest {
     void storesCodedDimensionsForSkippedLosslessInterBlock() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.INTER,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 true,
                 new byte[8],
@@ -372,7 +372,7 @@ final class TileTransformLayoutReaderTest {
     void partitionTreeLeafCarriesTransformLayout() {
         TileDecodeContext tileContext = createTileContext(
                 FrameType.KEY,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.LARGEST,
                 false,
                 new byte[8],
@@ -400,7 +400,7 @@ final class TileTransformLayoutReaderTest {
     /// Creates one synthetic tile-local decode context used by transform-layout tests.
     ///
     /// @param frameType the synthetic frame type
-    /// @param pixelFormat the synthetic sequence pixel format
+    /// @param chromaFormat the synthetic sequence pixel format
     /// @param transformMode the synthetic frame transform mode
     /// @param allLossless whether all segments are lossless
     /// @param payload the collected tile entropy payload
@@ -409,15 +409,15 @@ final class TileTransformLayoutReaderTest {
     /// @return one synthetic tile-local decode context used by transform-layout tests
     private static TileDecodeContext createTileContext(
             FrameType frameType,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader.TransformMode transformMode,
             boolean allLossless,
             byte[] payload,
             int codedWidth,
             int codedHeight
     ) {
-        boolean chromaSubsamplingX = pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422;
-        boolean chromaSubsamplingY = pixelFormat == AvifPixelFormat.I420;
+        boolean chromaSubsamplingX = chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422;
+        boolean chromaSubsamplingY = chromaFormat == Av1ChromaFormat.YUV420;
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 codedWidth,
@@ -454,13 +454,13 @@ final class TileTransformLayoutReaderTest {
                 ),
                 new SequenceHeader.ColorConfig(
                         8,
-                        pixelFormat == AvifPixelFormat.I400,
+                        chromaFormat == Av1ChromaFormat.MONOCHROME,
                         false,
                         2,
                         2,
                         2,
                         true,
-                        pixelFormat,
+                        chromaFormat,
                         0,
                         chromaSubsamplingX,
                         chromaSubsamplingY,

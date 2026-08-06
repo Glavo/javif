@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -69,18 +69,18 @@ final class DecodedPlanesTest {
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new DecodedPlanes(8, AvifPixelFormat.I400, 4, 4, 4, 4, luma, chroma, null)
+                () -> new DecodedPlanes(8, Av1ChromaFormat.MONOCHROME, 4, 4, 4, 4, luma, chroma, null)
         );
     }
 
-    /// Verifies that `I420` decoded planes validate subsampled chroma dimensions.
+    /// Verifies that `YUV420` decoded planes validate subsampled chroma dimensions.
     @Test
     void i420DecodedPlanesValidateChromaDimensions() {
         DecodedPlane luma = new DecodedPlane(5, 3, 5, filledSamples(15, (short) 1));
         DecodedPlane chromaU = new DecodedPlane(3, 2, 3, filledSamples(6, (short) 2));
         DecodedPlane chromaV = new DecodedPlane(3, 2, 3, filledSamples(6, (short) 3));
 
-        DecodedPlanes planes = new DecodedPlanes(8, AvifPixelFormat.I420, 5, 3, 5, 3, luma, chromaU, chromaV);
+        DecodedPlanes planes = new DecodedPlanes(8, Av1ChromaFormat.YUV420, 5, 3, 5, 3, luma, chromaU, chromaV);
 
         assertTrue(planes.hasChroma());
         assertEquals(5, planes.codedWidth());
@@ -93,7 +93,7 @@ final class DecodedPlanesTest {
         DecodedPlane wrongChroma = new DecodedPlane(2, 2, 2, filledSamples(4, (short) 3));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new DecodedPlanes(8, AvifPixelFormat.I420, 5, 3, 5, 3, luma, wrongChroma, chromaV)
+                () -> new DecodedPlanes(8, Av1ChromaFormat.YUV420, 5, 3, 5, 3, luma, wrongChroma, chromaV)
         );
     }
 
@@ -102,10 +102,10 @@ final class DecodedPlanesTest {
     void monochromeDecodedPlanesDoNotReportChroma() {
         DecodedPlane luma = new DecodedPlane(4, 4, 4, filledSamples(16, (short) 5));
 
-        DecodedPlanes planes = new DecodedPlanes(10, AvifPixelFormat.I400, 4, 4, 4, 4, luma, null, null);
+        DecodedPlanes planes = new DecodedPlanes(10, Av1ChromaFormat.MONOCHROME, 4, 4, 4, 4, luma, null, null);
 
         assertFalse(planes.hasChroma());
-        assertEquals(AvifPixelFormat.I400, planes.pixelFormat());
+        assertEquals(Av1ChromaFormat.MONOCHROME, planes.chromaFormat());
         assertEquals(10, planes.bitDepth());
     }
 

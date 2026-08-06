@@ -819,7 +819,7 @@ public final class Av1ImageReader implements AutoCloseable {
                 && stored.transferCharacteristics() == current.transferCharacteristics()
                 && stored.matrixCoefficients() == current.matrixCoefficients()
                 && stored.colorRange() == current.colorRange()
-                && stored.pixelFormat() == current.pixelFormat()
+                && stored.chromaFormat() == current.chromaFormat()
                 && stored.chromaSamplePosition() == current.chromaSamplePosition();
     }
 
@@ -940,7 +940,7 @@ public final class Av1ImageReader implements AutoCloseable {
 
         LargeScaleTileOutputBuilder outputBuilder = new LargeScaleTileOutputBuilder(
                 cameraSequenceHeader.colorConfig().bitDepth(),
-                cameraSequenceHeader.colorConfig().pixelFormat(),
+                cameraSequenceHeader.colorConfig().chromaFormat(),
                 tileWidth,
                 tileHeight,
                 tileList.outputTileColumns(),

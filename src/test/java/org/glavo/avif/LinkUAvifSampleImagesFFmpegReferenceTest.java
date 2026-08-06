@@ -84,7 +84,7 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
         assertEquals(expected.width(), actual.codedWidth(), label + " width");
         assertEquals(expected.height(), actual.codedHeight(), label + " height");
         assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), label + " bit depth");
-        assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), label + " pixel format");
+        assertEquals(expected.sourceMetadata().chromaFormat(), actual.chromaFormat(), label + " pixel format");
 
         assertPlaneMatches(
                 label + " Y",
@@ -94,7 +94,7 @@ final class LinkUAvifSampleImagesFFmpegReferenceTest {
                 expected::lumaSample,
                 actual.bitDepth()
         );
-        if (expected.sourceMetadata().pixelFormat() == AvifPixelFormat.I400) {
+        if (expected.sourceMetadata().chromaFormat() == Av1ChromaFormat.MONOCHROME) {
             assertNull(actual.chromaUPlane(), label + " U plane");
             assertNull(actual.chromaVPlane(), label + " V plane");
             return;

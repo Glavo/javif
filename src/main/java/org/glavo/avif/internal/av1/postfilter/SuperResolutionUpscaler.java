@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
@@ -152,7 +152,7 @@ final class SuperResolutionUpscaler {
         }
 
         int upscaledWidth = frameSize.upscaledWidth();
-        AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
+        Av1ChromaFormat chromaFormat = checkedDecodedPlanes.chromaFormat();
         int bitDepth = checkedDecodedPlanes.bitDepth();
         DecodedPlane upscaledLumaPlane = upscalePlaneHorizontally(
                 checkedDecodedPlanes.lumaPlane(),
@@ -165,22 +165,22 @@ final class SuperResolutionUpscaler {
         @Nullable DecodedPlane upscaledChromaUPlane = chromaUPlane != null
                 ? upscalePlaneHorizontally(
                         chromaUPlane,
-                        chromaWidth(pixelFormat, upscaledWidth),
+                        chromaWidth(chromaFormat, upscaledWidth),
                         bitDepth,
-                        pixelFormat == AvifPixelFormat.I444 ? 8 : 4
+                        chromaFormat == Av1ChromaFormat.YUV444 ? 8 : 4
                 )
                 : null;
         @Nullable DecodedPlane upscaledChromaVPlane = chromaVPlane != null
                 ? upscalePlaneHorizontally(
                         chromaVPlane,
-                        chromaWidth(pixelFormat, upscaledWidth),
+                        chromaWidth(chromaFormat, upscaledWidth),
                         bitDepth,
-                        pixelFormat == AvifPixelFormat.I444 ? 8 : 4
+                        chromaFormat == Av1ChromaFormat.YUV444 ? 8 : 4
                 )
                 : null;
         return new DecodedPlanes(
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 upscaledWidth,
                 frameSize.height(),
                 frameSize.renderWidth(),
@@ -191,16 +191,16 @@ final class SuperResolutionUpscaler {
         );
     }
 
-    /// Returns the post-super-resolution chroma width for one pixel format.
+    /// Returns the post-super-resolution chroma width for one chroma format.
     ///
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param lumaWidth the post-super-resolution luma width
     /// @return the post-super-resolution chroma width
-    private static int chromaWidth(AvifPixelFormat pixelFormat, int lumaWidth) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420, I422 -> (lumaWidth + 1) >> 1;
-            case I444 -> lumaWidth;
+    private static int chromaWidth(Av1ChromaFormat chromaFormat, int lumaWidth) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420, YUV422 -> (lumaWidth + 1) >> 1;
+            case YUV444 -> lumaWidth;
         };
     }
 

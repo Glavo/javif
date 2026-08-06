@@ -152,7 +152,7 @@ final class AvifGainMapToneMapper {
                 width,
                 height,
                 baseFrame.bitDepth(),
-                baseFrame.pixelFormat(),
+                baseFrame.chromaFormat(),
                 baseFrame.frameIndex(),
                 toneMapped
         );
@@ -207,7 +207,7 @@ final class AvifGainMapToneMapper {
                 width,
                 height,
                 baseFrame.bitDepth(),
-                baseFrame.pixelFormat(),
+                baseFrame.chromaFormat(),
                 baseFrame.frameIndex(),
                 toneMapped
         );
@@ -484,7 +484,7 @@ final class AvifGainMapToneMapper {
             this.baseHeight = baseHeight;
             this.maxSample = planes.bitDepth().maxSampleValue();
             this.yuvToRgbTransform = gainMapColorInfo != null
-                    ? YuvToRgbTransform.fromColorInfo(gainMapColorInfo, planes.pixelFormat() == AvifPixelFormat.I400)
+                    ? YuvToRgbTransform.fromColorInfo(gainMapColorInfo, planes.chromaFormat() == Av1ChromaFormat.MONOCHROME)
                     : YuvToRgbTransform.BT601_FULL_RANGE;
         }
 
@@ -497,7 +497,7 @@ final class AvifGainMapToneMapper {
         private double channel(int baseX, int baseY, int channel) {
             int x = mapCoordinate(baseX, baseWidth, planes.codedWidth());
             int y = mapCoordinate(baseY, baseHeight, planes.codedHeight());
-            if (planes.pixelFormat() == AvifPixelFormat.I400) {
+            if (planes.chromaFormat() == Av1ChromaFormat.MONOCHROME) {
                 return sampleToUnit(planes.lumaPlane().sample(x, y));
             }
             int rgb = rgbAt(x, y);
@@ -563,9 +563,9 @@ final class AvifGainMapToneMapper {
         /// @param x the luma x coordinate
         /// @return the chroma x coordinate
         private int chromaX(int x) {
-            return switch (planes.pixelFormat()) {
-                case I400, I444 -> x;
-                case I420, I422 -> x >> 1;
+            return switch (planes.chromaFormat()) {
+                case MONOCHROME, YUV444 -> x;
+                case YUV420, YUV422 -> x >> 1;
             };
         }
 
@@ -574,9 +574,9 @@ final class AvifGainMapToneMapper {
         /// @param y the luma y coordinate
         /// @return the chroma y coordinate
         private int chromaY(int y) {
-            return switch (planes.pixelFormat()) {
-                case I400, I422, I444 -> y;
-                case I420 -> y >> 1;
+            return switch (planes.chromaFormat()) {
+                case MONOCHROME, YUV422, YUV444 -> y;
+                case YUV420 -> y >> 1;
             };
         }
     }

@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifPlane;
 import org.glavo.avif.AvifPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -241,13 +241,13 @@ public final class SampleTransform {
         AvifPlane lumaPlane = applyPlane(lumaPlanes(checkedInputs), false, outputFullRange);
         @Nullable AvifPlane chromaUPlane = null;
         @Nullable AvifPlane chromaVPlane = null;
-        if (first.pixelFormat() != AvifPixelFormat.I400) {
+        if (first.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
             chromaUPlane = applyPlane(chromaPlanes(checkedInputs, true), true, outputFullRange);
             chromaVPlane = applyPlane(chromaPlanes(checkedInputs, false), true, outputFullRange);
         }
         return new AvifPlanes(
                 bitDepth,
-                first.pixelFormat(),
+                first.chromaFormat(),
                 first.codedWidth(),
                 first.codedHeight(),
                 first.renderWidth(),
@@ -299,7 +299,7 @@ public final class SampleTransform {
     /// @param expected the first decoded input
     /// @param actual another decoded input
     private static void validateCompatiblePlanes(AvifPlanes expected, AvifPlanes actual) {
-        if (actual.pixelFormat() != expected.pixelFormat()
+        if (actual.chromaFormat() != expected.chromaFormat()
                 || actual.codedWidth() != expected.codedWidth()
                 || actual.codedHeight() != expected.codedHeight()) {
             throw new IllegalArgumentException("Sample Transform input plane layouts differ");

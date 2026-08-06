@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -804,7 +804,7 @@ final class BlockNeighborContextTest {
     /// Verifies that chroma coefficient-skip contexts use dav1d's dedicated chroma range.
     @Test
     void chromaCoefficientSkipContextUsesDedicatedChromaRange() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, AvifPixelFormat.I444));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, Av1ChromaFormat.YUV444));
         BlockPosition position = new BlockPosition(0, 0);
 
         assertEquals(7, context.chromaCoefficientSkipContext(
@@ -851,7 +851,7 @@ final class BlockNeighborContextTest {
     /// Verifies that chroma coefficient-skip contexts account for subsampled chroma block size.
     @Test
     void chromaCoefficientSkipContextAccountsForSubsampling() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, AvifPixelFormat.I420));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, Av1ChromaFormat.YUV420));
 
         assertEquals(7, context.chromaCoefficientSkipContext(
                 0,
@@ -1031,15 +1031,15 @@ final class BlockNeighborContextTest {
     /// @param frameType the synthetic frame type
     /// @return a simple tile context used by neighbor-context tests
     private static TileDecodeContext testTileContext(FrameType frameType) {
-        return testTileContext(frameType, AvifPixelFormat.I420);
+        return testTileContext(frameType, Av1ChromaFormat.YUV420);
     }
 
     /// Creates a simple tile context used by neighbor-context tests.
     ///
     /// @param frameType the synthetic frame type
-    /// @param pixelFormat the synthetic decoded pixel format
+    /// @param chromaFormat the synthetic decoded pixel format
     /// @return a simple tile context used by neighbor-context tests
-    private static TileDecodeContext testTileContext(FrameType frameType, AvifPixelFormat pixelFormat) {
+    private static TileDecodeContext testTileContext(FrameType frameType, Av1ChromaFormat chromaFormat) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,
@@ -1082,10 +1082,10 @@ final class BlockNeighborContextTest {
                         2,
                         2,
                         true,
-                        pixelFormat,
+                        chromaFormat,
                         0,
-                        pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422,
-                        pixelFormat == AvifPixelFormat.I420,
+                        chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422,
+                        chromaFormat == Av1ChromaFormat.YUV420,
                         false
                 )
         );

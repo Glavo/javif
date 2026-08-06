@@ -15,7 +15,7 @@ parity are not project features.
 - AV1 sequence and frame assembly, operating-point filtering, temporal/spatial layer identifiers,
   invisible/reference-frame policy, `show_existing_frame`, and bounded or EOF-delimited size-less
   final OBUs.
-- 8-, 10-, and 12-bit `I400`, `I420`, `I422`, and `I444` reconstruction, including tiles,
+- 8-, 10-, and 12-bit monochrome, YUV 4:2:0, YUV 4:2:2, and YUV 4:4:4 reconstruction, including tiles,
   segmentation, palettes, `intrabc`, intra/inter/compound/inter-intra prediction, `refmvs`, global
   and local warped motion, OBMC, scaled references, transforms, quantization matrices, and
   super-resolution.

@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
@@ -488,8 +488,8 @@ public final class BlockNeighborContext {
         int frameHeight4 = ((nonNullTileContext.frameHeader().frameSize().height() + 7) >> 3) << 1;
         int tileWidth8 = (tileWidth4 + 1) >> 1;
         int tileHeight8 = (tileHeight4 + 1) >> 1;
-        int chromaSubsamplingX = chromaSubsamplingX(nonNullTileContext.sequenceHeader().colorConfig().pixelFormat());
-        int chromaSubsamplingY = chromaSubsamplingY(nonNullTileContext.sequenceHeader().colorConfig().pixelFormat());
+        int chromaSubsamplingX = chromaSubsamplingX(nonNullTileContext.sequenceHeader().colorConfig().chromaFormat());
+        int chromaSubsamplingY = chromaSubsamplingY(nonNullTileContext.sequenceHeader().colorConfig().chromaFormat());
         int chromaTileWidth4 = chromaTileSpan(tileWidth4, chromaSubsamplingX);
         int chromaTileHeight4 = chromaTileSpan(tileHeight4, chromaSubsamplingY);
         boolean keyFrame = nonNullTileContext.frameHeader().frameType() == FrameType.KEY;
@@ -610,27 +610,27 @@ public final class BlockNeighborContext {
         );
     }
 
-    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    /// Returns the horizontal chroma subsampling shift for one decoded chroma format.
     ///
-    /// @param pixelFormat the decoded sequence pixel format
-    /// @return the horizontal chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
-        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
-        return switch (nonNullPixelFormat) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+    /// @param chromaFormat the decoded sequence chroma format
+    /// @return the horizontal chroma subsampling shift for the supplied chroma format
+    private static int chromaSubsamplingX(Av1ChromaFormat chromaFormat) {
+        Av1ChromaFormat nonNullChromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
+        return switch (nonNullChromaFormat) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
-    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    /// Returns the vertical chroma subsampling shift for one decoded chroma format.
     ///
-    /// @param pixelFormat the decoded sequence pixel format
-    /// @return the vertical chroma subsampling shift for the supplied pixel format
-    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
-        AvifPixelFormat nonNullPixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
-        return switch (nonNullPixelFormat) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+    /// @param chromaFormat the decoded sequence chroma format
+    /// @return the vertical chroma subsampling shift for the supplied chroma format
+    private static int chromaSubsamplingY(Av1ChromaFormat chromaFormat) {
+        Av1ChromaFormat nonNullChromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
+        return switch (nonNullChromaFormat) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 

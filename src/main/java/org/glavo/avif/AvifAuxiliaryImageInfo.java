@@ -41,7 +41,7 @@ public final class AvifAuxiliaryImageInfo {
     /// The decoded AV1 bit depth, or `null` when the auxiliary item is not an AV1 image.
     private final @Nullable AvifBitDepth bitDepth;
     /// The AV1 chroma sampling layout, or `null` when the auxiliary item is not an AV1 image.
-    private final @Nullable AvifPixelFormat pixelFormat;
+    private final @Nullable Av1ChromaFormat chromaFormat;
 
     /// Creates auxiliary image metadata.
     ///
@@ -51,7 +51,7 @@ public final class AvifAuxiliaryImageInfo {
     /// @param width the auxiliary image width in pixels, or -1 when unknown
     /// @param height the auxiliary image height in pixels, or -1 when unknown
     /// @param bitDepth the decoded AV1 bit depth, or `null` when the auxiliary item is not an AV1 image
-    /// @param pixelFormat the AV1 chroma sampling layout, or `null` when the auxiliary item is not an AV1 image
+    /// @param chromaFormat the AV1 chroma sampling layout, or `null` when the auxiliary item is not an AV1 image
     public AvifAuxiliaryImageInfo(
             int itemId,
             String auxiliaryType,
@@ -59,7 +59,7 @@ public final class AvifAuxiliaryImageInfo {
             int width,
             int height,
             @Nullable AvifBitDepth bitDepth,
-            @Nullable AvifPixelFormat pixelFormat
+            @Nullable Av1ChromaFormat chromaFormat
     ) {
         if (itemId <= 0) {
             throw new IllegalArgumentException("itemId <= 0: " + itemId);
@@ -67,8 +67,8 @@ public final class AvifAuxiliaryImageInfo {
         if (!isKnownSize(width, height) && !isUnknownSize(width, height)) {
             throw new IllegalArgumentException("width and height must both be positive or both be -1");
         }
-        if ((bitDepth == null) != (pixelFormat == null)) {
-            throw new IllegalArgumentException("bitDepth and pixelFormat must both be present or both be null");
+        if ((bitDepth == null) != (chromaFormat == null)) {
+            throw new IllegalArgumentException("bitDepth and chromaFormat must both be present or both be null");
         }
 
         this.itemId = itemId;
@@ -77,7 +77,7 @@ public final class AvifAuxiliaryImageInfo {
         this.width = width;
         this.height = height;
         this.bitDepth = bitDepth;
-        this.pixelFormat = pixelFormat;
+        this.chromaFormat = chromaFormat;
     }
 
     /// Returns the BMFF item id for the auxiliary image.
@@ -133,8 +133,8 @@ public final class AvifAuxiliaryImageInfo {
     /// A `null` value means the auxiliary item is not an AV1 image or does not expose `av1C`.
     ///
     /// @return the AV1 chroma sampling layout, or `null`
-    public @Nullable AvifPixelFormat pixelFormat() {
-        return pixelFormat;
+    public @Nullable Av1ChromaFormat chromaFormat() {
+        return chromaFormat;
     }
 
     /// Returns whether this auxiliary image is an alpha image.

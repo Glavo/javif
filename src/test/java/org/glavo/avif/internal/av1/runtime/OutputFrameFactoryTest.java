@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.runtime;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
@@ -45,7 +45,7 @@ final class OutputFrameFactoryTest {
         assertTrue(frame.intPixelBuffer().isReadOnly());
         assertEquals(3, frame.temporalId());
         assertEquals(2, frame.spatialId());
-        assertFrameMetadata(frame, 8, AvifPixelFormat.I400, FrameType.KEY, false, 5L);
+        assertFrameMetadata(frame, 8, Av1ChromaFormat.MONOCHROME, FrameType.KEY, false, 5L);
     }
 
     /// Verifies that 10-bit and 12-bit decoded planes both produce one public `DecodedFrame`.
@@ -69,12 +69,12 @@ final class OutputFrameFactoryTest {
         assertTrue(tenBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, tenBitFrame.longPixels().length);
         assertTrue(tenBitFrame.longPixelBuffer().isReadOnly());
-        assertFrameMetadata(tenBitFrame, 10, AvifPixelFormat.I400, FrameType.INTRA, true, 8L);
+        assertFrameMetadata(tenBitFrame, 10, Av1ChromaFormat.MONOCHROME, FrameType.INTRA, true, 8L);
 
         assertTrue(twelveBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, twelveBitFrame.longPixels().length);
         assertTrue(twelveBitFrame.longPixelBuffer().isReadOnly());
-        assertFrameMetadata(twelveBitFrame, 12, AvifPixelFormat.I400, FrameType.INTRA, false, 9L);
+        assertFrameMetadata(twelveBitFrame, 12, Av1ChromaFormat.MONOCHROME, FrameType.INTRA, false, 9L);
     }
 
     /// Verifies that sequence color range metadata is used when creating public frames.
@@ -89,7 +89,7 @@ final class OutputFrameFactoryTest {
                 13,
                 6,
                 false,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 0,
                 true,
                 true,
@@ -131,21 +131,21 @@ final class OutputFrameFactoryTest {
         assertTrue(frame.longPixelBuffer().isReadOnly());
         assertEquals(5, frame.temporalId());
         assertEquals(3, frame.spatialId());
-        assertFrameMetadata(frame, 12, AvifPixelFormat.I400, FrameType.SWITCH, true, 12L);
+        assertFrameMetadata(frame, 12, Av1ChromaFormat.MONOCHROME, FrameType.SWITCH, true, 12L);
     }
 
     /// Asserts public frame metadata on one runtime-created decoded frame.
     ///
     /// @param frame the runtime-created decoded frame
     /// @param bitDepth the expected decoded bit depth
-    /// @param pixelFormat the expected public chroma layout
+    /// @param chromaFormat the expected public chroma layout
     /// @param frameType the expected AV1 frame type
     /// @param visible the expected visibility flag
     /// @param presentationIndex the expected zero-based presentation index
     private static void assertFrameMetadata(
             DecodedFrame frame,
             int bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex
@@ -153,7 +153,7 @@ final class OutputFrameFactoryTest {
         assertEquals(1, frame.width());
         assertEquals(1, frame.height());
         assertEquals(AvifBitDepth.fromBits(bitDepth), frame.bitDepth());
-        assertEquals(pixelFormat, frame.pixelFormat());
+        assertEquals(chromaFormat, frame.chromaFormat());
         assertEquals(frameType, frame.frameType());
         assertEquals(visible, frame.visible());
         assertEquals(presentationIndex, frame.presentationIndex());

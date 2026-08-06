@@ -16,7 +16,7 @@
 package org.glavo.avif.testutil;
 
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.bytedeco.ffmpeg.avcodec.AVCodec;
 import org.bytedeco.ffmpeg.avcodec.AVCodecContext;
 import org.bytedeco.ffmpeg.avcodec.AVCodecParameters;
@@ -522,9 +522,9 @@ public final class FFmpegAvifReferenceDecoder {
         short[] luma = copyPlane(sourceFrame.data(0), sourceFrame.linesize(0), width, height, sourceMetadata);
         short @Nullable [] chromaU = null;
         short @Nullable [] chromaV = null;
-        if (sourceMetadata.pixelFormat() != AvifPixelFormat.I400) {
-            int chromaWidth = chromaWidth(width, sourceMetadata.pixelFormat());
-            int chromaHeight = chromaHeight(height, sourceMetadata.pixelFormat());
+        if (sourceMetadata.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
+            int chromaWidth = chromaWidth(width, sourceMetadata.chromaFormat());
+            int chromaHeight = chromaHeight(height, sourceMetadata.chromaFormat());
             chromaU = copyPlane(sourceFrame.data(1), sourceFrame.linesize(1), chromaWidth, chromaHeight, sourceMetadata);
             chromaV = copyPlane(sourceFrame.data(2), sourceFrame.linesize(2), chromaWidth, chromaHeight, sourceMetadata);
         }
@@ -686,7 +686,7 @@ public final class FFmpegAvifReferenceDecoder {
         return new FrameMetadata(
                 pixelFormatName,
                 avifBitDepth(pixelFormatName),
-                avifPixelFormat(pixelFormatName)
+                av1ChromaFormat(pixelFormatName)
         );
     }
 
@@ -720,28 +720,28 @@ public final class FFmpegAvifReferenceDecoder {
         throw new IOException("Cannot map FFmpeg pixel format to AVIF bit depth: " + pixelFormatName);
     }
 
-    /// Maps one FFmpeg pixel format name to an AVIF pixel format.
+    /// Maps one FFmpeg pixel format name to an AV1 chroma format.
     ///
     /// @param pixelFormatName the FFmpeg pixel format name
-    /// @return the matching AVIF pixel format
+    /// @return the matching AV1 chroma format
     /// @throws IOException if the chroma layout cannot be mapped
-    private static AvifPixelFormat avifPixelFormat(String pixelFormatName) throws IOException {
+    private static Av1ChromaFormat av1ChromaFormat(String pixelFormatName) throws IOException {
         if (pixelFormatName.startsWith("gray")) {
-            return AvifPixelFormat.I400;
+            return Av1ChromaFormat.MONOCHROME;
         }
         if (pixelFormatName.startsWith("yuv420") || pixelFormatName.startsWith("yuva420")
                 || pixelFormatName.startsWith("yuvj420")) {
-            return AvifPixelFormat.I420;
+            return Av1ChromaFormat.YUV420;
         }
         if (pixelFormatName.startsWith("yuv422") || pixelFormatName.startsWith("yuva422")
                 || pixelFormatName.startsWith("yuvj422")) {
-            return AvifPixelFormat.I422;
+            return Av1ChromaFormat.YUV422;
         }
         if (pixelFormatName.startsWith("yuv444") || pixelFormatName.startsWith("yuva444")
                 || pixelFormatName.startsWith("yuvj444")) {
-            return AvifPixelFormat.I444;
+            return Av1ChromaFormat.YUV444;
         }
-        throw new IOException("Cannot map FFmpeg pixel format to AVIF chroma layout: " + pixelFormatName);
+        throw new IOException("Cannot map FFmpeg pixel format to AV1 chroma format: " + pixelFormatName);
     }
 
     /// Maps one FFmpeg color-space id to the matching swscale matrix id.
@@ -897,15 +897,15 @@ public final class FFmpegAvifReferenceDecoder {
                     tileGrid.verticalOffset(tile)
             );
 
-            if (sourceMetadata.pixelFormat() != AvifPixelFormat.I400) {
+            if (sourceMetadata.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
                 if (chromaU == null || chromaV == null) {
-                    int chromaSize = chromaWidth(tileGrid.width, sourceMetadata.pixelFormat())
-                            * chromaHeight(tileGrid.height, sourceMetadata.pixelFormat());
+                    int chromaSize = chromaWidth(tileGrid.width, sourceMetadata.chromaFormat())
+                            * chromaHeight(tileGrid.height, sourceMetadata.chromaFormat());
                     chromaU = new short[chromaSize];
                     chromaV = new short[chromaSize];
                 }
-                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaU, sourceMetadata.pixelFormat(), true);
-                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaV, sourceMetadata.pixelFormat(), false);
+                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaU, sourceMetadata.chromaFormat(), true);
+                copyChromaPlaneTile(tilePlanes, tileGrid, tile, chromaV, sourceMetadata.chromaFormat(), false);
             }
         }
 
@@ -938,10 +938,10 @@ public final class FFmpegAvifReferenceDecoder {
             return expected;
         }
         if (expected.bitDepth() == actual.bitDepth()) {
-            if (expected.pixelFormat() == AvifPixelFormat.I400 && actual.pixelFormat() != AvifPixelFormat.I400) {
+            if (expected.chromaFormat() == Av1ChromaFormat.MONOCHROME && actual.chromaFormat() != Av1ChromaFormat.MONOCHROME) {
                 return actual;
             }
-            if (expected.pixelFormat() != AvifPixelFormat.I400 && actual.pixelFormat() == AvifPixelFormat.I400) {
+            if (expected.chromaFormat() != Av1ChromaFormat.MONOCHROME && actual.chromaFormat() == Av1ChromaFormat.MONOCHROME) {
                 return expected;
             }
         }
@@ -990,22 +990,22 @@ public final class FFmpegAvifReferenceDecoder {
     /// @param tileGrid the tile-grid metadata
     /// @param tile the tile index
     /// @param destination the destination chroma plane
-    /// @param pixelFormat the composed grid pixel format
+    /// @param chromaFormat the composed grid chroma format
     /// @param chromaU whether to copy chroma U instead of chroma V
     private static void copyChromaPlaneTile(
             SourcePlanes tilePlanes,
             TileGridReference tileGrid,
             int tile,
             short[] destination,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean chromaU
     ) {
-        int destWidth = chromaWidth(tileGrid.width, pixelFormat);
-        int destHeight = chromaHeight(tileGrid.height, pixelFormat);
-        int sourceWidth = chromaWidth(tilePlanes.width, pixelFormat);
-        int sourceHeight = chromaHeight(tilePlanes.height, pixelFormat);
-        int offsetX = chromaHorizontalOffset(tileGrid.horizontalOffset(tile), pixelFormat);
-        int offsetY = chromaVerticalOffset(tileGrid.verticalOffset(tile), pixelFormat);
+        int destWidth = chromaWidth(tileGrid.width, chromaFormat);
+        int destHeight = chromaHeight(tileGrid.height, chromaFormat);
+        int sourceWidth = chromaWidth(tilePlanes.width, chromaFormat);
+        int sourceHeight = chromaHeight(tilePlanes.height, chromaFormat);
+        int offsetX = chromaHorizontalOffset(tileGrid.horizontalOffset(tile), chromaFormat);
+        int offsetY = chromaVerticalOffset(tileGrid.verticalOffset(tile), chromaFormat);
         short @Nullable [] source = chromaU ? tilePlanes.chromaU : tilePlanes.chromaV;
         if (source == null) {
             fillPlaneTile(
@@ -1127,24 +1127,24 @@ public final class FFmpegAvifReferenceDecoder {
     /// Returns a chroma-plane X offset for one luma-plane tile offset.
     ///
     /// @param lumaOffset the luma-plane X offset
-    /// @param pixelFormat the source pixel format
+    /// @param chromaFormat the source chroma format
     /// @return the chroma-plane X offset
-    private static int chromaHorizontalOffset(int lumaOffset, AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I444 -> lumaOffset;
-            case I420, I422 -> Math.floorDiv(lumaOffset, 2);
+    private static int chromaHorizontalOffset(int lumaOffset, Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV444 -> lumaOffset;
+            case YUV420, YUV422 -> Math.floorDiv(lumaOffset, 2);
         };
     }
 
     /// Returns a chroma-plane Y offset for one luma-plane tile offset.
     ///
     /// @param lumaOffset the luma-plane Y offset
-    /// @param pixelFormat the source pixel format
+    /// @param chromaFormat the source chroma format
     /// @return the chroma-plane Y offset
-    private static int chromaVerticalOffset(int lumaOffset, AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I422, I444 -> lumaOffset;
-            case I420 -> Math.floorDiv(lumaOffset, 2);
+    private static int chromaVerticalOffset(int lumaOffset, Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV422, YUV444 -> lumaOffset;
+            case YUV420 -> Math.floorDiv(lumaOffset, 2);
         };
     }
 
@@ -1184,27 +1184,27 @@ public final class FFmpegAvifReferenceDecoder {
         return selectedIndex;
     }
 
-    /// Returns the chroma plane width for one luma width and AVIF pixel format.
+    /// Returns the chroma plane width for one luma width and AV1 chroma format.
     ///
     /// @param lumaWidth the luma width in samples
-    /// @param pixelFormat the AVIF pixel format
+    /// @param chromaFormat the AV1 chroma format
     /// @return the chroma plane width in samples
-    private static int chromaWidth(int lumaWidth, AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I444 -> lumaWidth;
-            case I420, I422 -> (lumaWidth + 1) >> 1;
+    private static int chromaWidth(int lumaWidth, Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV444 -> lumaWidth;
+            case YUV420, YUV422 -> (lumaWidth + 1) >> 1;
         };
     }
 
-    /// Returns the chroma plane height for one luma height and AVIF pixel format.
+    /// Returns the chroma plane height for one luma height and AV1 chroma format.
     ///
     /// @param lumaHeight the luma height in samples
-    /// @param pixelFormat the AVIF pixel format
+    /// @param chromaFormat the AV1 chroma format
     /// @return the chroma plane height in samples
-    private static int chromaHeight(int lumaHeight, AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I422, I444 -> lumaHeight;
-            case I420 -> (lumaHeight + 1) >> 1;
+    private static int chromaHeight(int lumaHeight, Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV422, YUV444 -> lumaHeight;
+            case YUV420 -> (lumaHeight + 1) >> 1;
         };
     }
 
@@ -1587,14 +1587,14 @@ public final class FFmpegAvifReferenceDecoder {
         ///
         /// @return the chroma plane width
         public int chromaWidth() {
-            return FFmpegAvifReferenceDecoder.chromaWidth(width, sourceMetadata.pixelFormat());
+            return FFmpegAvifReferenceDecoder.chromaWidth(width, sourceMetadata.chromaFormat());
         }
 
         /// Returns the chroma plane height.
         ///
         /// @return the chroma plane height
         public int chromaHeight() {
-            return FFmpegAvifReferenceDecoder.chromaHeight(height, sourceMetadata.pixelFormat());
+            return FFmpegAvifReferenceDecoder.chromaHeight(height, sourceMetadata.chromaFormat());
         }
     }
 
@@ -1602,8 +1602,8 @@ public final class FFmpegAvifReferenceDecoder {
     ///
     /// @param pixelFormatName the FFmpeg source pixel format name
     /// @param bitDepth the normalized AVIF bit depth
-    /// @param pixelFormat the normalized AVIF pixel format
+    /// @param chromaFormat the normalized AV1 chroma format
     @NotNullByDefault
-    public record FrameMetadata(String pixelFormatName, AvifBitDepth bitDepth, AvifPixelFormat pixelFormat) {
+    public record FrameMetadata(String pixelFormatName, AvifBitDepth bitDepth, Av1ChromaFormat chromaFormat) {
     }
 }

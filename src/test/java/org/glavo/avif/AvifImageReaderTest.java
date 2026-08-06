@@ -347,7 +347,7 @@ final class AvifImageReaderTest {
             assertEquals(64, intFrame.width());
             assertEquals(64, intFrame.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
-            assertEquals(AvifPixelFormat.I420, intFrame.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV420, intFrame.chromaFormat());
             assertEquals(0, intFrame.frameIndex());
             assertEquals(AvifRgbOutputMode.ARGB_8888, intFrame.rgbOutputMode());
             assertTrue(intFrame.hasIntPixelBuffer());
@@ -470,7 +470,7 @@ final class AvifImageReaderTest {
             AvifPlanes planes = reader.readRawColorPlanes(0);
 
             assertEquals(AvifBitDepth.EIGHT_BITS, planes.bitDepth());
-            assertEquals(AvifPixelFormat.I420, planes.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV420, planes.chromaFormat());
             assertEquals(64, planes.codedWidth());
             assertEquals(64, planes.codedHeight());
             assertEquals(64, planes.renderWidth());
@@ -518,7 +518,7 @@ final class AvifImageReaderTest {
             assertEquals(1, info.width());
             assertEquals(1, info.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, info.bitDepth());
-            assertEquals(AvifPixelFormat.I444, info.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV444, info.chromaFormat());
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
@@ -538,7 +538,7 @@ final class AvifImageReaderTest {
             assertEquals(1, intFrame.width());
             assertEquals(1, intFrame.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
-            assertEquals(AvifPixelFormat.I444, intFrame.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV444, intFrame.chromaFormat());
 
             int[] pixels = intFrame.intPixels();
             assertEquals(1, pixels.length);
@@ -675,7 +675,7 @@ final class AvifImageReaderTest {
             assertTrue(gainMapInfo.gainMapWidth() > 0);
             assertTrue(gainMapInfo.gainMapHeight() > 0);
             assertNotNull(gainMapInfo.gainMapBitDepth());
-            assertNotNull(gainMapInfo.gainMapPixelFormat());
+            assertNotNull(gainMapInfo.gainMapChromaFormat());
             AvifColorInfo toneMappedColorInfo = gainMapInfo.toneMappedColorInfo();
             assertNotNull(toneMappedColorInfo);
             assertEquals(1, toneMappedColorInfo.colorPrimaries());
@@ -733,7 +733,7 @@ final class AvifImageReaderTest {
             AvifPlanes gainMapPlanes = reader.readRawGainMapPlanes(0);
             assertNotNull(gainMapPlanes);
             assertEquals(gainMapInfo.gainMapBitDepth(), gainMapPlanes.bitDepth());
-            assertEquals(gainMapInfo.gainMapPixelFormat(), gainMapPlanes.pixelFormat());
+            assertEquals(gainMapInfo.gainMapChromaFormat(), gainMapPlanes.chromaFormat());
             assertEquals(gainMapInfo.gainMapWidth(), gainMapPlanes.codedWidth());
             assertEquals(gainMapInfo.gainMapHeight(), gainMapPlanes.codedHeight());
             assertTrue(gainMapPlanes.lumaPlane().sampleBuffer().isReadOnly());
@@ -753,7 +753,7 @@ final class AvifImageReaderTest {
             AvifPlanes gainMapPlanes = reader.readRawGainMapPlanes(0);
             assertNotNull(gainMapPlanes);
             assertEquals(gainMapInfo.gainMapBitDepth(), gainMapPlanes.bitDepth());
-            assertEquals(gainMapInfo.gainMapPixelFormat(), gainMapPlanes.pixelFormat());
+            assertEquals(gainMapInfo.gainMapChromaFormat(), gainMapPlanes.chromaFormat());
             assertEquals(gainMapInfo.gainMapWidth(), gainMapPlanes.codedWidth());
             assertEquals(gainMapInfo.gainMapHeight(), gainMapPlanes.codedHeight());
             assertTrue(gainMapPlanes.lumaPlane().sampleBuffer().isReadOnly());
@@ -870,7 +870,7 @@ final class AvifImageReaderTest {
             assertEquals(baseFrame.width(), toneMappedFrame.width());
             assertEquals(baseFrame.height(), toneMappedFrame.height());
             assertEquals(baseFrame.bitDepth(), toneMappedFrame.bitDepth());
-            assertEquals(baseFrame.pixelFormat(), toneMappedFrame.pixelFormat());
+            assertEquals(baseFrame.chromaFormat(), toneMappedFrame.chromaFormat());
             assertEquals(baseFrame.rgbOutputMode(), toneMappedFrame.rgbOutputMode());
             assertTrue(hasRgbDifferenceWithSameAlpha(baseFrame.intPixelBuffer(), toneMappedFrame.intPixelBuffer()));
         }
@@ -914,7 +914,7 @@ final class AvifImageReaderTest {
             AvifPlanes depthPlanes = reader.readRawDepthPlanes(0);
             assertNotNull(depthPlanes);
             assertEquals(depthInfo.bitDepth(), depthPlanes.bitDepth());
-            assertEquals(depthInfo.pixelFormat(), depthPlanes.pixelFormat());
+            assertEquals(depthInfo.chromaFormat(), depthPlanes.chromaFormat());
             assertEquals(depthInfo.width(), depthPlanes.codedWidth());
             assertEquals(depthInfo.height(), depthPlanes.codedHeight());
             assertEquals(depthInfo.width(), depthPlanes.renderWidth());
@@ -1464,7 +1464,7 @@ final class AvifImageReaderTest {
             AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertEquals(AvifBitDepth.EIGHT_BITS, alphaPlanes.bitDepth());
-            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, alphaPlanes.chromaFormat());
             assertEquals(150, alphaPlanes.codedWidth());
             assertEquals(150, alphaPlanes.codedHeight());
             assertEquals(150, alphaPlanes.renderWidth());
@@ -1490,7 +1490,7 @@ final class AvifImageReaderTest {
             AvifPlanes depthPlanes = reader.readRawDepthPlanes(0);
             assertNotNull(depthPlanes);
             assertEquals(AvifBitDepth.EIGHT_BITS, depthPlanes.bitDepth());
-            assertEquals(AvifPixelFormat.I400, depthPlanes.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, depthPlanes.chromaFormat());
             assertEquals(150, depthPlanes.codedWidth());
             assertEquals(150, depthPlanes.codedHeight());
             assertEquals(150, depthPlanes.renderWidth());
@@ -1976,7 +1976,7 @@ final class AvifImageReaderTest {
             AvifPlanes planes = reader.readRawColorPlanes(0);
 
             assertEquals(AvifBitDepth.EIGHT_BITS, planes.bitDepth());
-            assertEquals(AvifPixelFormat.I420, planes.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV420, planes.chromaFormat());
             assertEquals(1024, planes.codedWidth());
             assertEquals(770, planes.codedHeight());
             assertEquals(1024, planes.renderWidth());
@@ -2007,7 +2007,7 @@ final class AvifImageReaderTest {
             AvifPlanes planes = reader.readRawColorPlanes(0);
 
             assertEquals(AvifBitDepth.EIGHT_BITS, planes.bitDepth());
-            assertEquals(AvifPixelFormat.I444, planes.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV444, planes.chromaFormat());
             assertEquals(80, planes.codedWidth());
             assertEquals(80, planes.codedHeight());
 
@@ -2037,7 +2037,7 @@ final class AvifImageReaderTest {
 
             AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
-            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, alphaPlanes.chromaFormat());
             assertEquals(info.width(), alphaPlanes.codedWidth());
             assertEquals(info.height(), alphaPlanes.codedHeight());
             assertEquals(info.width(), alphaPlanes.renderWidth());
@@ -2063,7 +2063,7 @@ final class AvifImageReaderTest {
             AvifPlanes depthPlanes = reader.readRawDepthPlanes(0);
             assertNotNull(depthPlanes);
             assertEquals(AvifBitDepth.TEN_BITS, depthPlanes.bitDepth());
-            assertEquals(AvifPixelFormat.I400, depthPlanes.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, depthPlanes.chromaFormat());
             assertEquals(info.width(), depthPlanes.codedWidth());
             assertEquals(info.height(), depthPlanes.codedHeight());
             assertEquals(info.width(), depthPlanes.renderWidth());
@@ -2100,7 +2100,7 @@ final class AvifImageReaderTest {
             assertTrue(auxiliaryImage.width() > 0);
             assertTrue(auxiliaryImage.height() > 0);
             assertNotNull(auxiliaryImage.bitDepth());
-            assertNotNull(auxiliaryImage.pixelFormat());
+            assertNotNull(auxiliaryImage.chromaFormat());
             auxiliaryImages[0] = new AvifAuxiliaryImageInfo(999, "test", "mime", -1, -1, null, null);
             assertEquals(auxiliaryImage.itemId(), info.auxiliaryImages()[0].itemId());
 
@@ -2138,12 +2138,12 @@ final class AvifImageReaderTest {
             assertEquals(64, auxiliaryImage.width());
             assertEquals(64, auxiliaryImage.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, auxiliaryImage.bitDepth());
-            assertEquals(AvifPixelFormat.I400, auxiliaryImage.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, auxiliaryImage.chromaFormat());
 
             AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertEquals(AvifBitDepth.EIGHT_BITS, alphaPlanes.bitDepth());
-            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, alphaPlanes.chromaFormat());
             assertEquals(64, alphaPlanes.codedWidth());
             assertEquals(64, alphaPlanes.codedHeight());
             assertFalse(alphaPlanes.hasChroma());
@@ -2267,7 +2267,7 @@ final class AvifImageReaderTest {
             assertEquals(info.width(), alphaInfo.width());
             assertEquals(info.height(), alphaInfo.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, alphaInfo.bitDepth());
-            assertEquals(AvifPixelFormat.I400, alphaInfo.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, alphaInfo.chromaFormat());
 
             AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
@@ -4336,7 +4336,7 @@ final class AvifImageReaderTest {
         return fullBox("ispe", 0, 0, u32(width), u32(height));
     }
 
-    /// Creates an `av1C` property for the reduced `8-bit I420` AV1 fixture.
+    /// Creates an `av1C` property for the reduced `8-bit YUV420` AV1 fixture.
     ///
     /// @return the AV1 codec configuration property bytes
     private static byte[] av1ConfigProperty() {
@@ -4424,14 +4424,14 @@ final class AvifImageReaderTest {
         return output.toByteArray();
     }
 
-    /// Creates a reduced `64x64 8-bit I420` still-picture sequence header payload.
+    /// Creates a reduced `64x64 8-bit YUV420` still-picture sequence header payload.
     ///
     /// @return the reduced still-picture sequence header payload
     private static byte[] reducedStillPictureSequenceHeaderPayload() {
         return reducedStillPictureSequenceHeaderPayload(64, 64);
     }
 
-    /// Creates a reduced `8-bit I420` still-picture sequence header payload with custom dimensions.
+    /// Creates a reduced `8-bit YUV420` still-picture sequence header payload with custom dimensions.
     ///
     /// @param width the maximum frame width in `[1, 1024]`
     /// @param height the maximum frame height in `[1, 512]`
@@ -4462,7 +4462,7 @@ final class AvifImageReaderTest {
         return writer.toByteArray();
     }
 
-    /// Writes the reduced `8-bit I420` color configuration bits.
+    /// Writes the reduced `8-bit YUV420` color configuration bits.
     ///
     /// @param writer the destination bit writer
     private static void writeReducedStillPictureColorConfig(BitWriter writer) {

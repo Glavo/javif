@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.model.BlockSize;
@@ -63,7 +63,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessPreservesDecodedSamplesWhenInLoopFiltersAreInactive() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 new int[][]{
                         {120, 121, 122, 123, 124, 125, 126, 127},
                         {128, 129, 130, 131, 132, 133, 134, 135},
@@ -88,7 +88,7 @@ final class FramePostprocessorTest {
                 }
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -125,7 +125,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveCdefFromDecodedBlockIndex() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -140,7 +140,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -176,7 +176,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessUsesDefaultCdefIndexWhenBlockIndexIsOmitted() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -191,7 +191,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -227,7 +227,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessSkipsFullySkippedCdefUnit() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -242,7 +242,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -279,7 +279,7 @@ final class FramePostprocessorTest {
     void postprocessAppliesCdefToHighBitDepthSamples() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 10,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {512, 512, 512, 512, 512, 512, 512, 512},
                         {512, 512, 512, 512, 512, 512, 512, 512},
@@ -294,7 +294,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -332,7 +332,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessRejectsActiveCdefWithoutDecodedBlockIndex() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -347,7 +347,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(6, 0, new int[]{60}, new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -374,7 +374,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveLoopFilterFromDecodedEdges() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {40, 40, 40, 40, 44, 44, 44, 44},
                         {40, 40, 40, 40, 44, 44, 44, 44},
@@ -389,7 +389,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{12, 0},
                         0,
@@ -428,7 +428,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessDoesNotApplyLoopFilterAwayFromDecodedEdges() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {40, 40, 40, 40, 40, 40, 40, 40},
                         {40, 40, 40, 40, 40, 40, 40, 40},
@@ -443,7 +443,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{16, 16},
                         0,
@@ -482,13 +482,13 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesEightTapLumaLoopFilterOnFlatEdges() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 repeatedRows(new int[]{40, 40, 40, 40, 40, 40, 40, 40, 48, 48, 48, 48, 48, 48, 48, 48}, 8),
                 null,
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 16,
                 8,
                 new FrameHeader.LoopFilterInfo(
@@ -534,13 +534,13 @@ final class FramePostprocessorTest {
     @Test
     void postprocessExtendsFrameEdgeSamplesForLoopFiltering() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 repeatedRows(new int[]{164, 164, 164, 164, 164, 164, 165, 165, 162, 162, 162}, 8),
                 null,
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{7, 0},
                         0,
@@ -584,7 +584,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesSixteenTapLumaLoopFilterOnFlatEdges() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 repeatedRows(
                         new int[]{
                                 40, 40, 40, 40, 40, 40, 40, 40,
@@ -598,7 +598,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 32,
                 16,
                 new FrameHeader.LoopFilterInfo(
@@ -649,14 +649,14 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesSixTapChromaLoopFilterOnFlatEdges() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 repeatedRows(new int[]{100, 100, 100, 100, 100, 100, 100, 100,
                         100, 100, 100, 100, 100, 100, 100, 100}, 8),
                 repeatedRows(new int[]{60, 60, 60, 60, 60, 60, 60, 60, 68, 68, 68, 68, 68, 68, 68, 68}, 8),
                 repeatedRows(new int[]{90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90}, 8)
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         16,
@@ -716,7 +716,7 @@ final class FramePostprocessorTest {
         }
         DecodedPlanes decodedPlanes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 16,
                 5,
                 16,
@@ -726,7 +726,7 @@ final class FramePostprocessorTest {
                 new DecodedPlane(8, 3, 8, chromaVSamples)
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 16,
                 5,
                 new FrameHeader.LoopFilterInfo(
@@ -773,7 +773,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessRejectsActiveLoopFilter() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32},
                         {32, 32, 32, 32},
@@ -784,7 +784,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{4, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -811,7 +811,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveWienerRestorationFromDecodedUnit() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -826,7 +826,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -870,7 +870,7 @@ final class FramePostprocessorTest {
         DecodedPlane lumaPlane = new DecodedPlane(5, 5, 8, samples);
         DecodedPlanes decodedPlanes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 5,
                 5,
                 5,
@@ -884,7 +884,7 @@ final class FramePostprocessorTest {
                 {2, -5, 11}
         };
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -930,7 +930,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessAppliesActiveSelfGuidedRestorationFromDecodedUnit() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32, 32, 32, 32, 32},
                         {32, 32, 32, 32, 32, 32, 32, 32},
@@ -945,7 +945,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -986,7 +986,7 @@ final class FramePostprocessorTest {
         DecodedPlane lumaPlane = new DecodedPlane(5, 5, 8, samples);
         DecodedPlanes decodedPlanes = new DecodedPlanes(
                 10,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 5,
                 5,
                 5,
@@ -997,7 +997,7 @@ final class FramePostprocessorTest {
         );
         int @Unmodifiable [] projectionCoefficients = new int[]{31, 31};
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(
                         new int[]{0, 0},
                         0,
@@ -1051,7 +1051,7 @@ final class FramePostprocessorTest {
             }
         }
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 sourceSamples,
                 null,
                 null
@@ -1061,7 +1061,7 @@ final class FramePostprocessorTest {
                 {2, -5, 11}
         };
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[8], new int[2]),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -1103,14 +1103,14 @@ final class FramePostprocessorTest {
             }
         }
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 sourceSamples,
                 null,
                 null
         );
         int @Unmodifiable [] projectionCoefficients = new int[]{31, 31};
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[8], new int[2]),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -1145,7 +1145,7 @@ final class FramePostprocessorTest {
     @Test
     void postprocessRejectsActiveRestoration() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {32, 32, 32, 32},
                         {32, 32, 32, 32},
@@ -1156,7 +1156,7 @@ final class FramePostprocessorTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(

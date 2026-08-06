@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.decode.Av1DecoderConfig;
 import org.glavo.avif.decode.Av1ImageReader;
 import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
@@ -118,7 +118,7 @@ final class CdefApplierTest {
         }
         DecodedPlanes baselinePlanes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 7,
                 8,
                 7,
@@ -129,7 +129,7 @@ final class CdefApplierTest {
         );
         DecodedPlanes paddedPlanes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 7,
                 8,
                 7,
@@ -140,7 +140,7 @@ final class CdefApplierTest {
         );
         FrameHeader.CdefInfo cdef = new FrameHeader.CdefInfo(6, 0, new int[]{3}, new int[0]);
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 7,
                 8,
                 new FrameHeader.LoopFilterInfo(

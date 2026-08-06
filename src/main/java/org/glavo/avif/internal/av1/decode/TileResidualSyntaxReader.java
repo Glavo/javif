@@ -293,23 +293,23 @@ public final class TileResidualSyntaxReader {
         }
     }
 
-    /// Returns the horizontal chroma subsampling shift used by the active sequence pixel format.
+    /// Returns the horizontal chroma subsampling shift used by the active sequence chroma format.
     ///
-    /// @return the horizontal chroma subsampling shift used by the active sequence pixel format
+    /// @return the horizontal chroma subsampling shift used by the active sequence chroma format
     private int chromaSubsamplingX() {
-        return switch (tileContext.sequenceHeader().colorConfig().pixelFormat()) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+        return switch (tileContext.sequenceHeader().colorConfig().chromaFormat()) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
-    /// Returns the vertical chroma subsampling shift used by the active sequence pixel format.
+    /// Returns the vertical chroma subsampling shift used by the active sequence chroma format.
     ///
-    /// @return the vertical chroma subsampling shift used by the active sequence pixel format
+    /// @return the vertical chroma subsampling shift used by the active sequence chroma format
     private int chromaSubsamplingY() {
-        return switch (tileContext.sequenceHeader().colorConfig().pixelFormat()) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+        return switch (tileContext.sequenceHeader().colorConfig().chromaFormat()) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 

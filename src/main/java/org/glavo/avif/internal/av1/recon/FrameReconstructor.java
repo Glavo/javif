@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -387,7 +387,7 @@ public final class FrameReconstructor {
         SequenceHeader sequenceHeader = assembly.sequenceHeader();
         FrameHeader frameHeader = assembly.frameHeader();
         FrameHeader.FrameSize frameSize = frameHeader.frameSize();
-        AvifPixelFormat pixelFormat = sequenceHeader.colorConfig().pixelFormat();
+        Av1ChromaFormat chromaFormat = sequenceHeader.colorConfig().chromaFormat();
 
         validateFrameConfiguration(sequenceHeader, frameHeader);
         if (selectedTileIndex < -1 || selectedTileIndex >= checkedSyntaxDecodeResult.tileCount()) {
@@ -402,7 +402,7 @@ public final class FrameReconstructor {
                 ? tileSampleBounds(
                         assembly,
                         selectedTileIndex,
-                        pixelFormat,
+                        chromaFormat,
                         frameBoundaryWidth,
                         frameBoundaryHeight
                 )
@@ -426,7 +426,7 @@ public final class FrameReconstructor {
                 storageEndY - storageStartY
         );
         @Nullable MutablePlaneBuffer chromaUPlane = createChromaPlane(
-                pixelFormat,
+                chromaFormat,
                 alignedLumaWidth,
                 alignedLumaHeight,
                 bitDepth,
@@ -436,7 +436,7 @@ public final class FrameReconstructor {
                 storageEndY
         );
         @Nullable MutablePlaneBuffer chromaVPlane = createChromaPlane(
-                pixelFormat,
+                chromaFormat,
                 alignedLumaWidth,
                 alignedLumaHeight,
                 bitDepth,
@@ -462,7 +462,7 @@ public final class FrameReconstructor {
             TileSampleBounds tileBounds = tileSampleBounds(
                     assembly,
                     tileIndex,
-                    pixelFormat,
+                    chromaFormat,
                     frameBoundaryWidth,
                     frameBoundaryHeight
             );
@@ -473,7 +473,7 @@ public final class FrameReconstructor {
                         lumaPlane,
                         chromaUPlane,
                         chromaVPlane,
-                        pixelFormat,
+                        chromaFormat,
                         frameHeader,
                         sequenceHeader.features().orderHintBits(),
                         sequenceHeader.features().intraEdgeFilter(),
@@ -491,8 +491,8 @@ public final class FrameReconstructor {
         int outputLumaHeight = selectedTileBounds != null
                 ? selectedTileBounds.lumaEndY() - selectedTileBounds.lumaStartY()
                 : frameSize.height();
-        int outputChromaWidth = chromaWidth(pixelFormat, outputLumaWidth);
-        int outputChromaHeight = chromaHeight(pixelFormat, outputLumaHeight);
+        int outputChromaWidth = chromaWidth(chromaFormat, outputLumaWidth);
+        int outputChromaHeight = chromaHeight(chromaFormat, outputLumaHeight);
         DecodedPlane decodedLumaPlane = lumaPlane.takeStoredDecodedPlane(outputLumaWidth, outputLumaHeight);
         @Nullable DecodedPlane decodedChromaUPlane = chromaUPlane != null
                 ? chromaUPlane.takeStoredDecodedPlane(outputChromaWidth, outputChromaHeight)
@@ -503,7 +503,7 @@ public final class FrameReconstructor {
 
         return new DecodedPlanes(
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 outputLumaWidth,
                 outputLumaHeight,
                 selectedTileBounds != null ? outputLumaWidth : frameSize.renderWidth(),
@@ -518,14 +518,14 @@ public final class FrameReconstructor {
     ///
     /// @param assembly the frame assembly that owns tile geometry
     /// @param tileIndex the zero-based tile index in frame order
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param lumaWidth the MI-grid-aligned luma frame width
     /// @param lumaHeight the MI-grid-aligned luma frame height
     /// @return the sample boundaries for one frame tile
     private TileSampleBounds tileSampleBounds(
             FrameAssembly assembly,
             int tileIndex,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int lumaWidth,
             int lumaHeight
     ) {
@@ -545,20 +545,20 @@ public final class FrameReconstructor {
                 lumaStartY,
                 lumaEndX,
                 lumaEndY,
-                chromaWidth(pixelFormat, lumaStartX),
-                chromaHeight(pixelFormat, lumaStartY),
-                chromaWidth(pixelFormat, lumaEndX),
-                chromaHeight(pixelFormat, lumaEndY)
+                chromaWidth(chromaFormat, lumaStartX),
+                chromaHeight(chromaFormat, lumaStartY),
+                chromaWidth(chromaFormat, lumaEndX),
+                chromaHeight(chromaFormat, lumaEndY)
         );
     }
 
     /// Returns full-frame sample boundaries for callers that reconstruct a standalone tree.
     ///
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param lumaWidth the internal luma plane width
     /// @param lumaHeight the internal luma plane height
     /// @return full-frame sample boundaries for callers that reconstruct a standalone tree
-    private TileSampleBounds fullFrameSampleBounds(AvifPixelFormat pixelFormat, int lumaWidth, int lumaHeight) {
+    private TileSampleBounds fullFrameSampleBounds(Av1ChromaFormat chromaFormat, int lumaWidth, int lumaHeight) {
         return new TileSampleBounds(
                 0,
                 0,
@@ -566,8 +566,8 @@ public final class FrameReconstructor {
                 lumaHeight,
                 0,
                 0,
-                chromaWidth(pixelFormat, lumaWidth),
-                chromaHeight(pixelFormat, lumaHeight)
+                chromaWidth(chromaFormat, lumaWidth),
+                chromaHeight(chromaFormat, lumaHeight)
         );
     }
 
@@ -587,13 +587,13 @@ public final class FrameReconstructor {
                             + sequenceHeader.colorConfig().bitDepth()
             );
         }
-        if (sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I400
-                && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I420
-                && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I422
-                && sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I444) {
+        if (sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.MONOCHROME
+                && sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.YUV420
+                && sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.YUV422
+                && sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.YUV444) {
             throw new IllegalStateException(
-                    "Pixel reconstruction requires an I400, I420, I422, or I444 pixel format: "
-                            + sequenceHeader.colorConfig().pixelFormat()
+                    "Pixel reconstruction requires an MONOCHROME, YUV420, YUV422, or YUV444 chroma format: "
+                            + sequenceHeader.colorConfig().chromaFormat()
             );
         }
         if (frameHeader.frameType() != FrameType.KEY && frameHeader.frameType() != FrameType.INTRA) {
@@ -607,9 +607,9 @@ public final class FrameReconstructor {
         }
     }
 
-    /// Creates one mutable chroma plane for the supplied pixel format, or `null` for monochrome.
+    /// Creates one mutable chroma plane for the supplied chroma format, or `null` for monochrome.
     ///
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param alignedLumaWidth the aligned luma-plane width in samples
     /// @param alignedLumaHeight the aligned luma-plane height in samples
     /// @param bitDepth the decoded sample bit depth
@@ -617,9 +617,9 @@ public final class FrameReconstructor {
     /// @param lumaStorageStartY the inclusive luma storage Y boundary
     /// @param lumaStorageEndX the exclusive luma storage X boundary
     /// @param lumaStorageEndY the exclusive luma storage Y boundary
-    /// @return one mutable chroma plane for the supplied pixel format, or `null` for monochrome
+    /// @return one mutable chroma plane for the supplied chroma format, or `null` for monochrome
     private @Nullable MutablePlaneBuffer createChromaPlane(
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int alignedLumaWidth,
             int alignedLumaHeight,
             int bitDepth,
@@ -628,15 +628,15 @@ public final class FrameReconstructor {
             int lumaStorageEndX,
             int lumaStorageEndY
     ) {
-        int planeWidth = chromaWidth(pixelFormat, alignedLumaWidth);
-        int planeHeight = chromaHeight(pixelFormat, alignedLumaHeight);
-        int originX = chromaWidth(pixelFormat, lumaStorageStartX);
-        int originY = chromaHeight(pixelFormat, lumaStorageStartY);
-        int storageEndX = chromaWidth(pixelFormat, lumaStorageEndX);
-        int storageEndY = chromaHeight(pixelFormat, lumaStorageEndY);
-        return switch (pixelFormat) {
-            case I400 -> null;
-            case I420, I422, I444 -> new MutablePlaneBuffer(
+        int planeWidth = chromaWidth(chromaFormat, alignedLumaWidth);
+        int planeHeight = chromaHeight(chromaFormat, alignedLumaHeight);
+        int originX = chromaWidth(chromaFormat, lumaStorageStartX);
+        int originY = chromaHeight(chromaFormat, lumaStorageStartY);
+        int storageEndX = chromaWidth(chromaFormat, lumaStorageEndX);
+        int storageEndY = chromaHeight(chromaFormat, lumaStorageEndY);
+        return switch (chromaFormat) {
+            case MONOCHROME -> null;
+            case YUV420, YUV422, YUV444 -> new MutablePlaneBuffer(
                     planeWidth,
                     planeHeight,
                     bitDepth,
@@ -677,27 +677,27 @@ public final class FrameReconstructor {
 
     /// Returns the chroma-plane width for one output luma width.
     ///
-    /// @param pixelFormat the active decoded pixel format
+    /// @param chromaFormat the active decoded chroma format
     /// @param lumaWidth the output luma width in samples
     /// @return the chroma-plane width for the supplied luma width
-    private int chromaWidth(AvifPixelFormat pixelFormat, int lumaWidth) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420, I422 -> (lumaWidth + 1) >> 1;
-            case I444 -> lumaWidth;
+    private int chromaWidth(Av1ChromaFormat chromaFormat, int lumaWidth) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420, YUV422 -> (lumaWidth + 1) >> 1;
+            case YUV444 -> lumaWidth;
         };
     }
 
     /// Returns the chroma-plane height for one output luma height.
     ///
-    /// @param pixelFormat the active decoded pixel format
+    /// @param chromaFormat the active decoded chroma format
     /// @param lumaHeight the output luma height in samples
     /// @return the chroma-plane height for the supplied luma height
-    private int chromaHeight(AvifPixelFormat pixelFormat, int lumaHeight) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420 -> (lumaHeight + 1) >> 1;
-            case I422, I444 -> lumaHeight;
+    private int chromaHeight(Av1ChromaFormat chromaFormat, int lumaHeight) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420 -> (lumaHeight + 1) >> 1;
+            case YUV422, YUV444 -> lumaHeight;
         };
     }
 
@@ -930,7 +930,7 @@ public final class FrameReconstructor {
     /// @param lumaPlane the mutable luma plane
     /// @param chromaUPlane the mutable chroma U plane, or `null`
     /// @param chromaVPlane the mutable chroma V plane, or `null`
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
@@ -940,7 +940,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             boolean intraEdgeFilterEnabled,
@@ -951,13 +951,13 @@ public final class FrameReconstructor {
                 lumaPlane,
                 chromaUPlane,
                 chromaVPlane,
-                pixelFormat,
+                chromaFormat,
                 frameHeader,
                 orderHintBits,
                 intraEdgeFilterEnabled,
                 referenceSurfaceSnapshots,
                 DecodedBlockMap.create(new TilePartitionTreeReader.Node[][]{{node}}, lumaPlane.width(), lumaPlane.height()),
-                fullFrameSampleBounds(pixelFormat, lumaPlane.width(), lumaPlane.height()),
+                fullFrameSampleBounds(chromaFormat, lumaPlane.width(), lumaPlane.height()),
                 false
         );
     }
@@ -968,7 +968,7 @@ public final class FrameReconstructor {
     /// @param lumaPlane the mutable luma plane
     /// @param chromaUPlane the mutable chroma U plane, or `null`
     /// @param chromaVPlane the mutable chroma V plane, or `null`
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
@@ -981,7 +981,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             boolean intraEdgeFilterEnabled,
@@ -996,7 +996,7 @@ public final class FrameReconstructor {
                     lumaPlane,
                     chromaUPlane,
                     chromaVPlane,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     orderHintBits,
                     intraEdgeFilterEnabled,
@@ -1015,7 +1015,7 @@ public final class FrameReconstructor {
                     lumaPlane,
                     chromaUPlane,
                     chromaVPlane,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     orderHintBits,
                     intraEdgeFilterEnabled,
@@ -1033,7 +1033,7 @@ public final class FrameReconstructor {
     /// @param lumaPlane the mutable luma plane
     /// @param chromaUPlane the mutable chroma U plane, or `null`
     /// @param chromaVPlane the mutable chroma V plane, or `null`
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence
     /// @param decodedBlockMap the decoded leaf map used by OBMC neighbor lookup
@@ -1044,7 +1044,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer lumaPlane,
             @Nullable MutablePlaneBuffer chromaUPlane,
             @Nullable MutablePlaneBuffer chromaVPlane,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             boolean intraEdgeFilterEnabled,
@@ -1060,7 +1060,7 @@ public final class FrameReconstructor {
                 header,
                 transformLayout,
                 residualLayout,
-                pixelFormat,
+                chromaFormat,
                 lumaPlane.bitDepth(),
                 frameHeader,
                 referenceSurfaceSnapshots
@@ -1079,7 +1079,7 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     header,
                     transformLayout,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader
             );
         } else if (header.intra()) {
@@ -1124,7 +1124,7 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     header,
                     transformLayout,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     orderHintBits,
                     referenceSurfaceSnapshots,
@@ -1138,8 +1138,8 @@ public final class FrameReconstructor {
         }
 
         if (header.hasChroma() && chromaUPlane != null && chromaVPlane != null) {
-            int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-            int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+            int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+            int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
             int chromaX = chromaBlockX(header, chromaSubsamplingX);
             int chromaY = chromaBlockY(header, chromaSubsamplingY);
             int chromaLumaX = chromaLumaBlockX(header, chromaSubsamplingX);
@@ -1155,7 +1155,7 @@ public final class FrameReconstructor {
                             chromaUPlane,
                             chromaVPlane,
                             header,
-                            pixelFormat,
+                            chromaFormat,
                             visibleChromaWidth,
                             visibleChromaHeight
                     );
@@ -1215,9 +1215,9 @@ public final class FrameReconstructor {
                             residualLayout,
                             header,
                             frameHeader,
-                            pixelFormat,
+                            chromaFormat,
                             intraEdgeFilterEnabled,
-                            chromaSmoothEdgeReferences(header, decodedBlockMap, pixelFormat, tileBounds),
+                            chromaSmoothEdgeReferences(header, decodedBlockMap, chromaFormat, tileBounds),
                             tileBounds,
                             strictStdCompliance
                     );
@@ -1231,7 +1231,7 @@ public final class FrameReconstructor {
                         chromaVPlane,
                         residualLayout,
                         frameHeader,
-                        pixelFormat,
+                        chromaFormat,
                         blockQIndex(header, frameHeader),
                         strictStdCompliance
                 );
@@ -1262,17 +1262,17 @@ public final class FrameReconstructor {
     ///
     /// @param header the current decoded block header
     /// @param decodedBlockMap the decoded leaf map used for causal neighbor lookup
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     /// @return whether an adjacent top or left chroma edge comes from a smooth intra predictor
     private boolean chromaSmoothEdgeReferences(
             TileBlockHeaderReader.BlockHeader header,
             DecodedBlockMap decodedBlockMap,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             TileSampleBounds tileBounds
     ) {
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int chromaX4 = chromaX >> 2;
@@ -1340,7 +1340,7 @@ public final class FrameReconstructor {
     /// @param header the decoded block header
     /// @param transformLayout the decoded block transform layout
     /// @param residualLayout the decoded block residual layout
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param bitDepth the decoded sample bit depth of the current frame
     /// @param frameHeader the frame header that owns the block
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
@@ -1348,7 +1348,7 @@ public final class FrameReconstructor {
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
             ResidualLayout residualLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int bitDepth,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
@@ -1361,7 +1361,7 @@ public final class FrameReconstructor {
                 throw new IllegalStateException("intrabc reconstruction does not support compound references");
             }
         }
-        if (header.hasChroma() && pixelFormat == AvifPixelFormat.I400) {
+        if (header.hasChroma() && chromaFormat == Av1ChromaFormat.MONOCHROME) {
             throw new IllegalStateException("Monochrome reconstruction encountered a block with chroma samples");
         }
         if (!header.hasChroma() && residualLayout.hasChromaUnits()) {
@@ -1402,7 +1402,7 @@ public final class FrameReconstructor {
             requireReferenceSurfaceSnapshot(
                     referenceSurfaceSnapshots,
                     frameHeader,
-                    pixelFormat,
+                    chromaFormat,
                     bitDepth,
                     header.referenceFrame0()
             );
@@ -1410,7 +1410,7 @@ public final class FrameReconstructor {
                 requireReferenceSurfaceSnapshot(
                         referenceSurfaceSnapshots,
                         frameHeader,
-                        pixelFormat,
+                        chromaFormat,
                         bitDepth,
                         header.referenceFrame1()
                 );
@@ -1425,7 +1425,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the inter state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
@@ -1437,7 +1437,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int orderHintBits,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
@@ -1453,7 +1453,7 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     header,
                     transformLayout,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     frameLumaWidth,
                     frameLumaHeight,
@@ -1468,7 +1468,7 @@ public final class FrameReconstructor {
                         chromaVPlane,
                         header,
                         transformLayout,
-                        pixelFormat,
+                        chromaFormat,
                         frameHeader,
                         frameLumaWidth,
                         frameLumaHeight,
@@ -1482,7 +1482,7 @@ public final class FrameReconstructor {
                         chromaVPlane,
                         header,
                         transformLayout,
-                        pixelFormat,
+                        chromaFormat,
                         frameHeader,
                         frameLumaWidth,
                         frameLumaHeight,
@@ -1497,7 +1497,7 @@ public final class FrameReconstructor {
                         chromaVPlane,
                         header,
                         transformLayout,
-                        pixelFormat,
+                        chromaFormat,
                         frameHeader,
                         frameLumaWidth,
                         frameLumaHeight,
@@ -1512,7 +1512,7 @@ public final class FrameReconstructor {
                         chromaVPlane,
                         header,
                         transformLayout,
-                        pixelFormat,
+                        chromaFormat,
                         tileBounds
                 );
             }
@@ -1523,7 +1523,7 @@ public final class FrameReconstructor {
                         chromaVPlane,
                         header,
                         transformLayout,
-                        pixelFormat,
+                        chromaFormat,
                         frameHeader,
                         referenceSurfaceSnapshots,
                         decodedBlockMap,
@@ -1540,7 +1540,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the OBMC state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
@@ -1551,7 +1551,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap,
@@ -1572,7 +1572,7 @@ public final class FrameReconstructor {
                 0,
                 0,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 referenceSurfaceSnapshots,
                 decodedBlockMap,
                 tileBounds
@@ -1588,7 +1588,7 @@ public final class FrameReconstructor {
                 0,
                 0,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 referenceSurfaceSnapshots,
                 decodedBlockMap,
                 tileBounds
@@ -1598,8 +1598,8 @@ public final class FrameReconstructor {
             return;
         }
 
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
@@ -1615,7 +1615,7 @@ public final class FrameReconstructor {
                 chromaSubsamplingX,
                 chromaSubsamplingY,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 referenceSurfaceSnapshots,
                 decodedBlockMap,
                 tileBounds
@@ -1631,7 +1631,7 @@ public final class FrameReconstructor {
                 chromaSubsamplingX,
                 chromaSubsamplingY,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 referenceSurfaceSnapshots,
                 decodedBlockMap,
                 tileBounds
@@ -1647,7 +1647,7 @@ public final class FrameReconstructor {
                 chromaSubsamplingX,
                 chromaSubsamplingY,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 referenceSurfaceSnapshots,
                 decodedBlockMap,
                 tileBounds
@@ -1663,7 +1663,7 @@ public final class FrameReconstructor {
                 chromaSubsamplingX,
                 chromaSubsamplingY,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 referenceSurfaceSnapshots,
                 decodedBlockMap,
                 tileBounds
@@ -1682,7 +1682,7 @@ public final class FrameReconstructor {
     /// @param subsamplingX the horizontal chroma subsampling shift for this plane
     /// @param subsamplingY the vertical chroma subsampling shift for this plane
     /// @param frameHeader the frame header that owns the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
     /// @param tileBounds the tile boundaries that constrain causal neighbor lookup
@@ -1697,7 +1697,7 @@ public final class FrameReconstructor {
             int subsamplingX,
             int subsamplingY,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap,
             TileSampleBounds tileBounds
@@ -1751,7 +1751,7 @@ public final class FrameReconstructor {
                             mask,
                             true,
                             frameHeader,
-                            pixelFormat,
+                            chromaFormat,
                             referenceSurfaceSnapshots
                     );
                     processed++;
@@ -1773,7 +1773,7 @@ public final class FrameReconstructor {
     /// @param subsamplingX the horizontal chroma subsampling shift for this plane
     /// @param subsamplingY the vertical chroma subsampling shift for this plane
     /// @param frameHeader the frame header that owns the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used to find causal neighbors
     /// @param tileBounds the tile boundaries that constrain causal neighbor lookup
@@ -1788,7 +1788,7 @@ public final class FrameReconstructor {
             int subsamplingX,
             int subsamplingY,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap,
             TileSampleBounds tileBounds
@@ -1837,7 +1837,7 @@ public final class FrameReconstructor {
                             mask,
                             false,
                             frameHeader,
-                            pixelFormat,
+                            chromaFormat,
                             referenceSurfaceSnapshots
                     );
                     processed++;
@@ -1861,7 +1861,7 @@ public final class FrameReconstructor {
     /// @param mask the OBMC mask for the varying axis
     /// @param above whether the region is blended from an above neighbor
     /// @param frameHeader the frame header that owns the current block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     private void blendObmcRegion(
             MutablePlaneBuffer destinationPlane,
@@ -1876,13 +1876,13 @@ public final class FrameReconstructor {
             int[] mask,
             boolean above,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots
     ) {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
                 referenceSurfaceSnapshots,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 destinationPlane.bitDepth(),
                 neighborHeader.referenceFrame0()
         );
@@ -1901,8 +1901,8 @@ public final class FrameReconstructor {
             );
         }
         MotionVector motionVector = Objects.requireNonNull(neighborHeader.motionVector0(), "neighborHeader.motionVector0()").vector();
-        int denominatorX = chromaPlane == null ? 8 : 8 << chromaSubsamplingX(pixelFormat);
-        int denominatorY = chromaPlane == null ? 8 : 8 << chromaSubsamplingY(pixelFormat);
+        int denominatorX = chromaPlane == null ? 8 : 8 << chromaSubsamplingX(chromaFormat);
+        int denominatorY = chromaPlane == null ? 8 : 8 << chromaSubsamplingY(chromaFormat);
         FrameHeader.InterpolationFilter horizontalFilter = resolveHorizontalInterpolationFilter(neighborHeader, frameHeader);
         FrameHeader.InterpolationFilter verticalFilter = resolveVerticalInterpolationFilter(neighborHeader, frameHeader);
         ReferenceScale referenceScale = referenceScale(
@@ -1993,7 +1993,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the intrabc state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that defines the MI-grid reference boundary
     private void reconstructIntrabcPrediction(
             MutablePlaneBuffer lumaPlane,
@@ -2001,7 +2001,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader
     ) {
         MotionVector motionVector = Objects.requireNonNull(header.motionVector0(), "header.motionVector0()").vector();
@@ -2029,16 +2029,16 @@ public final class FrameReconstructor {
             return;
         }
 
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int chromaDenominatorX = 8 << chromaSubsamplingX;
         int chromaDenominatorY = 8 << chromaSubsamplingY;
-        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
-        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
+        int frameChromaWidth = chromaWidth(chromaFormat, frameLumaWidth);
+        int frameChromaHeight = chromaHeight(chromaFormat, frameLumaHeight);
         reconstructIntrabcPlanePrediction(
                 chromaUPlane,
                 frameChromaWidth,
@@ -2188,7 +2188,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the inter state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used for sub-8x8 chroma motion derivation
@@ -2198,7 +2198,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int frameLumaWidth,
             int frameLumaHeight,
@@ -2209,7 +2209,7 @@ public final class FrameReconstructor {
                 requireReferenceSurfaceSnapshot(
                         referenceSurfaceSnapshots,
                         frameHeader,
-                        pixelFormat,
+                        chromaFormat,
                         lumaPlane.bitDepth(),
                         header.referenceFrame0()
         );
@@ -2247,16 +2247,16 @@ public final class FrameReconstructor {
             return;
         }
 
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
         int visibleChromaHeight = visibleChromaBlockHeight(header, transformLayout, chromaSubsamplingY);
         int chromaBlockWidth = header.size().widthPixels() >> chromaSubsamplingX;
         int chromaBlockHeight = header.size().heightPixels() >> chromaSubsamplingY;
-        int frameChromaWidth = chromaWidth(pixelFormat, frameLumaWidth);
-        int frameChromaHeight = chromaHeight(pixelFormat, frameLumaHeight);
+        int frameChromaWidth = chromaWidth(chromaFormat, frameLumaWidth);
+        int frameChromaHeight = chromaHeight(chromaFormat, frameLumaHeight);
         int chromaDenominatorX = 8 << chromaSubsamplingX;
         int chromaDenominatorY = 8 << chromaSubsamplingY;
 
@@ -2264,7 +2264,7 @@ public final class FrameReconstructor {
                 chromaUPlane,
                 chromaVPlane,
                 header,
-                pixelFormat,
+                chromaFormat,
                 frameHeader,
                 frameChromaWidth,
                 frameChromaHeight,
@@ -2326,7 +2326,7 @@ public final class FrameReconstructor {
     /// @param chromaUPlane the mutable chroma U destination plane
     /// @param chromaVPlane the mutable chroma V destination plane
     /// @param header the current decoded block header
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param frameChromaWidth the current frame chroma width in samples
     /// @param frameChromaHeight the current frame chroma height in samples
@@ -2339,7 +2339,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaUPlane,
             MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int frameChromaWidth,
             int frameChromaHeight,
@@ -2348,8 +2348,8 @@ public final class FrameReconstructor {
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             DecodedBlockMap decodedBlockMap
     ) {
-        int subsamplingX = chromaSubsamplingX(pixelFormat);
-        int subsamplingY = chromaSubsamplingY(pixelFormat);
+        int subsamplingX = chromaSubsamplingX(chromaFormat);
+        int subsamplingY = chromaSubsamplingY(chromaFormat);
         boolean splitHorizontally = subsamplingX == 1 && header.size().width4() == 1;
         boolean splitVertically = subsamplingY == 1 && header.size().height4() == 1;
         if (!splitHorizontally && !splitVertically) {
@@ -2385,7 +2385,7 @@ public final class FrameReconstructor {
                     chromaUPlane,
                     chromaVPlane,
                     aboveLeftHeader,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     frameChromaWidth,
                     frameChromaHeight,
@@ -2401,7 +2401,7 @@ public final class FrameReconstructor {
                     chromaUPlane,
                     chromaVPlane,
                     leftHeader,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     frameChromaWidth,
                     frameChromaHeight,
@@ -2417,7 +2417,7 @@ public final class FrameReconstructor {
                     chromaUPlane,
                     chromaVPlane,
                     aboveHeader,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     frameChromaWidth,
                     frameChromaHeight,
@@ -2432,7 +2432,7 @@ public final class FrameReconstructor {
                 chromaUPlane,
                 chromaVPlane,
                 header,
-                pixelFormat,
+                chromaFormat,
                 frameHeader,
                 frameChromaWidth,
                 frameChromaHeight,
@@ -2474,7 +2474,7 @@ public final class FrameReconstructor {
     /// @param chromaUPlane the mutable chroma U destination plane
     /// @param chromaVPlane the mutable chroma V destination plane
     /// @param sourceHeader the luma block header supplying the reference and motion vector
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param frameChromaWidth the current frame chroma width in samples
     /// @param frameChromaHeight the current frame chroma height in samples
@@ -2487,7 +2487,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaUPlane,
             MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader sourceHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int frameChromaWidth,
             int frameChromaHeight,
@@ -2503,7 +2503,7 @@ public final class FrameReconstructor {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
                 referenceSurfaceSnapshots,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 chromaUPlane.bitDepth(),
                 sourceHeader.referenceFrame0()
         );
@@ -2511,8 +2511,8 @@ public final class FrameReconstructor {
                 sourceHeader.motionVector0(),
                 "sourceHeader.motionVector0()"
         ).vector();
-        int subsamplingX = chromaSubsamplingX(pixelFormat);
-        int subsamplingY = chromaSubsamplingY(pixelFormat);
+        int subsamplingX = chromaSubsamplingX(chromaFormat);
+        int subsamplingY = chromaSubsamplingY(chromaFormat);
         int denominatorX = 8 << subsamplingX;
         int denominatorY = 8 << subsamplingY;
         FrameHeader.InterpolationFilter horizontalFilter = resolveHorizontalInterpolationFilter(sourceHeader, frameHeader);
@@ -2629,7 +2629,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the inter state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param frameLumaWidth the current coded-frame luma width
     /// @param frameLumaHeight the current coded-frame luma height
@@ -2641,7 +2641,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int frameLumaWidth,
             int frameLumaHeight,
@@ -2651,7 +2651,7 @@ public final class FrameReconstructor {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = requireReferenceSurfaceSnapshot(
                 referenceSurfaceSnapshots,
                 frameHeader,
-                pixelFormat,
+                chromaFormat,
                 lumaPlane.bitDepth(),
                 header.referenceFrame0()
         );
@@ -2663,7 +2663,7 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     header,
                     transformLayout,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     frameLumaWidth,
                     frameLumaHeight,
@@ -2678,7 +2678,7 @@ public final class FrameReconstructor {
                 chromaVPlane,
                 header,
                 transformLayout,
-                pixelFormat,
+                chromaFormat,
                 frameHeader,
                 referenceSurfaceSnapshot.decodedPlanes(),
                 model
@@ -2692,7 +2692,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the inter state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param decodedBlockMap the decoded leaf map used to find causal local-warp samples
@@ -2703,7 +2703,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int frameLumaWidth,
             int frameLumaHeight,
@@ -2715,7 +2715,7 @@ public final class FrameReconstructor {
                 requireReferenceSurfaceSnapshot(
                         referenceSurfaceSnapshots,
                         frameHeader,
-                        pixelFormat,
+                        chromaFormat,
                         lumaPlane.bitDepth(),
                         header.referenceFrame0()
         );
@@ -2728,7 +2728,7 @@ public final class FrameReconstructor {
                     chromaVPlane,
                     header,
                     transformLayout,
-                    pixelFormat,
+                    chromaFormat,
                     frameHeader,
                     frameLumaWidth,
                     frameLumaHeight,
@@ -2743,7 +2743,7 @@ public final class FrameReconstructor {
                 chromaVPlane,
                 header,
                 transformLayout,
-                pixelFormat,
+                chromaFormat,
                 frameHeader,
                 referencePlanes,
                 model
@@ -2757,7 +2757,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the inter state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that supplies resolved interpolation filters
     /// @param referencePlanes the decoded planes of the selected reference frame
     /// @param model the normalized affine warped-motion model
@@ -2767,7 +2767,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             DecodedPlanes referencePlanes,
             WarpedMotion.Model model
@@ -2796,8 +2796,8 @@ public final class FrameReconstructor {
             return;
         }
 
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
@@ -3233,7 +3233,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the inter-intra state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     private void applyInterIntraPrediction(
             MutablePlaneBuffer lumaPlane,
@@ -3241,7 +3241,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             TileSampleBounds tileBounds
     ) {
         InterIntraPredictionMode mode = Objects.requireNonNull(header.interIntraMode(), "header.interIntraMode()");
@@ -3293,8 +3293,8 @@ public final class FrameReconstructor {
             return;
         }
 
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
@@ -3432,7 +3432,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane, or `null`
     /// @param header the decoded block header that owns the inter state
     /// @param transformLayout the decoded transform layout for the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param frameHeader the frame header that owns the block
     /// @param orderHintBits the number of order-hint bits declared by the sequence
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
@@ -3442,7 +3442,7 @@ public final class FrameReconstructor {
             @Nullable MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
             TransformLayout transformLayout,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader frameHeader,
             int frameLumaWidth,
             int frameLumaHeight,
@@ -3453,7 +3453,7 @@ public final class FrameReconstructor {
                 requireReferenceSurfaceSnapshot(
                         referenceSurfaceSnapshots,
                         frameHeader,
-                        pixelFormat,
+                        chromaFormat,
                         lumaPlane.bitDepth(),
                         header.referenceFrame0()
                 );
@@ -3461,7 +3461,7 @@ public final class FrameReconstructor {
                 requireReferenceSurfaceSnapshot(
                         referenceSurfaceSnapshots,
                         frameHeader,
-                        pixelFormat,
+                        chromaFormat,
                         lumaPlane.bitDepth(),
                         header.referenceFrame1()
                 );
@@ -3551,8 +3551,8 @@ public final class FrameReconstructor {
             return;
         }
 
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int visibleChromaWidth = visibleChromaBlockWidth(header, transformLayout, chromaSubsamplingX);
@@ -5457,14 +5457,14 @@ public final class FrameReconstructor {
     ///
     /// @param referenceSurfaceSnapshots the stored reference surfaces addressable by AV1 slot index
     /// @param frameHeader the frame header that owns the block
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param bitDepth the decoded sample bit depth of the current frame
     /// @param referenceFramePosition the internal LAST..ALTREF reference position
     /// @return one compatible stored reference surface for the supplied reference position
     private ReferenceSurfaceSnapshot requireReferenceSurfaceSnapshot(
             @Nullable ReferenceSurfaceSnapshot[] referenceSurfaceSnapshots,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int bitDepth,
             int referenceFramePosition
     ) {
@@ -5487,9 +5487,9 @@ public final class FrameReconstructor {
                     "Inter reconstruction requires a stored reference surface whose bit depth matches the current frame"
             );
         }
-        if (referencePlanes.pixelFormat() != pixelFormat) {
+        if (referencePlanes.chromaFormat() != chromaFormat) {
             throw new IllegalStateException(
-                    "Inter reconstruction requires matching reference pixel format: " + pixelFormat
+                    "Inter reconstruction requires matching reference chroma format: " + chromaFormat
             );
         }
         return referenceSurfaceSnapshot;
@@ -5529,7 +5529,7 @@ public final class FrameReconstructor {
     /// Reconstructs one chroma palette block directly into the destination planes.
     ///
     /// Packed palette indices follow the geometry exposed by `TileBlockHeaderReader`; only the
-    /// visible `I420`, `I422`, or `I444` chroma footprint is written to the output planes.
+    /// visible `YUV420`, `YUV422`, or `YUV444` chroma footprint is written to the output planes.
     ///
     /// @param chromaUPlane the mutable chroma U destination plane
     /// @param chromaVPlane the mutable chroma V destination plane
@@ -5540,12 +5540,12 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaUPlane,
             MutablePlaneBuffer chromaVPlane,
             TileBlockHeaderReader.BlockHeader header,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int visibleChromaWidth,
             int visibleChromaHeight
     ) {
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int chromaX = chromaBlockX(header, chromaSubsamplingX);
         int chromaY = chromaBlockY(header, chromaSubsamplingY);
         int fullChromaWidth = codedChromaBlockWidth(header, chromaSubsamplingX);
@@ -6068,7 +6068,7 @@ public final class FrameReconstructor {
     /// @param residualLayout the decoded chroma residual layout
     /// @param header the decoded block header that owns the residuals
     /// @param frameHeader the frame header that owns the active quantization state
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
@@ -6079,7 +6079,7 @@ public final class FrameReconstructor {
             ResidualLayout residualLayout,
             TileBlockHeaderReader.BlockHeader header,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean intraEdgeFilterEnabled,
             boolean smoothEdgeReferences,
             TileSampleBounds tileBounds,
@@ -6100,7 +6100,7 @@ public final class FrameReconstructor {
                 smoothEdgeReferences,
                 qIndex,
                 quantization,
-                pixelFormat,
+                chromaFormat,
                 chromaUPlane,
                 tileBounds,
                 strictStdCompliance
@@ -6117,7 +6117,7 @@ public final class FrameReconstructor {
                 smoothEdgeReferences,
                 qIndex,
                 quantization,
-                pixelFormat,
+                chromaFormat,
                 chromaVPlane,
                 tileBounds,
                 strictStdCompliance
@@ -6137,7 +6137,7 @@ public final class FrameReconstructor {
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
     /// @param qIndex the block-local quantizer index after delta-q updates
     /// @param quantization the frame-level quantization state
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param referencePlane the mutable plane whose written samples are tracked
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
     /// @param strictStdCompliance whether malformed transform values must be rejected
@@ -6153,13 +6153,13 @@ public final class FrameReconstructor {
             boolean smoothEdgeReferences,
             int qIndex,
             FrameHeader.QuantizationInfo quantization,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             MutablePlaneBuffer referencePlane,
             TileSampleBounds tileBounds,
             boolean strictStdCompliance
     ) {
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         int blockX = chromaBlockX(header, chromaSubsamplingX);
         int blockY = chromaBlockY(header, chromaSubsamplingY);
         boolean[] appliedResiduals = new boolean[residualLayout.chromaUnitCount()];
@@ -6260,7 +6260,7 @@ public final class FrameReconstructor {
     /// @param chromaVPlane the mutable chroma V destination plane
     /// @param residualLayout the decoded residual layout
     /// @param frameHeader the frame header that owns the active quantization state
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param qIndex the block-local quantizer index after delta-q updates
     /// @param strictStdCompliance whether malformed transform values must be rejected
     private void reconstructChromaResiduals(
@@ -6268,7 +6268,7 @@ public final class FrameReconstructor {
             MutablePlaneBuffer chromaVPlane,
             ResidualLayout residualLayout,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int qIndex,
             boolean strictStdCompliance
     ) {
@@ -6279,7 +6279,7 @@ public final class FrameReconstructor {
                 true,
                 qIndex,
                 quantization,
-                pixelFormat,
+                chromaFormat,
                 strictStdCompliance
         );
         reconstructChromaPlaneResiduals(
@@ -6288,7 +6288,7 @@ public final class FrameReconstructor {
                 false,
                 qIndex,
                 quantization,
-                pixelFormat,
+                chromaFormat,
                 strictStdCompliance
         );
     }
@@ -6300,7 +6300,7 @@ public final class FrameReconstructor {
     /// @param chromaU whether to reconstruct the U plane rather than the V plane
     /// @param qIndex the block-local quantizer index after delta-q updates
     /// @param quantization the frame-level quantization state
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @param strictStdCompliance whether malformed transform values must be rejected
     private void reconstructChromaPlaneResiduals(
             MutablePlaneBuffer chromaPlane,
@@ -6308,11 +6308,11 @@ public final class FrameReconstructor {
             boolean chromaU,
             int qIndex,
             FrameHeader.QuantizationInfo quantization,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean strictStdCompliance
     ) {
-        int chromaSubsamplingX = chromaSubsamplingX(pixelFormat);
-        int chromaSubsamplingY = chromaSubsamplingY(pixelFormat);
+        int chromaSubsamplingX = chromaSubsamplingX(chromaFormat);
+        int chromaSubsamplingY = chromaSubsamplingY(chromaFormat);
         for (int unitIndex = 0; unitIndex < residualLayout.chromaUnitCount(); unitIndex++) {
             reconstructChromaResidualUnit(
                     chromaPlane,
@@ -6391,25 +6391,25 @@ public final class FrameReconstructor {
         );
     }
 
-    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    /// Returns the horizontal chroma subsampling shift for one decoded chroma format.
     ///
-    /// @param pixelFormat the active decoded chroma layout
-    /// @return the horizontal chroma subsampling shift for one decoded pixel format
-    private int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+    /// @param chromaFormat the active decoded chroma layout
+    /// @return the horizontal chroma subsampling shift for one decoded chroma format
+    private int chromaSubsamplingX(Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
-    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    /// Returns the vertical chroma subsampling shift for one decoded chroma format.
     ///
-    /// @param pixelFormat the active decoded chroma layout
-    /// @return the vertical chroma subsampling shift for one decoded pixel format
-    private int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+    /// @param chromaFormat the active decoded chroma layout
+    /// @return the vertical chroma subsampling shift for one decoded chroma format
+    private int chromaSubsamplingY(Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 

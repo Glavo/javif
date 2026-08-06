@@ -37,7 +37,7 @@ final class FramePixelBufferTest {
                 1,
                 1,
                 AvifBitDepth.EIGHT_BITS,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 0,
                 IntBuffer.wrap(new int[]{0x8040_2010}).asReadOnlyBuffer()
         );
@@ -61,7 +61,7 @@ final class FramePixelBufferTest {
                 1,
                 1,
                 AvifBitDepth.TEN_BITS,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 0,
                 LongBuffer.wrap(new long[]{0xFFFF_8080_4040_0000L}).asReadOnlyBuffer()
         );
@@ -85,7 +85,7 @@ final class FramePixelBufferTest {
                 1,
                 1,
                 AvifBitDepth.EIGHT_BITS,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameType.KEY,
                 true,
                 3L,
@@ -95,7 +95,7 @@ final class FramePixelBufferTest {
                 1,
                 1,
                 AvifBitDepth.TWELVE_BITS,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 FrameType.KEY,
                 true,
                 4L,

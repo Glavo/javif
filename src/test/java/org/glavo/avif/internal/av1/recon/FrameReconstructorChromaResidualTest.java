@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -46,14 +46,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Synthetic `FrameReconstructor` tests for the minimal `I420` chroma residual rollout.
+/// Synthetic `FrameReconstructor` tests for the minimal `YUV420` chroma residual rollout.
 ///
 /// These tests construct tiny structural frames directly and pin the intended U/V residual
 /// behavior without relying on the integration reader path.
 @NotNullByDefault
 final class FrameReconstructorChromaResidualTest {
     /// Verifies that a positive chroma-U DC residual shifts only the U plane above the
-    /// zero-residual `I420` baseline.
+    /// zero-residual `YUV420` baseline.
     @Test
     void reconstructsSingleTileI420IntraFrameWithPositiveChromaUDcResidual() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -69,10 +69,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -85,7 +85,7 @@ final class FrameReconstructorChromaResidualTest {
     }
 
     /// Verifies that a negative chroma-V DC residual shifts only the V plane below the
-    /// zero-residual `I420` baseline.
+    /// zero-residual `YUV420` baseline.
     @Test
     void reconstructsSingleTileI420IntraFrameWithNegativeChromaVDcResidual() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -101,10 +101,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, negativeChromaVLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, negativeChromaVLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -134,10 +134,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -181,10 +181,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 7, 5, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 7, 5, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 7, 5, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 7, 5, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -196,7 +196,7 @@ final class FrameReconstructorChromaResidualTest {
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
     }
 
-    /// Verifies that one synthetic `I420` block can carry non-zero luma and chroma residuals at
+    /// Verifies that one synthetic `YUV420` block can carry non-zero luma and chroma residuals at
     /// the same time without any cross-plane writes.
     @Test
     void reconstructsSingleTileI420IntraFrameWithIndependentLumaAndChromaResiduals() {
@@ -211,7 +211,7 @@ final class FrameReconstructorChromaResidualTest {
         );
 
         DecodedPlanes planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, residualLeaf)
         );
 
         assertPlaneEquals(
@@ -231,7 +231,7 @@ final class FrameReconstructorChromaResidualTest {
         assertPlaneFilled(requirePlane(planes.chromaVPlane()), 4, 4, 124);
     }
 
-    /// Verifies that one clipped `I420` chroma residual updates only the visible chroma footprint.
+    /// Verifies that one clipped `YUV420` chroma residual updates only the visible chroma footprint.
     @Test
     void reconstructsClippedI420ChromaResidualOnlyWithinVisibleFootprint() {
         BlockPosition position = new BlockPosition(2, 0);
@@ -261,10 +261,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 10, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 10, 8, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 10, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 10, 8, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -280,7 +280,7 @@ final class FrameReconstructorChromaResidualTest {
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
     }
 
-    /// Verifies that multiple `I420` chroma residual units update separate U/V footprints
+    /// Verifies that multiple `YUV420` chroma residual units update separate U/V footprints
     /// independently inside one synthetic leaf.
     @Test
     void reconstructsMultiUnitI420ChromaResidualsIndependently() {
@@ -305,10 +305,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 16, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 16, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 16, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 16, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -342,7 +342,7 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
-    /// Verifies that multiple clipped `I420` chroma residual units each respect their own visible
+    /// Verifies that multiple clipped `YUV420` chroma residual units each respect their own visible
     /// footprint on one frame fringe.
     @Test
     void reconstructsClippedMultiUnitI420ChromaResidualsIndependently() {
@@ -385,10 +385,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 14, 14, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 14, 14, baselineLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 14, 14, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 14, 14, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -409,7 +409,7 @@ final class FrameReconstructorChromaResidualTest {
     }
 
     /// Verifies that one full-plane `TX_16X16` chroma-U DC residual updates the entire chroma-U
-    /// plane above the zero-residual `I420` baseline without affecting luma or chroma-V.
+    /// plane above the zero-residual `YUV420` baseline without affecting luma or chroma-V.
     @Test
     void reconstructsSingleTileI420IntraFrameWithPositiveTx16x16ChromaUDcResidual() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -428,10 +428,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 32, 32, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 32, 32, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 32, 32, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 32, 32, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -443,7 +443,7 @@ final class FrameReconstructorChromaResidualTest {
     }
 
     /// Verifies that one rectangular `RTX_8X4` chroma-U DC residual updates the entire chroma-U
-    /// plane above the zero-residual `I420` baseline without affecting luma or chroma-V.
+    /// plane above the zero-residual `YUV420` baseline without affecting luma or chroma-V.
     @Test
     void reconstructsSingleTileI420IntraFrameWithPositiveRectangularChromaUDcResidual() {
         BlockPosition position = new BlockPosition(0, 0);
@@ -462,10 +462,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlanes baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 8, zeroResidualLeaf)
         );
         DecodedPlanes residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(AvifPixelFormat.I420, FrameType.INTRA, 16, 8, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 8, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -476,14 +476,14 @@ final class FrameReconstructorChromaResidualTest {
         assertPlanesEqual(requirePlane(baseline.chromaVPlane()), requirePlane(residualPlanes.chromaVPlane()));
     }
 
-    /// Creates one synthetic `I420` intra leaf with optional luma/chroma residual coefficients.
+    /// Creates one synthetic `YUV420` intra leaf with optional luma/chroma residual coefficients.
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
     /// @param lumaCoefficients the optional luma coefficients, or `null`
     /// @param chromaUCoefficients the optional chroma-U coefficients, or `null`
     /// @param chromaVCoefficients the optional chroma-V coefficients, or `null`
-    /// @return one synthetic `I420` intra leaf
+    /// @return one synthetic `YUV420` intra leaf
     private static TilePartitionTreeReader.LeafNode createI420Leaf(
             BlockPosition position,
             BlockSize size,
@@ -528,7 +528,7 @@ final class FrameReconstructorChromaResidualTest {
                         (visibleHeightPixels + 3) >> 2,
                         visibleWidthPixels,
                         visibleHeightPixels,
-                        AvifPixelFormat.I400
+                        Av1ChromaFormat.MONOCHROME
                 ),
                 createMonochromeResidualLayout(
                         position,
@@ -540,14 +540,14 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
-    /// Creates one synthetic `I420` intra leaf with caller-supplied residual-unit arrays.
+    /// Creates one synthetic `YUV420` intra leaf with caller-supplied residual-unit arrays.
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
     /// @param lumaUnits the luma residual units
     /// @param chromaUUnits the chroma-U residual units
     /// @param chromaVUnits the chroma-V residual units
-    /// @return one synthetic `I420` intra leaf backed by the supplied residual units
+    /// @return one synthetic `YUV420` intra leaf backed by the supplied residual units
     private static TilePartitionTreeReader.LeafNode createI420LeafWithResidualUnits(
             BlockPosition position,
             BlockSize size,
@@ -568,7 +568,7 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
-    /// Creates one synthetic clipped `I420` intra leaf with optional luma/chroma residual coefficients.
+    /// Creates one synthetic clipped `YUV420` intra leaf with optional luma/chroma residual coefficients.
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
@@ -579,7 +579,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param lumaCoefficients the optional luma coefficients, or `null`
     /// @param chromaUCoefficients the optional chroma-U coefficients, or `null`
     /// @param chromaVCoefficients the optional chroma-V coefficients, or `null`
-    /// @return one synthetic clipped `I420` intra leaf
+    /// @return one synthetic clipped `YUV420` intra leaf
     private static TilePartitionTreeReader.LeafNode createI420Leaf(
             BlockPosition position,
             BlockSize size,
@@ -600,7 +600,7 @@ final class FrameReconstructorChromaResidualTest {
                         visibleHeight4,
                         visibleWidthPixels,
                         visibleHeightPixels,
-                        AvifPixelFormat.I420
+                        Av1ChromaFormat.YUV420
                 ),
                 createResidualLayout(
                         position,
@@ -614,7 +614,7 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
-    /// Creates one synthetic clipped `I420` intra leaf with caller-supplied residual-unit arrays.
+    /// Creates one synthetic clipped `YUV420` intra leaf with caller-supplied residual-unit arrays.
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
@@ -625,7 +625,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param lumaUnits the luma residual units
     /// @param chromaUUnits the chroma-U residual units
     /// @param chromaVUnits the chroma-V residual units
-    /// @return one synthetic clipped `I420` intra leaf backed by the supplied residual units
+    /// @return one synthetic clipped `YUV420` intra leaf backed by the supplied residual units
     private static TilePartitionTreeReader.LeafNode createI420LeafWithResidualUnits(
             BlockPosition position,
             BlockSize size,
@@ -646,7 +646,7 @@ final class FrameReconstructorChromaResidualTest {
                         visibleHeight4,
                         visibleWidthPixels,
                         visibleHeightPixels,
-                        AvifPixelFormat.I420
+                        Av1ChromaFormat.YUV420
                 ),
                 createResidualLayout(position, size, lumaUnits, chromaUUnits, chromaVUnits)
         );
@@ -686,20 +686,20 @@ final class FrameReconstructorChromaResidualTest {
 
     /// Creates one minimal structural frame result backed by one synthetic tile tree.
     ///
-    /// @param pixelFormat the decoded chroma layout
+    /// @param chromaFormat the decoded chroma layout
     /// @param frameType the frame type to expose
     /// @param width the coded and rendered frame width
     /// @param height the coded and rendered frame height
     /// @param roots the synthetic single-tile partition roots
     /// @return one structural frame result
     private static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameType frameType,
             int width,
             int height,
             TilePartitionTreeReader.Node... roots
     ) {
-        SequenceHeader sequenceHeader = createSequenceHeader(pixelFormat, width, height);
+        SequenceHeader sequenceHeader = createSequenceHeader(chromaFormat, width, height);
         FrameHeader frameHeader = createFrameHeader(frameType, width, height);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
@@ -718,11 +718,11 @@ final class FrameReconstructorChromaResidualTest {
 
     /// Creates one minimal reduced-still-picture sequence header for reconstruction tests.
     ///
-    /// @param pixelFormat the decoded chroma layout
+    /// @param chromaFormat the decoded chroma layout
     /// @param width the frame width
     /// @param height the frame height
     /// @return one minimal reduced-still-picture sequence header
-    private static SequenceHeader createSequenceHeader(AvifPixelFormat pixelFormat, int width, int height) {
+    private static SequenceHeader createSequenceHeader(Av1ChromaFormat chromaFormat, int width, int height) {
         return new SequenceHeader(
                 0,
                 width,
@@ -759,16 +759,16 @@ final class FrameReconstructorChromaResidualTest {
                 ),
                 new SequenceHeader.ColorConfig(
                         8,
-                        pixelFormat == AvifPixelFormat.I400,
+                        chromaFormat == Av1ChromaFormat.MONOCHROME,
                         false,
                         2,
                         2,
                         2,
                         true,
-                        pixelFormat,
+                        chromaFormat,
                         0,
-                        pixelFormat != AvifPixelFormat.I444,
-                        pixelFormat == AvifPixelFormat.I420,
+                        chromaFormat != Av1ChromaFormat.YUV444,
+                        chromaFormat == Av1ChromaFormat.YUV420,
                         false
                 )
         );
@@ -848,11 +848,11 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
-    /// Creates one supported `I420` intra block header with zero directional and palette state.
+    /// Creates one supported `YUV420` intra block header with zero directional and palette state.
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
-    /// @return one supported `I420` intra block header
+    /// @return one supported `YUV420` intra block header
     private static TileBlockHeaderReader.BlockHeader createIntraI420BlockHeader(BlockPosition position, BlockSize size) {
         return new TileBlockHeaderReader.BlockHeader(
                 position,
@@ -924,9 +924,9 @@ final class FrameReconstructorChromaResidualTest {
     ///
     /// @param position the block origin in 4x4 units
     /// @param size the coded block size
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @return one transform layout that exactly covers one leaf block
-    private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, AvifPixelFormat pixelFormat) {
+    private static TransformLayout createTransformLayout(BlockPosition position, BlockSize size, Av1ChromaFormat chromaFormat) {
         return createTransformLayout(
                 position,
                 size,
@@ -934,7 +934,7 @@ final class FrameReconstructorChromaResidualTest {
                 size.height4(),
                 size.widthPixels(),
                 size.heightPixels(),
-                pixelFormat
+                chromaFormat
         );
     }
 
@@ -946,7 +946,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param visibleHeight4 the visible block height in 4x4 units
     /// @param visibleWidthPixels the exact visible block width in pixels
     /// @param visibleHeightPixels the exact visible block height in pixels
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @return one transform layout that covers the supplied visible leaf span
     private static TransformLayout createTransformLayout(
             BlockPosition position,
@@ -955,7 +955,7 @@ final class FrameReconstructorChromaResidualTest {
             int visibleHeight4,
             int visibleWidthPixels,
             int visibleHeightPixels,
-            AvifPixelFormat pixelFormat
+            Av1ChromaFormat chromaFormat
     ) {
         TransformSize transformSize = size.maxLumaTransformSize();
         return new TransformLayout(
@@ -966,7 +966,7 @@ final class FrameReconstructorChromaResidualTest {
                 visibleWidthPixels,
                 visibleHeightPixels,
                 transformSize,
-                size.maxChromaTransformSize(pixelFormat),
+                size.maxChromaTransformSize(chromaFormat),
                 false,
                 new TransformUnit[]{new TransformUnit(position, transformSize)}
         );
@@ -1093,12 +1093,12 @@ final class FrameReconstructorChromaResidualTest {
         );
     }
 
-    /// Returns the guaranteed-present `I420` chroma transform size for one block size.
+    /// Returns the guaranteed-present `YUV420` chroma transform size for one block size.
     ///
     /// @param size the coded block size
-    /// @return the guaranteed-present `I420` chroma transform size
+    /// @return the guaranteed-present `YUV420` chroma transform size
     private static TransformSize requireI420ChromaTransformSize(BlockSize size) {
-        TransformSize chromaTransformSize = size.maxChromaTransformSize(AvifPixelFormat.I420);
+        TransformSize chromaTransformSize = size.maxChromaTransformSize(Av1ChromaFormat.YUV420);
         assertNotNull(chromaTransformSize);
         return chromaTransformSize;
     }
@@ -1195,7 +1195,7 @@ final class FrameReconstructorChromaResidualTest {
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedPlane baseline = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
-                        AvifPixelFormat.I400,
+                        Av1ChromaFormat.MONOCHROME,
                         FrameType.INTRA,
                         visibleWidthPixels,
                         visibleHeightPixels,
@@ -1204,7 +1204,7 @@ final class FrameReconstructorChromaResidualTest {
         ).lumaPlane();
         DecodedPlane residual = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
-                        AvifPixelFormat.I400,
+                        Av1ChromaFormat.MONOCHROME,
                         FrameType.INTRA,
                         visibleWidthPixels,
                         visibleHeightPixels,

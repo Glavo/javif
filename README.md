@@ -6,7 +6,7 @@ sequences. The core API is implemented in pure Java and has no runtime dependenc
 
 ## Features
 
-- Decodes 8-, 10-, and 12-bit AV1 content in I400, I420, I422, and I444 layouts.
+- Decodes 8-, 10-, and 12-bit AV1 content in monochrome, YUV 4:2:0, YUV 4:2:2, and YUV 4:4:4 layouts.
 - Reads AVIF items and AVIS tracks, including grids, alpha, depth, gain maps, progressive images,
   presentation transforms, and Exif, XMP, ICC, and CICP metadata.
 - Exposes raw YUV planes or packed non-premultiplied 8-bit and 16-bit ARGB pixels.

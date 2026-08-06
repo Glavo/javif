@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundInterPredictionMode;
@@ -574,7 +574,7 @@ public final class TileBlockHeaderReader {
         blockSyntaxState.setCurrentQIndex(currentQIndex);
         if (delta.deltaLfPresent()) {
             int deltaLfCount = delta.deltaLfMulti()
-                    ? (tileContext.sequenceHeader().colorConfig().pixelFormat() == AvifPixelFormat.I400 ? 2 : 4)
+                    ? (tileContext.sequenceHeader().colorConfig().chromaFormat() == Av1ChromaFormat.MONOCHROME ? 2 : 4)
                     : 1;
             int contextOffset = delta.deltaLfMulti() ? 1 : 0;
             for (int i = 0; i < deltaLfCount; i++) {
@@ -654,8 +654,8 @@ public final class TileBlockHeaderReader {
     /// @param size the block size to test
     /// @return whether the supplied block has chroma samples in the active frame layout
     private boolean hasChroma(BlockPosition position, BlockSize size) {
-        AvifPixelFormat pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
-        if (pixelFormat == AvifPixelFormat.I400) {
+        Av1ChromaFormat chromaFormat = tileContext.sequenceHeader().colorConfig().chromaFormat();
+        if (chromaFormat == Av1ChromaFormat.MONOCHROME) {
             return false;
         }
         int subsamplingX = tileContext.sequenceHeader().colorConfig().chromaSubsamplingX() ? 1 : 0;

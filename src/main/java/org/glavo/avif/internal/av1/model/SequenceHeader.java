@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.model;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -538,7 +538,7 @@ public final class SequenceHeader {
         /// Whether full-range color samples are used.
         private final boolean colorRange;
         /// The decoded chroma layout.
-        private final AvifPixelFormat pixelFormat;
+        private final Av1ChromaFormat chromaFormat;
         /// The AV1 chroma sample position code.
         private final int chromaSamplePosition;
         /// Whether chroma is subsampled horizontally.
@@ -557,7 +557,7 @@ public final class SequenceHeader {
         /// @param transferCharacteristics the AV1 transfer characteristics code
         /// @param matrixCoefficients the AV1 matrix coefficients code
         /// @param colorRange whether full-range color samples are used
-        /// @param pixelFormat the decoded chroma layout
+        /// @param chromaFormat the decoded chroma layout
         /// @param chromaSamplePosition the AV1 chroma sample position code
         /// @param chromaSubsamplingX whether chroma is subsampled horizontally
         /// @param chromaSubsamplingY whether chroma is subsampled vertically
@@ -570,7 +570,7 @@ public final class SequenceHeader {
                 int transferCharacteristics,
                 int matrixCoefficients,
                 boolean colorRange,
-                AvifPixelFormat pixelFormat,
+                Av1ChromaFormat chromaFormat,
                 int chromaSamplePosition,
                 boolean chromaSubsamplingX,
                 boolean chromaSubsamplingY,
@@ -583,7 +583,7 @@ public final class SequenceHeader {
             this.transferCharacteristics = transferCharacteristics;
             this.matrixCoefficients = matrixCoefficients;
             this.colorRange = colorRange;
-            this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+            this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
             this.chromaSamplePosition = chromaSamplePosition;
             this.chromaSubsamplingX = chromaSubsamplingX;
             this.chromaSubsamplingY = chromaSubsamplingY;
@@ -642,8 +642,8 @@ public final class SequenceHeader {
         /// Returns the decoded chroma layout.
         ///
         /// @return the decoded chroma layout
-        public AvifPixelFormat pixelFormat() {
-            return pixelFormat;
+        public Av1ChromaFormat chromaFormat() {
+            return chromaFormat;
         }
 
         /// Returns the AV1 chroma sample position code.

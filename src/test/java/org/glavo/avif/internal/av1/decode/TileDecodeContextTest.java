@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -198,7 +198,7 @@ final class TileDecodeContextTest {
                         2,
                         2,
                         true,
-                        AvifPixelFormat.I420,
+                        Av1ChromaFormat.YUV420,
                         0,
                         true,
                         true,

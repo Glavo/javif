@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -158,7 +158,7 @@ final class TileListParserTest {
                         2,
                         2,
                         false,
-                        AvifPixelFormat.I420,
+                        Av1ChromaFormat.YUV420,
                         0,
                         true,
                         true,

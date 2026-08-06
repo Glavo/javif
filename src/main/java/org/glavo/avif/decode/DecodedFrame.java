@@ -16,7 +16,7 @@
 package org.glavo.avif.decode;
 
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.PixelBuffers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -37,7 +37,7 @@ public final class DecodedFrame {
     /// The decoded bit depth.
     private final AvifBitDepth bitDepth;
     /// The chroma layout of the decoded frame.
-    private final AvifPixelFormat pixelFormat;
+    private final Av1ChromaFormat chromaFormat;
     /// The AV1 frame type.
     private final FrameType frameType;
     /// Whether the frame is visible.
@@ -61,7 +61,7 @@ public final class DecodedFrame {
     /// @param width             the output frame width in pixels
     /// @param height            the output frame height in pixels
     /// @param bitDepth          the decoded bit depth
-    /// @param pixelFormat       the chroma layout
+    /// @param chromaFormat       the chroma layout
     /// @param frameType         the AV1 frame type
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
@@ -70,13 +70,13 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
             @Unmodifiable IntBuffer pixels
     ) {
-        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
+        this(width, height, bitDepth, chromaFormat, frameType, visible, presentationIndex,
                 0, 0, PixelBuffers.immutableIntPixels(pixels), null);
     }
 
@@ -88,7 +88,7 @@ public final class DecodedFrame {
     /// @param width             the output frame width in pixels
     /// @param height            the output frame height in pixels
     /// @param bitDepth          the decoded bit depth
-    /// @param pixelFormat       the chroma layout
+    /// @param chromaFormat       the chroma layout
     /// @param frameType         the AV1 frame type
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
@@ -99,7 +99,7 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -107,7 +107,7 @@ public final class DecodedFrame {
             int spatialId,
             @Unmodifiable IntBuffer pixels
     ) {
-        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
+        this(width, height, bitDepth, chromaFormat, frameType, visible, presentationIndex,
                 temporalId, spatialId, PixelBuffers.immutableIntPixels(pixels), null);
     }
 
@@ -119,7 +119,7 @@ public final class DecodedFrame {
     /// @param width             the output frame width in pixels
     /// @param height            the output frame height in pixels
     /// @param bitDepth          the decoded bit depth
-    /// @param pixelFormat       the chroma layout
+    /// @param chromaFormat       the chroma layout
     /// @param frameType         the AV1 frame type
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
@@ -128,13 +128,13 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
             @Unmodifiable LongBuffer pixels
     ) {
-        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
+        this(width, height, bitDepth, chromaFormat, frameType, visible, presentationIndex,
                 0, 0, null, PixelBuffers.immutableLongPixels(pixels));
     }
 
@@ -146,7 +146,7 @@ public final class DecodedFrame {
     /// @param width             the output frame width in pixels
     /// @param height            the output frame height in pixels
     /// @param bitDepth          the decoded bit depth
-    /// @param pixelFormat       the chroma layout
+    /// @param chromaFormat       the chroma layout
     /// @param frameType         the AV1 frame type
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
@@ -157,7 +157,7 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -165,7 +165,7 @@ public final class DecodedFrame {
             int spatialId,
             @Unmodifiable LongBuffer pixels
     ) {
-        this(width, height, bitDepth, pixelFormat, frameType, visible, presentationIndex,
+        this(width, height, bitDepth, chromaFormat, frameType, visible, presentationIndex,
                 temporalId, spatialId, null, PixelBuffers.immutableLongPixels(pixels));
     }
 
@@ -174,7 +174,7 @@ public final class DecodedFrame {
     /// @param width             the output frame width in pixels
     /// @param height            the output frame height in pixels
     /// @param bitDepth          the decoded bit depth
-    /// @param pixelFormat       the chroma layout
+    /// @param chromaFormat       the chroma layout
     /// @param frameType         the AV1 frame type
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
@@ -186,7 +186,7 @@ public final class DecodedFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameType frameType,
             boolean visible,
             long presentationIndex,
@@ -207,7 +207,7 @@ public final class DecodedFrame {
         this.width = width;
         this.height = height;
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
-        this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.frameType = Objects.requireNonNull(frameType, "frameType");
         this.visible = visible;
         this.presentationIndex = presentationIndex;
@@ -241,8 +241,8 @@ public final class DecodedFrame {
     /// Returns the chroma layout of the decoded frame.
     ///
     /// @return the chroma layout
-    public AvifPixelFormat pixelFormat() {
-        return pixelFormat;
+    public Av1ChromaFormat chromaFormat() {
+        return chromaFormat;
     }
 
     /// Returns the AV1 frame type.

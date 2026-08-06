@@ -32,7 +32,7 @@ public final class AvifPlanes {
     /// The decoded sample bit depth.
     private final AvifBitDepth bitDepth;
     /// The decoded AV1 chroma sampling layout.
-    private final AvifPixelFormat pixelFormat;
+    private final Av1ChromaFormat chromaFormat;
     /// The stored luma width in samples.
     private final int codedWidth;
     /// The stored luma height in samples.
@@ -51,7 +51,7 @@ public final class AvifPlanes {
     /// Creates raw decoded AVIF color planes.
     ///
     /// @param bitDepth the decoded sample bit depth
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param codedWidth the stored luma width in samples
     /// @param codedHeight the stored luma height in samples
     /// @param renderWidth the presentation render width before AVIF item transforms
@@ -61,7 +61,7 @@ public final class AvifPlanes {
     /// @param chromaVPlane the decoded chroma V plane, or `null` for monochrome images
     public AvifPlanes(
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int codedWidth,
             int codedHeight,
             int renderWidth,
@@ -84,7 +84,7 @@ public final class AvifPlanes {
         }
 
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
-        this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.codedWidth = codedWidth;
         this.codedHeight = codedHeight;
         this.renderWidth = renderWidth;
@@ -105,8 +105,8 @@ public final class AvifPlanes {
     /// Returns the decoded AV1 chroma sampling layout.
     ///
     /// @return the decoded AV1 chroma sampling layout
-    public AvifPixelFormat pixelFormat() {
-        return pixelFormat;
+    public Av1ChromaFormat chromaFormat() {
+        return chromaFormat;
     }
 
     /// Returns the stored luma width in samples.
@@ -173,7 +173,7 @@ public final class AvifPlanes {
         DecodedPlanes checkedPlanes = Objects.requireNonNull(planes, "planes");
         return new AvifPlanes(
                 AvifBitDepth.fromBits(checkedPlanes.bitDepth()),
-                checkedPlanes.pixelFormat(),
+                checkedPlanes.chromaFormat(),
                 checkedPlanes.codedWidth(),
                 checkedPlanes.codedHeight(),
                 checkedPlanes.renderWidth(),
@@ -211,49 +211,49 @@ public final class AvifPlanes {
         if (lumaPlane.width() != codedWidth || lumaPlane.height() != codedHeight) {
             throw new IllegalArgumentException("lumaPlane dimensions do not match coded luma dimensions");
         }
-        if (pixelFormat == AvifPixelFormat.I400) {
+        if (chromaFormat == Av1ChromaFormat.MONOCHROME) {
             if (chromaUPlane != null || chromaVPlane != null) {
-                throw new IllegalArgumentException("I400 output must not carry chroma planes");
+                throw new IllegalArgumentException("MONOCHROME output must not carry chroma planes");
             }
             return;
         }
         if (chromaUPlane == null || chromaVPlane == null) {
-            throw new IllegalArgumentException("Chroma planes are required for " + pixelFormat);
+            throw new IllegalArgumentException("Chroma planes are required for " + chromaFormat);
         }
 
-        int expectedWidth = expectedChromaWidth(pixelFormat, codedWidth);
-        int expectedHeight = expectedChromaHeight(pixelFormat, codedHeight);
+        int expectedWidth = expectedChromaWidth(chromaFormat, codedWidth);
+        int expectedHeight = expectedChromaHeight(chromaFormat, codedHeight);
         if (chromaUPlane.width() != expectedWidth || chromaUPlane.height() != expectedHeight) {
-            throw new IllegalArgumentException("chromaUPlane dimensions do not match pixel format");
+            throw new IllegalArgumentException("chromaUPlane dimensions do not match chroma format");
         }
         if (chromaVPlane.width() != expectedWidth || chromaVPlane.height() != expectedHeight) {
-            throw new IllegalArgumentException("chromaVPlane dimensions do not match pixel format");
+            throw new IllegalArgumentException("chromaVPlane dimensions do not match chroma format");
         }
     }
 
-    /// Returns the expected chroma width for one pixel format.
+    /// Returns the expected chroma width for one chroma format.
     ///
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param codedWidth the coded luma width in samples
     /// @return the expected chroma width
-    private static int expectedChromaWidth(AvifPixelFormat pixelFormat, int codedWidth) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420, I422 -> (codedWidth + 1) / 2;
-            case I444 -> codedWidth;
+    private static int expectedChromaWidth(Av1ChromaFormat chromaFormat, int codedWidth) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420, YUV422 -> (codedWidth + 1) / 2;
+            case YUV444 -> codedWidth;
         };
     }
 
-    /// Returns the expected chroma height for one pixel format.
+    /// Returns the expected chroma height for one chroma format.
     ///
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param codedHeight the coded luma height in samples
     /// @return the expected chroma height
-    private static int expectedChromaHeight(AvifPixelFormat pixelFormat, int codedHeight) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420 -> (codedHeight + 1) / 2;
-            case I422, I444 -> codedHeight;
+    private static int expectedChromaHeight(Av1ChromaFormat chromaFormat, int codedHeight) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420 -> (codedHeight + 1) / 2;
+            case YUV422, YUV444 -> codedHeight;
         };
     }
 }

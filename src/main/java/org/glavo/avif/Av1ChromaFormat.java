@@ -17,15 +17,15 @@ package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// AVIF chroma sampling layouts exposed by image and frame metadata.
+/// AV1 luma and chroma plane layouts exposed by decoded image and frame metadata.
 @NotNullByDefault
-public enum AvifPixelFormat {
-    /// Monochrome output with no chroma planes.
-    I400,
-    /// 4:2:0 subsampled chroma output.
-    I420,
-    /// 4:2:2 subsampled chroma output.
-    I422,
-    /// 4:4:4 full-resolution chroma output.
-    I444
+public enum Av1ChromaFormat {
+    /// Monochrome content with no chroma planes.
+    MONOCHROME,
+    /// YUV content with 4:2:0 chroma subsampling.
+    YUV420,
+    /// YUV content with 4:2:2 chroma subsampling.
+    YUV422,
+    /// YUV content with full-resolution 4:4:4 chroma.
+    YUV444
 }

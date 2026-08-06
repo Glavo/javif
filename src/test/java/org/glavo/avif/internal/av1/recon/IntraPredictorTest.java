@@ -640,7 +640,7 @@ final class IntraPredictorTest {
         );
     }
 
-    /// Verifies that `I420` CFL prediction derives signed AC from reconstructed luma and applies alpha.
+    /// Verifies that `YUV420` CFL prediction derives signed AC from reconstructed luma and applies alpha.
     @Test
     void chromaCflPredictionUsesDownsampledLumaAc() {
         MutablePlaneBuffer lumaPlane = new MutablePlaneBuffer(4, 4, 8);
@@ -718,7 +718,7 @@ final class IntraPredictorTest {
         );
     }
 
-    /// Verifies that generalized `I422` CFL prediction derives signed AC from horizontally
+    /// Verifies that generalized `YUV422` CFL prediction derives signed AC from horizontally
     /// subsampled reconstructed luma.
     @Test
     void chromaCflPredictionUsesHorizontallySubsampledLumaAc() {
@@ -751,7 +751,7 @@ final class IntraPredictorTest {
         );
     }
 
-    /// Verifies that generalized `I444` CFL prediction derives signed AC from full-resolution
+    /// Verifies that generalized `YUV444` CFL prediction derives signed AC from full-resolution
     /// reconstructed luma.
     @Test
     void chromaCflPredictionUsesFullResolutionLumaAc() {

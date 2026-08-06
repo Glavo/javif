@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.runtime;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -217,7 +217,7 @@ final class RuntimeTestFixtures {
     static DecodedPlanes createDecodedPlanes(int bitDepth, int sample) {
         return new DecodedPlanes(
                 bitDepth,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 1,
                 1,
                 1,
@@ -305,7 +305,7 @@ final class RuntimeTestFixtures {
                         2,
                         2,
                         true,
-                        AvifPixelFormat.I400,
+                        Av1ChromaFormat.MONOCHROME,
                         0,
                         true,
                         true,

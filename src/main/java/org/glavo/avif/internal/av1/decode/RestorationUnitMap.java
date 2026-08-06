@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -66,11 +66,11 @@ public final class RestorationUnitMap {
     public static RestorationUnitMap createEmpty(FrameAssembly assembly) {
         FrameAssembly checkedAssembly = Objects.requireNonNull(assembly, "assembly");
         FrameHeader frameHeader = checkedAssembly.frameHeader();
-        AvifPixelFormat pixelFormat = checkedAssembly.sequenceHeader().colorConfig().pixelFormat();
+        Av1ChromaFormat chromaFormat = checkedAssembly.sequenceHeader().colorConfig().chromaFormat();
         int[] columns = new int[3];
         int[] rows = new int[3];
         for (int plane = 0; plane < 3; plane++) {
-            if (plane > 0 && pixelFormat == AvifPixelFormat.I400) {
+            if (plane > 0 && chromaFormat == Av1ChromaFormat.MONOCHROME) {
                 continue;
             }
             if (frameHeader.restoration().types()[plane] == FrameHeader.RestorationType.NONE) {
@@ -81,10 +81,10 @@ public final class RestorationUnitMap {
                     : frameHeader.restoration().unitSizeLog2Uv());
             int width = plane == 0
                     ? frameHeader.frameSize().upscaledWidth()
-                    : chromaWidth(pixelFormat, frameHeader.frameSize().upscaledWidth());
+                    : chromaWidth(chromaFormat, frameHeader.frameSize().upscaledWidth());
             int height = plane == 0
                     ? frameHeader.frameSize().height()
-                    : chromaHeight(pixelFormat, frameHeader.frameSize().height());
+                    : chromaHeight(chromaFormat, frameHeader.frameSize().height());
             columns[plane] = countUnits(unitSize, width);
             rows[plane] = countUnits(unitSize, height);
         }
@@ -197,27 +197,27 @@ public final class RestorationUnitMap {
 
     /// Returns one chroma plane width for a luma width.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @param lumaWidth the luma width in samples
     /// @return one chroma plane width for a luma width
-    private static int chromaWidth(AvifPixelFormat pixelFormat, int lumaWidth) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420, I422 -> (lumaWidth + 1) >> 1;
-            case I444 -> lumaWidth;
+    private static int chromaWidth(Av1ChromaFormat chromaFormat, int lumaWidth) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420, YUV422 -> (lumaWidth + 1) >> 1;
+            case YUV444 -> lumaWidth;
         };
     }
 
     /// Returns one chroma plane height for a luma height.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @param lumaHeight the luma height in samples
     /// @return one chroma plane height for a luma height
-    private static int chromaHeight(AvifPixelFormat pixelFormat, int lumaHeight) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420 -> (lumaHeight + 1) >> 1;
-            case I422, I444 -> lumaHeight;
+    private static int chromaHeight(Av1ChromaFormat chromaFormat, int lumaHeight) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420 -> (lumaHeight + 1) >> 1;
+            case YUV422, YUV444 -> lumaHeight;
         };
     }
 }

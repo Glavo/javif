@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.output;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /// Contract tests for high-bit-depth ARGB output built on `DecodedPlanes`.
 ///
 /// These tests validate the completed Track E long-output path directly through `ArgbOutput`,
-/// covering exact `0xAAAA_RRRR_GGGG_BBBB` packing, `I444` per-pixel chroma sampling, public
+/// covering exact `0xAAAA_RRRR_GGGG_BBBB` packing, `YUV444` per-pixel chroma sampling, public
 /// frame metadata materialization, and the `8-bit` contract for long-output entry points.
 @NotNullByDefault
 final class DecodedPlanesArgbLongOutputTest {
@@ -52,7 +52,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void convertsTenBitI400SamplesIntoOpaqueArgbLongPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 10,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 3,
                 2,
                 3,
@@ -78,7 +78,7 @@ final class DecodedPlanesArgbLongOutputTest {
         assertOpaquePixels(pixels);
     }
 
-    /// Verifies that `12-bit I444` output uses one chroma pair per luma sample with no subsampling.
+    /// Verifies that `12-bit YUV444` output uses one chroma pair per luma sample with no subsampling.
     ///
     /// Every visible pixel uses a different YUV triplet while stride padding stays outside the
     /// render rectangle. Exact packed pixels ensure the long-output path preserves the intended
@@ -87,7 +87,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void convertsTwelveBitI444SamplesUsingPerPixelChromaIntoOpaqueArgbLongPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 12,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 4,
                 2,
                 4,
@@ -121,7 +121,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void returnsDecodedFrameMetadataForTwelveBitI444Output() {
         DecodedPlanes planes = new DecodedPlanes(
                 12,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 2,
                 1,
                 2,
@@ -153,7 +153,7 @@ final class DecodedPlanesArgbLongOutputTest {
     void expandsEightBitDecodedPlanesForLongOutputEntryPoints() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 3,
                 1,
                 3,
@@ -191,7 +191,7 @@ final class DecodedPlanesArgbLongOutputTest {
         assertEquals(planes.codedWidth(), frame.width());
         assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
-        assertEquals(planes.pixelFormat(), frame.pixelFormat());
+        assertEquals(planes.chromaFormat(), frame.chromaFormat());
         assertEquals(TEST_FRAME_TYPE, frame.frameType());
         assertEquals(TEST_VISIBLE, frame.visible());
         assertEquals(TEST_PRESENTATION_INDEX, frame.presentationIndex());

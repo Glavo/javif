@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.output;
 
 import org.glavo.avif.AvifColorInfo;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -31,7 +31,7 @@ final class YuvToRgbTransformTest {
     /// Verifies that limited-range luma endpoints map to black and white.
     @Test
     void limitedRangeTransformExpandsNominalLumaRange() {
-        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(6, false, AvifPixelFormat.I420));
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(6, false, Av1ChromaFormat.YUV420));
 
         assertEquals(0xFF00_0000, transform.toOpaqueArgb(16, 128, 128));
         assertEquals(0xFFFF_FFFF, transform.toOpaqueArgb(235, 128, 128));
@@ -40,7 +40,7 @@ final class YuvToRgbTransformTest {
     /// Verifies that unspecified matrix coefficients still preserve range for monochrome streams.
     @Test
     void unspecifiedMonochromeTransformPreservesRange() {
-        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(2, false, AvifPixelFormat.I400));
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(2, false, Av1ChromaFormat.MONOCHROME));
 
         assertEquals(0xFF00_0000, transform.toOpaqueGrayArgb(16));
         assertEquals(0xFFFF_FFFF, transform.toOpaqueGrayArgb(235));
@@ -49,7 +49,7 @@ final class YuvToRgbTransformTest {
     /// Verifies that unspecified chroma matrix coefficients still preserve limited-range signaling.
     @Test
     void unspecifiedChromaTransformPreservesRange() {
-        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(2, false, AvifPixelFormat.I420));
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(2, false, Av1ChromaFormat.YUV420));
 
         assertEquals(0xFF00_0000, transform.toOpaqueArgb(16, 128, 128));
         assertEquals(0xFFFF_FFFF, transform.toOpaqueArgb(235, 128, 128));
@@ -60,7 +60,7 @@ final class YuvToRgbTransformTest {
     void unsupportedExplicitChromaMatrixIsRejected() {
         UnsupportedOperationException exception = assertThrows(
                 UnsupportedOperationException.class,
-                () -> YuvToRgbTransform.fromColorConfig(colorConfig(14, true, AvifPixelFormat.I420))
+                () -> YuvToRgbTransform.fromColorConfig(colorConfig(14, true, Av1ChromaFormat.YUV420))
         );
 
         assertEquals("Unsupported CICP matrix coefficients: 14", exception.getMessage());
@@ -69,7 +69,7 @@ final class YuvToRgbTransformTest {
     /// Verifies that matrix-family support does not affect range conversion for monochrome planes.
     @Test
     void unsupportedExplicitMatrixIsIgnoredForMonochromePlanes() {
-        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(14, false, AvifPixelFormat.I400));
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(14, false, Av1ChromaFormat.MONOCHROME));
 
         assertEquals(0xFF00_0000, transform.toOpaqueGrayArgb(16));
         assertEquals(0xFFFF_FFFF, transform.toOpaqueGrayArgb(235));
@@ -78,8 +78,8 @@ final class YuvToRgbTransformTest {
     /// Verifies that matrix coefficients affect chroma conversion.
     @Test
     void matrixCoefficientsSelectDifferentTransforms() {
-        YuvToRgbTransform bt601 = YuvToRgbTransform.fromColorConfig(colorConfig(6, true, AvifPixelFormat.I420));
-        YuvToRgbTransform bt709 = YuvToRgbTransform.fromColorConfig(colorConfig(1, true, AvifPixelFormat.I420));
+        YuvToRgbTransform bt601 = YuvToRgbTransform.fromColorConfig(colorConfig(6, true, Av1ChromaFormat.YUV420));
+        YuvToRgbTransform bt709 = YuvToRgbTransform.fromColorConfig(colorConfig(1, true, Av1ChromaFormat.YUV420));
 
         assertNotEquals(bt601.toOpaqueArgb(100, 90, 200), bt709.toOpaqueArgb(100, 90, 200));
     }
@@ -88,7 +88,7 @@ final class YuvToRgbTransformTest {
     @Test
     void fccMatrixUsesStandardizedLumaCoefficients() {
         YuvToRgbTransform transform =
-                YuvToRgbTransform.fromColorConfig(colorConfig(4, true, AvifPixelFormat.I444));
+                YuvToRgbTransform.fromColorConfig(colorConfig(4, true, Av1ChromaFormat.YUV444));
 
         assertEquals(YuvToRgbTransform.FCC_FULL_RANGE.redCoefficientV(), transform.redCoefficientV());
         assertEquals(YuvToRgbTransform.FCC_FULL_RANGE.greenCoefficientU(), transform.greenCoefficientU());
@@ -100,7 +100,7 @@ final class YuvToRgbTransformTest {
     @Test
     void chromaticityDerivedMatrixUsesSignaledDisplayP3Primaries() {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
-                colorConfig(12, 12, true, AvifPixelFormat.I444)
+                colorConfig(12, 12, true, Av1ChromaFormat.YUV444)
         );
 
         assertEquals(101_060, transform.redCoefficientV());
@@ -113,7 +113,7 @@ final class YuvToRgbTransformTest {
     @Test
     void ycgcoMatrixReconstructsFullRangeRgb() {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
-                colorConfig(8, true, AvifPixelFormat.I444)
+                colorConfig(8, true, Av1ChromaFormat.YUV444)
         );
 
         assertEquals(0xFFC8_6428, transform.toOpaqueArgb(110, 118, 208));
@@ -127,7 +127,7 @@ final class YuvToRgbTransformTest {
     @Test
     void ycgcoLimitedRangeExpandsComponentRange() {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
-                colorConfig(8, false, AvifPixelFormat.I444)
+                colorConfig(8, false, Av1ChromaFormat.YUV444)
         );
 
         assertEquals(0xFF00_0000, transform.toOpaqueArgb(16, 128, 128));
@@ -138,7 +138,7 @@ final class YuvToRgbTransformTest {
     @Test
     void ycgcoMatrixReconstructsHighBitDepthRgb() {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(
-                colorConfig(8, true, AvifPixelFormat.I444)
+                colorConfig(8, true, Av1ChromaFormat.YUV444)
         );
 
         long pixel = transform.toOpaqueArgb64(440, 472, 832, 10);
@@ -150,7 +150,7 @@ final class YuvToRgbTransformTest {
     /// Verifies AV1 identity-matrix RGB signaling maps planes directly to RGB channels.
     @Test
     void identityMatrixMapsPlanesAsRgbSamples() {
-        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(0, true, AvifPixelFormat.I444));
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(0, true, Av1ChromaFormat.YUV444));
 
         assertEquals(0xFF11_2233, transform.toOpaqueArgb(0x22, 0x33, 0x11));
     }
@@ -158,7 +158,7 @@ final class YuvToRgbTransformTest {
     /// Verifies that high-bit-depth limited-range grayscale endpoints are expanded to 16-bit output.
     @Test
     void limitedRangeHighBitDepthExpandsNominalLumaRange() {
-        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(6, false, AvifPixelFormat.I420));
+        YuvToRgbTransform transform = YuvToRgbTransform.fromColorConfig(colorConfig(6, false, Av1ChromaFormat.YUV420));
 
         assertEquals(0xFFFF_0000_0000_0000L, transform.toOpaqueArgb64(64, 512, 512, 10));
         assertEquals(0xFFFF_FFFF_FFFF_FFFFL, transform.toOpaqueArgb64(940, 512, 512, 10));
@@ -184,14 +184,14 @@ final class YuvToRgbTransformTest {
     ///
     /// @param matrixCoefficients the AV1 matrix coefficients code
     /// @param fullRange whether samples are full-range
-    /// @param pixelFormat the decoded chroma layout
+    /// @param chromaFormat the decoded chroma layout
     /// @return one AV1 color configuration
     private static SequenceHeader.ColorConfig colorConfig(
             int matrixCoefficients,
             boolean fullRange,
-            AvifPixelFormat pixelFormat
+            Av1ChromaFormat chromaFormat
     ) {
-        return colorConfig(1, matrixCoefficients, fullRange, pixelFormat);
+        return colorConfig(1, matrixCoefficients, fullRange, chromaFormat);
     }
 
     /// Creates one color configuration with explicit primary and matrix codes.
@@ -199,28 +199,28 @@ final class YuvToRgbTransformTest {
     /// @param colorPrimaries the AV1 color-primary code
     /// @param matrixCoefficients the AV1 matrix coefficients code
     /// @param fullRange whether samples are full-range
-    /// @param pixelFormat the decoded chroma layout
+    /// @param chromaFormat the decoded chroma layout
     /// @return one AV1 color configuration
     private static SequenceHeader.ColorConfig colorConfig(
             int colorPrimaries,
             int matrixCoefficients,
             boolean fullRange,
-            AvifPixelFormat pixelFormat
+            Av1ChromaFormat chromaFormat
     ) {
         return new SequenceHeader.ColorConfig(
                 8,
-                pixelFormat == AvifPixelFormat.I400,
+                chromaFormat == Av1ChromaFormat.MONOCHROME,
                 true,
                 colorPrimaries,
                 13,
                 matrixCoefficients,
                 fullRange,
-                pixelFormat,
+                chromaFormat,
                 0,
-                pixelFormat == AvifPixelFormat.I400
-                        || pixelFormat == AvifPixelFormat.I420
-                        || pixelFormat == AvifPixelFormat.I422,
-                pixelFormat == AvifPixelFormat.I400 || pixelFormat == AvifPixelFormat.I420,
+                chromaFormat == Av1ChromaFormat.MONOCHROME
+                        || chromaFormat == Av1ChromaFormat.YUV420
+                        || chromaFormat == Av1ChromaFormat.YUV422,
+                chromaFormat == Av1ChromaFormat.MONOCHROME || chromaFormat == Av1ChromaFormat.YUV420,
                 false
         );
     }

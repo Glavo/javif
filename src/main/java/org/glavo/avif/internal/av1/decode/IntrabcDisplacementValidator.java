@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.MotionVector;
@@ -67,7 +67,7 @@ final class IntrabcDisplacementValidator {
                 tileStartX4 + nonNullTileContext.codedWidth4(),
                 tileStartY4 + nonNullTileContext.codedHeight4(),
                 nonNullTileContext.superblockSize(),
-                chromaReference && colorConfig.pixelFormat() != AvifPixelFormat.I400,
+                chromaReference && colorConfig.chromaFormat() != Av1ChromaFormat.MONOCHROME,
                 colorConfig.chromaSubsamplingX(),
                 colorConfig.chromaSubsamplingY()
         )) {

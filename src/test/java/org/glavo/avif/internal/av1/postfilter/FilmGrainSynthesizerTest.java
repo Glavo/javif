@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
@@ -35,7 +35,7 @@ final class FilmGrainSynthesizerTest {
     @Test
     void applyReturnsOriginalPlanesWhenFilmGrainIsDisabled() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new int[][]{
                         {128, 128, 128, 128},
                         {128, 128, 128, 128},
@@ -46,7 +46,7 @@ final class FilmGrainSynthesizerTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -74,7 +74,7 @@ final class FilmGrainSynthesizerTest {
     @Test
     void applyProducesDeterministicGrainAppliedCopy() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 new int[][]{
                         {128, 128, 128, 128, 128, 128, 128, 128},
                         {128, 128, 128, 128, 128, 128, 128, 128},
@@ -99,7 +99,7 @@ final class FilmGrainSynthesizerTest {
                 }
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -131,7 +131,7 @@ final class FilmGrainSynthesizerTest {
     @Test
     void applyClipsSynthesizedSamplesToRestrictedRange() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 new int[][]{
                         {0, 255, 0, 255, 0, 255, 0, 255},
                         {255, 0, 255, 0, 255, 0, 255, 0},
@@ -156,7 +156,7 @@ final class FilmGrainSynthesizerTest {
                 }
         );
         FrameHeader unrestrictedFrameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -171,7 +171,7 @@ final class FilmGrainSynthesizerTest {
                 PostfilterTestFixtures.createFilmGrainParams(0x5678, false)
         );
         FrameHeader restrictedFrameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 unrestrictedFrameHeader.loopFilter(),
                 unrestrictedFrameHeader.cdef(),
                 unrestrictedFrameHeader.restoration(),
@@ -246,7 +246,7 @@ final class FilmGrainSynthesizerTest {
         }
         DecodedPlanes decodedPlanes = new DecodedPlanes(
                 10,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 width,
                 height,
                 width,
@@ -256,7 +256,7 @@ final class FilmGrainSynthesizerTest {
                 null
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -314,7 +314,7 @@ final class FilmGrainSynthesizerTest {
     void applySupportsExplicitChromaGrainWithoutLumaScalingPoints() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
                 10,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 new int[][]{
                         {512, 512, 512, 512, 512, 512, 512, 512},
                         {512, 512, 512, 512, 512, 512, 512, 512},
@@ -347,7 +347,7 @@ final class FilmGrainSynthesizerTest {
                 }
         );
         FrameHeader frameHeader = PostfilterTestFixtures.createFrameHeader(
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 new FrameHeader.LoopFilterInfo(new int[]{0, 0}, 0, 0, 0, true, true, new int[]{1, 0, 0, 0, -1, 0, -1, -1}, new int[]{0, 0}),
                 new FrameHeader.CdefInfo(0, 0, new int[0], new int[0]),
                 new FrameHeader.RestorationInfo(
@@ -409,19 +409,19 @@ final class FilmGrainSynthesizerTest {
     /// @param matrixCoefficients the AV1 matrix-coefficients code
     /// @return the matching color configuration
     private static SequenceHeader.ColorConfig colorConfig(DecodedPlanes planes, int matrixCoefficients) {
-        AvifPixelFormat pixelFormat = planes.pixelFormat();
+        Av1ChromaFormat chromaFormat = planes.chromaFormat();
         return new SequenceHeader.ColorConfig(
                 planes.bitDepth(),
-                pixelFormat == AvifPixelFormat.I400,
+                chromaFormat == Av1ChromaFormat.MONOCHROME,
                 true,
                 2,
                 2,
                 matrixCoefficients,
                 false,
-                pixelFormat,
+                chromaFormat,
                 0,
-                pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422,
-                pixelFormat == AvifPixelFormat.I420,
+                chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422,
+                chromaFormat == Av1ChromaFormat.YUV420,
                 false
         );
     }

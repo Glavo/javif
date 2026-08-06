@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -67,8 +67,8 @@ final class TileLoopRestorationReader {
     /// The active frame header.
     private final FrameHeader frameHeader;
 
-    /// The active decoded pixel format.
-    private final AvifPixelFormat pixelFormat;
+    /// The active decoded chroma format.
+    private final Av1ChromaFormat chromaFormat;
 
     /// The frame-level restoration types.
     private final FrameHeader.RestorationType[] frameTypes;
@@ -89,7 +89,7 @@ final class TileLoopRestorationReader {
         this.tileContext = Objects.requireNonNull(tileContext, "tileContext");
         this.syntaxReader = Objects.requireNonNull(syntaxReader, "syntaxReader");
         this.frameHeader = tileContext.frameHeader();
-        this.pixelFormat = tileContext.sequenceHeader().colorConfig().pixelFormat();
+        this.chromaFormat = tileContext.sequenceHeader().colorConfig().chromaFormat();
         this.frameTypes = frameHeader.restoration().types();
         this.referenceWienerCoefficients = new int[3][2][3];
         this.referenceSelfGuidedProjectionCoefficients = new int[3][2];
@@ -224,23 +224,23 @@ final class TileLoopRestorationReader {
         return coefficients;
     }
 
-    /// Returns the chroma horizontal subsampling shift for the active pixel format.
+    /// Returns the chroma horizontal subsampling shift for the active chroma format.
     ///
-    /// @return the chroma horizontal subsampling shift for the active pixel format
+    /// @return the chroma horizontal subsampling shift for the active chroma format
     private int chromaSubsamplingX() {
-        return switch (pixelFormat) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
-    /// Returns the chroma vertical subsampling shift for the active pixel format.
+    /// Returns the chroma vertical subsampling shift for the active chroma format.
     ///
-    /// @return the chroma vertical subsampling shift for the active pixel format
+    /// @return the chroma vertical subsampling shift for the active chroma format
     private int chromaSubsamplingY() {
-        return switch (pixelFormat) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 

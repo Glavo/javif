@@ -122,7 +122,7 @@ final class AomAvifTestFilesCorpusTest {
             assertTrue(planes.codedWidth() > 0, resourceName + " coded width");
             assertTrue(planes.codedHeight() > 0, resourceName + " coded height");
             assertEquals(info.bitDepth(), planes.bitDepth(), resourceName + " bit depth");
-            assertEquals(info.pixelFormat(), planes.pixelFormat(), resourceName + " pixel format");
+            assertEquals(info.chromaFormat(), planes.chromaFormat(), resourceName + " pixel format");
 
             AvifDecodeException exception = assertThrows(AvifDecodeException.class, reader::readFrame);
             assertEquals(AvifErrorCode.UNSUPPORTED_FEATURE, exception.code(), resourceName + " error code");
@@ -166,7 +166,7 @@ final class AomAvifTestFilesCorpusTest {
         assertEquals(info.width(), frame.width(), resourceName + " frame width");
         assertEquals(info.height(), frame.height(), resourceName + " frame height");
         assertEquals(info.bitDepth(), frame.bitDepth(), resourceName + " bit depth");
-        assertEquals(info.pixelFormat(), frame.pixelFormat(), resourceName + " pixel format");
+        assertEquals(info.chromaFormat(), frame.chromaFormat(), resourceName + " pixel format");
 
         int pixelCount = Math.multiplyExact(frame.width(), frame.height());
         if (frame.bitDepth().isEightBit()) {

@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
@@ -48,31 +48,31 @@ final class PostfilterTestFixtures {
 
     /// Creates one decoded-plane snapshot from row-major sample matrices.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded pixel format
     /// @param lumaSamples the luma sample raster
     /// @param chromaUSamples the chroma-U sample raster, or `null`
     /// @param chromaVSamples the chroma-V sample raster, or `null`
     /// @return one immutable decoded-plane snapshot
     static DecodedPlanes createDecodedPlanes(
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int[][] lumaSamples,
             @Nullable int[][] chromaUSamples,
             @Nullable int[][] chromaVSamples
     ) {
-        return createDecodedPlanes(8, pixelFormat, lumaSamples, chromaUSamples, chromaVSamples);
+        return createDecodedPlanes(8, chromaFormat, lumaSamples, chromaUSamples, chromaVSamples);
     }
 
     /// Creates one decoded-plane snapshot from row-major sample matrices.
     ///
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded pixel format
     /// @param lumaSamples the luma sample raster
     /// @param chromaUSamples the chroma-U sample raster, or `null`
     /// @param chromaVSamples the chroma-V sample raster, or `null`
     /// @return one immutable decoded-plane snapshot
     static DecodedPlanes createDecodedPlanes(
             int bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int[][] lumaSamples,
             @Nullable int[][] chromaUSamples,
             @Nullable int[][] chromaVSamples
@@ -81,7 +81,7 @@ final class PostfilterTestFixtures {
         int height = lumaSamples.length;
         return new DecodedPlanes(
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 width,
                 height,
                 width,
@@ -94,25 +94,25 @@ final class PostfilterTestFixtures {
 
     /// Creates one minimal frame header with caller-supplied postfilter and grain state.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded pixel format
     /// @param loopFilter the loop-filter state
     /// @param cdef the CDEF state
     /// @param restoration the restoration state
     /// @param filmGrain the normalized film-grain state
     /// @return one minimal frame header with caller-supplied postfilter and grain state
     static FrameHeader createFrameHeader(
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader.LoopFilterInfo loopFilter,
             FrameHeader.CdefInfo cdef,
             FrameHeader.RestorationInfo restoration,
             FrameHeader.FilmGrainParams filmGrain
     ) {
-        return createFrameHeader(pixelFormat, 8, 8, loopFilter, cdef, restoration, filmGrain);
+        return createFrameHeader(chromaFormat, 8, 8, loopFilter, cdef, restoration, filmGrain);
     }
 
     /// Creates one minimal frame header with caller-supplied dimensions and postfilter state.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded pixel format
     /// @param width the coded frame width in pixels
     /// @param height the coded frame height in pixels
     /// @param loopFilter the loop-filter state
@@ -121,7 +121,7 @@ final class PostfilterTestFixtures {
     /// @param filmGrain the normalized film-grain state
     /// @return one minimal frame header with caller-supplied dimensions and postfilter state
     static FrameHeader createFrameHeader(
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int width,
             int height,
             FrameHeader.LoopFilterInfo loopFilter,
@@ -600,7 +600,7 @@ final class PostfilterTestFixtures {
                         2,
                         2,
                         true,
-                        AvifPixelFormat.I400,
+                        Av1ChromaFormat.MONOCHROME,
                         0,
                         true,
                         true,

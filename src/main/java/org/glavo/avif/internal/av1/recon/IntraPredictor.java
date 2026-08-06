@@ -25,7 +25,7 @@ import org.jetbrains.annotations.Unmodifiable;
 /// Reconstructs AV1 intra-predicted luma and chroma blocks with instance-owned scratch storage.
 ///
 /// This predictor implements non-directional modes, directional prediction with signed
-/// `angle_delta`, luma filter-intra, and CFL chroma prediction for `I420`, `I422`, and `I444`.
+/// `angle_delta`, luma filter-intra, and CFL chroma prediction for `YUV420`, `YUV422`, and `YUV444`.
 /// Frame edges use midpoint samples when top or left neighbors are unavailable.
 /// One instance must not execute prediction calls concurrently.
 @NotNullByDefault
@@ -821,7 +821,7 @@ final class IntraPredictor {
     /// Reconstructs one CFL chroma block directly into the destination plane.
     ///
     /// The predictor consumes already reconstructed luma samples, including applied luma
-    /// residuals, and accepts the subsampling shifts used by `I420`, `I422`, and `I444`.
+    /// residuals, and accepts the subsampling shifts used by `YUV420`, `YUV422`, and `YUV444`.
     ///
     /// @param chromaPlane the mutable chroma destination plane
     /// @param lumaPlane the already reconstructed luma plane
@@ -1013,7 +1013,7 @@ final class IntraPredictor {
         }
     }
 
-    /// Reconstructs one `I420` CFL chroma block directly into the destination plane.
+    /// Reconstructs one `YUV420` CFL chroma block directly into the destination plane.
     ///
     /// @param chromaPlane the mutable chroma destination plane
     /// @param lumaPlane the already reconstructed luma plane
@@ -2012,7 +2012,7 @@ final class IntraPredictor {
     /// Returns the signed CFL AC buffer for one subsampled chroma block.
     ///
     /// The returned buffer has one entry per chroma sample in raster order and accepts the
-    /// subsampling shifts used by `I420`, `I422`, and `I444`.
+    /// subsampling shifts used by `YUV420`, `YUV422`, and `YUV444`.
     ///
     /// @param lumaPlane the already reconstructed luma plane
     /// @param lumaX the zero-based horizontal luma sample coordinate

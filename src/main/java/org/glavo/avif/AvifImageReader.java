@@ -976,7 +976,7 @@ public final class AvifImageReader implements AutoCloseable {
         AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(planes.bitDepth());
         try {
             YuvToRgbTransform transform = colorInfo != null
-                    ? YuvToRgbTransform.fromColorInfo(colorInfo, planes.pixelFormat() == AvifPixelFormat.I400)
+                    ? YuvToRgbTransform.fromColorInfo(colorInfo, planes.chromaFormat() == Av1ChromaFormat.MONOCHROME)
                     : YuvToRgbTransform.fromColorConfig(av1ColorConfig);
             DecodedPlanes decodedPlanes = toDecodedPlanes(planes);
             if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
@@ -984,7 +984,7 @@ public final class AvifImageReader implements AutoCloseable {
                         planes.codedWidth(),
                         planes.codedHeight(),
                         planes.bitDepth(),
-                        planes.pixelFormat(),
+                        planes.chromaFormat(),
                         frameIndex,
                         ArgbOutput.toOpaqueArgbPixels(decodedPlanes, transform)
                 );
@@ -994,7 +994,7 @@ public final class AvifImageReader implements AutoCloseable {
                         planes.codedWidth(),
                         planes.codedHeight(),
                         planes.bitDepth(),
-                        planes.pixelFormat(),
+                        planes.chromaFormat(),
                         frameIndex,
                         ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes, transform)
                 );
@@ -1012,7 +1012,7 @@ public final class AvifImageReader implements AutoCloseable {
     private static DecodedPlanes toDecodedPlanes(AvifPlanes planes) {
         return new DecodedPlanes(
                 planes.bitDepth().bits(),
-                planes.pixelFormat(),
+                planes.chromaFormat(),
                 planes.codedWidth(),
                 planes.codedHeight(),
                 planes.renderWidth(),
@@ -1060,7 +1060,7 @@ public final class AvifImageReader implements AutoCloseable {
     private static AvifPlanes alphaPlanesFromDecodedImage(AvifPlanes planes) {
         return new AvifPlanes(
                 planes.bitDepth(),
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 planes.codedWidth(),
                 planes.codedHeight(),
                 planes.renderWidth(),
@@ -1105,32 +1105,32 @@ public final class AvifImageReader implements AutoCloseable {
         }
         AvifPlanes firstCell = cellPlanes[0];
         AvifBitDepth bitDepth = firstCell.bitDepth();
-        AvifPixelFormat pixelFormat = gridRawPlanePixelFormat(cellPlanes);
-        validateGridRawPlaneCells(cellPlanes, bitDepth, pixelFormat);
+        Av1ChromaFormat chromaFormat = gridRawPlaneChromaFormat(cellPlanes);
+        validateGridRawPlaneCells(cellPlanes, bitDepth, chromaFormat);
 
         AvifPlane lumaPlane = composeGridPlane(lumaPlanes(cellPlanes), rows, columns, outputWidth, outputHeight);
-        if (pixelFormat == AvifPixelFormat.I400) {
-            return new AvifPlanes(bitDepth, pixelFormat, outputWidth, outputHeight, outputWidth, outputHeight,
+        if (chromaFormat == Av1ChromaFormat.MONOCHROME) {
+            return new AvifPlanes(bitDepth, chromaFormat, outputWidth, outputHeight, outputWidth, outputHeight,
                     lumaPlane, null, null);
         }
 
-        int chromaWidth = expectedChromaWidth(pixelFormat, outputWidth);
-        int chromaHeight = expectedChromaHeight(pixelFormat, outputHeight);
+        int chromaWidth = expectedChromaWidth(chromaFormat, outputWidth);
+        int chromaHeight = expectedChromaHeight(chromaFormat, outputHeight);
         AvifPlane chromaUPlane = composeGridPlane(
-                chromaPlanes(cellPlanes, pixelFormat, bitDepth, true),
+                chromaPlanes(cellPlanes, chromaFormat, bitDepth, true),
                 rows,
                 columns,
                 chromaWidth,
                 chromaHeight
         );
         AvifPlane chromaVPlane = composeGridPlane(
-                chromaPlanes(cellPlanes, pixelFormat, bitDepth, false),
+                chromaPlanes(cellPlanes, chromaFormat, bitDepth, false),
                 rows,
                 columns,
                 chromaWidth,
                 chromaHeight
         );
-        return new AvifPlanes(bitDepth, pixelFormat, outputWidth, outputHeight, outputWidth, outputHeight,
+        return new AvifPlanes(bitDepth, chromaFormat, outputWidth, outputHeight, outputWidth, outputHeight,
                 lumaPlane, chromaUPlane, chromaVPlane);
     }
 
@@ -1178,12 +1178,12 @@ public final class AvifImageReader implements AutoCloseable {
             throw invalidImageGrid(label + " rightmost or bottommost grid cells do not overlap the output canvas");
         }
 
-        AvifPixelFormat pixelFormat = gridRawPlanePixelFormat(cellPlanes);
-        if ((pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422)
+        Av1ChromaFormat chromaFormat = gridRawPlaneChromaFormat(cellPlanes);
+        if ((chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422)
                 && ((tileWidth & 1) != 0 || (outputWidth & 1) != 0)) {
             throw invalidImageGrid(label + " horizontally subsampled grid widths must be even");
         }
-        if (pixelFormat == AvifPixelFormat.I420
+        if (chromaFormat == Av1ChromaFormat.YUV420
                 && ((tileHeight & 1) != 0 || (outputHeight & 1) != 0)) {
             throw invalidImageGrid(label + " vertically subsampled grid heights must be even");
         }
@@ -1192,43 +1192,43 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Returns the common raw grid pixel format, allowing monochrome cells in a chroma grid.
+    /// Returns the common raw grid chroma format, allowing monochrome cells in a chroma grid.
     ///
     /// @param cellPlanes the decoded cell planes
-    /// @return the grid pixel format
-    private static AvifPixelFormat gridRawPlanePixelFormat(AvifPlanes[] cellPlanes) {
-        AvifPixelFormat pixelFormat = AvifPixelFormat.I400;
+    /// @return the grid chroma format
+    private static Av1ChromaFormat gridRawPlaneChromaFormat(AvifPlanes[] cellPlanes) {
+        Av1ChromaFormat chromaFormat = Av1ChromaFormat.MONOCHROME;
         for (AvifPlanes cellPlane : cellPlanes) {
-            AvifPixelFormat cellPixelFormat = cellPlane.pixelFormat();
-            if (cellPixelFormat == AvifPixelFormat.I400) {
+            Av1ChromaFormat cellChromaFormat = cellPlane.chromaFormat();
+            if (cellChromaFormat == Av1ChromaFormat.MONOCHROME) {
                 continue;
             }
-            if (pixelFormat == AvifPixelFormat.I400) {
-                pixelFormat = cellPixelFormat;
-            } else if (cellPixelFormat != pixelFormat) {
-                throw new IllegalArgumentException("grid cell pixel format mismatch");
+            if (chromaFormat == Av1ChromaFormat.MONOCHROME) {
+                chromaFormat = cellChromaFormat;
+            } else if (cellChromaFormat != chromaFormat) {
+                throw new IllegalArgumentException("grid cell chroma format mismatch");
             }
         }
-        return pixelFormat;
+        return chromaFormat;
     }
 
     /// Validates that all grid cells share the same raw-plane format.
     ///
     /// @param cellPlanes the decoded cell planes
     /// @param bitDepth the expected bit depth
-    /// @param pixelFormat the expected output pixel format
+    /// @param chromaFormat the expected output chroma format
     private static void validateGridRawPlaneCells(
             AvifPlanes[] cellPlanes,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat
+            Av1ChromaFormat chromaFormat
     ) {
         for (AvifPlanes cellPlane : cellPlanes) {
             if (cellPlane.bitDepth() != bitDepth) {
                 throw new IllegalArgumentException("grid cell bit depth mismatch");
             }
-            AvifPixelFormat cellPixelFormat = cellPlane.pixelFormat();
-            if (cellPixelFormat != pixelFormat && cellPixelFormat != AvifPixelFormat.I400) {
-                throw new IllegalArgumentException("grid cell pixel format mismatch");
+            Av1ChromaFormat cellChromaFormat = cellPlane.chromaFormat();
+            if (cellChromaFormat != chromaFormat && cellChromaFormat != Av1ChromaFormat.MONOCHROME) {
+                throw new IllegalArgumentException("grid cell chroma format mismatch");
             }
         }
     }
@@ -1248,13 +1248,13 @@ public final class AvifImageReader implements AutoCloseable {
     /// Returns one chroma plane for all grid cells.
     ///
     /// @param cellPlanes the decoded cell planes
-    /// @param pixelFormat the output pixel format
+    /// @param chromaFormat the output chroma format
     /// @param bitDepth the output bit depth
     /// @param chromaU whether to return U instead of V
     /// @return chroma planes in row-major order
     private static AvifPlane[] chromaPlanes(
             AvifPlanes[] cellPlanes,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             AvifBitDepth bitDepth,
             boolean chromaU
     ) {
@@ -1262,7 +1262,7 @@ public final class AvifImageReader implements AutoCloseable {
         for (int i = 0; i < cellPlanes.length; i++) {
             AvifPlanes cellPlane = cellPlanes[i];
             AvifPlane plane = chromaU ? cellPlane.chromaUPlane() : cellPlane.chromaVPlane();
-            result[i] = plane != null ? plane : neutralChromaPlane(cellPlane, pixelFormat, bitDepth);
+            result[i] = plane != null ? plane : neutralChromaPlane(cellPlane, chromaFormat, bitDepth);
         }
         return result;
     }
@@ -1270,16 +1270,16 @@ public final class AvifImageReader implements AutoCloseable {
     /// Creates a neutral chroma plane for a monochrome grid cell.
     ///
     /// @param cellPlane the monochrome cell planes
-    /// @param pixelFormat the output pixel format
+    /// @param chromaFormat the output chroma format
     /// @param bitDepth the output bit depth
     /// @return a neutral chroma plane matching the cell's target chroma dimensions
     private static AvifPlane neutralChromaPlane(
             AvifPlanes cellPlane,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             AvifBitDepth bitDepth
     ) {
-        int width = expectedChromaWidth(pixelFormat, cellPlane.codedWidth());
-        int height = expectedChromaHeight(pixelFormat, cellPlane.codedHeight());
+        int width = expectedChromaWidth(chromaFormat, cellPlane.codedWidth());
+        int height = expectedChromaHeight(chromaFormat, cellPlane.codedHeight());
         short[] samples = new short[width * height];
         Arrays.fill(samples, (short) (1 << (bitDepth.bits() - 1)));
         return new AvifPlane(width, height, width, samples);
@@ -1352,29 +1352,29 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Returns the expected chroma width for one pixel format.
+    /// Returns the expected chroma width for one chroma format.
     ///
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param codedWidth the coded luma width in samples
     /// @return the expected chroma width
-    private static int expectedChromaWidth(AvifPixelFormat pixelFormat, int codedWidth) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420, I422 -> (codedWidth + 1) / 2;
-            case I444 -> codedWidth;
+    private static int expectedChromaWidth(Av1ChromaFormat chromaFormat, int codedWidth) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420, YUV422 -> (codedWidth + 1) / 2;
+            case YUV444 -> codedWidth;
         };
     }
 
-    /// Returns the expected chroma height for one pixel format.
+    /// Returns the expected chroma height for one chroma format.
     ///
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param codedHeight the coded luma height in samples
     /// @return the expected chroma height
-    private static int expectedChromaHeight(AvifPixelFormat pixelFormat, int codedHeight) {
-        return switch (pixelFormat) {
-            case I400 -> 0;
-            case I420 -> (codedHeight + 1) / 2;
-            case I422, I444 -> codedHeight;
+    private static int expectedChromaHeight(Av1ChromaFormat chromaFormat, int codedHeight) {
+        return switch (chromaFormat) {
+            case MONOCHROME -> 0;
+            case YUV420 -> (codedHeight + 1) / 2;
+            case YUV422, YUV444 -> codedHeight;
         };
     }
 
@@ -1497,7 +1497,7 @@ public final class AvifImageReader implements AutoCloseable {
             }
 
             return new AvifFrame(width, height, frame.bitDepth(),
-                    frame.pixelFormat(), frame.frameIndex(), pixels);
+                    frame.chromaFormat(), frame.frameIndex(), pixels);
         }
         if (frame.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
             long[] pixels = longBufferToArray(frame.longPixelBuffer());
@@ -1530,7 +1530,7 @@ public final class AvifImageReader implements AutoCloseable {
             }
 
             return new AvifFrame(width, height, frame.bitDepth(),
-                    frame.pixelFormat(), frame.frameIndex(), pixels);
+                    frame.chromaFormat(), frame.frameIndex(), pixels);
         }
         return frame;
     }
@@ -1750,7 +1750,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.width(),
                     frame.height(),
                     frame.bitDepth(),
-                    frame.pixelFormat(),
+                    frame.chromaFormat(),
                     frameIndex,
                     frame.intPixelBuffer()
             );
@@ -1760,7 +1760,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.width(),
                     frame.height(),
                     frame.bitDepth(),
-                    frame.pixelFormat(),
+                    frame.chromaFormat(),
                     frameIndex,
                     frame.longPixelBuffer()
             );
@@ -1785,14 +1785,14 @@ public final class AvifImageReader implements AutoCloseable {
     ) {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorInfo(
                 colorInfo,
-                frame.pixelFormat() == AvifPixelFormat.I400
+                frame.chromaFormat() == Av1ChromaFormat.MONOCHROME
         );
         if (resolvedOutputMode == AvifRgbOutputMode.ARGB_8888) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
                     frame.bitDepth(),
-                    frame.pixelFormat(),
+                    frame.chromaFormat(),
                     frameIndex,
                     ArgbOutput.toOpaqueArgbPixels(planes, transform)
             );
@@ -1802,7 +1802,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.width(),
                     frame.height(),
                     frame.bitDepth(),
-                    frame.pixelFormat(),
+                    frame.chromaFormat(),
                     frameIndex,
                     ArgbOutput.toOpaqueArgbLongPixels(planes, transform)
             );
@@ -2044,7 +2044,7 @@ public final class AvifImageReader implements AutoCloseable {
         if (alphaPremultiplied) {
             unpremultiplyIntPixels(combined);
         }
-        return new AvifFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
+        return new AvifFrame(width, height, color.bitDepth(), color.chromaFormat(), frameIndex, combined);
     }
 
     /// Combines alpha from raw luma plane into a 10/12-bit color frame.
@@ -2072,7 +2072,7 @@ public final class AvifImageReader implements AutoCloseable {
         if (alphaPremultiplied) {
             unpremultiplyLongPixels(combined);
         }
-        return new AvifFrame(width, height, color.bitDepth(), color.pixelFormat(), frameIndex, combined);
+        return new AvifFrame(width, height, color.bitDepth(), color.chromaFormat(), frameIndex, combined);
     }
 
     /// Converts packed 8-bit ARGB pixels from premultiplied to straight alpha in place.

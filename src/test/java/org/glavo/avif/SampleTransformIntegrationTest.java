@@ -50,14 +50,14 @@ final class SampleTransformIntegrationTest {
             assertEquals(1024, info.width());
             assertEquals(684, info.height());
             assertEquals(AvifBitDepth.SIXTEEN_BITS, info.bitDepth());
-            assertEquals(AvifPixelFormat.I444, info.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV444, info.chromaFormat());
             assertFalse(info.alphaPresent());
             assertFalse(info.animated());
             assertEquals(1, info.frameCount());
 
             AvifPlanes planes = reader.readRawColorPlanes(0);
             assertEquals(AvifBitDepth.SIXTEEN_BITS, planes.bitDepth());
-            assertEquals(AvifPixelFormat.I444, planes.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV444, planes.chromaFormat());
             assertEquals(1024, planes.codedWidth());
             assertEquals(684, planes.codedHeight());
             assertEquals(11519, planes.lumaPlane().sample(0, 0));

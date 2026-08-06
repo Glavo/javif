@@ -39,7 +39,7 @@ public final class AvifImageInfo {
     /// The decoded bit depth.
     private final AvifBitDepth bitDepth;
     /// The AV1 chroma sampling layout.
-    private final AvifPixelFormat pixelFormat;
+    private final Av1ChromaFormat chromaFormat;
     /// Whether an alpha auxiliary image is present.
     private final boolean alphaPresent;
     /// Whether color samples are premultiplied by the alpha auxiliary image.
@@ -94,7 +94,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -103,13 +103,13 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
             @Nullable AvifColorInfo colorInfo
     ) {
-        this(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount, colorInfo, null, null, null);
+        this(width, height, bitDepth, chromaFormat, alphaPresent, animated, frameCount, colorInfo, null, null, null);
     }
 
     /// Creates image metadata with embedded ICC, Exif, and XMP payloads.
@@ -117,7 +117,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -129,7 +129,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -142,7 +142,7 @@ public final class AvifImageInfo {
                 width,
                 height,
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 alphaPresent,
                 animated,
                 frameCount,
@@ -161,7 +161,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -176,7 +176,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -192,7 +192,7 @@ public final class AvifImageInfo {
                 width,
                 height,
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 alphaPresent,
                 animated,
                 frameCount,
@@ -218,7 +218,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -240,7 +240,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -263,7 +263,7 @@ public final class AvifImageInfo {
                 width,
                 height,
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 alphaPresent,
                 animated,
                 frameCount,
@@ -290,7 +290,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -314,7 +314,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -338,7 +338,7 @@ public final class AvifImageInfo {
                 width,
                 height,
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 alphaPresent,
                 animated,
                 frameCount,
@@ -366,7 +366,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -391,7 +391,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -416,7 +416,7 @@ public final class AvifImageInfo {
                 width,
                 height,
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 alphaPresent,
                 animated,
                 frameCount,
@@ -446,7 +446,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -473,7 +473,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -499,7 +499,7 @@ public final class AvifImageInfo {
                 width,
                 height,
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 alphaPresent,
                 animated,
                 frameCount,
@@ -530,7 +530,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -558,7 +558,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -585,7 +585,7 @@ public final class AvifImageInfo {
                 width,
                 height,
                 bitDepth,
-                pixelFormat,
+                chromaFormat,
                 alphaPresent,
                 animated,
                 frameCount,
@@ -617,7 +617,7 @@ public final class AvifImageInfo {
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the AV1 chroma sampling layout
+    /// @param chromaFormat the AV1 chroma sampling layout
     /// @param alphaPresent whether an alpha auxiliary image is present
     /// @param animated whether the input is an animated image sequence
     /// @param frameCount the number of frames advertised by the container
@@ -646,7 +646,7 @@ public final class AvifImageInfo {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount,
@@ -712,7 +712,7 @@ public final class AvifImageInfo {
         this.width = width;
         this.height = height;
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
-        this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.alphaPresent = alphaPresent;
         this.alphaPremultiplied = alphaPresent && alphaPremultiplied;
         this.animated = animated;
@@ -779,8 +779,8 @@ public final class AvifImageInfo {
     /// Returns the AV1 chroma sampling layout.
     ///
     /// @return the AV1 chroma sampling layout
-    public AvifPixelFormat pixelFormat() {
-        return pixelFormat;
+    public Av1ChromaFormat chromaFormat() {
+        return chromaFormat;
     }
 
     /// Returns whether an alpha auxiliary image is present.

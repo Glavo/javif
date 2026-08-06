@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -94,7 +94,7 @@ public final class LoopFilterApplier {
 
         LoopFilterBlockMap blockMap = LoopFilterBlockMap.create(syntaxDecodeResult, checkedDecodedPlanes);
         PlaneBuffer luma = PlaneBuffer.create(checkedDecodedPlanes.lumaPlane(), checkedDecodedPlanes.bitDepth());
-        applyPlane(luma, checkedFrameHeader, checkedDecodedPlanes.pixelFormat(), blockMap, 0);
+        applyPlane(luma, checkedFrameHeader, checkedDecodedPlanes.chromaFormat(), blockMap, 0);
 
         @Nullable PlaneBuffer chromaU = null;
         @Nullable PlaneBuffer chromaV = null;
@@ -107,13 +107,13 @@ public final class LoopFilterApplier {
                     Objects.requireNonNull(checkedDecodedPlanes.chromaVPlane(), "decodedPlanes.chromaVPlane()"),
                     checkedDecodedPlanes.bitDepth()
             );
-            applyPlane(chromaU, checkedFrameHeader, checkedDecodedPlanes.pixelFormat(), blockMap, 1);
-            applyPlane(chromaV, checkedFrameHeader, checkedDecodedPlanes.pixelFormat(), blockMap, 2);
+            applyPlane(chromaU, checkedFrameHeader, checkedDecodedPlanes.chromaFormat(), blockMap, 1);
+            applyPlane(chromaV, checkedFrameHeader, checkedDecodedPlanes.chromaFormat(), blockMap, 2);
         }
 
         return new DecodedPlanes(
                 checkedDecodedPlanes.bitDepth(),
-                checkedDecodedPlanes.pixelFormat(),
+                checkedDecodedPlanes.chromaFormat(),
                 checkedDecodedPlanes.codedWidth(),
                 checkedDecodedPlanes.codedHeight(),
                 checkedDecodedPlanes.renderWidth(),
@@ -128,18 +128,18 @@ public final class LoopFilterApplier {
     ///
     /// @param plane the mutable plane buffer
     /// @param frameHeader the normalized frame header that owns the plane
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @param blockMap the decoded block and transform map
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
     private static void applyPlane(
             PlaneBuffer plane,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             LoopFilterBlockMap blockMap,
             int planeIndex
     ) {
-        int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(pixelFormat);
-        int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(pixelFormat);
+        int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(chromaFormat);
+        int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(chromaFormat);
         plane.setProcessingExtent(
                 alignedPlaneBoundaryDimension(plane.width(), subX),
                 alignedPlaneBoundaryDimension(plane.height(), subY)
@@ -148,28 +148,28 @@ public final class LoopFilterApplier {
                 && planeFilterLevel(frameHeader.loopFilter(), planeIndex, 1) == 0) {
             return;
         }
-        applyPass(plane, frameHeader, pixelFormat, blockMap, planeIndex, 0);
-        applyPass(plane, frameHeader, pixelFormat, blockMap, planeIndex, 1);
+        applyPass(plane, frameHeader, chromaFormat, blockMap, planeIndex, 0);
+        applyPass(plane, frameHeader, chromaFormat, blockMap, planeIndex, 1);
     }
 
     /// Applies one vertical or horizontal loop-filter pass to one plane.
     ///
     /// @param plane the mutable plane buffer
     /// @param frameHeader the normalized frame header that owns the plane
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @param blockMap the decoded block and transform map
     /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
     /// @param pass the edge pass, `0` for vertical edges and `1` for horizontal edges
     private static void applyPass(
             PlaneBuffer plane,
             FrameHeader frameHeader,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             LoopFilterBlockMap blockMap,
             int planeIndex,
             int pass
     ) {
-        int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(pixelFormat);
-        int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(pixelFormat);
+        int subX = planeIndex == 0 ? 0 : chromaSubsamplingX(chromaFormat);
+        int subY = planeIndex == 0 ? 0 : chromaSubsamplingY(chromaFormat);
         int rowStep = Math.max(1, 1 << subY);
         int colStep = Math.max(1, 1 << subX);
         if (pass == 0) {
@@ -713,25 +713,25 @@ public final class LoopFilterApplier {
         }
     }
 
-    /// Returns the chroma horizontal subsampling shift for one pixel format.
+    /// Returns the chroma horizontal subsampling shift for one chroma format.
     ///
-    /// @param pixelFormat the decoded pixel format
-    /// @return the chroma horizontal subsampling shift for one pixel format
-    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+    /// @param chromaFormat the decoded chroma format
+    /// @return the chroma horizontal subsampling shift for one chroma format
+    private static int chromaSubsamplingX(Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
-    /// Returns the chroma vertical subsampling shift for one pixel format.
+    /// Returns the chroma vertical subsampling shift for one chroma format.
     ///
-    /// @param pixelFormat the decoded pixel format
-    /// @return the chroma vertical subsampling shift for one pixel format
-    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
-        return switch (pixelFormat) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+    /// @param chromaFormat the decoded chroma format
+    /// @return the chroma vertical subsampling shift for one chroma format
+    private static int chromaSubsamplingY(Av1ChromaFormat chromaFormat) {
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 
@@ -993,8 +993,8 @@ public final class LoopFilterApplier {
             LoopFilterBlockMap map = new LoopFilterBlockMap(
                     (decodedPlanes.codedWidth() + MI_SIZE - 1) / MI_SIZE,
                     (decodedPlanes.codedHeight() + MI_SIZE - 1) / MI_SIZE,
-                    chromaSubsamplingX(decodedPlanes.pixelFormat()),
-                    chromaSubsamplingY(decodedPlanes.pixelFormat())
+                    chromaSubsamplingX(decodedPlanes.chromaFormat()),
+                    chromaSubsamplingY(decodedPlanes.chromaFormat())
             );
             TilePartitionTreeReader.Node[][] frameLocalTileRoots = syntaxDecodeResult.tileRoots();
             for (TilePartitionTreeReader.Node[] tileRoots : frameLocalTileRoots) {

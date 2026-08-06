@@ -497,7 +497,7 @@ public final class AvifViewerApp extends Application {
         }
 
         text.append(" | depth=").append(frame.bitDepth())
-                .append(" | format=").append(frame.pixelFormat())
+                .append(" | format=").append(frame.chromaFormat())
                 .append(" | load=").append(loadMillis).append("ms");
         return text.toString();
     }

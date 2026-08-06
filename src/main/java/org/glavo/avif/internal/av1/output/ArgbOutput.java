@@ -18,7 +18,7 @@ package org.glavo.avif.internal.av1.output;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -30,8 +30,8 @@ import java.util.Objects;
 
 /// Internal entry points for converting complete `DecodedPlanes` snapshots into opaque ARGB output.
 ///
-/// Conversion covers every stored luma sample and uses point-sampled chroma expansion for `I420`,
-/// `I422`, and `I444`. AV1 render dimensions are display hints and do not crop or resample the
+/// Conversion covers every stored luma sample and uses point-sampled chroma expansion for `YUV420`,
+/// `YUV422`, and `YUV444`. AV1 render dimensions are display hints and do not crop or resample the
 /// decoded planes.
 @NotNullByDefault
 public final class ArgbOutput {
@@ -66,10 +66,10 @@ public final class ArgbOutput {
         int pixelCount = checkedPixelCount(outputWidth, outputHeight);
         int[] pixels = new int[pixelCount];
 
-        AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
+        Av1ChromaFormat chromaFormat = checkedDecodedPlanes.chromaFormat();
         int bitDepth = checkedDecodedPlanes.bitDepth();
-        return switch (pixelFormat) {
-            case I400 -> convertOpaqueI400(
+        return switch (chromaFormat) {
+            case MONOCHROME -> convertOpaqueI400(
                     checkedDecodedPlanes.lumaPlane(),
                     outputWidth,
                     outputHeight,
@@ -77,17 +77,7 @@ public final class ArgbOutput {
                     pixels,
                     checkedTransform
             );
-            case I420 -> convertOpaqueI420(
-                    checkedDecodedPlanes.lumaPlane(),
-                    requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
-                    requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    outputWidth,
-                    outputHeight,
-                    bitDepth,
-                    pixels,
-                    checkedTransform
-            );
-            case I422 -> convertOpaqueI422(
+            case YUV420 -> convertOpaqueI420(
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
@@ -97,7 +87,17 @@ public final class ArgbOutput {
                     pixels,
                     checkedTransform
             );
-            case I444 -> convertOpaqueI444(
+            case YUV422 -> convertOpaqueI422(
+                    checkedDecodedPlanes.lumaPlane(),
+                    requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
+                    requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
+                    outputWidth,
+                    outputHeight,
+                    bitDepth,
+                    pixels,
+                    checkedTransform
+            );
+            case YUV444 -> convertOpaqueI444(
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
@@ -180,7 +180,7 @@ public final class ArgbOutput {
                 checkedDecodedPlanes.codedWidth(),
                 checkedDecodedPlanes.codedHeight(),
                 AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),
-                checkedDecodedPlanes.pixelFormat(),
+                checkedDecodedPlanes.chromaFormat(),
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),
                 checkedMetadata.presentationIndex(),
@@ -214,10 +214,10 @@ public final class ArgbOutput {
         int pixelCount = checkedPixelCount(outputWidth, outputHeight);
         long[] pixels = new long[pixelCount];
 
-        AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
+        Av1ChromaFormat chromaFormat = checkedDecodedPlanes.chromaFormat();
         int bitDepth = checkedDecodedPlanes.bitDepth();
-        return switch (pixelFormat) {
-            case I400 -> convertOpaqueLongI400(
+        return switch (chromaFormat) {
+            case MONOCHROME -> convertOpaqueLongI400(
                     checkedDecodedPlanes.lumaPlane(),
                     outputWidth,
                     outputHeight,
@@ -225,17 +225,7 @@ public final class ArgbOutput {
                     pixels,
                     checkedTransform
             );
-            case I420 -> convertOpaqueLongI420(
-                    checkedDecodedPlanes.lumaPlane(),
-                    requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
-                    requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
-                    outputWidth,
-                    outputHeight,
-                    bitDepth,
-                    pixels,
-                    checkedTransform
-            );
-            case I422 -> convertOpaqueLongI422(
+            case YUV420 -> convertOpaqueLongI420(
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
@@ -245,7 +235,17 @@ public final class ArgbOutput {
                     pixels,
                     checkedTransform
             );
-            case I444 -> convertOpaqueLongI444(
+            case YUV422 -> convertOpaqueLongI422(
+                    checkedDecodedPlanes.lumaPlane(),
+                    requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
+                    requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
+                    outputWidth,
+                    outputHeight,
+                    bitDepth,
+                    pixels,
+                    checkedTransform
+            );
+            case YUV444 -> convertOpaqueLongI444(
                     checkedDecodedPlanes.lumaPlane(),
                     requireChromaPlane(checkedDecodedPlanes.chromaUPlane(), "chromaUPlane"),
                     requireChromaPlane(checkedDecodedPlanes.chromaVPlane(), "chromaVPlane"),
@@ -325,7 +325,7 @@ public final class ArgbOutput {
                 checkedDecodedPlanes.codedWidth(),
                 checkedDecodedPlanes.codedHeight(),
                 AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),
-                checkedDecodedPlanes.pixelFormat(),
+                checkedDecodedPlanes.chromaFormat(),
                 checkedMetadata.frameType(),
                 checkedMetadata.visible(),
                 checkedMetadata.presentationIndex(),
@@ -454,7 +454,7 @@ public final class ArgbOutput {
         return pixels;
     }
 
-    /// Converts one `I420` plane snapshot into opaque ARGB pixels with point-sampled chroma.
+    /// Converts one `YUV420` plane snapshot into opaque ARGB pixels with point-sampled chroma.
     ///
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
@@ -523,7 +523,7 @@ public final class ArgbOutput {
         return pixels;
     }
 
-    /// Converts one `I420` plane snapshot into opaque 16-bit-per-channel ARGB pixels with
+    /// Converts one `YUV420` plane snapshot into opaque 16-bit-per-channel ARGB pixels with
     /// point-sampled chroma.
     ///
     /// @param lumaPlane the decoded luma plane
@@ -588,7 +588,7 @@ public final class ArgbOutput {
         return pixels;
     }
 
-    /// Converts one `I422` plane snapshot into opaque ARGB pixels with horizontally shared chroma.
+    /// Converts one `YUV422` plane snapshot into opaque ARGB pixels with horizontally shared chroma.
     ///
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
@@ -657,7 +657,7 @@ public final class ArgbOutput {
         return pixels;
     }
 
-    /// Converts one `I422` plane snapshot into opaque 16-bit-per-channel ARGB pixels with
+    /// Converts one `YUV422` plane snapshot into opaque 16-bit-per-channel ARGB pixels with
     /// horizontally shared chroma.
     ///
     /// @param lumaPlane the decoded luma plane
@@ -722,7 +722,7 @@ public final class ArgbOutput {
         return pixels;
     }
 
-    /// Converts one `I444` plane snapshot into opaque ARGB pixels with one chroma sample per pixel.
+    /// Converts one `YUV444` plane snapshot into opaque ARGB pixels with one chroma sample per pixel.
     ///
     /// @param lumaPlane the decoded luma plane
     /// @param chromaUPlane the decoded chroma U plane
@@ -767,7 +767,7 @@ public final class ArgbOutput {
         return pixels;
     }
 
-    /// Converts one `I444` plane snapshot into opaque 16-bit-per-channel ARGB pixels with one
+    /// Converts one `YUV444` plane snapshot into opaque 16-bit-per-channel ARGB pixels with one
     /// chroma sample per luma sample.
     ///
     /// @param lumaPlane the decoded luma plane

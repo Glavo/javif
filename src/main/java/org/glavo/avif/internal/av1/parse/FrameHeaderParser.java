@@ -19,7 +19,7 @@ import org.glavo.avif.decode.DecodeErrorCode;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodeStage;
 import org.glavo.avif.decode.FrameType;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -921,7 +921,7 @@ public final class FrameHeaderParser {
         int uAcDelta = 0;
         int vDcDelta = 0;
         int vAcDelta = 0;
-        if (sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I400) {
+        if (sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.MONOCHROME) {
             boolean diffUvDelta = sequenceHeader.colorConfig().separateUvDeltaQ() && reader.readFlag();
             if (reader.readFlag()) {
                 uDcDelta = reader.readSignedBits(7);
@@ -1208,7 +1208,7 @@ public final class FrameHeaderParser {
         if (!allLossless && !allowIntrabc) {
             levelY[0] = readInt(reader, 6);
             levelY[1] = readInt(reader, 6);
-            if (sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I400
+            if (sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.MONOCHROME
                     && (levelY[0] != 0 || levelY[1] != 0)) {
                 levelU = readInt(reader, 6);
                 levelV = readInt(reader, 6);
@@ -1279,7 +1279,7 @@ public final class FrameHeaderParser {
         int[] uvStrengths = new int[count];
         for (int i = 0; i < count; i++) {
             yStrengths[i] = readInt(reader, 6);
-            if (sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I400) {
+            if (sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.MONOCHROME) {
                 uvStrengths[i] = readInt(reader, 6);
             }
         }
@@ -1312,7 +1312,7 @@ public final class FrameHeaderParser {
         }
 
         types[0] = decodeRestorationType(readInt(reader, 2));
-        if (sequenceHeader.colorConfig().pixelFormat() != AvifPixelFormat.I400) {
+        if (sequenceHeader.colorConfig().chromaFormat() != Av1ChromaFormat.MONOCHROME) {
             types[1] = decodeRestorationType(readInt(reader, 2));
             types[2] = decodeRestorationType(readInt(reader, 2));
         }

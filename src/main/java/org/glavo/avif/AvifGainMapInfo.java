@@ -51,7 +51,7 @@ public final class AvifGainMapInfo {
     /// The gain-map AV1 bit depth, or `null` when unknown.
     private final @Nullable AvifBitDepth gainMapBitDepth;
     /// The gain-map AV1 chroma sampling layout, or `null` when unknown.
-    private final @Nullable AvifPixelFormat gainMapPixelFormat;
+    private final @Nullable Av1ChromaFormat gainMapChromaFormat;
     /// The tone-mapped item CICP color information, or `null` when absent.
     private final @Nullable AvifColorInfo toneMappedColorInfo;
     /// The tone-mapped item ICC profile payload, or `null` when absent.
@@ -81,7 +81,7 @@ public final class AvifGainMapInfo {
     /// @param gainMapWidth the gain-map image width in pixels, or -1 when unknown
     /// @param gainMapHeight the gain-map image height in pixels, or -1 when unknown
     /// @param gainMapBitDepth the gain-map AV1 bit depth, or `null` when unknown
-    /// @param gainMapPixelFormat the gain-map AV1 chroma sampling layout, or `null` when unknown
+    /// @param gainMapChromaFormat the gain-map AV1 chroma sampling layout, or `null` when unknown
     /// @param toneMappedColorInfo the tone-mapped item CICP color information, or `null` when absent
     /// @param toneMappedIccProfile the tone-mapped item ICC profile payload, or `null` when absent
     /// @param gainMapColorInfo the gain-map image item CICP color information, or `null` when absent
@@ -101,7 +101,7 @@ public final class AvifGainMapInfo {
             int gainMapWidth,
             int gainMapHeight,
             @Nullable AvifBitDepth gainMapBitDepth,
-            @Nullable AvifPixelFormat gainMapPixelFormat,
+            @Nullable Av1ChromaFormat gainMapChromaFormat,
             @Nullable AvifColorInfo toneMappedColorInfo,
             byte @Nullable [] toneMappedIccProfile,
             @Nullable AvifColorInfo gainMapColorInfo,
@@ -126,8 +126,8 @@ public final class AvifGainMapInfo {
         if (!isKnownSize(gainMapWidth, gainMapHeight) && !isUnknownSize(gainMapWidth, gainMapHeight)) {
             throw new IllegalArgumentException("gainMapWidth and gainMapHeight must both be positive or both be -1");
         }
-        if ((gainMapBitDepth == null) != (gainMapPixelFormat == null)) {
-            throw new IllegalArgumentException("gainMapBitDepth and gainMapPixelFormat must both be present or both be null");
+        if ((gainMapBitDepth == null) != (gainMapChromaFormat == null)) {
+            throw new IllegalArgumentException("gainMapBitDepth and gainMapChromaFormat must both be present or both be null");
         }
         if (metadataVersion < 0 || metadataMinimumVersion < 0 || metadataWriterVersion < 0) {
             throw new IllegalArgumentException("metadata version fields must be non-negative");
@@ -146,7 +146,7 @@ public final class AvifGainMapInfo {
         this.gainMapWidth = gainMapWidth;
         this.gainMapHeight = gainMapHeight;
         this.gainMapBitDepth = gainMapBitDepth;
-        this.gainMapPixelFormat = gainMapPixelFormat;
+        this.gainMapChromaFormat = gainMapChromaFormat;
         this.toneMappedColorInfo = toneMappedColorInfo;
         this.toneMappedIccProfile = immutableBytes(toneMappedIccProfile);
         this.gainMapColorInfo = gainMapColorInfo;
@@ -230,8 +230,8 @@ public final class AvifGainMapInfo {
     /// Returns the gain-map AV1 chroma sampling layout.
     ///
     /// @return the gain-map AV1 chroma sampling layout, or `null` when unknown
-    public @Nullable AvifPixelFormat gainMapPixelFormat() {
-        return gainMapPixelFormat;
+    public @Nullable Av1ChromaFormat gainMapChromaFormat() {
+        return gainMapChromaFormat;
     }
 
     /// Returns the tone-mapped item CICP color information.

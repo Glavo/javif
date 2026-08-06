@@ -661,7 +661,7 @@ final class ArgonAv1CorpusTest {
         updateYuvDigest(frameDigest, planes);
         return "frame=" + frameIndex
                 + " dimensions=" + planes.codedWidth() + "x" + planes.codedHeight()
-                + " format=" + planes.pixelFormat()
+                + " format=" + planes.chromaFormat()
                 + " bitDepth=" + planes.bitDepth()
                 + " md5=" + HexFormat.of().formatHex(frameDigest.digest())
                 + " y=" + planeDigest(planes.lumaPlane(), planes.bitDepth())

@@ -107,63 +107,63 @@ final class LibavifImageIoReferenceTest {
             enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_metasize0.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_progressive.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_progressive_metasize0.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/abc.png",
                     "libavif-test-data/abc_color_irot_alpha_irot.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.ROTATE_90_COUNTER_CLOCKWISE,
                     ABC_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/abc.png",
                     "libavif-test-data/abc_color_irot_alpha_NOirot.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.ROTATE_90_COUNTER_CLOCKWISE,
                     ABC_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/ArcTriomphe-cHRM-orig.png",
                     "libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.IDENTITY,
                     ARC_TRIOMPHE_CHRM_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/circle-trns-after-plte.png",
                     "libavif-test-data/circle_custom_properties.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.IDENTITY,
                     CIRCLE_CUSTOM_PROPERTIES_TOLERANCE
             ),
             enabledPixelImage(
                     "libavif-test-data/paris_icc_exif_xmp.png",
                     "libavif-test-data/paris_icc_exif_xmp.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     PixelTransform.IDENTITY,
                     PARIS_LOSSY_TOLERANCE
             ),
@@ -174,7 +174,7 @@ final class LibavifImageIoReferenceTest {
             new PixelRegionReference(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     new PixelRegion(0, 8, 11, 3),
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
@@ -182,7 +182,7 @@ final class LibavifImageIoReferenceTest {
             new PixelRegionReference(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_metasize0.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     new PixelRegion(0, 8, 11, 3),
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
@@ -190,7 +190,7 @@ final class LibavifImageIoReferenceTest {
             new PixelRegionReference(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_progressive.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     new PixelRegion(0, 8, 11, 3),
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
@@ -198,7 +198,7 @@ final class LibavifImageIoReferenceTest {
             new PixelRegionReference(
                     "libavif-test-data/draw_points.png",
                     "libavif-test-data/draw_points_idat_progressive_metasize0.avif",
-                    AvifPixelFormat.I444,
+                    Av1ChromaFormat.YUV444,
                     new PixelRegion(0, 8, 11, 3),
                     PixelTransform.IDENTITY,
                     DRAW_POINTS_TOLERANCE
@@ -247,7 +247,7 @@ final class LibavifImageIoReferenceTest {
                 ));
     }
 
-    /// Verifies selected I444 AVIF regions against their ImageIO-readable source images.
+    /// Verifies selected YUV444 AVIF regions against their ImageIO-readable source images.
     ///
     /// @return the dynamic pixel region reference tests
     @TestFactory
@@ -319,7 +319,7 @@ final class LibavifImageIoReferenceTest {
             assertEquals(1, frame.width());
             assertEquals(1, frame.height());
             assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
-            assertEquals(AvifPixelFormat.I444, frame.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV444, frame.chromaFormat());
             assertEquals(0xFFFDFDFD, frame.intPixelBuffer().get(0));
             assertNull(reader.readFrame());
         }
@@ -379,7 +379,7 @@ final class LibavifImageIoReferenceTest {
 
             AvifPlanes colorPlanes = reader.readRawColorPlanes(0);
             assertEquals(AvifBitDepth.TEN_BITS, colorPlanes.bitDepth());
-            assertEquals(AvifPixelFormat.I444, colorPlanes.pixelFormat());
+            assertEquals(Av1ChromaFormat.YUV444, colorPlanes.chromaFormat());
             assertEquals(12, colorPlanes.renderWidth());
             assertEquals(34, colorPlanes.renderHeight());
             assertGradientPlaneClose("Y", colorPlanes.lumaPlane(), 12, 34, 10, 32, 40.0);
@@ -393,7 +393,7 @@ final class LibavifImageIoReferenceTest {
             AvifPlanes alphaPlanes = reader.readRawAlphaPlanes(0);
             assertNotNull(alphaPlanes);
             assertEquals(AvifBitDepth.TEN_BITS, alphaPlanes.bitDepth());
-            assertEquals(AvifPixelFormat.I400, alphaPlanes.pixelFormat());
+            assertEquals(Av1ChromaFormat.MONOCHROME, alphaPlanes.chromaFormat());
             assertGradientPlaneClose("A", alphaPlanes.lumaPlane(), 12, 34, 10, 32, 40.0);
 
             AvifFrame frame = reader.readFrame();
@@ -506,7 +506,7 @@ final class LibavifImageIoReferenceTest {
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.avifResource()))) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
-            assertEquals(reference.pixelFormat(), frame.pixelFormat());
+            assertEquals(reference.chromaFormat(), frame.chromaFormat());
             assertPixelsMatchReference(reference.avifResource(), expected, frame, reference.transform(), reference.tolerance());
             assertNull(reader.readFrame());
         }
@@ -521,7 +521,7 @@ final class LibavifImageIoReferenceTest {
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(reference.avifResource()))) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
-            assertEquals(reference.pixelFormat(), frame.pixelFormat());
+            assertEquals(reference.chromaFormat(), frame.chromaFormat());
             assertPixelsMatchReference(
                     reference.avifResource(),
                     expected,
@@ -643,18 +643,18 @@ final class LibavifImageIoReferenceTest {
     ///
     /// @param sourceResource the source image classpath resource name
     /// @param avifResource the encoded AVIF classpath resource name
-    /// @param pixelFormat the expected decoded AV1 chroma sampling layout
+    /// @param chromaFormat the expected decoded AV1 chroma sampling layout
     /// @param transform the coordinate transform from actual output pixels to expected source pixels
     /// @param tolerance the accepted pixel tolerance
     /// @return the full-image pixel reference
     private static PixelImageReference enabledPixelImage(
             String sourceResource,
             String avifResource,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             PixelTransform transform,
             PixelTolerance tolerance
     ) {
-        return new PixelImageReference(sourceResource, avifResource, pixelFormat, transform, tolerance);
+        return new PixelImageReference(sourceResource, avifResource, chromaFormat, transform, tolerance);
     }
 
     /// Expected ImageIO-readable image resource metadata.
@@ -679,14 +679,14 @@ final class LibavifImageIoReferenceTest {
     ///
     /// @param sourceResource the source image classpath resource name
     /// @param avifResource the encoded AVIF classpath resource name
-    /// @param pixelFormat the expected decoded AV1 chroma sampling layout
+    /// @param chromaFormat the expected decoded AV1 chroma sampling layout
     /// @param transform the coordinate transform from actual output pixels to expected source pixels
     /// @param tolerance the accepted pixel tolerance
     @NotNullByDefault
     private record PixelImageReference(
             String sourceResource,
             String avifResource,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             PixelTransform transform,
             PixelTolerance tolerance
     ) {
@@ -696,7 +696,7 @@ final class LibavifImageIoReferenceTest {
     ///
     /// @param sourceResource the source image classpath resource name
     /// @param avifResource the encoded AVIF classpath resource name
-    /// @param pixelFormat the expected decoded AV1 chroma sampling layout
+    /// @param chromaFormat the expected decoded AV1 chroma sampling layout
     /// @param region the actual output region to compare
     /// @param transform the coordinate transform from actual output pixels to expected source pixels
     /// @param tolerance the accepted pixel tolerance
@@ -704,7 +704,7 @@ final class LibavifImageIoReferenceTest {
     private record PixelRegionReference(
             String sourceResource,
             String avifResource,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             PixelRegion region,
             PixelTransform transform,
             PixelTolerance tolerance

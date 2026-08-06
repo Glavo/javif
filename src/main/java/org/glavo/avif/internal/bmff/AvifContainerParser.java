@@ -24,7 +24,7 @@ import org.glavo.avif.AvifGainMapInfo;
 import org.glavo.avif.AvifGainMapMetadata;
 import org.glavo.avif.AvifImageInfo;
 import org.glavo.avif.AvifImageItemProperty;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifSignedFraction;
 import org.glavo.avif.AvifUnsignedFraction;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -178,7 +178,7 @@ public final class AvifContainerParser {
                 sampleTransform != null
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(av1Config.bitDepth()),
-                av1Config.pixelFormat(),
+                av1Config.chromaFormat(),
                 alphaPayloads.present(),
                 false,
                 1,
@@ -255,7 +255,7 @@ public final class AvifContainerParser {
                 sampleTransform != null
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(colorGrid.representativeAv1C.bitDepth()),
-                colorGrid.representativeAv1C.pixelFormat(),
+                colorGrid.representativeAv1C.chromaFormat(),
                 alphaPayloads.present(),
                 false,
                 1,
@@ -1886,7 +1886,7 @@ public final class AvifContainerParser {
                 s.width > 0 ? s.width : 1,
                 s.height > 0 ? s.height : 1,
                 AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
-                s.pixelFormat != null ? s.pixelFormat : AvifPixelFormat.I420,
+                s.chromaFormat != null ? s.chromaFormat : Av1ChromaFormat.YUV420,
                 alphaPayloads != null,
                 true,
                 colorPayloads.sampleCount,
@@ -2533,7 +2533,7 @@ public final class AvifContainerParser {
                     int av1cPos = payload.offset();
                     Av1Config c = parseAv1C(payload);
                     meta.moovState.bitDepth = c.bitDepth();
-                    meta.moovState.pixelFormat = c.pixelFormat();
+                    meta.moovState.chromaFormat = c.chromaFormat();
                     meta.moovState.seqHeaderObu = c.seqHeaderObu(
                             meta.moovState.width > 0 ? meta.moovState.width : 150,
                             meta.moovState.height > 0 ? meta.moovState.height : 150
@@ -2871,8 +2871,8 @@ public final class AvifContainerParser {
         int width = ispe != null ? ispe.width : (alphaWithoutIspe ? fallbackWidth : -1);
         int height = ispe != null ? ispe.height : (alphaWithoutIspe ? fallbackHeight : -1);
         @Nullable AvifBitDepth bitDepth = av1Config != null ? AvifBitDepth.fromBits(av1Config.bitDepth()) : null;
-        @Nullable AvifPixelFormat pixelFormat = av1Config != null ? av1Config.pixelFormat() : null;
-        return new AvifAuxiliaryImageInfo(item.id, auxiliaryType.type, item.type, width, height, bitDepth, pixelFormat);
+        @Nullable Av1ChromaFormat chromaFormat = av1Config != null ? av1Config.chromaFormat() : null;
+        return new AvifAuxiliaryImageInfo(item.id, auxiliaryType.type, item.type, width, height, bitDepth, chromaFormat);
     }
 
     /// Returns the gain-map descriptor and decodable payloads associated with one base image item.
@@ -2920,7 +2920,7 @@ public final class AvifContainerParser {
                         toneMappedDimensions,
                         new ItemDimensions(grid.outputWidth, grid.outputHeight),
                         AvifBitDepth.fromBits(grid.representativeAv1C.bitDepth()),
-                        grid.representativeAv1C.pixelFormat(),
+                        grid.representativeAv1C.chromaFormat(),
                         toneMapMetadata
                 );
                 return GainMapPayloads.grid(info, grid);
@@ -2933,8 +2933,8 @@ public final class AvifContainerParser {
             @Nullable AvifBitDepth gainMapBitDepth = gainMapAv1Config != null
                     ? AvifBitDepth.fromBits(gainMapAv1Config.bitDepth())
                     : null;
-            @Nullable AvifPixelFormat gainMapPixelFormat = gainMapAv1Config != null
-                    ? gainMapAv1Config.pixelFormat()
+            @Nullable Av1ChromaFormat gainMapChromaFormat = gainMapAv1Config != null
+                    ? gainMapAv1Config.chromaFormat()
                     : null;
             AvifGainMapInfo info = gainMapInfo(
                     item,
@@ -2943,7 +2943,7 @@ public final class AvifContainerParser {
                     toneMappedDimensions,
                     gainMapDimensions,
                     gainMapBitDepth,
-                    gainMapPixelFormat,
+                    gainMapChromaFormat,
                     toneMapMetadata
             );
             if ("av01".equals(gainMapItem.type)) {
@@ -2971,7 +2971,7 @@ public final class AvifContainerParser {
     /// @param toneMappedDimensions the tone-mapped item dimensions
     /// @param gainMapDimensions the gain-map item dimensions
     /// @param gainMapBitDepth the gain-map AV1 bit depth, or `null`
-    /// @param gainMapPixelFormat the gain-map AV1 pixel format, or `null`
+    /// @param gainMapChromaFormat the gain-map AV1 chroma format, or `null`
     /// @param metadata the parsed tone-map metadata
     /// @return a gain-map descriptor
     private static AvifGainMapInfo gainMapInfo(
@@ -2981,7 +2981,7 @@ public final class AvifContainerParser {
             ItemDimensions toneMappedDimensions,
             ItemDimensions gainMapDimensions,
             @Nullable AvifBitDepth gainMapBitDepth,
-            @Nullable AvifPixelFormat gainMapPixelFormat,
+            @Nullable Av1ChromaFormat gainMapChromaFormat,
             ToneMapMetadata metadata
     ) {
         return new AvifGainMapInfo(
@@ -2995,7 +2995,7 @@ public final class AvifContainerParser {
                 gainMapDimensions.width,
                 gainMapDimensions.height,
                 gainMapBitDepth,
-                gainMapPixelFormat,
+                gainMapChromaFormat,
                 toneMappedItem.firstProperty(AvifColorInfo.class),
                 iccProfile(toneMappedItem),
                 gainMapItem.firstProperty(AvifColorInfo.class),
@@ -3562,8 +3562,8 @@ public final class AvifContainerParser {
         private int height;
         /// The parsed image sequence bit depth.
         private int bitDepth;
-        /// The parsed image sequence pixel format, or `null`.
-        private @Nullable AvifPixelFormat pixelFormat;
+        /// The parsed image sequence chroma format, or `null`.
+        private @Nullable Av1ChromaFormat chromaFormat;
         /// The parsed image sequence color information, or `null`.
         private @Nullable AvifColorInfo colr;
         /// The parsed image sequence ICC profile payload, or `null`.
@@ -3618,7 +3618,7 @@ public final class AvifContainerParser {
             width = other.width;
             height = other.height;
             bitDepth = other.bitDepth;
-            pixelFormat = other.pixelFormat;
+            chromaFormat = other.chromaFormat;
             colr = other.colr;
             iccProfile = other.iccProfile == null ? null : other.iccProfile.clone();
             mediaHandlerType = other.mediaHandlerType;
@@ -3986,17 +3986,17 @@ public final class AvifContainerParser {
         /// Returns the AV1 chroma sampling layout.
         ///
         /// @return the AV1 chroma sampling layout
-        private AvifPixelFormat pixelFormat() {
+        private Av1ChromaFormat chromaFormat() {
             if (monochrome) {
-                return AvifPixelFormat.I400;
+                return Av1ChromaFormat.MONOCHROME;
             }
             if (chromaSubsamplingX && chromaSubsamplingY) {
-                return AvifPixelFormat.I420;
+                return Av1ChromaFormat.YUV420;
             }
             if (chromaSubsamplingX) {
-                return AvifPixelFormat.I422;
+                return Av1ChromaFormat.YUV422;
             }
-            return AvifPixelFormat.I444;
+            return Av1ChromaFormat.YUV444;
         }
 
         /// Constructs a reduced-still-picture AV1 SEQUENCE_HEADER OBU from this configuration.

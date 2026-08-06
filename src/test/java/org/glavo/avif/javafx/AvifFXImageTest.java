@@ -19,7 +19,7 @@ import javafx.animation.Timeline;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifFrame;
 import org.glavo.avif.AvifImageReader;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifSequenceInfo;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -46,7 +46,7 @@ final class AvifFXImageTest {
                 1,
                 1,
                 AvifBitDepth.TEN_BITS,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 0,
                 LongBuffer.wrap(new long[]{0xFFFF_8080_4040_0000L}).asReadOnlyBuffer()
         );
@@ -109,7 +109,7 @@ final class AvifFXImageTest {
                 2,
                 1,
                 AvifBitDepth.EIGHT_BITS,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 1,
                 new int[]{0xFFFF_FFFF, 0xFFFF_FFFF}
         );
@@ -127,7 +127,7 @@ final class AvifFXImageTest {
                 1,
                 1,
                 AvifBitDepth.EIGHT_BITS,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 frameIndex,
                 new int[]{pixel}
         );

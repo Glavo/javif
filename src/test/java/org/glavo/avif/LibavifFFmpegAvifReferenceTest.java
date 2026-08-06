@@ -450,13 +450,13 @@ final class LibavifFFmpegAvifReferenceTest {
             throws IOException, URISyntaxException {
         SourcePlanes fallback = FFmpegAvifReferenceDecoder.decodeFirstFrameSourcePlanes(resourceName);
         assertEquals(AvifBitDepth.TWELVE_BITS, fallback.sourceMetadata().bitDepth());
-        assertEquals(AvifPixelFormat.I444, fallback.sourceMetadata().pixelFormat());
+        assertEquals(Av1ChromaFormat.YUV444, fallback.sourceMetadata().chromaFormat());
 
         try (AvifImageReader reader = AvifImageReader.open(TestResources.readBytes(resourceName))) {
             assertEquals(fallback.width(), reader.info().width());
             assertEquals(fallback.height(), reader.info().height());
             assertEquals(AvifBitDepth.SIXTEEN_BITS, reader.info().bitDepth());
-            assertEquals(fallback.sourceMetadata().pixelFormat(), reader.info().pixelFormat());
+            assertEquals(fallback.sourceMetadata().chromaFormat(), reader.info().chromaFormat());
 
             AvifPlanes derived = reader.readRawColorPlanes(0);
             assertEquals(AvifBitDepth.SIXTEEN_BITS, derived.bitDepth());
@@ -538,7 +538,7 @@ final class LibavifFFmpegAvifReferenceTest {
             assertEquals(expected.width(), actual.codedWidth());
             assertEquals(expected.height(), actual.codedHeight());
             assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), ffmpegSourcePlaneMessage(expected));
-            assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), ffmpegSourcePlaneMessage(expected));
+            assertEquals(expected.sourceMetadata().chromaFormat(), actual.chromaFormat(), ffmpegSourcePlaneMessage(expected));
 
             assertPlaneMatches(
                     resourceName + " Y",
@@ -548,7 +548,7 @@ final class LibavifFFmpegAvifReferenceTest {
                     expected::lumaSample,
                     tolerance
             );
-            if (expected.sourceMetadata().pixelFormat() != AvifPixelFormat.I400) {
+            if (expected.sourceMetadata().chromaFormat() != Av1ChromaFormat.MONOCHROME) {
                 AvifPlane chromaUPlane = actual.chromaUPlane();
                 AvifPlane chromaVPlane = actual.chromaVPlane();
                 assertNotNull(chromaUPlane);
@@ -579,7 +579,7 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @param expected the FFmpeg reference image
     private static void assertImageInfoMatchesFFmpegMetadata(AvifImageInfo actual, ArgbImage expected) {
         assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), ffmpegPixelFormatMessage(expected));
-        assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), ffmpegPixelFormatMessage(expected));
+        assertEquals(expected.sourceMetadata().chromaFormat(), actual.chromaFormat(), ffmpegPixelFormatMessage(expected));
     }
 
     /// Asserts decoded javif frame metadata against normalized source FFmpeg metadata.
@@ -588,7 +588,7 @@ final class LibavifFFmpegAvifReferenceTest {
     /// @param expected the FFmpeg reference image
     private static void assertFrameMetadataMatchesFFmpegMetadata(AvifFrame actual, ArgbImage expected) {
         assertEquals(expected.sourceMetadata().bitDepth(), actual.bitDepth(), ffmpegPixelFormatMessage(expected));
-        assertEquals(expected.sourceMetadata().pixelFormat(), actual.pixelFormat(), ffmpegPixelFormatMessage(expected));
+        assertEquals(expected.sourceMetadata().chromaFormat(), actual.chromaFormat(), ffmpegPixelFormatMessage(expected));
     }
 
     /// Returns a diagnostic label for FFmpeg source pixel format comparisons.

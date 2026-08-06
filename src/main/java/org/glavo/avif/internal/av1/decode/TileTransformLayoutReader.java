@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -89,7 +89,7 @@ public final class TileTransformLayoutReader {
         boolean lossless = tileContext.frameHeader().segmentation().lossless(nonNullHeader.segmentId());
         TransformSize maxLumaTransformSize = size.maxLumaTransformSize();
         @Nullable TransformSize chromaTransformSize = nonNullHeader.hasChroma()
-                ? size.maxChromaTransformSize(tileContext.sequenceHeader().colorConfig().pixelFormat())
+                ? size.maxChromaTransformSize(tileContext.sequenceHeader().colorConfig().chromaFormat())
                 : null;
         TransformSize effectiveMaxLumaTransformSize = lossless ? TransformSize.TX_4X4 : maxLumaTransformSize;
         if (lossless) {
@@ -102,7 +102,7 @@ public final class TileTransformLayoutReader {
                         visibleWidthPixels,
                         visibleHeightPixels,
                         chromaTransformSize,
-                        tileContext.sequenceHeader().colorConfig().pixelFormat()
+                        tileContext.sequenceHeader().colorConfig().chromaFormat()
                 )
                 : new TransformUnit[0];
 
@@ -377,7 +377,7 @@ public final class TileTransformLayoutReader {
     /// @param visibleWidthPixels the exact visible luma width in pixels
     /// @param visibleHeightPixels the exact visible luma height in pixels
     /// @param transformSize the repeated chroma transform size
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @return frame-relative chroma transform units covering the visible chroma span
     private TransformUnit[] tileChromaUnits(
             BlockPosition position,
@@ -385,13 +385,13 @@ public final class TileTransformLayoutReader {
             int visibleWidthPixels,
             int visibleHeightPixels,
             TransformSize transformSize,
-            AvifPixelFormat pixelFormat
+            Av1ChromaFormat chromaFormat
     ) {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         BlockSize nonNullBlockSize = Objects.requireNonNull(blockSize, "blockSize");
         TransformSize nonNullTransformSize = Objects.requireNonNull(transformSize, "transformSize");
-        int subsamplingX = chromaSubsamplingX(pixelFormat);
-        int subsamplingY = chromaSubsamplingY(pixelFormat);
+        int subsamplingX = chromaSubsamplingX(chromaFormat);
+        int subsamplingY = chromaSubsamplingY(chromaFormat);
         int originX4 = chromaOrigin4(nonNullPosition.x4(), nonNullBlockSize.width4(), subsamplingX);
         int originY4 = chromaOrigin4(nonNullPosition.y4(), nonNullBlockSize.height4(), subsamplingY);
         int visibleChromaWidthPixels = chromaDimension(
@@ -463,25 +463,25 @@ public final class TileTransformLayoutReader {
         return (lumaDimension + (1 << subsamplingShift) - 1) >> subsamplingShift;
     }
 
-    /// Returns the horizontal chroma subsampling shift for one decoded pixel format.
+    /// Returns the horizontal chroma subsampling shift for one decoded chroma format.
     ///
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @return the horizontal chroma subsampling shift
-    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
-        return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+    private static int chromaSubsamplingX(Av1ChromaFormat chromaFormat) {
+        return switch (Objects.requireNonNull(chromaFormat, "chromaFormat")) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
-    /// Returns the vertical chroma subsampling shift for one decoded pixel format.
+    /// Returns the vertical chroma subsampling shift for one decoded chroma format.
     ///
-    /// @param pixelFormat the active decoded chroma layout
+    /// @param chromaFormat the active decoded chroma layout
     /// @return the vertical chroma subsampling shift
-    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
-        return switch (Objects.requireNonNull(pixelFormat, "pixelFormat")) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+    private static int chromaSubsamplingY(Av1ChromaFormat chromaFormat) {
+        return switch (Objects.requireNonNull(chromaFormat, "chromaFormat")) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 

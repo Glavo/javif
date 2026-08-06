@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
@@ -107,9 +107,9 @@ public final class FilmGrainSynthesizer {
         @Nullable DecodedPlane chromaUPlane = checkedDecodedPlanes.chromaUPlane();
         @Nullable DecodedPlane chromaVPlane = checkedDecodedPlanes.chromaVPlane();
         if (checkedDecodedPlanes.hasChroma()) {
-            AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
-            int subsamplingX = chromaSubsamplingX(pixelFormat);
-            int subsamplingY = chromaSubsamplingY(pixelFormat);
+            Av1ChromaFormat chromaFormat = checkedDecodedPlanes.chromaFormat();
+            int subsamplingX = chromaSubsamplingX(chromaFormat);
+            int subsamplingY = chromaSubsamplingY(chromaFormat);
             boolean identityMatrixCoefficients = checkedColorConfig.matrixCoefficients() == MATRIX_IDENTITY;
             DecodedPlane sourceLumaPlane = checkedDecodedPlanes.lumaPlane();
 
@@ -143,7 +143,7 @@ public final class FilmGrainSynthesizer {
 
         return new DecodedPlanes(
                 bitDepth,
-                checkedDecodedPlanes.pixelFormat(),
+                checkedDecodedPlanes.chromaFormat(),
                 checkedDecodedPlanes.codedWidth(),
                 checkedDecodedPlanes.codedHeight(),
                 checkedDecodedPlanes.renderWidth(),
@@ -875,20 +875,20 @@ public final class FilmGrainSynthesizer {
         return new DecodedPlane(plane.width(), plane.height(), plane.stride(), plane.samples());
     }
 
-    /// Returns the horizontal chroma subsampling shift for one pixel format.
+    /// Returns the horizontal chroma subsampling shift for one chroma format.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @return the horizontal chroma subsampling shift
-    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat) {
-        return pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422 ? 1 : 0;
+    private static int chromaSubsamplingX(Av1ChromaFormat chromaFormat) {
+        return chromaFormat == Av1ChromaFormat.YUV420 || chromaFormat == Av1ChromaFormat.YUV422 ? 1 : 0;
     }
 
-    /// Returns the vertical chroma subsampling shift for one pixel format.
+    /// Returns the vertical chroma subsampling shift for one chroma format.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @return the vertical chroma subsampling shift
-    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat) {
-        return pixelFormat == AvifPixelFormat.I420 ? 1 : 0;
+    private static int chromaSubsamplingY(Av1ChromaFormat chromaFormat) {
+        return chromaFormat == Av1ChromaFormat.YUV420 ? 1 : 0;
     }
 
     /// Returns the chroma component multiplier for one chroma plane.

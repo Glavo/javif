@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.output;
 
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Contract tests for 8-bit ARGB output built on `DecodedPlanes`.
 ///
 /// These tests exercise the stable frame-returning `ArgbOutput` API directly and validate
-/// deterministic `I400`, `I420`, `I422`, and `I444` pixel packing behavior.
+/// deterministic `MONOCHROME`, `YUV420`, `YUV422`, and `YUV444` pixel packing behavior.
 @NotNullByDefault
 final class DecodedPlanesArgbIntOutputTest {
     /// The test frame type supplied to frame-returning converters.
@@ -49,7 +49,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void convertsEightBitI400SamplesIntoOpaqueArgbPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 3,
                 2,
                 3,
@@ -82,7 +82,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void ignoresRenderSizeHintWhenConvertingDecodedPlanes() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 3,
                 2,
                 7,
@@ -114,7 +114,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void convertsTenBitI400SamplesIntoOpaqueArgbPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 10,
-                AvifPixelFormat.I400,
+                Av1ChromaFormat.MONOCHROME,
                 3,
                 1,
                 3,
@@ -139,7 +139,7 @@ final class DecodedPlanesArgbIntOutputTest {
         assertFrameMetadata(frame, planes);
     }
 
-    /// Verifies that 8-bit `I420` output reuses one chroma sample for each 2x2 luma block and packs `AARRGGBB`.
+    /// Verifies that 8-bit `YUV420` output reuses one chroma sample for each 2x2 luma block and packs `AARRGGBB`.
     ///
     /// The left block uses neutral chroma so its pixels must stay grayscale. The right block uses strongly
     /// blue-biased chroma so channel extraction can validate the non-premultiplied ARGB byte order without
@@ -148,7 +148,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void convertsEightBitI420SamplesUsingSharedChromaIntoOpaqueArgbPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I420,
+                Av1ChromaFormat.YUV420,
                 4,
                 2,
                 4,
@@ -179,16 +179,16 @@ final class DecodedPlanesArgbIntOutputTest {
         assertFrameMetadata(frame, planes);
     }
 
-    /// Verifies that 8-bit `I422` output shares chroma horizontally within each row but not across rows.
+    /// Verifies that 8-bit `YUV422` output shares chroma horizontally within each row but not across rows.
     ///
     /// The top row uses neutral chroma for the left pair and blue-biased chroma for the right pair. The
     /// bottom row switches to two different chroma pairs so the expected pixels also catch accidental
-    /// `I420`-style vertical chroma reuse.
+    /// `YUV420`-style vertical chroma reuse.
     @Test
     void convertsEightBitI422SamplesUsingRowSpecificHorizontallySharedChromaIntoOpaqueArgbPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I422,
+                Av1ChromaFormat.YUV422,
                 4,
                 2,
                 4,
@@ -218,7 +218,7 @@ final class DecodedPlanesArgbIntOutputTest {
         assertFrameMetadata(frame, planes);
     }
 
-    /// Verifies that 8-bit `I444` output uses one chroma pair per luma sample with no subsampling.
+    /// Verifies that 8-bit `YUV444` output uses one chroma pair per luma sample with no subsampling.
     ///
     /// Every visible pixel uses a different YUV triplet, while stride padding stays outside the render
     /// rectangle. Exact packed pixels ensure the converter preserves the intended `AARRGGBB` byte order.
@@ -226,7 +226,7 @@ final class DecodedPlanesArgbIntOutputTest {
     void convertsEightBitI444SamplesUsingPerPixelChromaIntoOpaqueArgbPixels() {
         DecodedPlanes planes = new DecodedPlanes(
                 8,
-                AvifPixelFormat.I444,
+                Av1ChromaFormat.YUV444,
                 4,
                 2,
                 4,
@@ -286,7 +286,7 @@ final class DecodedPlanesArgbIntOutputTest {
         assertEquals(planes.codedWidth(), frame.width());
         assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());
-        assertEquals(planes.pixelFormat(), frame.pixelFormat());
+        assertEquals(planes.chromaFormat(), frame.chromaFormat());
         assertEquals(TEST_FRAME_TYPE, frame.frameType());
         assertEquals(TEST_VISIBLE, frame.visible());
         assertEquals(TEST_PRESENTATION_INDEX, frame.presentationIndex());

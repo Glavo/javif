@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
-import org.glavo.avif.AvifPixelFormat;
+import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.RestorationUnit;
 import org.glavo.avif.internal.av1.decode.RestorationUnitMap;
@@ -137,7 +137,7 @@ public final class RestorationApplier {
             return checkedDecodedPlanes;
         }
         if (checkedBoundaryPlanes.bitDepth() != checkedDecodedPlanes.bitDepth()
-                || checkedBoundaryPlanes.pixelFormat() != checkedDecodedPlanes.pixelFormat()) {
+                || checkedBoundaryPlanes.chromaFormat() != checkedDecodedPlanes.chromaFormat()) {
             throw new IllegalArgumentException("Boundary planes must match decoded plane format");
         }
         if (syntaxDecodeResult == null) {
@@ -150,7 +150,7 @@ public final class RestorationApplier {
                 checkedDecodedPlanes.lumaPlane(),
                 checkedBoundaryPlanes.lumaPlane(),
                 checkedDecodedPlanes.bitDepth(),
-                checkedDecodedPlanes.pixelFormat(),
+                checkedDecodedPlanes.chromaFormat(),
                 checkedRestoration,
                 unitMap,
                 0,
@@ -164,7 +164,7 @@ public final class RestorationApplier {
                     Objects.requireNonNull(chromaUPlane, "chromaUPlane"),
                     Objects.requireNonNull(checkedBoundaryPlanes.chromaUPlane(), "boundaryChromaUPlane"),
                     checkedDecodedPlanes.bitDepth(),
-                    checkedDecodedPlanes.pixelFormat(),
+                    checkedDecodedPlanes.chromaFormat(),
                     checkedRestoration,
                     unitMap,
                     1,
@@ -174,7 +174,7 @@ public final class RestorationApplier {
                     Objects.requireNonNull(chromaVPlane, "chromaVPlane"),
                     Objects.requireNonNull(checkedBoundaryPlanes.chromaVPlane(), "boundaryChromaVPlane"),
                     checkedDecodedPlanes.bitDepth(),
-                    checkedDecodedPlanes.pixelFormat(),
+                    checkedDecodedPlanes.chromaFormat(),
                     checkedRestoration,
                     unitMap,
                     2,
@@ -189,7 +189,7 @@ public final class RestorationApplier {
         }
         return new DecodedPlanes(
                 checkedDecodedPlanes.bitDepth(),
-                checkedDecodedPlanes.pixelFormat(),
+                checkedDecodedPlanes.chromaFormat(),
                 checkedDecodedPlanes.codedWidth(),
                 checkedDecodedPlanes.codedHeight(),
                 checkedDecodedPlanes.renderWidth(),
@@ -217,7 +217,7 @@ public final class RestorationApplier {
     /// @param plane the source plane
     /// @param boundaryPlane the source plane before CDEF, used for internal stripe boundaries
     /// @param bitDepth the decoded bit depth
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @param restoration the frame-level restoration state
     /// @param unitMap the decoded restoration-unit map
     /// @param planeIndex the plane index
@@ -227,7 +227,7 @@ public final class RestorationApplier {
             DecodedPlane plane,
             DecodedPlane boundaryPlane,
             int bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             FrameHeader.RestorationInfo restoration,
             RestorationUnitMap unitMap,
             int planeIndex,
@@ -253,8 +253,8 @@ public final class RestorationApplier {
         if (rows == 0 || columns == 0) {
             throw new IllegalStateException("Active AV1 loop restoration requires decoded restoration unit syntax");
         }
-        int subX = chromaSubsamplingX(pixelFormat, planeIndex);
-        int subY = chromaSubsamplingY(pixelFormat, planeIndex);
+        int subX = chromaSubsamplingX(chromaFormat, planeIndex);
+        int subY = chromaSubsamplingY(chromaFormat, planeIndex);
         int verticalOffset = RESTORATION_UNIT_OFFSET >> subY;
         int processingStripeHeight = RESTORATION_PROC_UNIT_SIZE >> subY;
         int processingUnitWidth = RESTORATION_PROC_UNIT_SIZE >> subX;
@@ -562,31 +562,31 @@ public final class RestorationApplier {
 
     /// Returns the chroma horizontal subsampling shift for one plane.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @param planeIndex the plane index
     /// @return the chroma horizontal subsampling shift for one plane
-    private static int chromaSubsamplingX(AvifPixelFormat pixelFormat, int planeIndex) {
+    private static int chromaSubsamplingX(Av1ChromaFormat chromaFormat, int planeIndex) {
         if (planeIndex == 0) {
             return 0;
         }
-        return switch (pixelFormat) {
-            case I400, I444 -> 0;
-            case I420, I422 -> 1;
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV444 -> 0;
+            case YUV420, YUV422 -> 1;
         };
     }
 
     /// Returns the chroma vertical subsampling shift for one plane.
     ///
-    /// @param pixelFormat the decoded pixel format
+    /// @param chromaFormat the decoded chroma format
     /// @param planeIndex the plane index
     /// @return the chroma vertical subsampling shift for one plane
-    private static int chromaSubsamplingY(AvifPixelFormat pixelFormat, int planeIndex) {
+    private static int chromaSubsamplingY(Av1ChromaFormat chromaFormat, int planeIndex) {
         if (planeIndex == 0) {
             return 0;
         }
-        return switch (pixelFormat) {
-            case I400, I422, I444 -> 0;
-            case I420 -> 1;
+        return switch (chromaFormat) {
+            case MONOCHROME, YUV422, YUV444 -> 0;
+            case YUV420 -> 1;
         };
     }
 

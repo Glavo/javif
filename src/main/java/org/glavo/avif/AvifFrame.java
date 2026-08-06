@@ -35,7 +35,7 @@ public final class AvifFrame {
     /// The decoded bit depth.
     private final AvifBitDepth bitDepth;
     /// The decoded AV1 chroma sampling layout.
-    private final AvifPixelFormat pixelFormat;
+    private final Av1ChromaFormat chromaFormat;
     /// The zero-based frame index.
     private final int frameIndex;
     /// The concrete packed RGB storage mode used by this frame before lazy conversion.
@@ -50,11 +50,11 @@ public final class AvifFrame {
     /// @param width       the frame width in pixels
     /// @param height      the frame height in pixels
     /// @param bitDepth    the decoded bit depth
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
-    public AvifFrame(int width, int height, AvifBitDepth bitDepth, AvifPixelFormat pixelFormat, int frameIndex, int[] pixels) {
-        this(width, height, bitDepth, pixelFormat, frameIndex,
+    public AvifFrame(int width, int height, AvifBitDepth bitDepth, Av1ChromaFormat chromaFormat, int frameIndex, int[] pixels) {
+        this(width, height, bitDepth, chromaFormat, frameIndex,
                 PixelBuffers.immutableIntPixels(Objects.requireNonNull(pixels, "pixels")), null);
     }
 
@@ -63,11 +63,11 @@ public final class AvifFrame {
     /// @param width       the frame width in pixels
     /// @param height      the frame height in pixels
     /// @param bitDepth    the decoded bit depth
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
-    public AvifFrame(int width, int height, AvifBitDepth bitDepth, AvifPixelFormat pixelFormat, int frameIndex, long[] pixels) {
-        this(width, height, bitDepth, pixelFormat, frameIndex,
+    public AvifFrame(int width, int height, AvifBitDepth bitDepth, Av1ChromaFormat chromaFormat, int frameIndex, long[] pixels) {
+        this(width, height, bitDepth, chromaFormat, frameIndex,
                 null, PixelBuffers.immutableLongPixels(Objects.requireNonNull(pixels, "pixels")));
     }
 
@@ -79,18 +79,18 @@ public final class AvifFrame {
     /// @param width       the frame width in pixels
     /// @param height      the frame height in pixels
     /// @param bitDepth    the decoded bit depth
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAARRGGBB` format
     public AvifFrame(
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int frameIndex,
             @Unmodifiable IntBuffer pixels
     ) {
-        this(width, height, bitDepth, pixelFormat, frameIndex, PixelBuffers.immutableIntPixels(pixels), null);
+        this(width, height, bitDepth, chromaFormat, frameIndex, PixelBuffers.immutableIntPixels(pixels), null);
     }
 
     /// Creates an AVIF frame from a packed `long` ARGB pixel buffer.
@@ -101,18 +101,18 @@ public final class AvifFrame {
     /// @param width       the frame width in pixels
     /// @param height      the frame height in pixels
     /// @param bitDepth    the decoded bit depth
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param pixels      packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format
     public AvifFrame(
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int frameIndex,
             @Unmodifiable LongBuffer pixels
     ) {
-        this(width, height, bitDepth, pixelFormat, frameIndex, null, PixelBuffers.immutableLongPixels(pixels));
+        this(width, height, bitDepth, chromaFormat, frameIndex, null, PixelBuffers.immutableLongPixels(pixels));
     }
 
     /// Creates a decoded AVIF frame descriptor with one available pixel representation.
@@ -120,7 +120,7 @@ public final class AvifFrame {
     /// @param width       the frame width in pixels
     /// @param height      the frame height in pixels
     /// @param bitDepth    the decoded bit depth
-    /// @param pixelFormat the decoded AV1 chroma sampling layout
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
     /// @param frameIndex  the zero-based frame index
     /// @param intPixels   packed `int` pixels, or `null`
     /// @param longPixels  packed `long` pixels, or `null`
@@ -128,7 +128,7 @@ public final class AvifFrame {
             int width,
             int height,
             AvifBitDepth bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             int frameIndex,
             @Nullable @Unmodifiable IntBuffer intPixels,
             @Nullable @Unmodifiable LongBuffer longPixels
@@ -139,7 +139,7 @@ public final class AvifFrame {
         this.width = width;
         this.height = height;
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
-        this.pixelFormat = Objects.requireNonNull(pixelFormat, "pixelFormat");
+        this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.frameIndex = frameIndex;
         this.rgbOutputMode = intPixels != null ? AvifRgbOutputMode.ARGB_8888 : AvifRgbOutputMode.ARGB_16161616;
         this.intPixels = intPixels;
@@ -170,8 +170,8 @@ public final class AvifFrame {
     /// Returns the decoded AV1 chroma sampling layout.
     ///
     /// @return the decoded AV1 chroma sampling layout
-    public AvifPixelFormat pixelFormat() {
-        return pixelFormat;
+    public Av1ChromaFormat chromaFormat() {
+        return chromaFormat;
     }
 
     /// Returns the zero-based frame index.

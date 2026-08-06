@@ -45,68 +45,68 @@ final class LibavifTestDataCorpusTest {
 
     /// The expected behavior for every AVIF fixture copied from libavif's test data.
     private static final CorpusCase @Unmodifiable [] CASES = new CorpusCase[]{
-            decode("libavif-test-data/abc_color_irot_alpha_NOirot.avif", 256, 512, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/abc_color_irot_alpha_irot.avif", 256, 512, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/alpha_noispe.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif", 64, 64, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/circle_custom_properties.avif", 100, 60, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/clap_irot_imir_non_essential.avif", 12, 34, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/clop_irot_imor.avif", 34, 12, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/color_grid_gainmap_different_grid.avif", 512, 600, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", 128, 200, 10, AvifPixelFormat.I444, true, false, 1),
+            decode("libavif-test-data/abc_color_irot_alpha_NOirot.avif", 256, 512, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/abc_color_irot_alpha_irot.avif", 256, 512, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/alpha_noispe.avif", 80, 80, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/arc_triomphe_extent1000_nullbyte_extent1310.avif", 64, 64, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/circle_custom_properties.avif", 100, 60, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/clap_irot_imir_non_essential.avif", 12, 34, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/clop_irot_imor.avif", 34, 12, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/color_grid_alpha_grid_gainmap_nogrid.avif", 512, 600, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/color_grid_alpha_grid_tile_shared_in_dimg.avif", 80, 80, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/color_grid_alpha_nogrid.avif", 80, 80, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/color_grid_gainmap_different_grid.avif", 512, 600, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/color_nogrid_alpha_nogrid_gainmap_grid.avif", 128, 200, 10, Av1ChromaFormat.YUV444, true, false, 1),
             decode("libavif-test-data/colors-animated-12bpc-keyframes-0-2-3.avif", 64, 64, 12,
-                    AvifPixelFormat.I422, true, true, 5),
+                    Av1ChromaFormat.YUV422, true, true, 5),
             decode("libavif-test-data/colors-animated-8bpc-alpha-exif-xmp.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, true, true, 5),
+                    Av1ChromaFormat.YUV420, true, true, 5),
             decode("libavif-test-data/colors-animated-8bpc-audio.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, false, true, 5),
+                    Av1ChromaFormat.YUV420, false, true, 5),
             decode("libavif-test-data/colors-animated-8bpc-depth-exif-xmp.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, false, true, 5),
+                    Av1ChromaFormat.YUV420, false, true, 5),
             decode("libavif-test-data/colors-animated-8bpc.avif", 150, 150, 8,
-                    AvifPixelFormat.I420, false, true, 5),
-            decode("libavif-test-data/colors_hdr_p3.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_hdr_rec2020.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_hdr_srgb.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_sdr_srgb.avif", 200, 200, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_text_hdr_p3.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_text_hdr_rec2020.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_text_hdr_srgb.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_text_sdr_srgb.avif", 200, 200, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_text_wcg_hdr_rec2020.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_text_wcg_sdr_rec2020.avif", 200, 200, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/colors_wcg_hdr_rec2020.avif", 200, 200, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/draw_points_idat.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/draw_points_idat_metasize0.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/draw_points_idat_progressive.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/draw_points_idat_progressive_metasize0.avif", 33, 11, 8, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/extended_pixi.avif", 4, 4, 8, AvifPixelFormat.I420, false, false, 1),
+                    Av1ChromaFormat.YUV420, false, true, 5),
+            decode("libavif-test-data/colors_hdr_p3.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_hdr_rec2020.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_hdr_srgb.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_sdr_srgb.avif", 200, 200, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_text_hdr_p3.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_text_hdr_rec2020.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_text_hdr_srgb.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_text_sdr_srgb.avif", 200, 200, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_text_wcg_hdr_rec2020.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_text_wcg_sdr_rec2020.avif", 200, 200, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/colors_wcg_hdr_rec2020.avif", 200, 200, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/draw_points_idat.avif", 33, 11, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/draw_points_idat_metasize0.avif", 33, 11, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/draw_points_idat_progressive.avif", 33, 11, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/draw_points_idat_progressive_metasize0.avif", 33, 11, 8, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/extended_pixi.avif", 4, 4, 8, Av1ChromaFormat.YUV420, false, false, 1),
             decode("libavif-test-data/io/cosmos1650_yuv444_10bpc_p3pq.avif", 1024, 428, 10,
-                    AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/io/kodim03_yuv420_8bpc.avif", 768, 512, 8, AvifPixelFormat.I420, false, false, 1),
-            decode("libavif-test-data/io/kodim23_yuv420_8bpc.avif", 768, 512, 8, AvifPixelFormat.I420, false, false, 1),
-            decode("libavif-test-data/paris_icc_exif_xmp.avif", 403, 302, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_hdr_gainmap_small_srgb.avif", 400, 300, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_hdr_gainmap_srgb.avif", 400, 300, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_hdr_gainmap_wrongaltr.avif", 400, 300, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_hdr_rec2020.avif", 400, 300, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_hdr_srgb.avif", 400, 300, 10, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_sdr_gainmap_big_srgb.avif", 400, 300, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_sdr_gainmap_gammazero.avif", 400, 300, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_sdr_gainmap_notmapbrand.avif", 400, 300, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_sdr_gainmap_srgb.avif", 400, 300, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/seine_sdr_gainmap_srgb_icc.avif", 400, 300, 8, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/sofa_grid1x5_420.avif", 1024, 770, 8, AvifPixelFormat.I420, false, false, 1),
-            decode("libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif", 1024, 770, 8, AvifPixelFormat.I420, false, false, 1),
-            decode("libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif", 1024, 770, 8, AvifPixelFormat.I420, false, false, 1),
-            decode("libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif", 100, 100, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/unsupported_gainmap_minimum_version.avif", 100, 100, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/unsupported_gainmap_version.avif", 100, 100, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif", 100, 100, 10, AvifPixelFormat.I444, true, false, 1),
-            decode("libavif-test-data/weld_sato_12B_8B_q0.avif", 1024, 684, 16, AvifPixelFormat.I444, false, false, 1),
-            decode("libavif-test-data/white_1x1.avif", 1, 1, 8, AvifPixelFormat.I444, false, false, 1),
+                    Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/io/kodim03_yuv420_8bpc.avif", 768, 512, 8, Av1ChromaFormat.YUV420, false, false, 1),
+            decode("libavif-test-data/io/kodim23_yuv420_8bpc.avif", 768, 512, 8, Av1ChromaFormat.YUV420, false, false, 1),
+            decode("libavif-test-data/paris_icc_exif_xmp.avif", 403, 302, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_hdr_gainmap_small_srgb.avif", 400, 300, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_hdr_gainmap_srgb.avif", 400, 300, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_hdr_gainmap_wrongaltr.avif", 400, 300, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_hdr_rec2020.avif", 400, 300, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_hdr_srgb.avif", 400, 300, 10, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_sdr_gainmap_big_srgb.avif", 400, 300, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_sdr_gainmap_gammazero.avif", 400, 300, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_sdr_gainmap_notmapbrand.avif", 400, 300, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_sdr_gainmap_srgb.avif", 400, 300, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/seine_sdr_gainmap_srgb_icc.avif", 400, 300, 8, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/sofa_grid1x5_420.avif", 1024, 770, 8, Av1ChromaFormat.YUV420, false, false, 1),
+            decode("libavif-test-data/sofa_grid1x5_420_dimg_repeat.avif", 1024, 770, 8, Av1ChromaFormat.YUV420, false, false, 1),
+            decode("libavif-test-data/sofa_grid1x5_420_reversed_dimg_order.avif", 1024, 770, 8, Av1ChromaFormat.YUV420, false, false, 1),
+            decode("libavif-test-data/supported_gainmap_writer_version_with_extra_bytes.avif", 100, 100, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/unsupported_gainmap_minimum_version.avif", 100, 100, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/unsupported_gainmap_version.avif", 100, 100, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/unsupported_gainmap_writer_version_with_extra_bytes.avif", 100, 100, 10, Av1ChromaFormat.YUV444, true, false, 1),
+            decode("libavif-test-data/weld_sato_12B_8B_q0.avif", 1024, 684, 16, Av1ChromaFormat.YUV444, false, false, 1),
+            decode("libavif-test-data/white_1x1.avif", 1, 1, 8, Av1ChromaFormat.YUV444, false, false, 1),
     };
 
     /// Verifies that every copied libavif AVIF resource has an explicit test expectation.
@@ -174,7 +174,7 @@ final class LibavifTestDataCorpusTest {
         assertEquals(expected.width, actual.width());
         assertEquals(expected.height, actual.height());
         assertEquals(AvifBitDepth.fromBits(expected.bitDepth), actual.bitDepth());
-        assertEquals(expected.pixelFormat, actual.pixelFormat());
+        assertEquals(expected.chromaFormat, actual.chromaFormat());
         assertEquals(expected.alphaPresent, actual.alphaPresent());
         assertEquals(expected.animated, actual.animated());
         assertEquals(expected.frameCount, actual.frameCount());
@@ -189,7 +189,7 @@ final class LibavifTestDataCorpusTest {
         assertTrue(actual.width() > 0);
         assertTrue(actual.height() > 0);
         assertEquals(AvifBitDepth.fromBits(expected.bitDepth), actual.bitDepth());
-        assertEquals(expected.pixelFormat, actual.pixelFormat());
+        assertEquals(expected.chromaFormat, actual.chromaFormat());
         assertEquals(frameIndex, actual.frameIndex());
     }
 
@@ -293,7 +293,7 @@ final class LibavifTestDataCorpusTest {
     /// @param width        the expected width
     /// @param height       the expected height
     /// @param bitDepth     the expected bit depth
-    /// @param pixelFormat  the expected pixel format
+    /// @param chromaFormat  the expected pixel format
     /// @param alphaPresent whether alpha is expected
     /// @param animated     whether animation is expected
     /// @param frameCount   the expected frame count
@@ -303,14 +303,14 @@ final class LibavifTestDataCorpusTest {
             int width,
             int height,
             int bitDepth,
-            AvifPixelFormat pixelFormat,
+            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
             boolean animated,
             int frameCount
     ) {
         return new CorpusCase(
                 resourceName,
-                new ExpectedInfo(width, height, bitDepth, pixelFormat, alphaPresent, animated, frameCount)
+                new ExpectedInfo(width, height, bitDepth, chromaFormat, alphaPresent, animated, frameCount)
         );
     }
 
@@ -327,12 +327,12 @@ final class LibavifTestDataCorpusTest {
     /// @param width        The expected width.
     /// @param height       The expected height.
     /// @param bitDepth     The expected bit depth.
-    /// @param pixelFormat  The expected pixel format.
+    /// @param chromaFormat  The expected pixel format.
     /// @param alphaPresent Whether alpha is expected.
     /// @param animated     Whether animation is expected.
     /// @param frameCount   The expected frame count.
     @NotNullByDefault
-    private record ExpectedInfo(int width, int height, int bitDepth, AvifPixelFormat pixelFormat, boolean alphaPresent,
+    private record ExpectedInfo(int width, int height, int bitDepth, Av1ChromaFormat chromaFormat, boolean alphaPresent,
                                 boolean animated, int frameCount) {
     }
 }
