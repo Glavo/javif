@@ -66,7 +66,7 @@ import org.glavo.avif.AvifPixelFormat;
 import java.nio.file.Path;
 
 AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
-        .withPixelFormatOverride(AvifPixelFormat.ARGB_8888)
+        .withOutputPixelFormat(AvifPixelFormat.ARGB_8888)
         .withInputSizeLimit(64L * 1024 * 1024);
 
 try (AvifImageReader reader = factory.open(Path.of("image.avif"))) {

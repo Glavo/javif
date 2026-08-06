@@ -43,23 +43,23 @@ public final class AvifImageReaderFactory {
 
     /// The underlying AV1 decoder configuration.
     private final Av1DecoderConfig av1DecoderConfig;
-    /// The packed ARGB output format override, or `null` to select a default from the source bit depth.
-    private final @Nullable AvifPixelFormat pixelFormatOverride;
+    /// The configured packed ARGB output format, or `null` to select one from the source bit depth.
+    private final @Nullable AvifPixelFormat outputPixelFormat;
     /// The maximum accepted encoded AVIF input size in bytes, or `0` for no limit.
     private final long inputSizeLimit;
 
     /// Creates a reader factory with validated options.
     ///
     /// @param av1DecoderConfig the underlying AV1 decoder configuration
-    /// @param pixelFormatOverride the packed ARGB output format override, or `null`
+    /// @param outputPixelFormat the packed ARGB output format, or `null` for automatic selection
     /// @param inputSizeLimit the maximum accepted encoded input size in bytes, or `0` for no limit
     private AvifImageReaderFactory(
             Av1DecoderConfig av1DecoderConfig,
-            @Nullable AvifPixelFormat pixelFormatOverride,
+            @Nullable AvifPixelFormat outputPixelFormat,
             long inputSizeLimit
     ) {
         this.av1DecoderConfig = Objects.requireNonNull(av1DecoderConfig, "av1DecoderConfig");
-        this.pixelFormatOverride = pixelFormatOverride;
+        this.outputPixelFormat = outputPixelFormat;
         this.inputSizeLimit = inputSizeLimit;
     }
 
@@ -70,14 +70,14 @@ public final class AvifImageReaderFactory {
         return av1DecoderConfig;
     }
 
-    /// Returns the packed ARGB output format override.
+    /// Returns the configured packed ARGB output format.
     ///
     /// A `null` value selects [AvifPixelFormat#defaultFor(AvifBitDepth)] after the source bit depth
     /// is known.
     ///
-    /// @return the requested output format override, or `null` for automatic selection
-    public @Nullable AvifPixelFormat pixelFormatOverride() {
-        return pixelFormatOverride;
+    /// @return the configured output format, or `null` for automatic selection
+    public @Nullable AvifPixelFormat outputPixelFormat() {
+        return outputPixelFormat;
     }
 
     /// Returns the maximum accepted encoded AVIF input size.
@@ -97,18 +97,18 @@ public final class AvifImageReaderFactory {
         Av1DecoderConfig checkedValue = Objects.requireNonNull(value, "value");
         return checkedValue == av1DecoderConfig
                 ? this
-                : new AvifImageReaderFactory(checkedValue, pixelFormatOverride, inputSizeLimit);
+                : new AvifImageReaderFactory(checkedValue, outputPixelFormat, inputSizeLimit);
     }
 
-    /// Returns a factory using the supplied packed ARGB output format override.
+    /// Returns a factory using the supplied packed ARGB output format.
     ///
-    /// Passing `null` clears the override. Without an override, 8-bit sources use `ARGB_8888` and
+    /// Passing `null` enables automatic selection: 8-bit sources use `ARGB_8888` and
     /// higher-bit-depth sources use `ARGB_16161616`.
     ///
     /// @param value the requested output format, or `null` for automatic selection
-    /// @return a factory with the supplied output format override
-    public AvifImageReaderFactory withPixelFormatOverride(@Nullable AvifPixelFormat value) {
-        return value == pixelFormatOverride
+    /// @return a factory with the supplied output format
+    public AvifImageReaderFactory withOutputPixelFormat(@Nullable AvifPixelFormat value) {
+        return value == outputPixelFormat
                 ? this
                 : new AvifImageReaderFactory(av1DecoderConfig, value, inputSizeLimit);
     }
@@ -126,7 +126,7 @@ public final class AvifImageReaderFactory {
         }
         return value == inputSizeLimit
                 ? this
-                : new AvifImageReaderFactory(av1DecoderConfig, pixelFormatOverride, value);
+                : new AvifImageReaderFactory(av1DecoderConfig, outputPixelFormat, value);
     }
 
     /// Opens an AVIF image reader over a byte array.

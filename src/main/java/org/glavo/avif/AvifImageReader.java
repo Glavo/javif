@@ -182,7 +182,7 @@ public final class AvifImageReader implements AutoCloseable {
                 decodedColor.colorConfig(),
                 container.info().colorInfo(),
                 frameIndex,
-                factory.pixelFormatOverride()
+                factory.outputPixelFormat()
         );
         AvifImageSource alphaSource = container.alphaSource();
         if (alphaSource != null) {
@@ -455,7 +455,7 @@ public final class AvifImageReader implements AutoCloseable {
                     sequenceAv1Reader.lastPlanes(),
                     container.info().colorInfo(),
                     frameIndex,
-                    factory.pixelFormatOverride()
+                    factory.outputPixelFormat()
             );
             return combineFrameWithSequenceAlphaSequential(rawFrame, frameIndex);
         } catch (AvifDecodeException exception) {
@@ -763,7 +763,7 @@ public final class AvifImageReader implements AutoCloseable {
                 decodedColor.primaryColorConfig(),
                 container.info().colorInfo(),
                 frameIndex,
-                factory.pixelFormatOverride()
+                factory.outputPixelFormat()
         );
         if (container.info().alphaPresent()) {
             AvifPlanes alphaPlanes = decodeSampleTransform(sampleTransform, true).planes();
@@ -801,7 +801,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param av1ColorConfig the primary input's AV1 color configuration
     /// @param colorInfo the AVIF container color information, or `null`
     /// @param frameIndex the zero-based frame index
-    /// @param pixelFormatOverride the requested packed pixel format, or `null` to select by source bit depth
+    /// @param outputPixelFormat the configured packed pixel format, or `null` to select by source bit depth
     /// @return the rendered AVIF frame
     /// @throws AvifDecodeException if the selected color conversion is unsupported
     private static AvifFrame adaptRawPlanes(
@@ -809,10 +809,10 @@ public final class AvifImageReader implements AutoCloseable {
             SequenceHeader.ColorConfig av1ColorConfig,
             @Nullable AvifColorInfo colorInfo,
             int frameIndex,
-            @Nullable AvifPixelFormat pixelFormatOverride
+            @Nullable AvifPixelFormat outputPixelFormat
     ) throws AvifDecodeException {
-        AvifPixelFormat pixelFormat = pixelFormatOverride != null
-                ? pixelFormatOverride
+        AvifPixelFormat pixelFormat = outputPixelFormat != null
+                ? outputPixelFormat
                 : AvifPixelFormat.defaultFor(planes.bitDepth());
         try {
             YuvToRgbTransform transform = colorInfo != null
@@ -1248,7 +1248,7 @@ public final class AvifImageReader implements AutoCloseable {
                     randomAccessReader.lastPlanes(),
                     container.info().colorInfo(),
                     frameIndex,
-                    factory.pixelFormatOverride()
+                    factory.outputPixelFormat()
             );
             return combineFrameWithSequenceAlphaRandomAccess(rawFrame, frameIndex);
         } catch (AvifDecodeException exception) {
@@ -1567,7 +1567,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param planes the decoded AV1 planes, or `null`
     /// @param colorInfo the AVIF `nclx` color metadata, or `null`
     /// @param frameIndex the zero-based AVIF frame index
-    /// @param pixelFormatOverride the requested packed pixel format, or `null` to select by source bit depth
+    /// @param outputPixelFormat the configured packed pixel format, or `null` to select by source bit depth
     /// @return an AVIF public frame
     /// @throws AvifDecodeException if the container selects an unsupported color conversion
     private static AvifFrame adaptFrame(
@@ -1575,10 +1575,10 @@ public final class AvifImageReader implements AutoCloseable {
             @Nullable DecodedPlanes planes,
             @Nullable AvifColorInfo colorInfo,
             int frameIndex,
-            @Nullable AvifPixelFormat pixelFormatOverride
+            @Nullable AvifPixelFormat outputPixelFormat
     ) throws AvifDecodeException {
-        AvifPixelFormat pixelFormat = pixelFormatOverride != null
-                ? pixelFormatOverride
+        AvifPixelFormat pixelFormat = outputPixelFormat != null
+                ? outputPixelFormat
                 : AvifPixelFormat.defaultFor(frame.bitDepth());
         if (colorInfo != null && planes != null) {
             try {

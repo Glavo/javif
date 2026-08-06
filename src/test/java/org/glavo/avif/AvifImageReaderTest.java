@@ -260,19 +260,19 @@ final class AvifImageReaderTest {
         assertEquals(AvifPixelFormat.ARGB_16161616, AvifPixelFormat.defaultFor(AvifBitDepth.TWELVE_BITS));
     }
 
-    /// Verifies that the pixel-format override is absent by default and can be explicitly cleared.
+    /// Verifies that the output pixel format is automatic by default and can be reset to automatic.
     @Test
-    void readerFactoryPixelFormatOverrideIsOptionalAndClearable() {
-        assertNull(AvifImageReaderFactory.DEFAULT.pixelFormatOverride());
+    void readerFactoryOutputPixelFormatIsOptionalAndClearable() {
+        assertNull(AvifImageReaderFactory.DEFAULT.outputPixelFormat());
 
         AvifImageReaderFactory explicit = AvifImageReaderFactory.DEFAULT
-                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888);
-        assertEquals(AvifPixelFormat.ARGB_8888, explicit.pixelFormatOverride());
+                .withOutputPixelFormat(AvifPixelFormat.ARGB_8888);
+        assertEquals(AvifPixelFormat.ARGB_8888, explicit.outputPixelFormat());
 
         AvifImageReaderFactory cleared = AvifImageReaderFactory.DEFAULT
-                .withPixelFormatOverride(AvifPixelFormat.ARGB_16161616)
-                .withPixelFormatOverride(null);
-        assertNull(cleared.pixelFormatOverride());
+                .withOutputPixelFormat(AvifPixelFormat.ARGB_16161616)
+                .withOutputPixelFormat(null);
+        assertNull(cleared.outputPixelFormat());
     }
 
     /// Verifies that factory withers return configured values without mutating the default factory.
@@ -281,14 +281,14 @@ final class AvifImageReaderTest {
         Av1DecoderConfig av1Config = Av1DecoderConfig.builder().frameSizeLimit(4096).build();
         AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
                 .withAv1DecoderConfig(av1Config)
-                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888)
+                .withOutputPixelFormat(AvifPixelFormat.ARGB_8888)
                 .withInputSizeLimit(8192);
 
         assertEquals(av1Config, factory.av1DecoderConfig());
-        assertEquals(AvifPixelFormat.ARGB_8888, factory.pixelFormatOverride());
+        assertEquals(AvifPixelFormat.ARGB_8888, factory.outputPixelFormat());
         assertEquals(8192, factory.inputSizeLimit());
         assertEquals(Av1DecoderConfig.DEFAULT, AvifImageReaderFactory.DEFAULT.av1DecoderConfig());
-        assertNull(AvifImageReaderFactory.DEFAULT.pixelFormatOverride());
+        assertNull(AvifImageReaderFactory.DEFAULT.outputPixelFormat());
         assertEquals(0, AvifImageReaderFactory.DEFAULT.inputSizeLimit());
     }
 
@@ -423,7 +423,7 @@ final class AvifImageReaderTest {
     @Test
     void readFrameCanForceLongRgbOutputForEightBitStillImage() throws IOException {
         AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
-                .withPixelFormatOverride(AvifPixelFormat.ARGB_16161616);
+                .withOutputPixelFormat(AvifPixelFormat.ARGB_16161616);
         try (AvifImageReader reader = factory.open(minimalAvifStillImage())) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -450,7 +450,7 @@ final class AvifImageReaderTest {
     @Test
     void readFrameCanForceIntRgbOutputForTenBitStillImage() throws IOException {
         AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
-                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888);
+                .withOutputPixelFormat(AvifPixelFormat.ARGB_8888);
         try (AvifImageReader reader = factory.open(testResourceBytes(LIBAVIF_COLORS_HDR_SRGB_FIXTURE))) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
@@ -476,7 +476,7 @@ final class AvifImageReaderTest {
     @Test
     void readFrameCanForceIntRgbOutputForHighBitDepthGridWithAlpha() throws IOException {
         AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
-                .withPixelFormatOverride(AvifPixelFormat.ARGB_8888);
+                .withOutputPixelFormat(AvifPixelFormat.ARGB_8888);
         try (AvifImageReader reader = factory.open(
                 testResourceBytes(LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE)
         )) {
