@@ -104,10 +104,19 @@ archives are available or can be downloaded:
 ```text
 ./gradlew -g .gradle-user-home aomAvifTest
 ./gradlew -g .gradle-user-home argonAv1Test
+./gradlew -g .gradle-user-home firefoxAvifTest
+./gradlew -g .gradle-user-home chromiumAvifTest
 ```
 
-The second archive is several gigabytes. The `Corpus Check` GitHub Actions workflow therefore keeps
-both corpus gates manual, caches their pinned archives independently, and runs all 25 Argon
+The Firefox and Chromium tasks download small, revision-pinned selections from the browser test
+suites and verify aggregate SHA-256 digests before running compatibility tests. They cover color
+conversion matrices, bit depths, chroma layouts, alpha, animation, transforms, grids, scalable
+images, gain maps, malformed inputs, and crash regressions. See
+`src/test/resources/browser-corpora/README.md` for provenance and the deliberately adapted
+browser-specific assertions.
+
+The Argon archive is several gigabytes. The `Corpus Check` GitHub Actions workflow therefore keeps
+the external corpus gates manual, caches their pinned inputs independently, and runs all 25 Argon
 categories as separate matrix jobs. The baseline Argon gate covers all 3,586 reference
 streams—including regular, special low-overhead, Annex B core, Large Scale Tile, stress, and
 profile-switching streams—plus all 335 malformed conformance streams across the three profiles.

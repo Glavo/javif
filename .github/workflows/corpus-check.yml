@@ -11,12 +11,57 @@ on:
         options:
           - aom
           - argon
+          - firefox
+          - chromium
+          - browser
           - all
 
 permissions:
   contents: read
 
 jobs:
+  firefox-corpus:
+    if: ${{ inputs.corpus == 'firefox' || inputs.corpus == 'browser' || inputs.corpus == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Restore pinned Firefox AVIF resources
+        uses: actions/cache@v5
+        with:
+          path: build/firefox-avif-test-resources
+          key: firefox-avif-ac91bfcce1bf3240e2dce40f47c372e76bc4f26c
+      - name: Run Firefox AVIF compatibility gate
+        run: >-
+          ./gradlew -g .gradle-user-home
+          firefoxAvifTest --info --no-daemon --stacktrace
+
+  chromium-corpus:
+    if: ${{ inputs.corpus == 'chromium' || inputs.corpus == 'browser' || inputs.corpus == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Restore pinned Chromium AVIF resources
+        uses: actions/cache@v5
+        with:
+          path: build/chromium-avif-test-resources
+          key: chromium-avif-ddb449c8c2536723346df7ea26ca13d99857c302
+      - name: Run Chromium AVIF compatibility gate
+        run: >-
+          ./gradlew -g .gradle-user-home
+          chromiumAvifTest --info --no-daemon --stacktrace
+
   aom-corpus:
     if: ${{ inputs.corpus == 'aom' || inputs.corpus == 'all' }}
     runs-on: ubuntu-24.04

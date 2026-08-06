@@ -1,5 +1,8 @@
 import java.lang.module.ModuleDescriptor
 import java.lang.module.ModuleFinder
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.HexFormat
 
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.kotlin.dsl.attributes
@@ -149,7 +152,7 @@ tasks.register<JavaExec>("run") {
 
 tasks.test {
     useJUnitPlatform {
-        excludeTags("aom-corpus", "argon-corpus")
+        excludeTags("aom-corpus", "argon-corpus", "firefox-corpus", "chromium-corpus")
     }
     systemProperty(
         "org.bytedeco.javacpp.cachedir",
@@ -169,6 +172,114 @@ val aomAvifTestResourcesDirectory = layout.buildDirectory.dir("aom-avif-test-res
 val argonAv1Version = "2.1.1"
 val argonAv1ArchiveName = "argon_coveragetool_av1_base_and_extended_profiles_v$argonAv1Version.zip"
 val argonAv1Zip = layout.buildDirectory.file("downloads/$argonAv1ArchiveName")
+val firefoxCommit = "ac91bfcce1bf3240e2dce40f47c372e76bc4f26c"
+val firefoxAvifTestResourcesDirectory = layout.buildDirectory.dir("firefox-avif-test-resources")
+val firefoxGtestResourcesDirectory = firefoxAvifTestResourcesDirectory.map {
+    it.dir("firefox-avif-test-data/gtest")
+}
+val firefoxCrashResourcesDirectory = firefoxAvifTestResourcesDirectory.map {
+    it.dir("firefox-avif-test-data/crashtests")
+}
+val firefoxGtestResourceNames = listOf(
+    "blend.avif",
+    "bug-1655846.avif",
+    "downscaled.avif",
+    "first-frame-green.avif",
+    "green.avif",
+    "hdlr-nonzero-reserved-bug-1727033.avif",
+    "large.avif",
+    "multilayer.avif",
+    "stackcheck.avif",
+    "transparent.avif",
+    "valid-avif-colr-nclx-and-prof.avif",
+) + listOf(8, 10, 12).flatMap { bitDepth ->
+    listOf("full", "limited").flatMap { range ->
+        listOf("bt601", "bt709", "bt2020", "grayscale").map { matrix ->
+            "gray-235-${bitDepth}bit-$range-range-$matrix.avif"
+        }
+    }
+} + listOf(8, 10, 12).flatMap { bitDepth ->
+    listOf("yuv420", "yuv422", "yuv444").map { chroma ->
+        "transparent-green-50pct-${bitDepth}bit-$chroma.avif"
+    }
+}
+val firefoxCrashResourceNames = listOf(
+    "1814553.avif",
+    "1814561.avif",
+    "1814677.avif",
+    "1814708.avif",
+    "1814741.avif",
+    "1814774.avif",
+    "1817108.avif",
+    "1848717-1.avif",
+    "1910211-1.avif",
+)
+val chromiumCommit = "ddb449c8c2536723346df7ea26ca13d99857c302"
+val chromiumAvifTestResourcesDirectory = layout.buildDirectory.dir("chromium-avif-test-resources")
+val chromiumAvifResourcesDirectory = chromiumAvifTestResourcesDirectory.map {
+    it.dir("chromium-avif-test-data")
+}
+val chromiumAvifResourceNames = listOf(
+    "README.md",
+    "blue-and-magenta-crop-invalid.avif",
+    "blue-and-magenta-crop.avif",
+    "dice_444_10b_grid4x3.avif",
+    "gainmap-sdr-srgb-to-hdr-wcg-rec2020.avif",
+    "gracehopper_422_12b_grid2x4.avif",
+    "green-no-alpha-ispe.avif",
+    "hdr-base-with-yuv400-gainmap.avif",
+    "red-and-purple-and-blue.avif",
+    "red-and-purple-crop.avif",
+    "red-at-12-oclock-with-color-profile-lossy.avif",
+    "red-at-12-oclock-with-color-profile-truncated.avif",
+    "red-at-12-oclock-with-color-profile-with-wrong-frame-header.avif",
+    "red-full-range-angle-1-420-8bpc.avif",
+    "red-full-range-angle-2-mode-0-420-8bpc.avif",
+    "red-full-range-angle-3-mode-1-420-8bpc.avif",
+    "red-full-range-bt2020-hlg-444-10bpc.avif",
+    "red-full-range-bt2020-hlg-444-12bpc.avif",
+    "red-full-range-bt2020-pq-444-10bpc.avif",
+    "red-full-range-bt2020-pq-444-12bpc.avif",
+    "red-full-range-bt709-444-8bpc.avif",
+    "red-full-range-mode-0-420-8bpc.avif",
+    "red-full-range-mode-1-420-8bpc.avif",
+    "red-full-range-unspecified-420-8bpc.avif",
+    "red-icc-version-zero.avif",
+    "red-unsupported-transfer.avif",
+    "silver-400-matrix-0.avif",
+    "silver-400-matrix-6.avif",
+    "silver-full-range-srgb-420-8bpc.avif",
+    "small-with-gainmap-iso-gammazero.avif",
+    "small-with-gainmap-iso-hdrbase.avif",
+    "small-with-gainmap-iso-usealtcolorspace-differenticc.avif",
+    "small-with-gainmap-iso-usealtcolorspace.avif",
+    "small-with-gainmap-iso.avif",
+    "star-animated-8bpc-1-repetition.avif",
+    "star-animated-8bpc-10-repetition.avif",
+    "star-animated-8bpc-infinite-repetition.avif",
+    "tiger_3layer_1res.avif",
+    "tiger_3layer_3res.avif",
+    "tiger_420_8b_grid1x13.avif",
+) + listOf(8, 10, 12).flatMap { bitDepth ->
+    listOf("full", "limited").map { range ->
+        "alpha-mask-$range-range-${bitDepth}bpc.avif"
+    }
+} + listOf(8, 10, 12).map { bitDepth ->
+    "red-at-12-oclock-with-color-profile-${bitDepth}bpc.avif"
+} + listOf(8, 10, 12).map { bitDepth ->
+    "red-full-range-420-${bitDepth}bpc.avif"
+} + listOf(8, 10, 12).flatMap { bitDepth ->
+    listOf(420, 422, 444).map { chroma ->
+        "red-limited-range-$chroma-${bitDepth}bpc.avif"
+    }
+} + listOf(8, 10, 12).map { bitDepth ->
+    "red-with-alpha-${bitDepth}bpc.avif"
+} + listOf(8, 10, 12).flatMap { bitDepth ->
+    listOf(
+        "star-animated-${bitDepth}bpc.avif",
+        "star-animated-${bitDepth}bpc-with-alpha.avif",
+    )
+}
 
 val downloadLibavif = tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadLibavif") {
     src("https://github.com/AOMediaCodec/libavif/archive/$libavifCommit.zip")
@@ -197,6 +308,112 @@ val downloadArgonAv1Streams =
             !argonAv1Zip.get().asFile.isFile
         }
     }
+
+val downloadFirefoxAvifGtestResources =
+    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadFirefoxAvifGtestResources") {
+        group = "verification"
+        description = "Downloads the selected pinned Firefox AVIF gtest resources."
+        src(firefoxGtestResourceNames.map { fileName ->
+            "https://raw.githubusercontent.com/mozilla-firefox/firefox/$firefoxCommit/image/test/gtest/$fileName"
+        })
+        dest(firefoxGtestResourcesDirectory)
+        overwrite(false)
+        onlyIf("one or more pinned Firefox AVIF gtest resources are not already cached") {
+            firefoxGtestResourceNames.any { fileName ->
+                !firefoxGtestResourcesDirectory.get().file(fileName).asFile.isFile
+            }
+        }
+    }
+
+val downloadFirefoxAvifCrashResources =
+    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadFirefoxAvifCrashResources") {
+        group = "verification"
+        description = "Downloads the selected pinned Firefox AVIF crash-test resources."
+        src(firefoxCrashResourceNames.map { fileName ->
+            "https://raw.githubusercontent.com/mozilla-firefox/firefox/$firefoxCommit/image/test/crashtests/$fileName"
+        })
+        dest(firefoxCrashResourcesDirectory)
+        overwrite(false)
+        onlyIf("one or more pinned Firefox AVIF crash-test resources are not already cached") {
+            firefoxCrashResourceNames.any { fileName ->
+                !firefoxCrashResourcesDirectory.get().file(fileName).asFile.isFile
+            }
+        }
+    }
+
+val downloadFirefoxAvifTests = tasks.register("downloadFirefoxAvifTests") {
+    group = "verification"
+    description = "Downloads the selected pinned Firefox AVIF test resources."
+    dependsOn(downloadFirefoxAvifGtestResources, downloadFirefoxAvifCrashResources)
+}
+
+val downloadChromiumAvifTests =
+    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadChromiumAvifTests") {
+        group = "verification"
+        description = "Downloads the selected pinned Chromium AVIF image-decoder resources."
+        src(chromiumAvifResourceNames.map { fileName ->
+            "https://raw.githubusercontent.com/chromium/chromium/$chromiumCommit/" +
+                    "third_party/blink/web_tests/images/resources/avif/$fileName"
+        })
+        dest(chromiumAvifResourcesDirectory)
+        overwrite(false)
+        onlyIf("one or more pinned Chromium AVIF resources are not already cached") {
+            chromiumAvifResourceNames.any { fileName ->
+                !chromiumAvifResourcesDirectory.get().file(fileName).asFile.isFile
+            }
+        }
+    }
+
+fun aggregateCorpusSha256(directory: File, resourceNames: List<String>): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    for (resourceName in resourceNames.sorted()) {
+        val resource = directory.resolve(resourceName)
+        check(resource.isFile) { "Missing corpus resource: $resource" }
+        digest.update(resourceName.toByteArray(StandardCharsets.UTF_8))
+        digest.update(0.toByte())
+        resource.inputStream().buffered().use { input ->
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) {
+                    break
+                }
+                digest.update(buffer, 0, count)
+            }
+        }
+    }
+    return HexFormat.of().formatHex(digest.digest())
+}
+
+val verifyFirefoxAvifTestResources = tasks.register("verifyFirefoxAvifTestResources") {
+    group = "verification"
+    description = "Verifies the pinned Firefox AVIF resource selections."
+    dependsOn(downloadFirefoxAvifTests)
+
+    doLast {
+        val gtestHash = aggregateCorpusSha256(firefoxGtestResourcesDirectory.get().asFile, firefoxGtestResourceNames)
+        check(gtestHash == "a87147ca266d04e9a2fba1f6ec0d08f448080f1d3b85b27e9a98d21a06d073b3") {
+            "Unexpected Firefox AVIF gtest resource digest: $gtestHash"
+        }
+        val crashHash = aggregateCorpusSha256(firefoxCrashResourcesDirectory.get().asFile, firefoxCrashResourceNames)
+        check(crashHash == "f1ed713e679177f364c08245904afc61db09bdbe2971c036212944f3be3cad24") {
+            "Unexpected Firefox AVIF crash-test resource digest: $crashHash"
+        }
+    }
+}
+
+val verifyChromiumAvifTestResources = tasks.register("verifyChromiumAvifTestResources") {
+    group = "verification"
+    description = "Verifies the pinned Chromium AVIF resource selection."
+    dependsOn(downloadChromiumAvifTests)
+
+    doLast {
+        val hash = aggregateCorpusSha256(chromiumAvifResourcesDirectory.get().asFile, chromiumAvifResourceNames)
+        check(hash == "009014d4bfc94b1058d3e3bbff3fc3545ad3c3267c75d0ab272fc7aeb7051c6b") {
+            "Unexpected Chromium AVIF resource digest: $hash"
+        }
+    }
+}
 
 val prepareAomAvifTestResources = tasks.register<Sync>("prepareAomAvifTestResources") {
     dependsOn(downloadAomAvifTestFiles)
@@ -322,6 +539,42 @@ tasks.register<Test>("argonAv1Test") {
     }
     if (providers.gradleProperty("argonAv1TraceFrames").isPresent) {
         systemProperty("org.glavo.avif.argon.traceFrames", "true")
+    }
+}
+
+tasks.register<Test>("firefoxAvifTest") {
+    group = "verification"
+    description = "Runs the selected Firefox AVIF compatibility and regression tests."
+    dependsOn(tasks.testClasses)
+    dependsOn(verifyFirefoxAvifTestResources)
+
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath + files(firefoxAvifTestResourcesDirectory)
+    maxHeapSize = "2g"
+    extensions.configure<JacocoTaskExtension> {
+        isEnabled = false
+    }
+
+    useJUnitPlatform {
+        includeTags("firefox-corpus")
+    }
+}
+
+tasks.register<Test>("chromiumAvifTest") {
+    group = "verification"
+    description = "Runs the selected Chromium AVIF compatibility and regression tests."
+    dependsOn(tasks.testClasses)
+    dependsOn(verifyChromiumAvifTestResources)
+
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath + files(chromiumAvifTestResourcesDirectory)
+    maxHeapSize = "2g"
+    extensions.configure<JacocoTaskExtension> {
+        isEnabled = false
+    }
+
+    useJUnitPlatform {
+        includeTags("chromium-corpus")
     }
 }
 

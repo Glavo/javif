@@ -2152,6 +2152,7 @@ public final class AvifContainerParser {
                 BoxInput trakPayload = input.slice(child.payloadOffset(), child.payloadSize());
                 parseMoovTrack(trakPayload);
                 MoovState parsedTrack = meta.moovState.copy();
+                inferLegacyMoovAuxiliaryType(parsedTrack);
                 if (isMoovImageTrack(parsedTrack)) {
                     if (parsedTrack.auxiliaryType != null) {
                         meta.moovAuxiliaryCandidates.add(parsedTrack);
@@ -2169,6 +2170,21 @@ public final class AvifContainerParser {
             input.skipBoxPayload(child);
         }
         resolveMoovAuxiliaryTracks();
+    }
+
+    /// Infers the alpha type for legacy monochrome AVIS auxiliary tracks without `auxi`.
+    ///
+    /// Early AVIF sequence encoders identified alpha tracks only through a `tref/auxl`
+    /// relationship. A monochrome track with that relationship is treated as alpha so that its
+    /// samples remain associated with the selected color sequence.
+    ///
+    /// @param track the parsed track state
+    private static void inferLegacyMoovAuxiliaryType(MoovState track) {
+        if (track.auxiliaryType == null
+                && !track.auxiliaryForTrackIds.isEmpty()
+                && track.chromaFormat == Av1ChromaFormat.MONOCHROME) {
+            track.auxiliaryType = AvifAuxiliaryImageInfo.ALPHA_TYPE;
+        }
     }
 
     /// Returns whether a parsed `trak` can be used as an AVIS image-sequence track.
