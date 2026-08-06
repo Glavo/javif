@@ -389,6 +389,8 @@ public final class RestorationApplier {
         int height = endY - startY;
         int horizontalRowCount = height + WIENER_TAP_COUNT - 1;
         int[] horizontalSamples = workspace.wienerIntermediate(width * horizontalRowCount);
+        int sourceRowLength = width + WIENER_TAP_COUNT - 1;
+        int[] sourceRow = workspace.sourceRow(sourceRowLength);
         int bitDepth = source.bitDepth();
         int roundBitsH = 3 + (bitDepth == 12 ? 2 : 0);
         int roundingOffsetH = 1 << (roundBitsH - 1);
@@ -400,11 +402,17 @@ public final class RestorationApplier {
         for (int row = 0; row < horizontalRowCount; row++) {
             int sourceY = startY + row - WIENER_TAP_OFFSET;
             int rowOffset = row * width;
+            source.copyExtendedRow(
+                    startX - WIENER_TAP_OFFSET,
+                    sourceY,
+                    sourceRowLength,
+                    sourceRow,
+                    0
+            );
             for (int localX = 0; localX < width; localX++) {
-                int x = startX + localX;
                 int sum = horizontalInitialSum;
                 for (int tap = 0; tap < WIENER_TAP_COUNT; tap++) {
-                    sum += horizontalKernel[tap] * source.sample(x + tap - WIENER_TAP_OFFSET, sourceY);
+                    sum += horizontalKernel[tap] * sourceRow[localX + tap];
                 }
                 horizontalSamples[rowOffset + localX] =
                         clamp((sum + roundingOffsetH) >> roundBitsH, 0, clipLimit - 1);
@@ -588,6 +596,9 @@ public final class RestorationApplier {
         /// The horizontal Wiener intermediate rows.
         private int[] wienerIntermediate = new int[0];
 
+        /// One frame-border-extended source row used by Wiener filtering.
+        private int[] sourceRow = new int[0];
+
         /// The reusable horizontal Wiener kernel.
         private final int[] horizontalWienerKernel = new int[WIENER_TAP_COUNT];
 
@@ -614,6 +625,17 @@ public final class RestorationApplier {
             }
             return wienerIntermediate;
         }
+
+        /// Returns source-row storage with at least the requested length.
+        ///
+        /// @param requiredLength the minimum number of source samples
+        /// @return reusable source-row storage
+        private int[] sourceRow(int requiredLength) {
+            if (sourceRow.length < requiredLength) {
+                sourceRow = new int[requiredLength];
+            }
+            return sourceRow;
+        }
     }
 
     /// Self-guided A/B projection fields for one filter radius.
@@ -636,6 +658,9 @@ public final class RestorationApplier {
 
         /// The reusable vertical box-filter squared-sample sums.
         private int[] columnSquareSums = new int[0];
+
+        /// One frame-border-extended source row used to update vertical column sums.
+        private int[] sourceRow = new int[0];
 
         /// Creates an empty reusable self-guided intermediate field.
         private SelfGuidedIntermediate() {
@@ -683,18 +708,21 @@ public final class RestorationApplier {
                 columnSums = new int[extendedWidth];
                 columnSquareSums = new int[extendedWidth];
             }
+            if (sourceRow.length < extendedWidth) {
+                sourceRow = new int[extendedWidth];
+            }
             // Keep vertical column totals and slide them horizontally so each field sample is O(1).
             for (int column = 0; column < extendedWidth; column++) {
-                int sourceX = firstSourceX + column;
-                int sum = 0;
-                int sumSquares = 0;
-                for (int dy = -radius; dy <= radius; dy++) {
-                    int sample = source.sample(sourceX, firstCenterY + dy);
-                    sum += sample;
-                    sumSquares += sample * sample;
+                columnSums[column] = 0;
+                columnSquareSums[column] = 0;
+            }
+            for (int dy = -radius; dy <= radius; dy++) {
+                source.copyExtendedRow(firstSourceX, firstCenterY + dy, extendedWidth, sourceRow, 0);
+                for (int column = 0; column < extendedWidth; column++) {
+                    int sample = sourceRow[column];
+                    columnSums[column] += sample;
+                    columnSquareSums[column] += sample * sample;
                 }
-                columnSums[column] = sum;
-                columnSquareSums[column] = sumSquares;
             }
 
             for (int fieldY = 0; fieldY < fieldHeight; fieldY++) {
@@ -702,12 +730,17 @@ public final class RestorationApplier {
                     int centerY = firstCenterY + fieldY;
                     int removedY = centerY - radius - 1;
                     int addedY = centerY + radius;
+                    source.copyExtendedRow(firstSourceX, removedY, extendedWidth, sourceRow, 0);
                     for (int column = 0; column < extendedWidth; column++) {
-                        int sourceX = firstSourceX + column;
-                        int removedSample = source.sample(sourceX, removedY);
-                        int addedSample = source.sample(sourceX, addedY);
-                        columnSums[column] += addedSample - removedSample;
-                        columnSquareSums[column] += addedSample * addedSample - removedSample * removedSample;
+                        int removedSample = sourceRow[column];
+                        columnSums[column] -= removedSample;
+                        columnSquareSums[column] -= removedSample * removedSample;
+                    }
+                    source.copyExtendedRow(firstSourceX, addedY, extendedWidth, sourceRow, 0);
+                    for (int column = 0; column < extendedWidth; column++) {
+                        int addedSample = sourceRow[column];
+                        columnSums[column] += addedSample;
+                        columnSquareSums[column] += addedSample * addedSample;
                     }
                 }
 
@@ -907,6 +940,25 @@ public final class RestorationApplier {
         /// @param y the sample Y coordinate
         /// @return one sample
         int sample(int x, int y);
+
+        /// Copies one frame-border-extended source row into caller-provided storage.
+        ///
+        /// @param startX the first source X coordinate
+        /// @param y the source Y coordinate
+        /// @param length the number of samples to copy
+        /// @param destination the destination storage
+        /// @param destinationOffset the first destination index
+        default void copyExtendedRow(
+                int startX,
+                int y,
+                int length,
+                int[] destination,
+                int destinationOffset
+        ) {
+            for (int index = 0; index < length; index++) {
+                destination[destinationOffset + index] = sample(startX + index, y);
+            }
+        }
     }
 
     /// Read-only restoration source backed by one immutable decoded plane.
@@ -959,6 +1011,38 @@ public final class RestorationApplier {
         @Override
         public int sample(int x, int y) {
             return plane.sample(clamp(x, 0, plane.width() - 1), clamp(y, 0, plane.height() - 1));
+        }
+
+        /// Copies one frame-border-extended decoded-plane row.
+        ///
+        /// @param startX the first source X coordinate
+        /// @param y the source Y coordinate
+        /// @param length the number of samples to copy
+        /// @param destination the destination storage
+        /// @param destinationOffset the first destination index
+        @Override
+        public void copyExtendedRow(
+                int startX,
+                int y,
+                int length,
+                int[] destination,
+                int destinationOffset
+        ) {
+            int clampedY = clamp(y, 0, plane.height() - 1);
+            int sourceWidth = plane.width();
+            int firstVisibleIndex = clamp(-startX, 0, length);
+            int visibleEndIndex = clamp(sourceWidth - startX, firstVisibleIndex, length);
+            int leftSample = plane.sample(0, clampedY);
+            for (int index = 0; index < firstVisibleIndex; index++) {
+                destination[destinationOffset + index] = leftSample;
+            }
+            for (int index = firstVisibleIndex; index < visibleEndIndex; index++) {
+                destination[destinationOffset + index] = plane.sample(startX + index, clampedY);
+            }
+            int rightSample = plane.sample(sourceWidth - 1, clampedY);
+            for (int index = visibleEndIndex; index < length; index++) {
+                destination[destinationOffset + index] = rightSample;
+            }
         }
     }
 
@@ -1047,6 +1131,34 @@ public final class RestorationApplier {
                 return boundarySource.sample(x, boundaryY);
             }
             return source.sample(x, y);
+        }
+
+        /// Copies one source row after resolving internal stripe-boundary substitution once.
+        ///
+        /// @param startX the first source X coordinate
+        /// @param y the source Y coordinate
+        /// @param length the number of samples to copy
+        /// @param destination the destination storage
+        /// @param destinationOffset the first destination index
+        @Override
+        public void copyExtendedRow(
+                int startX,
+                int y,
+                int length,
+                int[] destination,
+                int destinationOffset
+        ) {
+            if (copyAbove && y >= stripeStart - RESTORATION_STRIPE_BORDER && y < stripeStart) {
+                int boundaryY = y <= stripeStart - 2 ? stripeStart - 2 : stripeStart - 1;
+                boundarySource.copyExtendedRow(startX, boundaryY, length, destination, destinationOffset);
+                return;
+            }
+            if (copyBelow && y >= stripeEnd && y < stripeEnd + RESTORATION_STRIPE_BORDER) {
+                int boundaryY = y == stripeEnd ? stripeEnd : stripeEnd + 1;
+                boundarySource.copyExtendedRow(startX, boundaryY, length, destination, destinationOffset);
+                return;
+            }
+            source.copyExtendedRow(startX, y, length, destination, destinationOffset);
         }
     }
 
