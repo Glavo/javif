@@ -45,7 +45,7 @@ final class FramePixelBufferTest {
         IntBuffer intPixels = frame.intPixelBuffer();
         LongBuffer longPixels = frame.longPixelBuffer();
 
-        assertEquals(AvifRgbOutputMode.ARGB_8888, frame.rgbOutputMode());
+        assertEquals(AvifPixelFormat.ARGB_8888, frame.pixelFormat());
         assertTrue(intPixels.isReadOnly());
         assertTrue(longPixels.isReadOnly());
         assertEquals(0x8040_2010, intPixels.get(0));
@@ -69,7 +69,7 @@ final class FramePixelBufferTest {
         LongBuffer longPixels = frame.longPixelBuffer();
         IntBuffer intPixels = frame.intPixelBuffer();
 
-        assertEquals(AvifRgbOutputMode.ARGB_16161616, frame.rgbOutputMode());
+        assertEquals(AvifPixelFormat.ARGB_16161616, frame.pixelFormat());
         assertTrue(longPixels.isReadOnly());
         assertTrue(intPixels.isReadOnly());
         assertEquals(0xFFFF_8080_4040_0000L, longPixels.get(0));

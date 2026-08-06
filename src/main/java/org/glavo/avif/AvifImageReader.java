@@ -344,7 +344,7 @@ public final class AvifImageReader implements AutoCloseable {
                 decodedColor.colorConfig(),
                 container.info().colorInfo(),
                 frameIndex,
-                config.rgbOutputMode()
+                config.pixelFormatOverride()
         );
         AvifImageSource alphaSource = container.alphaSource();
         if (alphaSource != null) {
@@ -462,8 +462,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// Reads the decoded frame at the supplied index with its AVIF gain map applied.
     ///
     /// The returned frame preserves the regular `readFrame(int)` alpha composition, item
-    /// transforms, frame index, and RGB storage mode. A `null` return value means the frame has no
-    /// supported gain-map association.
+    /// transforms, frame index, and packed ARGB pixel format. A `null` return value means the frame
+    /// has no supported gain-map association.
     ///
     /// @param frameIndex the zero-based frame index
     /// @param hdrHeadroom the requested display HDR headroom in log2 space
@@ -476,9 +476,9 @@ public final class AvifImageReader implements AutoCloseable {
     /// Reads the decoded frame at the supplied index with its AVIF gain map applied.
     ///
     /// The returned frame preserves the regular `readFrame(int)` alpha composition, item
-    /// transforms, frame index, and RGB storage mode. RGB channels are converted into the requested
-    /// CICP output color space after gain-map application. ICC profile application remains
-    /// metadata-only.
+    /// transforms, frame index, and packed ARGB pixel format. RGB channels are converted into the
+    /// requested CICP output color space after gain-map application. ICC profile application
+    /// remains metadata-only.
     ///
     /// @param frameIndex the zero-based frame index
     /// @param hdrHeadroom the requested display HDR headroom in log2 space
@@ -617,7 +617,7 @@ public final class AvifImageReader implements AutoCloseable {
                     sequenceAv1Reader.lastPlanes(),
                     container.info().colorInfo(),
                     frameIndex,
-                    config.rgbOutputMode()
+                    config.pixelFormatOverride()
             );
             return combineFrameWithSequenceAlphaSequential(rawFrame, frameIndex);
         } catch (AvifDecodeException exception) {
@@ -925,7 +925,7 @@ public final class AvifImageReader implements AutoCloseable {
                 decodedColor.primaryColorConfig(),
                 container.info().colorInfo(),
                 frameIndex,
-                config.rgbOutputMode()
+                config.pixelFormatOverride()
         );
         if (container.info().alphaPresent()) {
             AvifPlanes alphaPlanes = decodeSampleTransform(sampleTransform, true).planes();
@@ -954,7 +954,7 @@ public final class AvifImageReader implements AutoCloseable {
         return applyTransforms(rawFrame);
     }
 
-    /// Renders reconstructed color planes into the requested packed RGB format.
+    /// Renders reconstructed color planes into the requested packed ARGB format.
     ///
     /// Container `nclx` metadata takes precedence over the primary input's AV1 sequence-header
     /// color configuration, matching the normal still-image path.
@@ -963,7 +963,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param av1ColorConfig the primary input's AV1 color configuration
     /// @param colorInfo the AVIF container color information, or `null`
     /// @param frameIndex the zero-based frame index
-    /// @param outputMode the requested packed RGB output mode
+    /// @param pixelFormatOverride the requested packed pixel format, or `null` to select by source bit depth
     /// @return the rendered AVIF frame
     /// @throws AvifDecodeException if the selected color conversion is unsupported
     private static AvifFrame adaptRawPlanes(
@@ -971,15 +971,17 @@ public final class AvifImageReader implements AutoCloseable {
             SequenceHeader.ColorConfig av1ColorConfig,
             @Nullable AvifColorInfo colorInfo,
             int frameIndex,
-            AvifRgbOutputMode outputMode
+            @Nullable AvifPixelFormat pixelFormatOverride
     ) throws AvifDecodeException {
-        AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(planes.bitDepth());
+        AvifPixelFormat pixelFormat = pixelFormatOverride != null
+                ? pixelFormatOverride
+                : AvifPixelFormat.defaultFor(planes.bitDepth());
         try {
             YuvToRgbTransform transform = colorInfo != null
                     ? YuvToRgbTransform.fromColorInfo(colorInfo, planes.chromaFormat() == Av1ChromaFormat.MONOCHROME)
                     : YuvToRgbTransform.fromColorConfig(av1ColorConfig);
             DecodedPlanes decodedPlanes = toDecodedPlanes(planes);
-            if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
+            if (pixelFormat == AvifPixelFormat.ARGB_8888) {
                 return new AvifFrame(
                         planes.codedWidth(),
                         planes.codedHeight(),
@@ -989,7 +991,7 @@ public final class AvifImageReader implements AutoCloseable {
                         ArgbOutput.toOpaqueArgbPixels(decodedPlanes, transform)
                 );
             }
-            if (resolvedMode == AvifRgbOutputMode.ARGB_16161616) {
+            if (pixelFormat == AvifPixelFormat.ARGB_16161616) {
                 return new AvifFrame(
                         planes.codedWidth(),
                         planes.codedHeight(),
@@ -999,7 +1001,7 @@ public final class AvifImageReader implements AutoCloseable {
                         ArgbOutput.toOpaqueArgbLongPixels(decodedPlanes, transform)
                 );
             }
-            throw new IllegalArgumentException("Unsupported RGB output mode: " + resolvedMode);
+            throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
         } catch (UnsupportedOperationException exception) {
             throw unsupportedColorConversion(exception);
         }
@@ -1408,7 +1410,7 @@ public final class AvifImageReader implements AutoCloseable {
                     randomAccessReader.lastPlanes(),
                     container.info().colorInfo(),
                     frameIndex,
-                    config.rgbOutputMode()
+                    config.pixelFormatOverride()
             );
             return combineFrameWithSequenceAlphaRandomAccess(rawFrame, frameIndex);
         } catch (AvifDecodeException exception) {
@@ -1466,7 +1468,7 @@ public final class AvifImageReader implements AutoCloseable {
         if (!info.hasCleanApertureCrop() && info.rotationCode() <= 0 && info.mirrorAxis() < 0) {
             return frame;
         }
-        if (frame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
+        if (frame.pixelFormat() == AvifPixelFormat.ARGB_8888) {
             int[] pixels = intBufferToArray(frame.intPixelBuffer());
             int width = frame.width();
             int height = frame.height();
@@ -1499,7 +1501,7 @@ public final class AvifImageReader implements AutoCloseable {
             return new AvifFrame(width, height, frame.bitDepth(),
                     frame.chromaFormat(), frame.frameIndex(), pixels);
         }
-        if (frame.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
+        if (frame.pixelFormat() == AvifPixelFormat.ARGB_16161616) {
             long[] pixels = longBufferToArray(frame.longPixelBuffer());
             int width = frame.width();
             int height = frame.height();
@@ -1727,7 +1729,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param planes the decoded AV1 planes, or `null`
     /// @param colorInfo the AVIF `nclx` color metadata, or `null`
     /// @param frameIndex the zero-based AVIF frame index
-    /// @param outputMode the requested packed RGB output mode
+    /// @param pixelFormatOverride the requested packed pixel format, or `null` to select by source bit depth
     /// @return an AVIF public frame
     /// @throws AvifDecodeException if the container selects an unsupported color conversion
     private static AvifFrame adaptFrame(
@@ -1735,17 +1737,19 @@ public final class AvifImageReader implements AutoCloseable {
             @Nullable DecodedPlanes planes,
             @Nullable AvifColorInfo colorInfo,
             int frameIndex,
-            AvifRgbOutputMode outputMode
+            @Nullable AvifPixelFormat pixelFormatOverride
     ) throws AvifDecodeException {
-        AvifRgbOutputMode resolvedMode = Objects.requireNonNull(outputMode, "outputMode").resolve(frame.bitDepth());
+        AvifPixelFormat pixelFormat = pixelFormatOverride != null
+                ? pixelFormatOverride
+                : AvifPixelFormat.defaultFor(frame.bitDepth());
         if (colorInfo != null && planes != null) {
             try {
-                return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex, resolvedMode);
+                return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex, pixelFormat);
             } catch (UnsupportedOperationException exception) {
                 throw unsupportedColorConversion(exception);
             }
         }
-        if (resolvedMode == AvifRgbOutputMode.ARGB_8888) {
+        if (pixelFormat == AvifPixelFormat.ARGB_8888) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1755,7 +1759,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.intPixelBuffer()
             );
         }
-        if (resolvedMode == AvifRgbOutputMode.ARGB_16161616) {
+        if (pixelFormat == AvifPixelFormat.ARGB_16161616) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1765,7 +1769,7 @@ public final class AvifImageReader implements AutoCloseable {
                     frame.longPixelBuffer()
             );
         }
-        throw new IllegalArgumentException("Unsupported RGB output mode: " + resolvedMode);
+        throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
     }
 
     /// Adapts decoded AV1 planes to the AVIF public frame model using container color metadata.
@@ -1774,20 +1778,20 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param planes the decoded AV1 planes to render
     /// @param colorInfo the AVIF `nclx` color metadata
     /// @param frameIndex the zero-based AVIF frame index
-    /// @param resolvedOutputMode the concrete packed RGB output mode
+    /// @param pixelFormat the concrete packed pixel format
     /// @return an AVIF public frame rendered with the container-selected YUV transform
     private static AvifFrame adaptFrameFromPlanes(
             DecodedFrame frame,
             DecodedPlanes planes,
             AvifColorInfo colorInfo,
             int frameIndex,
-            AvifRgbOutputMode resolvedOutputMode
+            AvifPixelFormat pixelFormat
     ) {
         YuvToRgbTransform transform = YuvToRgbTransform.fromColorInfo(
                 colorInfo,
                 frame.chromaFormat() == Av1ChromaFormat.MONOCHROME
         );
-        if (resolvedOutputMode == AvifRgbOutputMode.ARGB_8888) {
+        if (pixelFormat == AvifPixelFormat.ARGB_8888) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1797,7 +1801,7 @@ public final class AvifImageReader implements AutoCloseable {
                     ArgbOutput.toOpaqueArgbPixels(planes, transform)
             );
         }
-        if (resolvedOutputMode == AvifRgbOutputMode.ARGB_16161616) {
+        if (pixelFormat == AvifPixelFormat.ARGB_16161616) {
             return new AvifFrame(
                     frame.width(),
                     frame.height(),
@@ -1807,7 +1811,7 @@ public final class AvifImageReader implements AutoCloseable {
                     ArgbOutput.toOpaqueArgbLongPixels(planes, transform)
             );
         }
-        throw new IllegalArgumentException("Unsupported RGB output mode: " + resolvedOutputMode);
+        throw new IllegalArgumentException("Unsupported pixel format: " + pixelFormat);
     }
 
     /// Combines a sequentially read sequence frame with its matching alpha sample when present.
@@ -2010,13 +2014,13 @@ public final class AvifImageReader implements AutoCloseable {
             int frameIndex,
             boolean alphaPremultiplied
     ) {
-        if (color.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
+        if (color.pixelFormat() == AvifPixelFormat.ARGB_8888) {
             return combineIntPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex, alphaPremultiplied);
         }
-        if (color.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
+        if (color.pixelFormat() == AvifPixelFormat.ARGB_16161616) {
             return combineLongPlaneAlpha(color, alphaPlanes, alphaBitDepth, frameIndex, alphaPremultiplied);
         }
-        throw new IllegalArgumentException("Unsupported alpha color frame RGB output mode: " + color.rgbOutputMode());
+        throw new IllegalArgumentException("Unsupported alpha color frame pixel format: " + color.pixelFormat());
     }
 
     /// Combines alpha from raw luma plane into an 8-bit color frame.

@@ -77,13 +77,13 @@ final class AvifGainMapToneMapper {
                     gainMapColorInfo
             );
         }
-        if (checkedBaseFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_8888) {
+        if (checkedBaseFrame.pixelFormat() == AvifPixelFormat.ARGB_8888) {
             return applyToIntFrame(checkedBaseFrame, sampler, math);
         }
-        if (checkedBaseFrame.rgbOutputMode() == AvifRgbOutputMode.ARGB_16161616) {
+        if (checkedBaseFrame.pixelFormat() == AvifPixelFormat.ARGB_16161616) {
             return applyToLongFrame(checkedBaseFrame, sampler, math);
         }
-        throw new IllegalArgumentException("Unsupported RGB output mode: " + checkedBaseFrame.rgbOutputMode());
+        throw new IllegalArgumentException("Unsupported pixel format: " + checkedBaseFrame.pixelFormat());
     }
 
     /// Returns whether the gain-map planes must be decoded for one requested headroom.

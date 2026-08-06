@@ -72,7 +72,7 @@ final class SampleTransformIntegrationTest {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
             assertEquals(AvifBitDepth.SIXTEEN_BITS, frame.bitDepth());
-            assertEquals(AvifRgbOutputMode.ARGB_16161616, frame.rgbOutputMode());
+            assertEquals(AvifPixelFormat.ARGB_16161616, frame.pixelFormat());
             assertTrue(frame.hasLongPixelBuffer());
             assertFalse(frame.hasIntPixelBuffer());
             assertEquals(1024 * 684, frame.longPixelBuffer().remaining());

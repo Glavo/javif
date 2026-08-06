@@ -17,6 +17,7 @@ package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1DecoderConfig;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
@@ -28,8 +29,9 @@ public final class AvifDecoderConfig {
 
     /// The underlying AV1 decoder configuration.
     private final Av1DecoderConfig av1DecoderConfig;
-    /// The requested packed RGB output storage mode.
-    private final AvifRgbOutputMode rgbOutputMode;
+    /// The requested packed ARGB output format override, or `null` to select a default from the
+    /// source bit depth.
+    private final @Nullable AvifPixelFormat pixelFormatOverride;
     /// The maximum accepted encoded AVIF input size in bytes, or `0` for no limit.
     private final long inputSizeLimit;
 
@@ -38,7 +40,7 @@ public final class AvifDecoderConfig {
     /// @param builder the validated builder state
     private AvifDecoderConfig(Builder builder) {
         this.av1DecoderConfig = builder.av1DecoderConfig;
-        this.rgbOutputMode = builder.rgbOutputMode;
+        this.pixelFormatOverride = builder.pixelFormatOverride;
         this.inputSizeLimit = builder.inputSizeLimit;
     }
 
@@ -56,11 +58,14 @@ public final class AvifDecoderConfig {
         return av1DecoderConfig;
     }
 
-    /// Returns the requested packed RGB output storage mode.
+    /// Returns the requested packed ARGB output format override.
     ///
-    /// @return the requested packed RGB output storage mode
-    public AvifRgbOutputMode rgbOutputMode() {
-        return rgbOutputMode;
+    /// A `null` value selects [AvifPixelFormat#defaultFor(AvifBitDepth)] after the source bit depth
+    /// is known.
+    ///
+    /// @return the requested output format override, or `null` for automatic selection
+    public @Nullable AvifPixelFormat pixelFormatOverride() {
+        return pixelFormatOverride;
     }
 
     /// Returns the maximum accepted encoded AVIF input size.
@@ -77,8 +82,8 @@ public final class AvifDecoderConfig {
     public static final class Builder {
         /// The underlying AV1 decoder configuration.
         private Av1DecoderConfig av1DecoderConfig = Av1DecoderConfig.DEFAULT;
-        /// The requested packed RGB output storage mode.
-        private AvifRgbOutputMode rgbOutputMode = AvifRgbOutputMode.AUTOMATIC;
+        /// The requested packed ARGB output format override, or `null` for automatic selection.
+        private @Nullable AvifPixelFormat pixelFormatOverride;
         /// The maximum accepted encoded AVIF input size in bytes, or `0` for no limit.
         private long inputSizeLimit;
 
@@ -95,15 +100,15 @@ public final class AvifDecoderConfig {
             return this;
         }
 
-        /// Sets the requested packed RGB output storage mode.
+        /// Sets the packed ARGB output format override.
         ///
-        /// `AUTOMATIC` exposes `IntBuffer` pixels first for 8-bit inputs and `LongBuffer` pixels
-        /// first for 10/12-bit inputs.
+        /// Passing `null` clears the override. Without an override, 8-bit sources use `ARGB_8888`
+        /// and higher-bit-depth sources use `ARGB_16161616`.
         ///
-        /// @param value the requested packed RGB output storage mode
+        /// @param value the requested output format, or `null` for automatic selection
         /// @return this builder
-        public Builder rgbOutputMode(AvifRgbOutputMode value) {
-            this.rgbOutputMode = Objects.requireNonNull(value, "value");
+        public Builder pixelFormatOverride(@Nullable AvifPixelFormat value) {
+            this.pixelFormatOverride = value;
             return this;
         }
 

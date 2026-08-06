@@ -252,6 +252,31 @@ final class AvifImageReaderTest {
         assertThrows(IllegalArgumentException.class, () -> AvifDecoderConfig.builder().inputSizeLimit(-1));
     }
 
+    /// Verifies that the default packed pixel format follows the decoded source bit depth.
+    @Test
+    void pixelFormatDefaultsFollowSourceBitDepth() {
+        assertEquals(AvifPixelFormat.ARGB_8888, AvifPixelFormat.defaultFor(AvifBitDepth.EIGHT_BITS));
+        assertEquals(AvifPixelFormat.ARGB_16161616, AvifPixelFormat.defaultFor(AvifBitDepth.TEN_BITS));
+        assertEquals(AvifPixelFormat.ARGB_16161616, AvifPixelFormat.defaultFor(AvifBitDepth.TWELVE_BITS));
+    }
+
+    /// Verifies that the pixel-format override is absent by default and can be explicitly cleared.
+    @Test
+    void decoderConfigPixelFormatOverrideIsOptionalAndClearable() {
+        assertNull(AvifDecoderConfig.DEFAULT.pixelFormatOverride());
+
+        AvifDecoderConfig explicit = AvifDecoderConfig.builder()
+                .pixelFormatOverride(AvifPixelFormat.ARGB_8888)
+                .build();
+        assertEquals(AvifPixelFormat.ARGB_8888, explicit.pixelFormatOverride());
+
+        AvifDecoderConfig cleared = AvifDecoderConfig.builder()
+                .pixelFormatOverride(AvifPixelFormat.ARGB_16161616)
+                .pixelFormatOverride(null)
+                .build();
+        assertNull(cleared.pixelFormatOverride());
+    }
+
     /// Verifies that every public input type rejects encoded data above the configured limit.
     ///
     /// @throws IOException if the temporary fixture cannot be written
@@ -349,7 +374,7 @@ final class AvifImageReaderTest {
             assertEquals(AvifBitDepth.EIGHT_BITS, intFrame.bitDepth());
             assertEquals(Av1ChromaFormat.YUV420, intFrame.chromaFormat());
             assertEquals(0, intFrame.frameIndex());
-            assertEquals(AvifRgbOutputMode.ARGB_8888, intFrame.rgbOutputMode());
+            assertEquals(AvifPixelFormat.ARGB_8888, intFrame.pixelFormat());
             assertTrue(intFrame.hasIntPixelBuffer());
             assertFalse(intFrame.hasLongPixelBuffer());
 
@@ -386,14 +411,14 @@ final class AvifImageReaderTest {
     @Test
     void readFrameCanForceLongRgbOutputForEightBitStillImage() throws IOException {
         AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .rgbOutputMode(AvifRgbOutputMode.ARGB_16161616)
+                .pixelFormatOverride(AvifPixelFormat.ARGB_16161616)
                 .build();
         try (AvifImageReader reader = AvifImageReader.open(minimalAvifStillImage(), config)) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
 
             assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
-            assertEquals(AvifRgbOutputMode.ARGB_16161616, frame.rgbOutputMode());
+            assertEquals(AvifPixelFormat.ARGB_16161616, frame.pixelFormat());
             assertFalse(frame.hasIntPixelBuffer());
             assertTrue(frame.hasLongPixelBuffer());
 
@@ -414,14 +439,14 @@ final class AvifImageReaderTest {
     @Test
     void readFrameCanForceIntRgbOutputForTenBitStillImage() throws IOException {
         AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .rgbOutputMode(AvifRgbOutputMode.ARGB_8888)
+                .pixelFormatOverride(AvifPixelFormat.ARGB_8888)
                 .build();
         try (AvifImageReader reader = AvifImageReader.open(testResourceBytes(LIBAVIF_COLORS_HDR_SRGB_FIXTURE), config)) {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
 
             assertEquals(AvifBitDepth.TEN_BITS, frame.bitDepth());
-            assertEquals(AvifRgbOutputMode.ARGB_8888, frame.rgbOutputMode());
+            assertEquals(AvifPixelFormat.ARGB_8888, frame.pixelFormat());
             assertTrue(frame.hasIntPixelBuffer());
             assertFalse(frame.hasLongPixelBuffer());
 
@@ -441,7 +466,7 @@ final class AvifImageReaderTest {
     @Test
     void readFrameCanForceIntRgbOutputForHighBitDepthGridWithAlpha() throws IOException {
         AvifDecoderConfig config = AvifDecoderConfig.builder()
-                .rgbOutputMode(AvifRgbOutputMode.ARGB_8888)
+                .pixelFormatOverride(AvifPixelFormat.ARGB_8888)
                 .build();
         try (AvifImageReader reader = AvifImageReader.open(
                 testResourceBytes(LIBAVIF_COLOR_GRID_ALPHA_GRID_GAINMAP_FIXTURE),
@@ -454,7 +479,7 @@ final class AvifImageReaderTest {
             AvifFrame frame = reader.readFrame();
             assertNotNull(frame);
             assertEquals(AvifBitDepth.TEN_BITS, frame.bitDepth());
-            assertEquals(AvifRgbOutputMode.ARGB_8888, frame.rgbOutputMode());
+            assertEquals(AvifPixelFormat.ARGB_8888, frame.pixelFormat());
             assertTrue(frame.hasIntPixelBuffer());
             assertFalse(frame.hasLongPixelBuffer());
             assertEquals(frame.width() * frame.height(), frame.intPixelBuffer().remaining());
@@ -844,7 +869,7 @@ final class AvifImageReaderTest {
             assertNotNull(toneMappedFrame);
             assertEquals(baseFrame.width(), toneMappedFrame.width());
             assertEquals(baseFrame.height(), toneMappedFrame.height());
-            assertEquals(baseFrame.rgbOutputMode(), toneMappedFrame.rgbOutputMode());
+            assertEquals(baseFrame.pixelFormat(), toneMappedFrame.pixelFormat());
             assertTrue(hasRgbDifferenceWithSameAlpha(baseFrame.intPixelBuffer(), toneMappedFrame.intPixelBuffer()));
         }
     }
@@ -871,7 +896,7 @@ final class AvifImageReaderTest {
             assertEquals(baseFrame.height(), toneMappedFrame.height());
             assertEquals(baseFrame.bitDepth(), toneMappedFrame.bitDepth());
             assertEquals(baseFrame.chromaFormat(), toneMappedFrame.chromaFormat());
-            assertEquals(baseFrame.rgbOutputMode(), toneMappedFrame.rgbOutputMode());
+            assertEquals(baseFrame.pixelFormat(), toneMappedFrame.pixelFormat());
             assertTrue(hasRgbDifferenceWithSameAlpha(baseFrame.intPixelBuffer(), toneMappedFrame.intPixelBuffer()));
         }
     }
@@ -891,7 +916,7 @@ final class AvifImageReaderTest {
             assertNotNull(toneMappedFrame);
             assertEquals(reader.info().width(), toneMappedFrame.width());
             assertEquals(reader.info().height(), toneMappedFrame.height());
-            assertEquals(AvifRgbOutputMode.ARGB_16161616, toneMappedFrame.rgbOutputMode());
+            assertEquals(AvifPixelFormat.ARGB_16161616, toneMappedFrame.pixelFormat());
             assertTrue(toneMappedFrame.longPixelBuffer().isReadOnly());
         }
     }

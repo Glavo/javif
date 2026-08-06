@@ -38,8 +38,8 @@ public final class AvifFrame {
     private final Av1ChromaFormat chromaFormat;
     /// The zero-based frame index.
     private final int frameIndex;
-    /// The concrete packed RGB storage mode used by this frame before lazy conversion.
-    private final AvifRgbOutputMode rgbOutputMode;
+    /// The packed ARGB pixel format used by this frame's native storage.
+    private final AvifPixelFormat pixelFormat;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
     private @Nullable @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
@@ -141,7 +141,7 @@ public final class AvifFrame {
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
         this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
         this.frameIndex = frameIndex;
-        this.rgbOutputMode = intPixels != null ? AvifRgbOutputMode.ARGB_8888 : AvifRgbOutputMode.ARGB_16161616;
+        this.pixelFormat = intPixels != null ? AvifPixelFormat.ARGB_8888 : AvifPixelFormat.ARGB_16161616;
         this.intPixels = intPixels;
         this.longPixels = longPixels;
     }
@@ -181,13 +181,11 @@ public final class AvifFrame {
         return frameIndex;
     }
 
-    /// Returns the concrete packed RGB storage mode used by this frame before lazy conversion.
+    /// Returns the packed ARGB pixel format used by this frame's native storage.
     ///
-    /// The value is either `ARGB_8888` or `ARGB_16161616`; it is never `AUTOMATIC`.
-    ///
-    /// @return the concrete packed RGB storage mode
-    public AvifRgbOutputMode rgbOutputMode() {
-        return rgbOutputMode;
+    /// @return the packed ARGB pixel format
+    public AvifPixelFormat pixelFormat() {
+        return pixelFormat;
     }
 
     /// Returns whether this frame already has native `IntBuffer` ARGB_8888 storage.

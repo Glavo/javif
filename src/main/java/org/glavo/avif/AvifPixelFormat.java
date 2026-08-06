@@ -17,24 +17,19 @@ package org.glavo.avif;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Selects the packed ARGB storage used for decoded AVIF frames.
+/// Packed non-premultiplied ARGB formats exposed by decoded AVIF frames.
 @NotNullByDefault
-public enum AvifRgbOutputMode {
-    /// Uses `IntBuffer` ARGB_8888 for 8-bit images and `LongBuffer` ARGB_16161616 for high-bit-depth images.
-    AUTOMATIC,
-    /// Stores decoded frames primarily as `IntBuffer` pixels in `0xAARRGGBB` format.
+public enum AvifPixelFormat {
+    /// Stores each pixel in an `IntBuffer` element as `0xAARRGGBB`.
     ARGB_8888,
-    /// Stores decoded frames primarily as `LongBuffer` pixels in `0xAAAA_RRRR_GGGG_BBBB` format.
+    /// Stores each pixel in a `LongBuffer` element as `0xAAAA_RRRR_GGGG_BBBB`.
     ARGB_16161616;
 
-    /// Resolves this requested mode for one decoded source bit depth.
+    /// Returns the default output format for a decoded source bit depth.
     ///
     /// @param bitDepth the decoded source bit depth
-    /// @return the concrete frame storage mode
-    public AvifRgbOutputMode resolve(AvifBitDepth bitDepth) {
-        if (this != AUTOMATIC) {
-            return this;
-        }
+    /// @return `ARGB_8888` for 8-bit sources, otherwise `ARGB_16161616`
+    public static AvifPixelFormat defaultFor(AvifBitDepth bitDepth) {
         return bitDepth.isEightBit() ? ARGB_8888 : ARGB_16161616;
     }
 }
