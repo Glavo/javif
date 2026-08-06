@@ -211,18 +211,21 @@ public final class LoopFilterApplier {
     ) {
         int prevCol4 = col4 - (pass == 0 ? Math.max(1, 1 << subX) : 0);
         int prevRow4 = row4 - (pass == 1 ? Math.max(1, 1 << subY) : 0);
-        @Nullable LoopFilterCell current = blockMap.cellAt(col4, row4, planeIndex);
-        @Nullable LoopFilterCell previous = blockMap.cellAt(prevCol4, prevRow4, planeIndex);
-        if (current == null || previous == null) {
+        @Nullable TileBlockHeaderReader.BlockHeader currentHeader = blockMap.headerAt(col4, row4, planeIndex);
+        @Nullable TileBlockHeaderReader.BlockHeader previousHeader =
+                blockMap.headerAt(prevCol4, prevRow4, planeIndex);
+        @Nullable TransformUnit currentTransform = blockMap.transformAt(col4, row4, planeIndex);
+        @Nullable TransformUnit previousTransform = blockMap.transformAt(prevCol4, prevRow4, planeIndex);
+        if (currentHeader == null || previousHeader == null || currentTransform == null || previousTransform == null) {
             return;
         }
 
-        boolean blockEdge = current.header() != previous.header();
-        boolean transformEdge = current.transformCell().unit() != previous.transformCell().unit();
+        boolean blockEdge = currentHeader != previousHeader;
+        boolean transformEdge = currentTransform != previousTransform;
         if (!blockEdge && !transformEdge) {
             return;
         }
-        if (!blockEdge && isSkippedInter(current.header()) && isSkippedInter(previous.header())) {
+        if (!blockEdge && isSkippedInter(currentHeader) && isSkippedInter(previousHeader)) {
             return;
         }
 
@@ -241,15 +244,18 @@ public final class LoopFilterApplier {
         int dx = pass == 0 ? 1 : 0;
         int dy = pass == 0 ? 0 : 1;
         int filterSize = filterSize(
-                current.transformCell().size(),
-                previous.transformCell().size(),
+                currentTransform.size(),
+                previousTransform.size(),
                 planeIndex,
                 pass
         );
-        int level = filterLevel(frameHeader, current.header(), planeIndex, pass);
+        int level = filterLevel(frameHeader, currentHeader, planeIndex, pass);
         int strength = filterStrength(level, frameHeader.loopFilter().sharpness());
         if (strengthLevel(strength) == 0) {
-            strength = filterStrength(filterLevel(frameHeader, previous.header(), planeIndex, pass), frameHeader.loopFilter().sharpness());
+            strength = filterStrength(
+                    filterLevel(frameHeader, previousHeader, planeIndex, pass),
+                    frameHeader.loopFilter().sharpness()
+            );
         }
         if (strengthLevel(strength) == 0) {
             return;
@@ -939,11 +945,17 @@ public final class LoopFilterApplier {
         /// The frame height rounded up to 4x4 units.
         private final int height4;
 
-        /// The per-4x4 decoded luma block and transform cells.
-        private final @Nullable LoopFilterCell[] lumaCells;
+        /// The decoded luma block header covering each 4x4 cell.
+        private final @Nullable TileBlockHeaderReader.BlockHeader[] lumaHeaders;
 
-        /// The per-4x4 decoded chroma-reference block and transform cells.
-        private final @Nullable LoopFilterCell[] chromaCells;
+        /// The decoded luma transform unit covering each 4x4 cell.
+        private final @Nullable TransformUnit[] lumaTransforms;
+
+        /// The decoded chroma-reference block header covering each 4x4 cell.
+        private final @Nullable TileBlockHeaderReader.BlockHeader[] chromaHeaders;
+
+        /// The decoded chroma transform unit covering each 4x4 cell.
+        private final @Nullable TransformUnit[] chromaTransforms;
 
         /// The chroma horizontal subsampling shift.
         private final int chromaSubsamplingX;
@@ -960,8 +972,11 @@ public final class LoopFilterApplier {
         private LoopFilterBlockMap(int width4, int height4, int chromaSubsamplingX, int chromaSubsamplingY) {
             this.width4 = width4;
             this.height4 = height4;
-            this.lumaCells = new LoopFilterCell[width4 * height4];
-            this.chromaCells = new LoopFilterCell[width4 * height4];
+            int cellCount = width4 * height4;
+            this.lumaHeaders = new TileBlockHeaderReader.BlockHeader[cellCount];
+            this.lumaTransforms = new TransformUnit[cellCount];
+            this.chromaHeaders = new TileBlockHeaderReader.BlockHeader[cellCount];
+            this.chromaTransforms = new TransformUnit[cellCount];
             this.chromaSubsamplingX = chromaSubsamplingX;
             this.chromaSubsamplingY = chromaSubsamplingY;
         }
@@ -1004,17 +1019,30 @@ public final class LoopFilterApplier {
             return height4;
         }
 
-        /// Returns the plane-specific cell at one luma 4x4 coordinate.
+        /// Returns the plane-specific block header at one luma 4x4 coordinate.
         ///
         /// @param x4 the luma 4x4 X coordinate
         /// @param y4 the luma 4x4 Y coordinate
         /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
-        /// @return the plane-specific cell at one luma 4x4 coordinate, or `null`
-        public @Nullable LoopFilterCell cellAt(int x4, int y4, int planeIndex) {
+        /// @return the plane-specific block header, or `null`
+        public @Nullable TileBlockHeaderReader.BlockHeader headerAt(int x4, int y4, int planeIndex) {
             if (x4 < 0 || y4 < 0 || x4 >= width4 || y4 >= height4) {
                 return null;
             }
-            return (planeIndex == 0 ? lumaCells : chromaCells)[y4 * width4 + x4];
+            return (planeIndex == 0 ? lumaHeaders : chromaHeaders)[y4 * width4 + x4];
+        }
+
+        /// Returns the plane-specific transform unit at one luma 4x4 coordinate.
+        ///
+        /// @param x4 the luma 4x4 X coordinate
+        /// @param y4 the luma 4x4 Y coordinate
+        /// @param planeIndex the plane index, `0` for luma, `1` for U, and `2` for V
+        /// @return the plane-specific transform unit, or `null`
+        public @Nullable TransformUnit transformAt(int x4, int y4, int planeIndex) {
+            if (x4 < 0 || y4 < 0 || x4 >= width4 || y4 >= height4) {
+                return null;
+            }
+            return (planeIndex == 0 ? lumaTransforms : chromaTransforms)[y4 * width4 + x4];
         }
 
         /// Adds one partition node and all descendant leaves to this map.
@@ -1038,27 +1066,39 @@ public final class LoopFilterApplier {
             TileBlockHeaderReader.BlockHeader header = leafNode.header();
             int startX4 = Math.max(0, header.position().x4());
             int startY4 = Math.max(0, header.position().y4());
-            int endX4 = Math.min(width4, startX4 + leafNode.transformLayout().visibleWidth4());
-            int endY4 = Math.min(height4, startY4 + leafNode.transformLayout().visibleHeight4());
-            TransformCell[] lumaTransformCells = transformCells(
-                    startX4,
-                    startY4,
-                    endX4,
-                    endY4,
-                    leafNode.transformLayout(),
-                    leafNode.transformLayout().maxLumaTransformSize()
-            );
+            TransformLayout transformLayout = leafNode.transformLayout();
+            int endX4 = Math.min(width4, startX4 + transformLayout.visibleWidth4());
+            int endY4 = Math.min(height4, startY4 + transformLayout.visibleHeight4());
             for (int y4 = startY4; y4 < endY4; y4++) {
                 for (int x4 = startX4; x4 < endX4; x4++) {
-                    int localIndex = (y4 - startY4) * (endX4 - startX4) + (x4 - startX4);
-                    lumaCells[y4 * width4 + x4] = new LoopFilterCell(
-                            header,
-                            lumaTransformCells[localIndex]
+                    int index = y4 * width4 + x4;
+                    lumaHeaders[index] = header;
+                }
+            }
+
+            if (transformLayout.lumaUnitCount() == 0) {
+                TransformUnit fallbackUnit = new TransformUnit(
+                        new BlockPosition(startX4, startY4),
+                        transformLayout.maxLumaTransformSize()
+                );
+                fillDefaultTransformUnits(startX4, startY4, endX4, endY4, fallbackUnit);
+            } else {
+                TransformUnit firstUnit = transformLayout.lumaUnit(0);
+                fillDefaultTransformUnits(startX4, startY4, endX4, endY4, firstUnit);
+                for (int unitIndex = 0; unitIndex < transformLayout.lumaUnitCount(); unitIndex++) {
+                    fillTransformUnits(
+                            lumaTransforms,
+                            startX4,
+                            startY4,
+                            endX4,
+                            endY4,
+                            transformLayout.lumaUnit(unitIndex),
+                            0,
+                            0
                     );
                 }
             }
             if (header.hasChroma()) {
-                TransformLayout transformLayout = leafNode.transformLayout();
                 for (int unitIndex = 0; unitIndex < transformLayout.chromaUnitCount(); unitIndex++) {
                     fillChromaCells(header, transformLayout.chromaUnit(unitIndex));
                 }
@@ -1083,163 +1123,73 @@ public final class LoopFilterApplier {
                     height4,
                     transformUnit.position().y4() + (transformUnit.size().height4() << chromaSubsamplingY)
             );
-            LoopFilterCell cell = new LoopFilterCell(
-                    Objects.requireNonNull(header, "header"),
-                    new TransformCell(transformUnit, transformUnit.size())
-            );
             for (int y4 = unitStartY4; y4 < unitEndY4; y4++) {
                 for (int x4 = unitStartX4; x4 < unitEndX4; x4++) {
-                    chromaCells[y4 * width4 + x4] = cell;
+                    int index = y4 * width4 + x4;
+                    chromaHeaders[index] = header;
+                    chromaTransforms[index] = transformUnit;
                 }
             }
         }
 
-        /// Builds transform-cell coverage for one leaf.
+        /// Initializes every cell in one leaf with a default luma transform unit.
         ///
         /// @param startX4 the leaf start X in luma 4x4 units
         /// @param startY4 the leaf start Y in luma 4x4 units
         /// @param endX4 the exclusive leaf end X in luma 4x4 units
         /// @param endY4 the exclusive leaf end Y in luma 4x4 units
-        /// @param transformLayout the decoded transform layout
-        /// @param fallbackSize the fallback transform size
-        /// @return transform-cell coverage for one leaf
-        private static TransformCell[] transformCells(
+        /// @param defaultUnit the transform unit used until decoded units overwrite its coverage
+        private void fillDefaultTransformUnits(
                 int startX4,
                 int startY4,
                 int endX4,
                 int endY4,
-                TransformLayout transformLayout,
-                TransformSize fallbackSize
+                TransformUnit defaultUnit
         ) {
-            int width = endX4 - startX4;
-            int height = endY4 - startY4;
-            TransformCell[] result = new TransformCell[width * height];
-            if (transformLayout.lumaUnitCount() == 0) {
-                TransformUnit fallbackUnit = new TransformUnit(new BlockPosition(startX4, startY4), fallbackSize);
-                fillTransformCells(result, width, height, startX4, startY4, endX4, endY4, fallbackUnit);
-                return result;
-            }
-            for (int unitIndex = 0; unitIndex < transformLayout.lumaUnitCount(); unitIndex++) {
-                fillTransformCells(
-                        result,
-                        width,
-                        height,
-                        startX4,
-                        startY4,
-                        endX4,
-                        endY4,
-                        transformLayout.lumaUnit(unitIndex)
-                );
-            }
-            TransformUnit firstUnit = transformLayout.lumaUnit(0);
-            for (int i = 0; i < result.length; i++) {
-                if (result[i] == null) {
-                    result[i] = new TransformCell(firstUnit, firstUnit.size());
+            for (int y4 = startY4; y4 < endY4; y4++) {
+                for (int x4 = startX4; x4 < endX4; x4++) {
+                    lumaTransforms[y4 * width4 + x4] = defaultUnit;
                 }
             }
-            return result;
         }
 
-        /// Fills transform-cell coverage for one transform unit.
+        /// Fills bounded 4x4-grid coverage with one decoded transform-unit reference.
         ///
-        /// @param result the mutable result coverage array
-        /// @param width the local coverage width in 4x4 units
-        /// @param height the local coverage height in 4x4 units
-        /// @param startX4 the leaf start X in luma 4x4 units
-        /// @param startY4 the leaf start Y in luma 4x4 units
-        /// @param endX4 the exclusive leaf end X in luma 4x4 units
-        /// @param endY4 the exclusive leaf end Y in luma 4x4 units
+        /// @param destination the plane-specific transform-unit map
+        /// @param startX4 the inclusive coverage bound in luma 4x4 units
+        /// @param startY4 the inclusive coverage bound in luma 4x4 units
+        /// @param endX4 the exclusive coverage bound in luma 4x4 units
+        /// @param endY4 the exclusive coverage bound in luma 4x4 units
         /// @param transformUnit the transform unit to fill
-        private static void fillTransformCells(
-                TransformCell[] result,
-                int width,
-                int height,
+        /// @param subsamplingX the horizontal plane subsampling shift
+        /// @param subsamplingY the vertical plane subsampling shift
+        private void fillTransformUnits(
+                @Nullable TransformUnit[] destination,
                 int startX4,
                 int startY4,
                 int endX4,
                 int endY4,
-                TransformUnit transformUnit
+                TransformUnit transformUnit,
+                int subsamplingX,
+                int subsamplingY
         ) {
             int unitStartX4 = Math.max(startX4, transformUnit.position().x4());
             int unitStartY4 = Math.max(startY4, transformUnit.position().y4());
-            int unitEndX4 = Math.min(endX4, transformUnit.position().x4() + transformUnit.size().width4());
-            int unitEndY4 = Math.min(endY4, transformUnit.position().y4() + transformUnit.size().height4());
+            int unitEndX4 = Math.min(
+                    endX4,
+                    transformUnit.position().x4() + (transformUnit.size().width4() << subsamplingX)
+            );
+            int unitEndY4 = Math.min(
+                    endY4,
+                    transformUnit.position().y4() + (transformUnit.size().height4() << subsamplingY)
+            );
             for (int y4 = unitStartY4; y4 < unitEndY4; y4++) {
                 for (int x4 = unitStartX4; x4 < unitEndX4; x4++) {
-                    result[(y4 - startY4) * width + (x4 - startX4)] =
-                            new TransformCell(transformUnit, transformUnit.size());
+                    destination[y4 * width4 + x4] = transformUnit;
                 }
             }
         }
     }
 
-    /// One decoded block and transform lookup cell.
-    @NotNullByDefault
-    private static final class LoopFilterCell {
-        /// The decoded block header covering this cell.
-        private final TileBlockHeaderReader.BlockHeader header;
-
-        /// The decoded plane-specific transform cell covering this cell.
-        private final TransformCell transformCell;
-
-        /// Creates one decoded block and transform lookup cell.
-        ///
-        /// @param header the decoded block header covering this cell
-        /// @param transformCell the decoded plane-specific transform cell covering this cell
-        private LoopFilterCell(
-                TileBlockHeaderReader.BlockHeader header,
-                TransformCell transformCell
-        ) {
-            this.header = Objects.requireNonNull(header, "header");
-            this.transformCell = Objects.requireNonNull(transformCell, "transformCell");
-        }
-
-        /// Returns the decoded block header covering this cell.
-        ///
-        /// @return the decoded block header covering this cell
-        public TileBlockHeaderReader.BlockHeader header() {
-            return header;
-        }
-
-        /// Returns the plane-specific transform cell covering this cell.
-        ///
-        /// @return the plane-specific transform cell covering this cell
-        public TransformCell transformCell() {
-            return transformCell;
-        }
-    }
-
-    /// One transform-unit lookup cell.
-    @NotNullByDefault
-    private static final class TransformCell {
-        /// The transform unit covering this cell.
-        private final TransformUnit unit;
-
-        /// The transform size covering this cell.
-        private final TransformSize size;
-
-        /// Creates one transform-unit lookup cell.
-        ///
-        /// @param unit the transform unit covering this cell
-        /// @param size the transform size covering this cell
-        private TransformCell(TransformUnit unit, TransformSize size) {
-            this.unit = Objects.requireNonNull(unit, "unit");
-            this.size = Objects.requireNonNull(size, "size");
-        }
-
-        /// Returns the transform unit covering this cell.
-        ///
-        /// @return the transform unit covering this cell
-        public TransformUnit unit() {
-            return unit;
-        }
-
-        /// Returns the transform size covering this cell.
-        ///
-        /// @return the transform size covering this cell
-        public TransformSize size() {
-            return size;
-        }
-    }
 
 }

@@ -55,9 +55,11 @@ parity are not project features.
   FFmpeg's first-frame source planes. Documented PNG references additionally cover presentation
   transforms such as clean aperture, rotation, and mirroring.
 - The opt-in `argonAv1Test` task verifies the complete 3,921-stream inventory in Argon Streams AV1
-  2.1.1. Its default reference-output gate covers all 37 regular low-overhead streams across AV1
-  profiles 0, 1, and 2 and compares every visible pre-grain YUV frame with Argon's MD5 digest.
-  Other Argon categories remain diagnostic selectors rather than part of the default gate.
+  2.1.1. Its reference-output gate covers all 3,586 valid streams across regular and special
+  low-overhead, Annex B core, Large Scale Tile, stress, and profile-switching categories, comparing
+  every visible pre-grain YUV frame with Argon's MD5 digest. The strict-error gate covers all 335
+  malformed streams across profiles 0, 1, and 2. Category selectors and deterministic shards allow
+  the complete gate to run as separate CI jobs without weakening the expected-output checks.
 - Libavif fixtures cover still images, sequences, grids, alpha/depth/gain-map relationships,
   progressive images, Sample Transform, HDR/WCG metadata, and reference pixel/plane comparisons.
 - Unit and integration tests cover entropy decoding, syntax contexts, prediction, reconstruction,
