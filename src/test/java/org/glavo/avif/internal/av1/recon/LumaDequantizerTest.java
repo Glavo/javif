@@ -172,6 +172,31 @@ final class LumaDequantizerTest {
         assertArrayEquals(expected, dequantized);
     }
 
+    /// Verifies that the allocation-free scalar entry point matches context-based dequantization.
+    @Test
+    void scalarParametersMatchContextBasedDequantization() {
+        int[] coefficients = new int[16];
+        coefficients[0] = 7;
+        coefficients[1] = -11;
+        coefficients[5] = 19;
+        TransformResidualUnit residualUnit = new TransformResidualUnit(
+                new BlockPosition(0, 0),
+                TransformSize.TX_4X4,
+                5,
+                coefficients,
+                0x31
+        );
+        int[] expected = LumaDequantizer.dequantize(
+                residualUnit,
+                new LumaDequantizer.Context(37, -3, 10, true, 4)
+        );
+        int[] actual = new int[coefficients.length];
+
+        LumaDequantizer.dequantize(residualUnit, 37, -3, 10, true, 4, actual);
+
+        assertArrayEquals(expected, actual);
+    }
+
     /// Verifies that unsupported bit depths fail fast.
     @Test
     void rejectsUnsupportedBitDepths() {

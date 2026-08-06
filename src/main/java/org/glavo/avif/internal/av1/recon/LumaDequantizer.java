@@ -65,11 +65,47 @@ final class LumaDequantizer {
     ) {
         TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         Context nonNullContext = Objects.requireNonNull(context, "context");
+        dequantize(
+                nonNullResidualUnit,
+                nonNullContext.qIndex(),
+                nonNullContext.yDcDelta(),
+                nonNullContext.bitDepth(),
+                nonNullContext.useQuantizationMatrices(),
+                nonNullContext.quantizationMatrix(),
+                destination
+        );
+    }
+
+    /// Dequantizes one luma transform residual unit from scalar block parameters.
+    ///
+    /// This allocation-free entry point overwrites the complete exact-length destination array.
+    ///
+    /// @param residualUnit the luma residual unit to dequantize
+    /// @param qIndex the block-local luma AC quantizer index in `[0, 255]`
+    /// @param yDcDelta the frame-level luma DC delta quantizer
+    /// @param bitDepth the decoded sample bit depth
+    /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
+    /// @param quantizationMatrixIndex the luma quantization matrix index in `[0, 15]`
+    /// @param destination the exact-length destination in natural raster order
+    static void dequantize(
+            TransformResidualUnit residualUnit,
+            int qIndex,
+            int yDcDelta,
+            int bitDepth,
+            boolean useQuantizationMatrices,
+            int quantizationMatrixIndex,
+            int[] destination
+    ) {
+        TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         int[] nonNullDestination = Objects.requireNonNull(destination, "destination");
-        if (nonNullContext.bitDepth() != 8
-                && nonNullContext.bitDepth() != 10
-                && nonNullContext.bitDepth() != 12) {
-            throw new IllegalStateException("Unsupported luma dequantization bit depth: " + nonNullContext.bitDepth());
+        if (qIndex < 0 || qIndex > 255) {
+            throw new IllegalArgumentException("qIndex out of range: " + qIndex);
+        }
+        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
+            throw new IllegalStateException("Unsupported luma dequantization bit depth: " + bitDepth);
+        }
+        if (quantizationMatrixIndex < 0 || quantizationMatrixIndex > 15) {
+            throw new IllegalArgumentException("quantizationMatrixIndex out of range: " + quantizationMatrixIndex);
         }
 
         int coefficientCount = nonNullResidualUnit.coefficientCount();
@@ -81,15 +117,19 @@ final class LumaDequantizer {
             return;
         }
 
-        int dcQuantizer = lumaDcQuantizer(nonNullContext);
-        int acQuantizer = lumaAcQuantizer(nonNullContext);
+        int dcQuantizer = QuantizerTables.dcQuantizer(qIndex + yDcDelta, bitDepth);
+        int acQuantizer = QuantizerTables.acQuantizer(qIndex, bitDepth);
         int dequantizationShift = QuantizerTables.dequantizationShift(nonNullResidualUnit.size());
-        byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(nonNullResidualUnit, nonNullContext);
+        byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(
+                nonNullResidualUnit,
+                useQuantizationMatrices,
+                quantizationMatrixIndex
+        );
         nonNullDestination[0] = scaledCoefficient(
                 nonNullResidualUnit.coefficient(0),
                 dcQuantizer,
                 dequantizationShift,
-                nonNullContext.bitDepth(),
+                bitDepth,
                 matrixValue(quantizationMatrix, nonNullResidualUnit.size(), 0)
         );
         for (int coefficientIndex = 1; coefficientIndex < coefficientCount; coefficientIndex++) {
@@ -97,41 +137,27 @@ final class LumaDequantizer {
                     nonNullResidualUnit.coefficient(coefficientIndex),
                     acQuantizer,
                     dequantizationShift,
-                    nonNullContext.bitDepth(),
+                    bitDepth,
                     matrixValue(quantizationMatrix, nonNullResidualUnit.size(), coefficientIndex)
             );
         }
     }
 
-    /// Returns the active luma DC quantizer after clamping the derived qindex.
-    ///
-    /// @param context the block-local dequantization context
-    /// @return the active luma DC quantizer
-    private static int lumaDcQuantizer(Context context) {
-        return QuantizerTables.dcQuantizer(context.qIndex() + context.yDcDelta(), context.bitDepth());
-    }
-
-    /// Returns the active luma AC quantizer for the block-local qindex.
-    ///
-    /// @param context the block-local dequantization context
-    /// @return the active luma AC quantizer
-    private static int lumaAcQuantizer(Context context) {
-        return QuantizerTables.acQuantizer(context.qIndex(), context.bitDepth());
-    }
-
     /// Returns the active quantization matrix for one residual unit, or `null` when no matrix applies.
     ///
     /// @param residualUnit the residual unit to dequantize
-    /// @param context the block-local dequantization context
+    /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
+    /// @param quantizationMatrixIndex the luma quantization matrix index
     /// @return the active quantization matrix, or `null` when no matrix applies
     private static byte @Nullable @Unmodifiable [] quantizationMatrix(
             TransformResidualUnit residualUnit,
-            Context context
+            boolean useQuantizationMatrices,
+            int quantizationMatrixIndex
     ) {
-        if (!context.useQuantizationMatrices() || !usesQuantizationMatrix(residualUnit.transformType())) {
+        if (!useQuantizationMatrices || !usesQuantizationMatrix(residualUnit.transformType())) {
             return null;
         }
-        return QuantizationMatrixTables.matrix(context.quantizationMatrix(), false, residualUnit.size());
+        return QuantizationMatrixTables.matrix(quantizationMatrixIndex, false, residualUnit.size());
     }
 
     /// Returns whether one transform type applies frame-level quantization matrices.

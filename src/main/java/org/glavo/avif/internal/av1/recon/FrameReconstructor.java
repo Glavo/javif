@@ -84,6 +84,10 @@ public final class FrameReconstructor {
     private static final ReferenceScale IDENTITY_REFERENCE_SCALE =
             new ReferenceScale(REFERENCE_SCALE_IDENTITY, REFERENCE_SCALE_IDENTITY, false);
 
+    /// Per-thread scratch storage for separable inter-prediction filtering.
+    private static final ThreadLocal<InterPredictionWorkspace> INTER_PREDICTION_WORKSPACE =
+            ThreadLocal.withInitial(InterPredictionWorkspace::new);
+
     /// The AV1 OBMC blend masks indexed by overlap length `1, 2, 4, 8, 16, 32, 64`.
     private static final int @Unmodifiable [] @Unmodifiable [] OBMC_MASKS = {
             {64},
@@ -142,6 +146,56 @@ public final class FrameReconstructor {
             int verticalFactor,
             boolean scaled
     ) {
+    }
+
+    /// Reusable scratch storage for one inter-predicted block.
+    @NotNullByDefault
+    private static final class InterPredictionWorkspace {
+        /// Horizontally filtered samples consumed by the vertical pass.
+        private int[] horizontalSamples = new int[0];
+
+        /// Primary compound predictor samples retained until blending.
+        private int[] compoundPrediction0 = new int[0];
+
+        /// Secondary compound predictor samples retained until blending.
+        private int[] compoundPrediction1 = new int[0];
+
+        /// Creates an empty inter-prediction workspace.
+        private InterPredictionWorkspace() {
+        }
+
+        /// Returns horizontal intermediate storage with at least the requested length.
+        ///
+        /// @param requiredLength the minimum number of intermediate samples
+        /// @return reusable horizontal intermediate storage
+        private int[] horizontalSamples(int requiredLength) {
+            if (horizontalSamples.length < requiredLength) {
+                horizontalSamples = new int[requiredLength];
+            }
+            return horizontalSamples;
+        }
+
+        /// Returns primary compound predictor storage with at least the requested length.
+        ///
+        /// @param requiredLength the minimum number of predictor samples
+        /// @return reusable primary compound predictor storage
+        private int[] compoundPrediction0(int requiredLength) {
+            if (compoundPrediction0.length < requiredLength) {
+                compoundPrediction0 = new int[requiredLength];
+            }
+            return compoundPrediction0;
+        }
+
+        /// Returns secondary compound predictor storage with at least the requested length.
+        ///
+        /// @param requiredLength the minimum number of predictor samples
+        /// @return reusable secondary compound predictor storage
+        private int[] compoundPrediction1(int requiredLength) {
+            if (compoundPrediction1.length < requiredLength) {
+                compoundPrediction1 = new int[requiredLength];
+            }
+            return compoundPrediction1;
+        }
     }
 
     /// The default AV1 regular 8-tap subpel filters in `dav1d_mc_subpel_filters` order.
@@ -3646,6 +3700,26 @@ public final class FrameReconstructor {
             return;
         }
 
+        if (!nonNullReferenceScale.scaled()) {
+            reconstructUnscaledInterPlanePrediction(
+                    destinationPlane,
+                    referencePlane,
+                    destinationX,
+                    destinationY,
+                    width,
+                    height,
+                    sourceOffsetEighthPelX,
+                    sourceOffsetEighthPelY,
+                    denominatorX,
+                    denominatorY,
+                    widthForFilterSelection,
+                    heightForFilterSelection,
+                    horizontalFilterMode,
+                    verticalFilterMode
+            );
+            return;
+        }
+
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 destinationPlane.setSample(
@@ -3668,6 +3742,247 @@ public final class FrameReconstructor {
                                 verticalFilterMode,
                                 destinationPlane.maxSampleValue()
                         )
+                );
+            }
+        }
+    }
+
+    /// Reconstructs one unscaled inter-predicted plane with block-level separable filtering.
+    ///
+    /// Motion-vector fractions and filter kernels are constant across an unscaled block. For a
+    /// two-dimensional fixed filter, the horizontal pass is therefore computed once for each
+    /// required source row and reused by all eight vertical taps.
+    ///
+    /// @param destinationPlane the mutable destination plane
+    /// @param referencePlane the immutable reference plane
+    /// @param destinationX the zero-based horizontal destination coordinate
+    /// @param destinationY the zero-based vertical destination coordinate
+    /// @param width the predicted width in samples
+    /// @param height the predicted height in samples
+    /// @param sourceOffsetEighthPelX the signed horizontal motion-vector component
+    /// @param sourceOffsetEighthPelY the signed vertical motion-vector component
+    /// @param denominatorX the plane-local horizontal denominator
+    /// @param denominatorY the plane-local vertical denominator
+    /// @param widthForFilterSelection the sampled block width used for filter selection
+    /// @param heightForFilterSelection the sampled block height used for filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    private static void reconstructUnscaledInterPlanePrediction(
+            MutablePlaneBuffer destinationPlane,
+            DecodedPlane referencePlane,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            int sourceOffsetEighthPelX,
+            int sourceOffsetEighthPelY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode
+    ) {
+        int sourceX0 = destinationX + Math.floorDiv(sourceOffsetEighthPelX, denominatorX);
+        int sourceY0 = destinationY + Math.floorDiv(sourceOffsetEighthPelY, denominatorY);
+        int phaseX = interpolationPhase(Math.floorMod(sourceOffsetEighthPelX, denominatorX), denominatorX);
+        int phaseY = interpolationPhase(Math.floorMod(sourceOffsetEighthPelY, denominatorY), denominatorY);
+        if (phaseX == 0 && phaseY == 0) {
+            copyReferencePlaneBlock(
+                    destinationPlane,
+                    referencePlane,
+                    destinationX,
+                    destinationY,
+                    sourceX0,
+                    sourceY0,
+                    width,
+                    height
+            );
+            return;
+        }
+        if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            reconstructUnscaledBilinearInterPlanePrediction(
+                    destinationPlane,
+                    referencePlane,
+                    destinationX,
+                    destinationY,
+                    sourceX0,
+                    sourceY0,
+                    width,
+                    height,
+                    phaseX,
+                    phaseY
+            );
+            return;
+        }
+        if (!isConcreteInterpolationFilter(horizontalFilterMode)
+                || !isConcreteInterpolationFilter(verticalFilterMode)
+                || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            throw new IllegalStateException(
+                    "Inter reconstruction requires resolved matching BILINEAR or EIGHT_TAP_* filters"
+            );
+        }
+
+        @Nullable int[] horizontalFilter = phaseX == 0
+                ? null
+                : selectSubpelFilter(horizontalFilterMode, phaseX, widthForFilterSelection);
+        @Nullable int[] verticalFilter = phaseY == 0
+                ? null
+                : selectSubpelFilter(verticalFilterMode, phaseY, heightForFilterSelection);
+        int maximumSampleValue = destinationPlane.maxSampleValue();
+        int intermediateBits = interPredictionIntermediateBits(maximumSampleValue);
+        if (verticalFilter == null) {
+            int[] checkedHorizontalFilter = Objects.requireNonNull(horizontalFilter, "horizontalFilter");
+            for (int y = 0; y < height; y++) {
+                int sourceY = sourceY0 + y;
+                for (int x = 0; x < width; x++) {
+                    int intermediate = roundShift(
+                            horizontalInterpolate(referencePlane, sourceX0 + x, sourceY, checkedHorizontalFilter),
+                            INTER_FILTER_BITS - intermediateBits
+                    );
+                    destinationPlane.setSample(
+                            destinationX + x,
+                            destinationY + y,
+                            clamp(roundShift(intermediate, intermediateBits), 0, maximumSampleValue)
+                    );
+                }
+            }
+            return;
+        }
+        if (horizontalFilter == null) {
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    destinationPlane.setSample(
+                            destinationX + x,
+                            destinationY + y,
+                            clamp(
+                                    roundShift(
+                                            verticalInterpolate(
+                                                    referencePlane,
+                                                    sourceX0 + x,
+                                                    sourceY0 + y,
+                                                    verticalFilter
+                                            ),
+                                            INTER_FILTER_BITS
+                                    ),
+                                    0,
+                                    maximumSampleValue
+                            )
+                    );
+                }
+            }
+            return;
+        }
+
+        int horizontalRowCount = height + INTER_FILTER_TAP_COUNT - 1;
+        int[] horizontalSamples = INTER_PREDICTION_WORKSPACE.get()
+                .horizontalSamples(width * horizontalRowCount);
+        int firstPassRound = INTER_FILTER_BITS - intermediateBits;
+        for (int row = 0; row < horizontalRowCount; row++) {
+            int sourceY = clamp(
+                    sourceY0 + row - INTER_FILTER_START_OFFSET,
+                    0,
+                    referencePlane.height() - 1
+            );
+            int rowOffset = row * width;
+            for (int x = 0; x < width; x++) {
+                int integerSourceX = sourceX0 + x;
+                long filtered = 0;
+                for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                    int sourceX = clamp(
+                            integerSourceX + tapIndex - INTER_FILTER_START_OFFSET,
+                            0,
+                            referencePlane.width() - 1
+                    );
+                    filtered += (long) horizontalFilter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+                }
+                horizontalSamples[rowOffset + x] = roundShift(filtered, firstPassRound);
+            }
+        }
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                long combined = 0;
+                for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                    combined += (long) verticalFilter[tapIndex]
+                            * horizontalSamples[(y + tapIndex) * width + x];
+                }
+                destinationPlane.setSample(
+                        destinationX + x,
+                        destinationY + y,
+                        clamp(
+                                roundShift(combined, INTER_FILTER_BITS + intermediateBits),
+                                0,
+                                maximumSampleValue
+                        )
+                );
+            }
+        }
+    }
+
+    /// Reconstructs one unscaled bilinear inter-predicted plane from constant block phases.
+    ///
+    /// @param destinationPlane the mutable destination plane
+    /// @param referencePlane the immutable reference plane
+    /// @param destinationX the zero-based horizontal destination coordinate
+    /// @param destinationY the zero-based vertical destination coordinate
+    /// @param sourceX0 the integer horizontal source origin
+    /// @param sourceY0 the integer vertical source origin
+    /// @param width the predicted width in samples
+    /// @param height the predicted height in samples
+    /// @param phaseX the horizontal interpolation phase in `[0, 15]`
+    /// @param phaseY the vertical interpolation phase in `[0, 15]`
+    private static void reconstructUnscaledBilinearInterPlanePrediction(
+            MutablePlaneBuffer destinationPlane,
+            DecodedPlane referencePlane,
+            int destinationX,
+            int destinationY,
+            int sourceX0,
+            int sourceY0,
+            int width,
+            int height,
+            int phaseX,
+            int phaseY
+    ) {
+        int maximumSampleValue = destinationPlane.maxSampleValue();
+        int intermediateBits = interPredictionIntermediateBits(maximumSampleValue);
+        for (int y = 0; y < height; y++) {
+            int topY = clamp(sourceY0 + y, 0, referencePlane.height() - 1);
+            int bottomY = clamp(sourceY0 + y + 1, 0, referencePlane.height() - 1);
+            for (int x = 0; x < width; x++) {
+                int leftX = clamp(sourceX0 + x, 0, referencePlane.width() - 1);
+                int rightX = clamp(sourceX0 + x + 1, 0, referencePlane.width() - 1);
+                int topLeft = referencePlane.sample(leftX, topY);
+                int sample;
+                if (phaseY == 0) {
+                    int topRight = referencePlane.sample(rightX, topY);
+                    int horizontal = roundShift(
+                            bilinearFilterSum(topLeft, topRight, phaseX),
+                            4 - intermediateBits
+                    );
+                    sample = roundShift(horizontal, intermediateBits);
+                } else if (phaseX == 0) {
+                    int bottomLeft = referencePlane.sample(leftX, bottomY);
+                    sample = roundShift(bilinearFilterSum(topLeft, bottomLeft, phaseY), 4);
+                } else {
+                    int topRight = referencePlane.sample(rightX, topY);
+                    int bottomLeft = referencePlane.sample(leftX, bottomY);
+                    int bottomRight = referencePlane.sample(rightX, bottomY);
+                    int top = roundShift(
+                            bilinearFilterSum(topLeft, topRight, phaseX),
+                            4 - intermediateBits
+                    );
+                    int bottom = roundShift(
+                            bilinearFilterSum(bottomLeft, bottomRight, phaseX),
+                            4 - intermediateBits
+                    );
+                    sample = roundShift(bilinearFilterSum(top, bottom, phaseY), 4 + intermediateBits);
+                }
+                destinationPlane.setSample(
+                        destinationX + x,
+                        destinationY + y,
+                        clamp(sample, 0, maximumSampleValue)
                 );
             }
         }
@@ -3784,11 +4099,61 @@ public final class FrameReconstructor {
         );
         int maximumSampleValue = destinationPlane.maxSampleValue();
         int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        int predictionLength = width * height;
+        boolean useUnscaledPrediction0 = warpedPrediction0 == null && !nonNullReferenceScale0.scaled();
+        boolean useUnscaledPrediction1 = warpedPrediction1 == null && !nonNullReferenceScale1.scaled();
+        @Nullable InterPredictionWorkspace workspace = useUnscaledPrediction0 || useUnscaledPrediction1
+                ? INTER_PREDICTION_WORKSPACE.get()
+                : null;
+        @Nullable int[] prediction0 = warpedPrediction0;
+        if (useUnscaledPrediction0) {
+            prediction0 = Objects.requireNonNull(workspace, "workspace")
+                    .compoundPrediction0(predictionLength);
+            reconstructUnscaledCompoundInterPlanePrediction(
+                    referencePlane0,
+                    destinationX,
+                    destinationY,
+                    width,
+                    height,
+                    sourceOffsetEighthPelX0,
+                    sourceOffsetEighthPelY0,
+                    denominatorX,
+                    denominatorY,
+                    widthForFilterSelection,
+                    heightForFilterSelection,
+                    horizontalFilterMode,
+                    verticalFilterMode,
+                    maximumSampleValue,
+                    prediction0
+            );
+        }
+        @Nullable int[] prediction1 = warpedPrediction1;
+        if (useUnscaledPrediction1) {
+            prediction1 = Objects.requireNonNull(workspace, "workspace")
+                    .compoundPrediction1(predictionLength);
+            reconstructUnscaledCompoundInterPlanePrediction(
+                    referencePlane1,
+                    destinationX,
+                    destinationY,
+                    width,
+                    height,
+                    sourceOffsetEighthPelX1,
+                    sourceOffsetEighthPelY1,
+                    denominatorX,
+                    denominatorY,
+                    widthForFilterSelection,
+                    heightForFilterSelection,
+                    horizontalFilterMode,
+                    verticalFilterMode,
+                    maximumSampleValue,
+                    prediction1
+            );
+        }
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int predictionIndex = y * width + x;
-                int sample0 = warpedPrediction0 != null
-                        ? warpedPrediction0[predictionIndex]
+                int sample0 = prediction0 != null
+                        ? prediction0[predictionIndex]
                         : sampleCompoundInterPlaneValue(
                         referencePlane0,
                         destinationX,
@@ -3806,8 +4171,8 @@ public final class FrameReconstructor {
                         verticalFilterMode,
                         maximumSampleValue
                 );
-                int sample1 = warpedPrediction1 != null
-                        ? warpedPrediction1[predictionIndex]
+                int sample1 = prediction1 != null
+                        ? prediction1[predictionIndex]
                         : sampleCompoundInterPlaneValue(
                         referencePlane1,
                         destinationX,
@@ -3865,6 +4230,235 @@ public final class FrameReconstructor {
                         destinationY + y,
                         clamp(sample, 0, maximumSampleValue)
                 );
+            }
+        }
+    }
+
+    /// Writes one unscaled compound predictor using block-level separable filtering.
+    ///
+    /// The destination retains the AV1 compound post-filter fractional bits. For a
+    /// two-dimensional fixed filter, horizontally filtered rows are computed once and reused by
+    /// the vertical pass.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param destinationX the zero-based horizontal prediction origin
+    /// @param destinationY the zero-based vertical prediction origin
+    /// @param width the predicted width in samples
+    /// @param height the predicted height in samples
+    /// @param sourceOffsetEighthPelX the signed horizontal motion-vector component
+    /// @param sourceOffsetEighthPelY the signed vertical motion-vector component
+    /// @param denominatorX the plane-local horizontal denominator
+    /// @param denominatorY the plane-local vertical denominator
+    /// @param widthForFilterSelection the sampled block width used for filter selection
+    /// @param heightForFilterSelection the sampled block height used for filter selection
+    /// @param horizontalFilterMode the effective horizontal interpolation filter
+    /// @param verticalFilterMode the effective vertical interpolation filter
+    /// @param maximumSampleValue the maximum legal sample value for the destination bit depth
+    /// @param destination predictor storage with room for at least `width * height` samples
+    private static void reconstructUnscaledCompoundInterPlanePrediction(
+            DecodedPlane referencePlane,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            int sourceOffsetEighthPelX,
+            int sourceOffsetEighthPelY,
+            int denominatorX,
+            int denominatorY,
+            int widthForFilterSelection,
+            int heightForFilterSelection,
+            FrameHeader.InterpolationFilter horizontalFilterMode,
+            FrameHeader.InterpolationFilter verticalFilterMode,
+            int maximumSampleValue,
+            int[] destination
+    ) {
+        int[] nonNullDestination = Objects.requireNonNull(destination, "destination");
+        int requiredLength = width * height;
+        if (nonNullDestination.length < requiredLength) {
+            throw new IllegalArgumentException(
+                    "Compound prediction destination too short: " + nonNullDestination.length
+            );
+        }
+        int sourceX0 = destinationX + Math.floorDiv(sourceOffsetEighthPelX, denominatorX);
+        int sourceY0 = destinationY + Math.floorDiv(sourceOffsetEighthPelY, denominatorY);
+        int phaseX = interpolationPhase(Math.floorMod(sourceOffsetEighthPelX, denominatorX), denominatorX);
+        int phaseY = interpolationPhase(Math.floorMod(sourceOffsetEighthPelY, denominatorY), denominatorY);
+        int postRoundBits = interPredictionIntermediateBits(maximumSampleValue);
+        if (phaseX == 0 && phaseY == 0) {
+            for (int y = 0; y < height; y++) {
+                int sourceY = clamp(sourceY0 + y, 0, referencePlane.height() - 1);
+                int rowOffset = y * width;
+                for (int x = 0; x < width; x++) {
+                    int sourceX = clamp(sourceX0 + x, 0, referencePlane.width() - 1);
+                    nonNullDestination[rowOffset + x] = referencePlane.sample(sourceX, sourceY) << postRoundBits;
+                }
+            }
+            return;
+        }
+        if (horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                && verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            reconstructUnscaledBilinearCompoundInterPlanePrediction(
+                    referencePlane,
+                    sourceX0,
+                    sourceY0,
+                    width,
+                    height,
+                    phaseX,
+                    phaseY,
+                    postRoundBits,
+                    nonNullDestination
+            );
+            return;
+        }
+        if (!isConcreteInterpolationFilter(horizontalFilterMode)
+                || !isConcreteInterpolationFilter(verticalFilterMode)
+                || horizontalFilterMode == FrameHeader.InterpolationFilter.BILINEAR
+                || verticalFilterMode == FrameHeader.InterpolationFilter.BILINEAR) {
+            throw new IllegalStateException(
+                    "Inter reconstruction requires resolved matching BILINEAR or EIGHT_TAP_* filters"
+            );
+        }
+
+        @Nullable int[] horizontalFilter = phaseX == 0
+                ? null
+                : selectSubpelFilter(horizontalFilterMode, phaseX, widthForFilterSelection);
+        @Nullable int[] verticalFilter = phaseY == 0
+                ? null
+                : selectSubpelFilter(verticalFilterMode, phaseY, heightForFilterSelection);
+        int firstPassRound = INTER_FILTER_BITS - postRoundBits;
+        if (verticalFilter == null) {
+            int[] checkedHorizontalFilter = Objects.requireNonNull(horizontalFilter, "horizontalFilter");
+            for (int y = 0; y < height; y++) {
+                int sourceY = sourceY0 + y;
+                int rowOffset = y * width;
+                for (int x = 0; x < width; x++) {
+                    nonNullDestination[rowOffset + x] = roundShift(
+                            horizontalInterpolate(
+                                    referencePlane,
+                                    sourceX0 + x,
+                                    sourceY,
+                                    checkedHorizontalFilter
+                            ),
+                            firstPassRound
+                    );
+                }
+            }
+            return;
+        }
+        if (horizontalFilter == null) {
+            for (int y = 0; y < height; y++) {
+                int rowOffset = y * width;
+                for (int x = 0; x < width; x++) {
+                    nonNullDestination[rowOffset + x] = roundShift(
+                            verticalInterpolate(
+                                    referencePlane,
+                                    sourceX0 + x,
+                                    sourceY0 + y,
+                                    verticalFilter
+                            ),
+                            firstPassRound
+                    );
+                }
+            }
+            return;
+        }
+
+        int horizontalRowCount = height + INTER_FILTER_TAP_COUNT - 1;
+        int[] horizontalSamples = INTER_PREDICTION_WORKSPACE.get()
+                .horizontalSamples(width * horizontalRowCount);
+        for (int row = 0; row < horizontalRowCount; row++) {
+            int sourceY = clamp(
+                    sourceY0 + row - INTER_FILTER_START_OFFSET,
+                    0,
+                    referencePlane.height() - 1
+            );
+            int rowOffset = row * width;
+            for (int x = 0; x < width; x++) {
+                int integerSourceX = sourceX0 + x;
+                long filtered = 0;
+                for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                    int sourceX = clamp(
+                            integerSourceX + tapIndex - INTER_FILTER_START_OFFSET,
+                            0,
+                            referencePlane.width() - 1
+                    );
+                    filtered += (long) horizontalFilter[tapIndex] * referencePlane.sample(sourceX, sourceY);
+                }
+                horizontalSamples[rowOffset + x] = roundShift(filtered, firstPassRound);
+            }
+        }
+        for (int y = 0; y < height; y++) {
+            int rowOffset = y * width;
+            for (int x = 0; x < width; x++) {
+                long combined = 0;
+                for (int tapIndex = 0; tapIndex < INTER_FILTER_TAP_COUNT; tapIndex++) {
+                    combined += (long) verticalFilter[tapIndex]
+                            * horizontalSamples[(y + tapIndex) * width + x];
+                }
+                nonNullDestination[rowOffset + x] = roundShift(combined, INTER_FILTER_BITS);
+            }
+        }
+    }
+
+    /// Writes one unscaled bilinear compound predictor with constant block phases.
+    ///
+    /// @param referencePlane the immutable reference plane
+    /// @param sourceX0 the integer horizontal source origin
+    /// @param sourceY0 the integer vertical source origin
+    /// @param width the predicted width in samples
+    /// @param height the predicted height in samples
+    /// @param phaseX the horizontal interpolation phase in `[0, 15]`
+    /// @param phaseY the vertical interpolation phase in `[0, 15]`
+    /// @param postRoundBits the fractional bits retained for compound blending
+    /// @param destination predictor storage with room for at least `width * height` samples
+    private static void reconstructUnscaledBilinearCompoundInterPlanePrediction(
+            DecodedPlane referencePlane,
+            int sourceX0,
+            int sourceY0,
+            int width,
+            int height,
+            int phaseX,
+            int phaseY,
+            int postRoundBits,
+            int[] destination
+    ) {
+        int firstPassRound = 4 - postRoundBits;
+        for (int y = 0; y < height; y++) {
+            int topY = clamp(sourceY0 + y, 0, referencePlane.height() - 1);
+            int bottomY = clamp(sourceY0 + y + 1, 0, referencePlane.height() - 1);
+            int rowOffset = y * width;
+            for (int x = 0; x < width; x++) {
+                int leftX = clamp(sourceX0 + x, 0, referencePlane.width() - 1);
+                int rightX = clamp(sourceX0 + x + 1, 0, referencePlane.width() - 1);
+                int topLeft = referencePlane.sample(leftX, topY);
+                int predictor;
+                if (phaseY == 0) {
+                    int topRight = referencePlane.sample(rightX, topY);
+                    predictor = roundShift(
+                            bilinearFilterSum(topLeft, topRight, phaseX),
+                            firstPassRound
+                    );
+                } else if (phaseX == 0) {
+                    int bottomLeft = referencePlane.sample(leftX, bottomY);
+                    predictor = roundShift(
+                            bilinearFilterSum(topLeft, bottomLeft, phaseY),
+                            firstPassRound
+                    );
+                } else {
+                    int topRight = referencePlane.sample(rightX, topY);
+                    int bottomLeft = referencePlane.sample(leftX, bottomY);
+                    int bottomRight = referencePlane.sample(rightX, bottomY);
+                    int top = roundShift(
+                            bilinearFilterSum(topLeft, topRight, phaseX),
+                            firstPassRound
+                    );
+                    int bottom = roundShift(
+                            bilinearFilterSum(bottomLeft, bottomRight, phaseX),
+                            firstPassRound
+                    );
+                    predictor = roundShift(bilinearFilterSum(top, bottom, phaseY), 4);
+                }
+                destination[rowOffset + x] = predictor;
             }
         }
     }
@@ -5049,12 +5643,14 @@ public final class FrameReconstructor {
             FrameHeader frameHeader,
             boolean strictStdCompliance
     ) {
-        LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
+        int qIndex = blockQIndex(header, frameHeader);
+        FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
         for (int unitIndex = 0; unitIndex < residualLayout.lumaUnitCount(); unitIndex++) {
             reconstructLumaResidualUnit(
                     lumaPlane,
                     residualLayout.lumaUnit(unitIndex),
-                    dequantizationContext,
+                    qIndex,
+                    quantization,
                     strictStdCompliance
             );
         }
@@ -5081,7 +5677,8 @@ public final class FrameReconstructor {
             boolean strictStdCompliance
     ) {
         LumaIntraPredictionMode yMode = Objects.requireNonNull(header.yMode(), "header.yMode()");
-        LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
+        int qIndex = blockQIndex(header, frameHeader);
+        FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
         for (int unitIndex = 0; unitIndex < residualLayout.lumaUnitCount(); unitIndex++) {
             TransformResidualUnit residualUnit = residualLayout.lumaUnit(unitIndex);
             int predictionX = residualUnit.position().x4() << 2;
@@ -5129,7 +5726,7 @@ public final class FrameReconstructor {
                     tileBounds.lumaEndX(),
                     tileBounds.lumaEndY()
             );
-            reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext, strictStdCompliance);
+            reconstructLumaResidualUnit(lumaPlane, residualUnit, qIndex, quantization, strictStdCompliance);
         }
     }
 
@@ -5151,7 +5748,8 @@ public final class FrameReconstructor {
             TileSampleBounds tileBounds,
             boolean strictStdCompliance
     ) {
-        LumaDequantizer.Context dequantizationContext = lumaDequantizationContext(lumaPlane, header, frameHeader);
+        int qIndex = blockQIndex(header, frameHeader);
+        FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
         for (int unitIndex = 0; unitIndex < residualLayout.lumaUnitCount(); unitIndex++) {
             TransformResidualUnit residualUnit = residualLayout.lumaUnit(unitIndex);
             IntraPredictor.predictFilterIntraLuma(
@@ -5166,7 +5764,7 @@ public final class FrameReconstructor {
                     tileBounds.lumaEndX(),
                     tileBounds.lumaEndY()
             );
-            reconstructLumaResidualUnit(lumaPlane, residualUnit, dequantizationContext, strictStdCompliance);
+            reconstructLumaResidualUnit(lumaPlane, residualUnit, qIndex, quantization, strictStdCompliance);
         }
     }
 
@@ -5174,12 +5772,14 @@ public final class FrameReconstructor {
     ///
     /// @param lumaPlane the mutable luma destination plane
     /// @param residualUnit the decoded residual unit
-    /// @param dequantizationContext the active luma dequantization context
+    /// @param qIndex the block-local quantizer index after delta-q updates
+    /// @param quantization the frame-level quantization state
     /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructLumaResidualUnit(
             MutablePlaneBuffer lumaPlane,
             TransformResidualUnit residualUnit,
-            LumaDequantizer.Context dequantizationContext,
+            int qIndex,
+            FrameHeader.QuantizationInfo quantization,
             boolean strictStdCompliance
     ) {
         if (residualUnit.allZero()) {
@@ -5187,7 +5787,15 @@ public final class FrameReconstructor {
         }
         InverseTransformer.Workspace workspace = InverseTransformer.workspace();
         int[] dequantizedCoefficients = workspace.coefficientBuffer(residualUnit.size());
-        LumaDequantizer.dequantize(residualUnit, dequantizationContext, dequantizedCoefficients);
+        LumaDequantizer.dequantize(
+                residualUnit,
+                qIndex,
+                quantization.yDcDelta(),
+                lumaPlane.bitDepth(),
+                quantization.useQuantizationMatrices(),
+                quantization.quantizationMatrixY(),
+                dequantizedCoefficients
+        );
         int destinationX = residualUnit.position().x4() << 2;
         int destinationY = residualUnit.position().y4() << 2;
         InverseTransformer.reconstructAndAddResidualBlock(
@@ -5202,27 +5810,6 @@ public final class FrameReconstructor {
                 Math.min(residualUnit.size().heightPixels(), lumaPlane.height() - destinationY),
                 strictStdCompliance,
                 dequantizedCoefficients
-        );
-    }
-
-    /// Creates a luma dequantization context for one decoded block.
-    ///
-    /// @param lumaPlane the mutable luma destination plane
-    /// @param header the decoded block header that owns the residuals
-    /// @param frameHeader the frame header that owns the active quantization state
-    /// @return the luma dequantization context
-    private static LumaDequantizer.Context lumaDequantizationContext(
-            MutablePlaneBuffer lumaPlane,
-            TileBlockHeaderReader.BlockHeader header,
-            FrameHeader frameHeader
-    ) {
-        FrameHeader.QuantizationInfo quantization = frameHeader.quantization();
-        return new LumaDequantizer.Context(
-                blockQIndex(header, frameHeader),
-                quantization.yDcDelta(),
-                lumaPlane.bitDepth(),
-                quantization.useQuantizationMatrices(),
-                quantization.quantizationMatrixY()
         );
     }
 
@@ -5499,14 +6086,8 @@ public final class FrameReconstructor {
                 header.uvAngle(),
                 intraEdgeFilterEnabled,
                 smoothEdgeReferences,
-                new ChromaDequantizer.Context(
-                        qIndex,
-                        quantization.uDcDelta(),
-                        quantization.uAcDelta(),
-                        chromaUPlane.bitDepth(),
-                        quantization.useQuantizationMatrices(),
-                        quantization.quantizationMatrixU()
-                ),
+                qIndex,
+                quantization,
                 pixelFormat,
                 chromaUPlane,
                 tileBounds,
@@ -5522,14 +6103,8 @@ public final class FrameReconstructor {
                 header.uvAngle(),
                 intraEdgeFilterEnabled,
                 smoothEdgeReferences,
-                new ChromaDequantizer.Context(
-                        qIndex,
-                        quantization.vDcDelta(),
-                        quantization.vAcDelta(),
-                        chromaVPlane.bitDepth(),
-                        quantization.useQuantizationMatrices(),
-                        quantization.quantizationMatrixV()
-                ),
+                qIndex,
+                quantization,
                 pixelFormat,
                 chromaVPlane,
                 tileBounds,
@@ -5548,7 +6123,8 @@ public final class FrameReconstructor {
     /// @param uvAngle the derived chroma directional prediction angle
     /// @param intraEdgeFilterEnabled whether directional intra-edge filtering is enabled by the sequence header
     /// @param smoothEdgeReferences whether the neighboring reference edges are marked as smooth predictors
-    /// @param dequantizationContext the plane-local chroma dequantization context
+    /// @param qIndex the block-local quantizer index after delta-q updates
+    /// @param quantization the frame-level quantization state
     /// @param pixelFormat the active decoded chroma layout
     /// @param referencePlane the mutable plane whose written samples are tracked
     /// @param tileBounds the tile-local sample boundaries used by intra prediction references
@@ -5563,7 +6139,8 @@ public final class FrameReconstructor {
             int uvAngle,
             boolean intraEdgeFilterEnabled,
             boolean smoothEdgeReferences,
-            ChromaDequantizer.Context dequantizationContext,
+            int qIndex,
+            FrameHeader.QuantizationInfo quantization,
             AvifPixelFormat pixelFormat,
             MutablePlaneBuffer referencePlane,
             TileSampleBounds tileBounds,
@@ -5627,7 +6204,9 @@ public final class FrameReconstructor {
                     reconstructChromaResidualUnit(
                             chromaPlane,
                             residualUnit,
-                            dequantizationContext,
+                            chromaU,
+                            qIndex,
+                            quantization,
                             chromaSubsamplingX,
                             chromaSubsamplingY,
                             strictStdCompliance
@@ -5642,7 +6221,9 @@ public final class FrameReconstructor {
                 reconstructChromaResidualUnit(
                         chromaPlane,
                         chromaResidualUnit(residualLayout, i, chromaU),
-                        dequantizationContext,
+                        chromaU,
+                        qIndex,
+                        quantization,
                         chromaSubsamplingX,
                         chromaSubsamplingY,
                         strictStdCompliance
@@ -5684,14 +6265,8 @@ public final class FrameReconstructor {
                 chromaUPlane,
                 residualLayout,
                 true,
-                new ChromaDequantizer.Context(
-                        qIndex,
-                        quantization.uDcDelta(),
-                        quantization.uAcDelta(),
-                        chromaUPlane.bitDepth(),
-                        quantization.useQuantizationMatrices(),
-                        quantization.quantizationMatrixU()
-                ),
+                qIndex,
+                quantization,
                 pixelFormat,
                 strictStdCompliance
         );
@@ -5699,14 +6274,8 @@ public final class FrameReconstructor {
                 chromaVPlane,
                 residualLayout,
                 false,
-                new ChromaDequantizer.Context(
-                        qIndex,
-                        quantization.vDcDelta(),
-                        quantization.vAcDelta(),
-                        chromaVPlane.bitDepth(),
-                        quantization.useQuantizationMatrices(),
-                        quantization.quantizationMatrixV()
-                ),
+                qIndex,
+                quantization,
                 pixelFormat,
                 strictStdCompliance
         );
@@ -5717,14 +6286,16 @@ public final class FrameReconstructor {
     /// @param chromaPlane the mutable destination chroma plane
     /// @param residualLayout the decoded transform residual layout
     /// @param chromaU whether to reconstruct the U plane rather than the V plane
-    /// @param dequantizationContext the plane-local chroma dequantization context
+    /// @param qIndex the block-local quantizer index after delta-q updates
+    /// @param quantization the frame-level quantization state
     /// @param pixelFormat the active decoded chroma layout
     /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructChromaPlaneResiduals(
             MutablePlaneBuffer chromaPlane,
             ResidualLayout residualLayout,
             boolean chromaU,
-            ChromaDequantizer.Context dequantizationContext,
+            int qIndex,
+            FrameHeader.QuantizationInfo quantization,
             AvifPixelFormat pixelFormat,
             boolean strictStdCompliance
     ) {
@@ -5734,7 +6305,9 @@ public final class FrameReconstructor {
             reconstructChromaResidualUnit(
                     chromaPlane,
                     chromaResidualUnit(residualLayout, unitIndex, chromaU),
-                    dequantizationContext,
+                    chromaU,
+                    qIndex,
+                    quantization,
                     chromaSubsamplingX,
                     chromaSubsamplingY,
                     strictStdCompliance
@@ -5760,14 +6333,18 @@ public final class FrameReconstructor {
     ///
     /// @param chromaPlane the mutable destination chroma plane
     /// @param residualUnit the decoded residual unit
-    /// @param dequantizationContext the active chroma dequantization context
+    /// @param chromaU whether the residual belongs to the U plane rather than the V plane
+    /// @param qIndex the block-local quantizer index after delta-q updates
+    /// @param quantization the frame-level quantization state
     /// @param chromaSubsamplingX the horizontal chroma subsampling shift
     /// @param chromaSubsamplingY the vertical chroma subsampling shift
     /// @param strictStdCompliance whether malformed transform values must be rejected
     private static void reconstructChromaResidualUnit(
             MutablePlaneBuffer chromaPlane,
             TransformResidualUnit residualUnit,
-            ChromaDequantizer.Context dequantizationContext,
+            boolean chromaU,
+            int qIndex,
+            FrameHeader.QuantizationInfo quantization,
             int chromaSubsamplingX,
             int chromaSubsamplingY,
             boolean strictStdCompliance
@@ -5777,7 +6354,16 @@ public final class FrameReconstructor {
         }
         InverseTransformer.Workspace workspace = InverseTransformer.workspace();
         int[] dequantizedCoefficients = workspace.coefficientBuffer(residualUnit.size());
-        ChromaDequantizer.dequantize(residualUnit, dequantizationContext, dequantizedCoefficients);
+        ChromaDequantizer.dequantize(
+                residualUnit,
+                qIndex,
+                chromaU ? quantization.uDcDelta() : quantization.vDcDelta(),
+                chromaU ? quantization.uAcDelta() : quantization.vAcDelta(),
+                chromaPlane.bitDepth(),
+                quantization.useQuantizationMatrices(),
+                chromaU ? quantization.quantizationMatrixU() : quantization.quantizationMatrixV(),
+                dequantizedCoefficients
+        );
         int destinationX = residualUnit.position().x4() << (2 - chromaSubsamplingX);
         int destinationY = residualUnit.position().y4() << (2 - chromaSubsamplingY);
         InverseTransformer.reconstructAndAddResidualBlock(

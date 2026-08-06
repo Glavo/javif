@@ -66,11 +66,50 @@ final class ChromaDequantizer {
     ) {
         TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         Context nonNullContext = Objects.requireNonNull(context, "context");
+        dequantize(
+                nonNullResidualUnit,
+                nonNullContext.qIndex(),
+                nonNullContext.dcDelta(),
+                nonNullContext.acDelta(),
+                nonNullContext.bitDepth(),
+                nonNullContext.useQuantizationMatrices(),
+                nonNullContext.quantizationMatrix(),
+                destination
+        );
+    }
+
+    /// Dequantizes one chroma transform residual unit from scalar plane parameters.
+    ///
+    /// This allocation-free entry point overwrites the complete exact-length destination array.
+    ///
+    /// @param residualUnit the chroma residual unit to dequantize
+    /// @param qIndex the block-local chroma quantizer index in `[0, 255]`
+    /// @param dcDelta the plane-local DC delta quantizer
+    /// @param acDelta the plane-local AC delta quantizer
+    /// @param bitDepth the decoded sample bit depth
+    /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
+    /// @param quantizationMatrixIndex the chroma quantization matrix index in `[0, 15]`
+    /// @param destination the exact-length destination in natural raster order
+    static void dequantize(
+            TransformResidualUnit residualUnit,
+            int qIndex,
+            int dcDelta,
+            int acDelta,
+            int bitDepth,
+            boolean useQuantizationMatrices,
+            int quantizationMatrixIndex,
+            int[] destination
+    ) {
+        TransformResidualUnit nonNullResidualUnit = Objects.requireNonNull(residualUnit, "residualUnit");
         int[] nonNullDestination = Objects.requireNonNull(destination, "destination");
-        if (nonNullContext.bitDepth() != 8
-                && nonNullContext.bitDepth() != 10
-                && nonNullContext.bitDepth() != 12) {
-            throw new IllegalStateException("Unsupported chroma dequantization bit depth: " + nonNullContext.bitDepth());
+        if (qIndex < 0 || qIndex > 255) {
+            throw new IllegalArgumentException("qIndex out of range: " + qIndex);
+        }
+        if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
+            throw new IllegalStateException("Unsupported chroma dequantization bit depth: " + bitDepth);
+        }
+        if (quantizationMatrixIndex < 0 || quantizationMatrixIndex > 15) {
+            throw new IllegalArgumentException("quantizationMatrixIndex out of range: " + quantizationMatrixIndex);
         }
 
         int coefficientCount = nonNullResidualUnit.coefficientCount();
@@ -83,20 +122,24 @@ final class ChromaDequantizer {
         }
 
         int dcQuantizer = QuantizerTables.dcQuantizer(
-                nonNullContext.qIndex() + nonNullContext.dcDelta(),
-                nonNullContext.bitDepth()
+                qIndex + dcDelta,
+                bitDepth
         );
         int acQuantizer = QuantizerTables.acQuantizer(
-                nonNullContext.qIndex() + nonNullContext.acDelta(),
-                nonNullContext.bitDepth()
+                qIndex + acDelta,
+                bitDepth
         );
         int dequantizationShift = QuantizerTables.dequantizationShift(nonNullResidualUnit.size());
-        byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(nonNullResidualUnit, nonNullContext);
+        byte @Nullable @Unmodifiable [] quantizationMatrix = quantizationMatrix(
+                nonNullResidualUnit,
+                useQuantizationMatrices,
+                quantizationMatrixIndex
+        );
         nonNullDestination[0] = scaledCoefficient(
                 nonNullResidualUnit.coefficient(0),
                 dcQuantizer,
                 dequantizationShift,
-                nonNullContext.bitDepth(),
+                bitDepth,
                 matrixValue(quantizationMatrix, nonNullResidualUnit.size(), 0)
         );
         for (int coefficientIndex = 1; coefficientIndex < coefficientCount; coefficientIndex++) {
@@ -104,7 +147,7 @@ final class ChromaDequantizer {
                     nonNullResidualUnit.coefficient(coefficientIndex),
                     acQuantizer,
                     dequantizationShift,
-                    nonNullContext.bitDepth(),
+                    bitDepth,
                     matrixValue(quantizationMatrix, nonNullResidualUnit.size(), coefficientIndex)
             );
         }
@@ -113,16 +156,18 @@ final class ChromaDequantizer {
     /// Returns the active quantization matrix for one residual unit, or `null` when no matrix applies.
     ///
     /// @param residualUnit the residual unit to dequantize
-    /// @param context the block-local dequantization context
+    /// @param useQuantizationMatrices whether frame-level quantization matrices are enabled
+    /// @param quantizationMatrixIndex the chroma quantization matrix index
     /// @return the active quantization matrix, or `null` when no matrix applies
     private static byte @Nullable @Unmodifiable [] quantizationMatrix(
             TransformResidualUnit residualUnit,
-            Context context
+            boolean useQuantizationMatrices,
+            int quantizationMatrixIndex
     ) {
-        if (!context.useQuantizationMatrices() || !usesQuantizationMatrix(residualUnit.transformType())) {
+        if (!useQuantizationMatrices || !usesQuantizationMatrix(residualUnit.transformType())) {
             return null;
         }
-        return QuantizationMatrixTables.matrix(context.quantizationMatrix(), true, residualUnit.size());
+        return QuantizationMatrixTables.matrix(quantizationMatrixIndex, true, residualUnit.size());
     }
 
     /// Returns whether one transform type applies frame-level quantization matrices.
