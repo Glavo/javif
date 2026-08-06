@@ -21,6 +21,8 @@ import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.io.BufferedInput;
@@ -45,6 +47,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -76,8 +79,17 @@ final class ArgonAv1CorpusTest {
     /// Optional system property that selects one one-based deterministic test shard as `index/count`.
     private static final String SHARD_PROPERTY = "org.glavo.avif.argon.shard";
 
+    /// Optional system property that selects operating point `0..31`, `distinct`, or `all`.
+    private static final String OPERATING_POINT_PROPERTY = "org.glavo.avif.argon.operatingPoint";
+
+    /// Optional system property that selects `pre-grain`, `film-grain`, or `both` reference output.
+    private static final String OUTPUT_PROPERTY = "org.glavo.avif.argon.output";
+
     /// Optional system property that enables per-frame digest diagnostics on corpus failures.
     private static final String TRACE_FRAMES_PROPERTY = "org.glavo.avif.argon.traceFrames";
+
+    /// MD5 of an empty decoder output, used by valid operating points that select no visible frame.
+    private static final String EMPTY_OUTPUT_DIGEST = "d41d8cd98f00b204e9800998ecf8427e";
 
     /// Root directory stored in the Argon Streams 2.1.1 ZIP.
     private static final String ARCHIVE_ROOT =
@@ -88,6 +100,9 @@ final class ArgonAv1CorpusTest {
 
     /// Number of gated streams that carry reference YUV digests.
     private static final int EXPECTED_REFERENCE_STREAM_COUNT = 3_586;
+
+    /// Number of operating-point reference configurations in either Argon MD5 tree.
+    private static final int EXPECTED_REFERENCE_VARIANT_COUNT = 89_239;
 
     /// Number of gated malformed streams that strict decoding must reject.
     private static final int EXPECTED_ERROR_STREAM_COUNT = 335;
@@ -254,11 +269,19 @@ final class ArgonAv1CorpusTest {
         ZipFile openArchive = archive();
         long streamCount = 0;
         long referenceStreamCount = 0;
+        long preGrainReferenceVariantCount = 0;
+        long filmGrainReferenceVariantCount = 0;
         long errorStreamCount = 0;
         long strictErrorStreamCount = 0;
         Enumeration<? extends ZipEntry> entries = openArchive.entries();
         while (entries.hasMoreElements()) {
             String entryName = entries.nextElement().getName();
+            if (entryName.endsWith(".md5") && entryName.contains("/md5_no_film_grain/")) {
+                preGrainReferenceVariantCount++;
+            }
+            if (entryName.endsWith(".md5") && entryName.contains("/md5_ref/")) {
+                filmGrainReferenceVariantCount++;
+            }
             if (entryName.endsWith(".obu")) {
                 streamCount++;
                 if (REFERENCE_STREAM_PREFIXES.stream().anyMatch(entryName::startsWith)) {
@@ -272,6 +295,8 @@ final class ArgonAv1CorpusTest {
         }
         assertEquals(EXPECTED_STREAM_COUNT, streamCount);
         assertEquals(EXPECTED_REFERENCE_STREAM_COUNT, referenceStreamCount);
+        assertEquals(EXPECTED_REFERENCE_VARIANT_COUNT, preGrainReferenceVariantCount);
+        assertEquals(EXPECTED_REFERENCE_VARIANT_COUNT, filmGrainReferenceVariantCount);
         assertEquals(EXPECTED_ERROR_STREAM_COUNT, errorStreamCount);
         assertEquals(EXPECTED_STRICT_ERROR_STREAM_COUNT, strictErrorStreamCount);
         assertNotNull(openArchive.getEntry(ARCHIVE_ROOT + "P8005-R-005h (Argon Streams AV1 User Manual).pdf"));
@@ -299,22 +324,61 @@ final class ArgonAv1CorpusTest {
         assertThrows(IllegalArgumentException.class, () -> new CorpusShard(4, 4).select(cases.subList(0, 3)));
     }
 
+    /// Verifies parsing of the reference-output modes exposed by the Gradle corpus task.
+    @Test
+    void selectsReferenceOutputModes() {
+        assertEquals(List.of(ReferenceOutput.PRE_GRAIN), ReferenceOutput.parseSelection(null));
+        assertEquals(List.of(ReferenceOutput.PRE_GRAIN), ReferenceOutput.parseSelection("pre-grain"));
+        assertEquals(List.of(ReferenceOutput.FILM_GRAIN), ReferenceOutput.parseSelection("film-grain"));
+        assertEquals(
+                List.of(ReferenceOutput.PRE_GRAIN, ReferenceOutput.FILM_GRAIN),
+                ReferenceOutput.parseSelection("both")
+        );
+        assertThrows(IllegalArgumentException.class, () -> ReferenceOutput.parseSelection("grain"));
+    }
+
+    /// Verifies parsing of single, distinct-output, and exhaustive operating-point selections.
+    @Test
+    void selectsOperatingPointModes() {
+        assertEquals(OperatingPointSelection.single(0), OperatingPointSelection.parse(null));
+        assertEquals(OperatingPointSelection.single(0), OperatingPointSelection.parse("0"));
+        assertEquals(OperatingPointSelection.single(31), OperatingPointSelection.parse("31"));
+        assertEquals(
+                new OperatingPointSelection(OperatingPointSelectionMode.DISTINCT, 0),
+                OperatingPointSelection.parse("distinct")
+        );
+        assertEquals(
+                new OperatingPointSelection(OperatingPointSelectionMode.ALL, 0),
+                OperatingPointSelection.parse("all")
+        );
+        assertThrows(IllegalArgumentException.class, () -> OperatingPointSelection.parse("-1"));
+        assertThrows(IllegalArgumentException.class, () -> OperatingPointSelection.parse("32"));
+        assertThrows(IllegalArgumentException.class, () -> OperatingPointSelection.parse("first"));
+    }
+
     /// Returns reference-output checks and strict malformed-stream rejection checks.
     ///
     /// @return the dynamic gated-stream tests
+    /// @throws IOException if a selected reference digest cannot be read during discovery
     @TestFactory
-    Stream<DynamicTest> gatedStreamsMeetExpectedOutcome() {
-        return selectedGatedCases().stream()
-                .map(testCase -> DynamicTest.dynamicTest(
-                        testCase.category() + "/" + testCase.streamName(),
-                        () -> {
-                            if (testCase.errorStream()) {
-                                assertMalformedStreamRejected(testCase);
-                            } else {
-                                assertReferenceDigest(testCase);
-                            }
-                        }
+    Stream<DynamicTest> gatedStreamsMeetExpectedOutcome() throws IOException {
+        List<DynamicTest> tests = new ArrayList<>();
+        for (CorpusCase testCase : selectedGatedCases()) {
+            if (testCase.errorStream()) {
+                tests.add(DynamicTest.dynamicTest(
+                        testCase.selector(),
+                        () -> assertMalformedStreamRejected(testCase)
                 ));
+                continue;
+            }
+            for (ReferenceCase referenceCase : selectedReferenceCases(testCase)) {
+                tests.add(DynamicTest.dynamicTest(
+                        referenceCase.displayName(),
+                        () -> assertReferenceDigest(referenceCase)
+                ));
+            }
+        }
+        return tests.stream();
     }
 
     /// Returns the complete gate, a diagnostic group, or one explicitly selected case.
@@ -377,6 +441,111 @@ final class ArgonAv1CorpusTest {
                 .toList();
     }
 
+    /// Returns the configured reference-output variants for one selected stream.
+    ///
+    /// @param testCase the reference stream to expand
+    /// @return the immutable selected reference cases
+    /// @throws IOException if distinct-output selection cannot read a reference digest
+    private static @Unmodifiable List<ReferenceCase> selectedReferenceCases(CorpusCase testCase) throws IOException {
+        @Unmodifiable List<ReferenceOutput> outputs = ReferenceOutput.parseSelection(
+                System.getProperty(OUTPUT_PROPERTY)
+        );
+        OperatingPointSelection operatingPointSelection = OperatingPointSelection.parse(
+                System.getProperty(OPERATING_POINT_PROPERTY)
+        );
+        @Unmodifiable List<Integer> operatingPoints = operatingPointSelection.select(testCase, outputs);
+        List<ReferenceCase> cases = new ArrayList<>(operatingPoints.size() * outputs.size());
+        for (int operatingPoint : operatingPoints) {
+            for (ReferenceOutput output : outputs) {
+                cases.add(new ReferenceCase(testCase, operatingPoint, output));
+            }
+        }
+        return List.copyOf(cases);
+    }
+
+    /// Returns the exact archive path of one reference digest.
+    ///
+    /// @param testCase the reference stream
+    /// @param operatingPoint the selected operating-point index
+    /// @param output the selected output stage
+    /// @return the reference MD5 path
+    private static String referenceDigestPath(
+            CorpusCase testCase,
+            int operatingPoint,
+            ReferenceOutput output
+    ) {
+        String digestName = testCase.baseName();
+        String layerDirectory = "";
+        if (operatingPoint != 0) {
+            layerDirectory = "layers/" + operatingPoint + "/";
+            digestName += "_layer" + operatingPoint;
+        }
+        return ARCHIVE_ROOT + testCase.category() + "/" + output.directory() + "/"
+                + layerDirectory + digestName + ".md5";
+    }
+
+    /// Returns whether the archive carries a reference for one operating-point selection.
+    ///
+    /// @param testCase the reference stream
+    /// @param operatingPoint the selected operating-point index
+    /// @return whether the pre-grain reference exists
+    private static boolean hasOperatingPointReference(CorpusCase testCase, int operatingPoint) {
+        return archive().getEntry(referenceDigestPath(testCase, operatingPoint, ReferenceOutput.PRE_GRAIN)) != null;
+    }
+
+    /// Returns the number of operating-point indices declared by every sequence in one stream.
+    ///
+    /// A configured reader validates its selection whenever a new sequence header appears, so a
+    /// whole-stream reference case can select only indices shared by every sequence.
+    ///
+    /// @param testCase the reference stream to inspect
+    /// @return the positive common operating-point count
+    /// @throws IOException if the stream cannot be read or its sequence header is malformed
+    private static int commonDeclaredOperatingPointCount(CorpusCase testCase) throws IOException {
+        ZipFile archive = archive();
+        String streamPath = ARCHIVE_ROOT + testCase.category() + "/streams/" + testCase.streamName();
+        ZipEntry streamEntry = requireEntry(archive, streamPath);
+        SequenceHeaderParser parser = new SequenceHeaderParser();
+        int commonCount = 32;
+        boolean foundSequenceHeader = false;
+        try (BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry))) {
+            ObuStreamReader reader = testCase.annexB() ? ObuStreamReader.forAnnexB(input) : new ObuStreamReader(input);
+            @Nullable ObuPacket packet;
+            while ((packet = reader.readObu()) != null) {
+                if (packet.header().type() != ObuType.SEQUENCE_HEADER) {
+                    continue;
+                }
+                SequenceHeader sequenceHeader = parser.parse(packet, false);
+                commonCount = Math.min(commonCount, sequenceHeader.operatingPoints().length);
+                foundSequenceHeader = true;
+            }
+        }
+        if (!foundSequenceHeader) {
+            throw new IOException(streamPath + " contains no sequence header");
+        }
+        return commonCount;
+    }
+
+    /// Returns a stable digest signature for one operating point across selected output stages.
+    ///
+    /// @param testCase the reference stream
+    /// @param operatingPoint the selected operating-point index
+    /// @param outputs the output stages that participate in uniqueness
+    /// @return the combined expected-digest signature
+    /// @throws IOException if one reference digest cannot be read
+    private static String referenceDigestSignature(
+            CorpusCase testCase,
+            int operatingPoint,
+            @Unmodifiable List<ReferenceOutput> outputs
+    ) throws IOException {
+        StringBuilder signature = new StringBuilder(outputs.size() * 33);
+        for (ReferenceOutput output : outputs) {
+            String path = referenceDigestPath(testCase, operatingPoint, output);
+            signature.append(readReferenceDigest(archive(), requireEntry(archive(), path))).append(';');
+        }
+        return signature.toString();
+    }
+
     /// Verifies that strict decoding rejects one malformed Argon stream before clean end of input.
     ///
     /// @param testCase the malformed corpus stream
@@ -405,12 +574,16 @@ final class ArgonAv1CorpusTest {
 
     /// Decodes one selected stream and compares all visible pre-grain YUV planes with Argon's MD5.
     ///
-    /// @param testCase the selected corpus stream
-    private static void assertReferenceDigest(CorpusCase testCase) throws IOException, NoSuchAlgorithmException {
+    /// @param referenceCase the selected stream, operating point, and output stage
+    private static void assertReferenceDigest(ReferenceCase referenceCase) throws IOException, NoSuchAlgorithmException {
+        CorpusCase testCase = referenceCase.testCase();
         ZipFile archive = archive();
         String streamPath = ARCHIVE_ROOT + testCase.category() + "/streams/" + testCase.streamName();
-        String referencePath = ARCHIVE_ROOT + testCase.category() + "/md5_no_film_grain/"
-                + testCase.baseName() + ".md5";
+        String referencePath = referenceDigestPath(
+                testCase,
+                referenceCase.operatingPoint(),
+                referenceCase.output()
+        );
         ZipEntry streamEntry = requireEntry(archive, streamPath);
         String expectedDigest = readReferenceDigest(archive, requireEntry(archive, referencePath));
         MessageDigest actualDigest = MessageDigest.getInstance("MD5");
@@ -418,9 +591,10 @@ final class ArgonAv1CorpusTest {
                 ? readLargeScaleTileDigestLayouts(archive, streamEntry, testCase.annexB())
                 : null;
         Av1DecoderConfig config = Av1DecoderConfig.builder()
-                .applyFilmGrain(false)
+                .applyFilmGrain(referenceCase.output().applyFilmGrain())
                 .outputAllLayers(true)
                 .largeScaleTileMode(testCase.largeScaleTileMode())
+                .operatingPoint(referenceCase.operatingPoint())
                 .build();
 
         int frameCount = 0;
@@ -438,7 +612,10 @@ final class ArgonAv1CorpusTest {
                     if (tileListLayouts == null) {
                         updateYuvDigest(actualDigest, requiredPlanes);
                     } else {
-                        assertTrue(frameCount < tileListLayouts.size(), streamPath + " produced too many tile lists");
+                        assertTrue(
+                                frameCount < tileListLayouts.size(),
+                                referenceCase.displayName() + " produced too many tile lists"
+                        );
                         updateLargeScaleTileDigest(actualDigest, requiredPlanes, tileListLayouts.get(frameCount));
                     }
                     if (frameDiagnostics != null) {
@@ -449,23 +626,28 @@ final class ArgonAv1CorpusTest {
             }
         } catch (DecodeException exception) {
             throw new AssertionError(
-                    streamPath + " failed at OBU " + exception.obuIndex()
+                    referenceCase.displayName() + " failed at OBU " + exception.obuIndex()
                             + " (offset " + exception.streamOffset() + ", stage " + exception.stage() + ")",
                     exception
             );
         }
 
-        assertTrue(frameCount > 0, () -> streamPath + " produced no visible frames");
+        if (expectedDigest.equals(EMPTY_OUTPUT_DIGEST)) {
+            assertEquals(0, frameCount, referenceCase.displayName() + " expected empty output");
+        } else {
+            assertTrue(frameCount > 0, () -> referenceCase.displayName() + " produced no visible frames");
+        }
         if (tileListLayouts != null) {
-            assertEquals(tileListLayouts.size(), frameCount, streamPath + " tile-list output count");
+            assertEquals(tileListLayouts.size(), frameCount, referenceCase.displayName() + " tile-list output count");
         }
         String actualDigestHex = HexFormat.of().formatHex(actualDigest.digest());
         assertEquals(
                 expectedDigest,
                 actualDigestHex,
                 () -> frameDiagnostics == null
-                        ? streamPath
-                        : streamPath + System.lineSeparator() + String.join(System.lineSeparator(), frameDiagnostics)
+                        ? referenceCase.displayName()
+                        : referenceCase.displayName() + System.lineSeparator()
+                                + String.join(System.lineSeparator(), frameDiagnostics)
         );
     }
 
@@ -710,6 +892,213 @@ final class ArgonAv1CorpusTest {
         @Nullable ZipEntry entry = archive.getEntry(entryName);
         assertNotNull(entry, entryName);
         return Objects.requireNonNull(entry);
+    }
+
+    /// Identifies one expected output stage and its corresponding Argon digest tree.
+    @NotNullByDefault
+    private enum ReferenceOutput {
+        /// Pre-grain postprocessed output stored under `md5_no_film_grain`.
+        PRE_GRAIN("pre-grain", "md5_no_film_grain", false),
+
+        /// Presentation output with normative film grain stored under `md5_ref`.
+        FILM_GRAIN("film-grain", "md5_ref", true);
+
+        /// The command-line selector for this output stage.
+        private final String selector;
+
+        /// The archive directory containing this stage's reference digests.
+        private final String directory;
+
+        /// Whether the decoder must synthesize film grain for this output stage.
+        private final boolean applyFilmGrain;
+
+        /// Creates one reference-output descriptor.
+        ///
+        /// @param selector the command-line selector
+        /// @param directory the reference digest directory
+        /// @param applyFilmGrain whether film grain synthesis must be enabled
+        ReferenceOutput(String selector, String directory, boolean applyFilmGrain) {
+            this.selector = selector;
+            this.directory = directory;
+            this.applyFilmGrain = applyFilmGrain;
+        }
+
+        /// Returns the command-line selector for this output stage.
+        ///
+        /// @return the output selector
+        private String selector() {
+            return selector;
+        }
+
+        /// Returns the archive directory containing this stage's reference digests.
+        ///
+        /// @return the digest directory
+        private String directory() {
+            return directory;
+        }
+
+        /// Returns whether film grain synthesis must be enabled.
+        ///
+        /// @return whether film grain must be applied
+        private boolean applyFilmGrain() {
+            return applyFilmGrain;
+        }
+
+        /// Parses one output selection into its deterministic output-stage list.
+        ///
+        /// @param value `pre-grain`, `film-grain`, `both`, or `null` for the default
+        /// @return the immutable selected output stages
+        private static @Unmodifiable List<ReferenceOutput> parseSelection(@Nullable String value) {
+            if (value == null || value.equals("pre-grain")) {
+                return List.of(PRE_GRAIN);
+            }
+            if (value.equals("film-grain")) {
+                return List.of(FILM_GRAIN);
+            }
+            if (value.equals("both")) {
+                return List.of(PRE_GRAIN, FILM_GRAIN);
+            }
+            throw new IllegalArgumentException("Invalid Argon AV1 output selection: " + value);
+        }
+    }
+
+    /// Identifies how operating-point variants are selected for each stream.
+    @NotNullByDefault
+    private enum OperatingPointSelectionMode {
+        /// Selects one exact operating-point index.
+        SINGLE,
+
+        /// Selects the first operating point for every distinct expected output signature.
+        DISTINCT,
+
+        /// Selects every operating point for which the archive carries references.
+        ALL
+    }
+
+    /// Selects one exact, all distinct, or every available operating-point reference.
+    ///
+    /// @param mode the selection mode
+    /// @param operatingPoint the exact index for `SINGLE`, or `0` for the aggregate modes
+    @NotNullByDefault
+    private record OperatingPointSelection(OperatingPointSelectionMode mode, int operatingPoint) {
+        /// Creates one validated operating-point selection.
+        private OperatingPointSelection {
+            if (mode == OperatingPointSelectionMode.SINGLE) {
+                if (operatingPoint < 0 || operatingPoint > 31) {
+                    throw new IllegalArgumentException("Argon AV1 operating point out of range: " + operatingPoint);
+                }
+            } else if (operatingPoint != 0) {
+                throw new IllegalArgumentException("Aggregate Argon AV1 operating-point selections use index 0");
+            }
+        }
+
+        /// Creates one exact operating-point selection.
+        ///
+        /// @param operatingPoint the exact operating-point index
+        /// @return the validated selection
+        private static OperatingPointSelection single(int operatingPoint) {
+            return new OperatingPointSelection(OperatingPointSelectionMode.SINGLE, operatingPoint);
+        }
+
+        /// Parses an exact index, `distinct`, `all`, or the default operating point.
+        ///
+        /// @param value the configured property value, or `null` for operating point zero
+        /// @return the validated selection
+        private static OperatingPointSelection parse(@Nullable String value) {
+            if (value == null) {
+                return single(0);
+            }
+            if (value.equals("distinct")) {
+                return new OperatingPointSelection(OperatingPointSelectionMode.DISTINCT, 0);
+            }
+            if (value.equals("all")) {
+                return new OperatingPointSelection(OperatingPointSelectionMode.ALL, 0);
+            }
+            try {
+                return single(Integer.parseInt(value));
+            } catch (NumberFormatException exception) {
+                throw new IllegalArgumentException("Invalid Argon AV1 operating-point selection: " + value, exception);
+            }
+        }
+
+        /// Selects available operating points for one stream and output-stage combination.
+        ///
+        /// `DISTINCT` retains the lowest operating-point index for every unique tuple of selected
+        /// reference digests. This preserves every distinct expected output while omitting the many
+        /// duplicate Argon configurations that decode to the same bytes.
+        ///
+        /// @param testCase the reference stream
+        /// @param outputs the selected output stages
+        /// @return the immutable selected operating points in ascending order
+        /// @throws IOException if distinct-output selection cannot read a reference digest
+        private @Unmodifiable List<Integer> select(
+                CorpusCase testCase,
+                @Unmodifiable List<ReferenceOutput> outputs
+        ) throws IOException {
+            if (mode == OperatingPointSelectionMode.SINGLE) {
+                if (operatingPoint != 0
+                        && operatingPoint >= commonDeclaredOperatingPointCount(testCase)) {
+                    throw new IllegalArgumentException(
+                            testCase.selector() + " does not declare operating point " + operatingPoint
+                    );
+                }
+                if (!hasOperatingPointReference(testCase, operatingPoint)) {
+                    throw new IllegalArgumentException(
+                            testCase.selector() + " has no Argon reference for operating point " + operatingPoint
+                    );
+                }
+                return List.of(operatingPoint);
+            }
+
+            int declaredOperatingPointCount = commonDeclaredOperatingPointCount(testCase);
+            List<Integer> available = new ArrayList<>(32);
+            for (int candidate = 0; candidate < declaredOperatingPointCount; candidate++) {
+                if (hasOperatingPointReference(testCase, candidate)) {
+                    available.add(candidate);
+                }
+            }
+            if (mode == OperatingPointSelectionMode.ALL) {
+                return List.copyOf(available);
+            }
+
+            LinkedHashSet<String> signatures = new LinkedHashSet<>();
+            List<Integer> distinct = new ArrayList<>();
+            for (int candidate : available) {
+                String signature = referenceDigestSignature(testCase, candidate, outputs);
+                if (signatures.add(signature)) {
+                    distinct.add(candidate);
+                }
+            }
+            return List.copyOf(distinct);
+        }
+    }
+
+    /// Identifies one exact Argon reference-output configuration.
+    ///
+    /// @param testCase the selected reference stream
+    /// @param operatingPoint the selected operating-point index
+    /// @param output the selected output stage
+    @NotNullByDefault
+    private record ReferenceCase(CorpusCase testCase, int operatingPoint, ReferenceOutput output) {
+        /// Creates one validated reference-output case.
+        private ReferenceCase {
+            if (testCase.errorStream()) {
+                throw new IllegalArgumentException("Malformed streams do not carry reference output: " + testCase);
+            }
+            if (operatingPoint < 0 || operatingPoint > 31) {
+                throw new IllegalArgumentException("operatingPoint out of range: " + operatingPoint);
+            }
+        }
+
+        /// Returns the stable JUnit display name for this exact configuration.
+        ///
+        /// @return the stream selector with non-default variant qualifiers
+        private String displayName() {
+            if (operatingPoint == 0 && output == ReferenceOutput.PRE_GRAIN) {
+                return testCase.selector();
+            }
+            return testCase.selector() + " [op=" + operatingPoint + ", output=" + output.selector() + "]";
+        }
     }
 
     /// Identifies one selected Argon stream and its category.

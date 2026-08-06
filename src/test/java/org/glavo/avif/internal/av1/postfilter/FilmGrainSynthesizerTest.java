@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -60,7 +61,11 @@ final class FilmGrainSynthesizerTest {
                 PostfilterTestFixtures.disabledFilmGrain()
         );
 
-        DecodedPlanes result = new FilmGrainSynthesizer().apply(decodedPlanes, frameHeader);
+        DecodedPlanes result = new FilmGrainSynthesizer().apply(
+                decodedPlanes,
+                frameHeader,
+                colorConfig(decodedPlanes, 2)
+        );
 
         assertSame(decodedPlanes, result);
     }
@@ -110,8 +115,8 @@ final class FilmGrainSynthesizerTest {
         );
 
         FilmGrainSynthesizer synthesizer = new FilmGrainSynthesizer();
-        DecodedPlanes first = synthesizer.apply(decodedPlanes, frameHeader);
-        DecodedPlanes second = synthesizer.apply(decodedPlanes, frameHeader);
+        DecodedPlanes first = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
+        DecodedPlanes second = synthesizer.apply(decodedPlanes, frameHeader, colorConfig(decodedPlanes, 2));
 
         assertNotSame(decodedPlanes, first);
         assertEquals(first.lumaPlane().sample(0, 0), second.lumaPlane().sample(0, 0));
@@ -121,8 +126,8 @@ final class FilmGrainSynthesizerTest {
         assertEquals(128, decodedPlanes.lumaPlane().sample(0, 0));
     }
 
-    /// Verifies that restricted-range clipping keeps synthesized samples inside the legal studio
-    /// swing bounds while changing at least one unrestricted presentation sample.
+    /// Verifies restricted-range clipping, including the luma ceiling required for identity-matrix
+    /// chroma, while changing at least one unrestricted presentation sample.
     @Test
     void applyClipsSynthesizedSamplesToRestrictedRange() {
         DecodedPlanes decodedPlanes = PostfilterTestFixtures.createDecodedPlanes(
@@ -174,10 +179,24 @@ final class FilmGrainSynthesizerTest {
         );
 
         FilmGrainSynthesizer synthesizer = new FilmGrainSynthesizer();
-        DecodedPlanes unrestricted = synthesizer.apply(decodedPlanes, unrestrictedFrameHeader);
-        DecodedPlanes restricted = synthesizer.apply(decodedPlanes, restrictedFrameHeader);
+        DecodedPlanes unrestricted = synthesizer.apply(
+                decodedPlanes,
+                unrestrictedFrameHeader,
+                colorConfig(decodedPlanes, 2)
+        );
+        DecodedPlanes restricted = synthesizer.apply(
+                decodedPlanes,
+                restrictedFrameHeader,
+                colorConfig(decodedPlanes, 2)
+        );
+        DecodedPlanes identityMatrixRestricted = synthesizer.apply(
+                decodedPlanes,
+                restrictedFrameHeader,
+                colorConfig(decodedPlanes, 0)
+        );
 
         boolean changedByRestrictedClipping = false;
+        boolean usedNonIdentityChromaHeadroom = false;
         for (int y = 0; y < restricted.lumaPlane().height(); y++) {
             for (int x = 0; x < restricted.lumaPlane().width(); x++) {
                 int restrictedSample = restricted.lumaPlane().sample(x, y);
@@ -196,6 +215,11 @@ final class FilmGrainSynthesizerTest {
                 assertTrue(restrictedCbSample <= 240);
                 assertTrue(restrictedCrSample >= 16);
                 assertTrue(restrictedCrSample <= 240);
+                assertTrue(identityMatrixRestricted.chromaUPlane().sample(x, y) <= 235);
+                assertTrue(identityMatrixRestricted.chromaVPlane().sample(x, y) <= 235);
+                if (restrictedCbSample > 235 || restrictedCrSample > 235) {
+                    usedNonIdentityChromaHeadroom = true;
+                }
                 if (restrictedCbSample != unrestricted.chromaUPlane().sample(x, y)
                         || restrictedCrSample != unrestricted.chromaVPlane().sample(x, y)) {
                     changedByRestrictedClipping = true;
@@ -204,6 +228,7 @@ final class FilmGrainSynthesizerTest {
         }
 
         assertTrue(changedByRestrictedClipping);
+        assertTrue(usedNonIdentityChromaHeadroom);
     }
 
     /// Verifies that block-based luma grain covers overlapped block rows and columns while keeping
@@ -274,7 +299,11 @@ final class FilmGrainSynthesizerTest {
                 )
         );
 
-        DecodedPlanes result = new FilmGrainSynthesizer().apply(decodedPlanes, frameHeader);
+        DecodedPlanes result = new FilmGrainSynthesizer().apply(
+                decodedPlanes,
+                frameHeader,
+                colorConfig(decodedPlanes, 2)
+        );
 
         assertTrue(countChangedVisibleSamples(decodedPlanes.lumaPlane(), result.lumaPlane()) > 16);
         assertPaddingEquals(999, result.lumaPlane(), width, stride);
@@ -363,11 +392,38 @@ final class FilmGrainSynthesizerTest {
                 )
         );
 
-        DecodedPlanes result = new FilmGrainSynthesizer().apply(decodedPlanes, frameHeader);
+        DecodedPlanes result = new FilmGrainSynthesizer().apply(
+                decodedPlanes,
+                frameHeader,
+                colorConfig(decodedPlanes, 2)
+        );
 
         assertEquals(0, countChangedVisibleSamples(decodedPlanes.lumaPlane(), result.lumaPlane()));
         assertTrue(countChangedVisibleSamples(decodedPlanes.chromaUPlane(), result.chromaUPlane()) > 0);
         assertTrue(countChangedVisibleSamples(decodedPlanes.chromaVPlane(), result.chromaVPlane()) > 0);
+    }
+
+    /// Creates a color configuration matching one decoded-plane fixture.
+    ///
+    /// @param planes the decoded planes whose bit depth and chroma layout are copied
+    /// @param matrixCoefficients the AV1 matrix-coefficients code
+    /// @return the matching color configuration
+    private static SequenceHeader.ColorConfig colorConfig(DecodedPlanes planes, int matrixCoefficients) {
+        AvifPixelFormat pixelFormat = planes.pixelFormat();
+        return new SequenceHeader.ColorConfig(
+                planes.bitDepth(),
+                pixelFormat == AvifPixelFormat.I400,
+                true,
+                2,
+                2,
+                matrixCoefficients,
+                false,
+                pixelFormat,
+                0,
+                pixelFormat == AvifPixelFormat.I420 || pixelFormat == AvifPixelFormat.I422,
+                pixelFormat == AvifPixelFormat.I420,
+                false
+        );
     }
 
     /// Counts changed visible samples between two planes.

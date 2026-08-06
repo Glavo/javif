@@ -302,6 +302,12 @@ tasks.register<Test>("argonAv1Test") {
     providers.gradleProperty("argonAv1Shard").orNull?.let { selectedShard ->
         systemProperty("org.glavo.avif.argon.shard", selectedShard)
     }
+    providers.gradleProperty("argonAv1OperatingPoint").orNull?.let { selectedOperatingPoint ->
+        systemProperty("org.glavo.avif.argon.operatingPoint", selectedOperatingPoint)
+    }
+    providers.gradleProperty("argonAv1Output").orNull?.let { selectedOutput ->
+        systemProperty("org.glavo.avif.argon.output", selectedOutput)
+    }
     providers.gradleProperty("argonAv1Jfr").orNull?.let { recordingPath ->
         val recordingFile = layout.projectDirectory.file(recordingPath).asFile
         val recordingRepository = layout.buildDirectory.dir("jfr-repository").get().asFile

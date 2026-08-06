@@ -756,7 +756,8 @@ public final class Av1ImageReader implements AutoCloseable {
         }
         DecodedPlanes presentationPlanes = applyPresentationFilters(
                 Objects.requireNonNull(postprocessedPlanes, "postprocessedPlanes"),
-                frameHeader
+                frameHeader,
+                assembly.sequenceHeader().colorConfig()
         );
         lastPlanes = presentationPlanes;
         return PendingOutput.normal(
@@ -1335,7 +1336,11 @@ public final class Av1ImageReader implements AutoCloseable {
         if (!FrameOutputPolicy.shouldOutputExistingFrame(referencedFrameHeader, config)) {
             return null;
         }
-        DecodedPlanes presentationPlanes = applyPresentationFilters(referenceSurfaceSnapshot.decodedPlanes(), referencedFrameHeader);
+        DecodedPlanes presentationPlanes = applyPresentationFilters(
+                referenceSurfaceSnapshot.decodedPlanes(),
+                referencedFrameHeader,
+                referenceSurfaceSnapshot.frameSyntaxState().sequenceHeader().colorConfig()
+        );
         lastPlanes = presentationPlanes;
         return PendingOutput.existing(
                 presentationPlanes,
@@ -1369,12 +1374,18 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param decodedPlanes the post-filter, post-super-resolution, pre-grain planes
     /// @param frameHeader the normalized frame header that owns the output
+    /// @param colorConfig the sequence color configuration associated with the output surface
     /// @return the presentation planes after output-only processing
-    private DecodedPlanes applyPresentationFilters(DecodedPlanes decodedPlanes, FrameHeader frameHeader) {
+    private DecodedPlanes applyPresentationFilters(
+            DecodedPlanes decodedPlanes,
+            FrameHeader frameHeader,
+            SequenceHeader.ColorConfig colorConfig
+    ) {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
+        SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         if (FrameOutputPolicy.requiresFilmGrainSynthesis(checkedFrameHeader, config)) {
-            return filmGrainSynthesizer.apply(checkedDecodedPlanes, checkedFrameHeader);
+            return filmGrainSynthesizer.apply(checkedDecodedPlanes, checkedFrameHeader, checkedColorConfig);
         }
         return checkedDecodedPlanes;
     }

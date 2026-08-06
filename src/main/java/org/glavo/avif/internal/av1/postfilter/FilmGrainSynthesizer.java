@@ -17,6 +17,7 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.AvifPixelFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
+import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.recon.DecodedPlane;
 import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -66,6 +67,9 @@ public final class FilmGrainSynthesizer {
     /// The XOR seed offset for the Cr grain table.
     private static final int CHROMA_CR_SEED_OFFSET = 0x49D8;
 
+    /// The AV1 matrix-coefficients code whose chroma planes use the luma restricted range.
+    private static final int MATRIX_IDENTITY = 0;
+
     /// The compressed AV1 Gaussian sequence from the AV1 specification.
     private static final String GAUSSIAN_SEQUENCE_GZIP_BASE64 = """
             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
@@ -78,10 +82,16 @@ public final class FilmGrainSynthesizer {
     ///
     /// @param decodedPlanes the post-filter, pre-grain planes to present
     /// @param frameHeader the normalized frame header that owns the grain parameters
+    /// @param colorConfig the active sequence color configuration
     /// @return the grain-applied presentation planes
-    public DecodedPlanes apply(DecodedPlanes decodedPlanes, FrameHeader frameHeader) {
+    public DecodedPlanes apply(
+            DecodedPlanes decodedPlanes,
+            FrameHeader frameHeader,
+            SequenceHeader.ColorConfig colorConfig
+    ) {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
+        SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         FrameHeader.FilmGrainParams filmGrain = checkedFrameHeader.filmGrain();
         if (!filmGrain.applyGrain()) {
             return checkedDecodedPlanes;
@@ -100,6 +110,7 @@ public final class FilmGrainSynthesizer {
             AvifPixelFormat pixelFormat = checkedDecodedPlanes.pixelFormat();
             int subsamplingX = chromaSubsamplingX(pixelFormat);
             int subsamplingY = chromaSubsamplingY(pixelFormat);
+            boolean identityMatrixCoefficients = checkedColorConfig.matrixCoefficients() == MATRIX_IDENTITY;
             DecodedPlane sourceLumaPlane = checkedDecodedPlanes.lumaPlane();
 
             DecodedPlane sourceChromaUPlane = Objects.requireNonNull(chromaUPlane, "chromaUPlane");
@@ -113,7 +124,8 @@ public final class FilmGrainSynthesizer {
                     lumaGrain,
                     CHROMA_CB,
                     subsamplingX,
-                    subsamplingY
+                    subsamplingY,
+                    identityMatrixCoefficients
             );
             chromaVPlane = applyChromaPlaneIfNeeded(
                     sourceChromaVPlane,
@@ -124,7 +136,8 @@ public final class FilmGrainSynthesizer {
                     lumaGrain,
                     CHROMA_CR,
                     subsamplingX,
-                    subsamplingY
+                    subsamplingY,
+                    identityMatrixCoefficients
             );
         }
 
@@ -152,6 +165,7 @@ public final class FilmGrainSynthesizer {
     /// @param chromaPlaneIndex the AV1 chroma plane index, `0` for Cb and `1` for Cr
     /// @param subsamplingX the horizontal chroma subsampling shift
     /// @param subsamplingY the vertical chroma subsampling shift
+    /// @param identityMatrixCoefficients whether chroma uses the luma restricted range
     /// @return the grain-applied chroma plane, or an unchanged copy when the plane has no active grain
     private static DecodedPlane applyChromaPlaneIfNeeded(
             DecodedPlane chromaPlane,
@@ -162,7 +176,8 @@ public final class FilmGrainSynthesizer {
             int[][] lumaGrain,
             int chromaPlaneIndex,
             int subsamplingX,
-            int subsamplingY
+            int subsamplingY,
+            boolean identityMatrixCoefficients
     ) {
         FrameHeader.FilmGrainPoint[] points = chromaPlaneIndex == CHROMA_CB
                 ? filmGrain.cbPoints()
@@ -191,7 +206,8 @@ public final class FilmGrainSynthesizer {
                 chromaGrain,
                 chromaPlaneIndex,
                 subsamplingX,
-                subsamplingY
+                subsamplingY,
+                identityMatrixCoefficients
         );
     }
 
@@ -307,6 +323,7 @@ public final class FilmGrainSynthesizer {
     /// @param chromaPlaneIndex the AV1 chroma plane index
     /// @param subsamplingX the horizontal chroma subsampling shift
     /// @param subsamplingY the vertical chroma subsampling shift
+    /// @param identityMatrixCoefficients whether chroma uses the luma restricted range
     /// @return the grain-applied chroma plane
     private static DecodedPlane applyChromaGrain(
             DecodedPlane chromaPlane,
@@ -317,7 +334,8 @@ public final class FilmGrainSynthesizer {
             int[][] grainLookup,
             int chromaPlaneIndex,
             int subsamplingX,
-            int subsamplingY
+            int subsamplingY,
+            boolean identityMatrixCoefficients
     ) {
         short[] outputSamples = chromaPlane.samples();
         int rowCount = (lumaPlane.height() + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -333,6 +351,7 @@ public final class FilmGrainSynthesizer {
                     chromaPlaneIndex,
                     subsamplingX,
                     subsamplingY,
+                    identityMatrixCoefficients,
                     row
             );
         }
@@ -351,6 +370,7 @@ public final class FilmGrainSynthesizer {
     /// @param chromaPlaneIndex the AV1 chroma plane index
     /// @param subsamplingX the horizontal chroma subsampling shift
     /// @param subsamplingY the vertical chroma subsampling shift
+    /// @param identityMatrixCoefficients whether chroma uses the luma restricted range
     /// @param rowNumber the zero-based film-grain block row
     private static void applyChromaGrainRow(
             DecodedPlane chromaPlane,
@@ -363,6 +383,7 @@ public final class FilmGrainSynthesizer {
             int chromaPlaneIndex,
             int subsamplingX,
             int subsamplingY,
+            boolean identityMatrixCoefficients,
             int rowNumber
     ) {
         int blockY = (rowNumber * BLOCK_SIZE) >> subsamplingY;
@@ -376,7 +397,11 @@ public final class FilmGrainSynthesizer {
         int[] seeds = createBlockRowSeeds(filmGrain.grainSeed(), rowNumber, rowOffsetCount);
         int[][] offsets = new int[2][2];
         int minimumSample = restrictedRangeMinimum(bitDepth, filmGrain.clipToRestrictedRange());
-        int maximumSample = restrictedRangeMaximum(bitDepth, false, filmGrain.clipToRestrictedRange());
+        int maximumSample = restrictedRangeMaximum(
+                bitDepth,
+                identityMatrixCoefficients,
+                filmGrain.clipToRestrictedRange()
+        );
         int grainMinimum = -(128 << (bitDepth - 8));
         int grainMaximum = (128 << (bitDepth - 8)) - 1;
         int chromaBlockSize = BLOCK_SIZE >> subsamplingX;
@@ -905,14 +930,14 @@ public final class FilmGrainSynthesizer {
     /// Returns the inclusive maximum sample after optional restricted-range clipping.
     ///
     /// @param bitDepth the decoded bit depth
-    /// @param lumaPlane whether the target plane is luma instead of chroma
+    /// @param useLumaRange whether the restricted-range maximum is 235 rather than 240
     /// @param restrictedRange whether restricted-range clipping is enabled
     /// @return the inclusive maximum sample after optional restricted-range clipping
-    private static int restrictedRangeMaximum(int bitDepth, boolean lumaPlane, boolean restrictedRange) {
+    private static int restrictedRangeMaximum(int bitDepth, boolean useLumaRange, boolean restrictedRange) {
         if (!restrictedRange) {
             return (1 << bitDepth) - 1;
         }
-        return (lumaPlane ? 235 : 240) << (bitDepth - 8);
+        return (useLumaRange ? 235 : 240) << (bitDepth - 8);
     }
 
     /// Rounds one signed integer by a power-of-two divisor with positive bias.

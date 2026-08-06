@@ -3458,7 +3458,8 @@ final class Av1ImageReaderTest {
         assertNotNull(decodedFrame);
         DecodedPlanes synthesizedPlanes = new FilmGrainSynthesizer().apply(
                 referenceSurfaceSnapshot.decodedPlanes(),
-                referenceSurfaceSnapshot.frameHeader()
+                referenceSurfaceSnapshot.frameHeader(),
+                referenceSurfaceSnapshot.frameSyntaxState().sequenceHeader().colorConfig()
         );
         assertDecodedStillPictureFrameMetadata(
                 decodedFrame,
