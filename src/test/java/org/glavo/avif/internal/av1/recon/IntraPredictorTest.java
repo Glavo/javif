@@ -21,8 +21,14 @@ import org.glavo.avif.internal.av1.model.UvIntraPredictionMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for the currently supported intra-prediction paths.
@@ -30,6 +36,63 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class IntraPredictorTest {
     /// The predictor under test with storage isolated to this test instance.
     private final IntraPredictor predictor = new IntraPredictor();
+
+    /// Verifies that lazily allocated directional references remain owned by the predictor across
+    /// a sequential thread handoff.
+    ///
+    /// @throws InterruptedException if the test thread is interrupted while awaiting the worker
+    /// @throws ExecutionException if directional prediction fails on the worker
+    @Test
+    void reusesDirectionalWorkspaceAfterSequentialThreadHandoff()
+            throws InterruptedException, ExecutionException {
+        int x = 3;
+        int y = 3;
+        int[] top = {21, 64, 93, 137, 82, 149, 205, 171};
+        int[] left = {34, 58, 101, 88, 145, 179, 152, 214};
+        MutablePlaneBuffer initialPlane = new MutablePlaneBuffer(12, 12, 8);
+        seedDirectionalReferences(initialPlane, x, y, 77, top, left);
+        int[][] expected = DirectionalIntraPredictionOracle.predictLuma(
+                initialPlane,
+                x,
+                y,
+                4,
+                4,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                1
+        );
+        predictor.predictLuma(
+                initialPlane,
+                x,
+                y,
+                4,
+                4,
+                LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                1
+        );
+        Object initialWorkspace = predictionWorkspace(predictor);
+        FutureTask<MutablePlaneBuffer> workerTask = new FutureTask<>(() -> {
+            MutablePlaneBuffer workerPlane = new MutablePlaneBuffer(12, 12, 8);
+            seedDirectionalReferences(workerPlane, x, y, 77, top, left);
+            predictor.predictLuma(
+                    workerPlane,
+                    x,
+                    y,
+                    4,
+                    4,
+                    LumaIntraPredictionMode.DIAGONAL_DOWN_LEFT,
+                    1
+            );
+            return workerPlane;
+        });
+        Thread worker = new Thread(workerTask, "intra-prediction-workspace-handoff");
+
+        worker.start();
+        MutablePlaneBuffer workerPlane = workerTask.get();
+
+        assertSame(initialWorkspace, predictionWorkspace(predictor));
+        assertBlockEquals(initialPlane, x, y, expected);
+        assertBlockEquals(workerPlane, x, y, expected);
+    }
 
     /// Verifies that DC prediction averages the available top and left reference samples.
     @Test
@@ -1067,6 +1130,20 @@ final class IntraPredictorTest {
         }
         for (int i = 0; i < left.length; i++) {
             plane.setSample(x - 1, y + i, left[i]);
+        }
+    }
+
+    /// Returns the lazily allocated reference workspace of one predictor.
+    ///
+    /// @param predictor the predictor whose workspace should already be initialized
+    /// @return the predictor-owned reference workspace
+    private static Object predictionWorkspace(IntraPredictor predictor) {
+        try {
+            Field field = IntraPredictor.class.getDeclaredField("predictionWorkspace");
+            field.setAccessible(true);
+            return Objects.requireNonNull(field.get(predictor), "prediction workspace");
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Failed to inspect the predictor workspace", exception);
         }
     }
 

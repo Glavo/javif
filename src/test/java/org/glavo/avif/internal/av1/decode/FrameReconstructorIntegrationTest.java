@@ -61,6 +61,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -138,6 +141,66 @@ final class FrameReconstructorIntegrationTest {
         assertEquals(128, decodedPlanes.chromaUPlane().sample(3, 3));
         assertEquals(128, decodedPlanes.chromaVPlane().sample(0, 0));
         assertEquals(128, decodedPlanes.chromaVPlane().sample(3, 3));
+    }
+
+    /// Verifies that one reconstructor retains usable intra and inverse-transform workspaces when
+    /// sequential decoding moves to another thread.
+    ///
+    /// @throws InterruptedException if the test thread is interrupted while awaiting the worker
+    /// @throws ExecutionException if reconstruction fails on the worker
+    @Test
+    void reusesReconstructionWorkspacesAfterSequentialThreadHandoff()
+            throws InterruptedException, ExecutionException {
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
+                AvifPixelFormat.I400,
+                createLeaf(false, false)
+        );
+        FrameReconstructor reconstructor = new FrameReconstructor();
+        DecodedPlanes expected = reconstructor.reconstruct(syntaxDecodeResult);
+        FutureTask<DecodedPlanes> workerTask = new FutureTask<>(
+                () -> reconstructor.reconstruct(syntaxDecodeResult)
+        );
+        Thread worker = new Thread(workerTask, "frame-reconstructor-workspace-handoff");
+
+        worker.start();
+        DecodedPlanes actual = workerTask.get();
+
+        assertDecodedPlanesEqual(expected, actual);
+    }
+
+    /// Verifies that separate reconstructors can decode concurrently without sharing mutable
+    /// prediction or transform state.
+    ///
+    /// @throws InterruptedException if the test thread is interrupted while awaiting a worker
+    /// @throws ExecutionException if reconstruction fails on a worker
+    @Test
+    void separateFrameReconstructorsDecodeConcurrentlyWithIndependentWorkspaces()
+            throws InterruptedException, ExecutionException {
+        FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(
+                AvifPixelFormat.I400,
+                createLeaf(false, false)
+        );
+        DecodedPlanes expected = new FrameReconstructor().reconstruct(syntaxDecodeResult);
+        CountDownLatch startGate = new CountDownLatch(1);
+        FutureTask<DecodedPlanes> firstTask = repeatedReconstructionTask(
+                new FrameReconstructor(),
+                syntaxDecodeResult,
+                startGate
+        );
+        FutureTask<DecodedPlanes> secondTask = repeatedReconstructionTask(
+                new FrameReconstructor(),
+                syntaxDecodeResult,
+                startGate
+        );
+        Thread firstWorker = new Thread(firstTask, "frame-reconstructor-independent-1");
+        Thread secondWorker = new Thread(secondTask, "frame-reconstructor-independent-2");
+
+        firstWorker.start();
+        secondWorker.start();
+        startGate.countDown();
+
+        assertDecodedPlanesEqual(expected, firstTask.get());
+        assertDecodedPlanesEqual(expected, secondTask.get());
     }
 
     /// Verifies that one synthetic monochrome luma-palette leaf now reconstructs through the
@@ -2503,6 +2566,30 @@ final class FrameReconstructorIntegrationTest {
         );
     }
 
+    /// Creates a worker task that begins at a shared gate and repeatedly reconstructs one frame.
+    ///
+    /// Repetition increases the opportunity for incorrectly shared mutable scratch storage to
+    /// affect either concurrent decoder without introducing timing assertions.
+    ///
+    /// @param reconstructor the independently owned frame reconstructor
+    /// @param syntaxDecodeResult the immutable frame syntax to reconstruct
+    /// @param startGate the gate that releases concurrent workers
+    /// @return the task that returns its final reconstructed frame
+    private static FutureTask<DecodedPlanes> repeatedReconstructionTask(
+            FrameReconstructor reconstructor,
+            FrameSyntaxDecodeResult syntaxDecodeResult,
+            CountDownLatch startGate
+    ) {
+        return new FutureTask<>(() -> {
+            startGate.await();
+            DecodedPlanes result = reconstructor.reconstruct(syntaxDecodeResult);
+            for (int iteration = 1; iteration < 32; iteration++) {
+                result = reconstructor.reconstruct(syntaxDecodeResult);
+            }
+            return result;
+        });
+    }
+
     /// Creates one synthetic partition-tree leaf.
     ///
     /// @param allZeroResidual whether the synthetic residual unit should be all-zero
@@ -4209,6 +4296,29 @@ final class FrameReconstructorIntegrationTest {
             for (int x = 0; x < plane.width(); x++) {
                 assertEquals(expectedSample, plane.sample(x, y));
             }
+        }
+    }
+
+    /// Asserts that two decoded-plane sets have identical metadata and visible samples.
+    ///
+    /// @param expected the expected decoded planes
+    /// @param actual the actual decoded planes
+    private static void assertDecodedPlanesEqual(DecodedPlanes expected, DecodedPlanes actual) {
+        assertEquals(expected.bitDepth(), actual.bitDepth());
+        assertEquals(expected.pixelFormat(), actual.pixelFormat());
+        assertEquals(expected.codedWidth(), actual.codedWidth());
+        assertEquals(expected.codedHeight(), actual.codedHeight());
+        assertEquals(expected.renderWidth(), actual.renderWidth());
+        assertEquals(expected.renderHeight(), actual.renderHeight());
+        assertPlanesEqual(expected.lumaPlane(), actual.lumaPlane());
+        if (expected.hasChroma()) {
+            assertTrue(actual.hasChroma());
+            assertPlanesEqual(requirePlane(expected.chromaUPlane()), requirePlane(actual.chromaUPlane()));
+            assertPlanesEqual(requirePlane(expected.chromaVPlane()), requirePlane(actual.chromaVPlane()));
+        } else {
+            assertFalse(actual.hasChroma());
+            assertNull(actual.chromaUPlane());
+            assertNull(actual.chromaVPlane());
         }
     }
 

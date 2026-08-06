@@ -21,6 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -66,6 +68,25 @@ final class InverseTransformerTest {
                 transformer.coefficientBuffer(TransformSize.TX_4X4),
                 otherTransformer.coefficientBuffer(TransformSize.TX_4X4)
         );
+    }
+
+    /// Verifies that one transformer's coefficient storage follows it across a sequential thread
+    /// handoff instead of being replaced by thread-owned state.
+    ///
+    /// @throws InterruptedException if the test thread is interrupted while awaiting the worker
+    /// @throws ExecutionException if the worker cannot obtain the coefficient buffer
+    @Test
+    void reusesCoefficientWorkspaceAfterSequentialThreadHandoff()
+            throws InterruptedException, ExecutionException {
+        int[] initialBuffer = transformer.coefficientBuffer(TransformSize.TX_8X8);
+        FutureTask<int[]> workerTask = new FutureTask<>(
+                () -> transformer.coefficientBuffer(TransformSize.TX_8X8)
+        );
+        Thread worker = new Thread(workerTask, "inverse-transform-workspace-handoff");
+
+        worker.start();
+
+        assertSame(initialBuffer, workerTask.get());
     }
 
     /// Verifies that `TX_4X4` DC-only `DCT_DCT` reconstruction yields one constant residual block.
@@ -321,6 +342,44 @@ final class InverseTransformerTest {
                 InvalidFrameReconstructionException.class,
                 () -> transformer.reconstructResidualBlock(
                         coefficients,
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        8,
+                        true
+                )
+        );
+    }
+
+    /// Verifies that a strict staged-transform failure does not poison later reconstruction on the
+    /// same transformer instance.
+    @Test
+    void remainsUsableAfterStrictInverseTransformFailure() {
+        int[] oversizedCoefficients = new int[16];
+        oversizedCoefficients[0] = 1_000_000;
+        int[] validCoefficients = new int[16];
+        validCoefficients[0] = 128;
+        int[] expected = new InverseTransformer().reconstructResidualBlock(
+                validCoefficients,
+                TransformSize.TX_4X4,
+                TransformType.DCT_DCT,
+                8,
+                true
+        );
+
+        assertThrows(
+                InvalidFrameReconstructionException.class,
+                () -> transformer.reconstructResidualBlock(
+                        oversizedCoefficients,
+                        TransformSize.TX_4X4,
+                        TransformType.DCT_DCT,
+                        8,
+                        true
+                )
+        );
+        assertArrayEquals(
+                expected,
+                transformer.reconstructResidualBlock(
+                        validCoefficients,
                         TransformSize.TX_4X4,
                         TransformType.DCT_DCT,
                         8,
