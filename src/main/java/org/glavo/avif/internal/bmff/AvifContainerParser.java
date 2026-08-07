@@ -24,6 +24,8 @@ import org.glavo.avif.AvifGainMapInfo;
 import org.glavo.avif.AvifGainMapMetadata;
 import org.glavo.avif.AvifImageInfo;
 import org.glavo.avif.AvifImageItemProperty;
+import org.glavo.avif.AvifImageTransformInfo;
+import org.glavo.avif.AvifSequenceInfo;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifSignedFraction;
 import org.glavo.avif.AvifUnsignedFraction;
@@ -189,8 +191,12 @@ public final class AvifContainerParser {
                 ispe.height
         );
         MetadataPayloads metadata = collectMetadataPayloads(primaryItem);
-        int[] transformParams = extractTransformParams(primaryItem, ispe.width, ispe.height);
-        DisplaySize displaySize = transformedDisplaySize(ispe.width, ispe.height, transformParams);
+        @Nullable AvifImageTransformInfo transformInfo = extractTransformInfo(
+                primaryItem,
+                ispe.width,
+                ispe.height
+        );
+        DisplaySize displaySize = transformedDisplaySize(ispe.width, ispe.height, transformInfo);
         GainMapPayloads gainMapPayloads = gainMapPayloads(primaryItem.id);
         AvifImageInfo info = new AvifImageInfo(
                 displaySize.width(),
@@ -199,27 +205,17 @@ public final class AvifContainerParser {
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(av1Config.bitDepth()),
                 av1Config.chromaFormat(),
+                null,
+                transformInfo,
+                null,
+                auxiliaryImages(primaryItem.id, ispe.width, ispe.height),
                 alphaPayloads.present(),
-                false,
-                1,
+                alphaPremultiplied,
+                gainMapPayloads.info,
                 primaryItem.firstProperty(AvifColorInfo.class),
                 metadata.iccProfile,
                 metadata.exif,
                 metadata.xmp,
-                0,
-                0,
-                null,
-                transformParams[0],
-                transformParams[1],
-                transformParams[2],
-                transformParams[3],
-                transformParams[4],
-                transformParams[5],
-                null,
-                auxiliaryImages(primaryItem.id, ispe.width, ispe.height),
-                gainMapPayloads.info,
-                AvifImageInfo.REPETITION_COUNT_UNKNOWN,
-                alphaPremultiplied,
                 opaqueItemProperties(primaryItem)
         );
 
@@ -279,11 +275,15 @@ public final class AvifContainerParser {
                 alphaPayloads.present()
         );
         MetadataPayloads metadata = collectMetadataPayloads(gridItem);
-        int[] transforms = extractTransformParams(gridItem, colorGrid.outputWidth, colorGrid.outputHeight);
+        @Nullable AvifImageTransformInfo transformInfo = extractTransformInfo(
+                gridItem,
+                colorGrid.outputWidth,
+                colorGrid.outputHeight
+        );
         DisplaySize displaySize = transformedDisplaySize(
                 colorGrid.outputWidth,
                 colorGrid.outputHeight,
-                transforms
+                transformInfo
         );
         GainMapPayloads gainMapPayloads = gainMapPayloads(gridItem.id);
 
@@ -294,27 +294,17 @@ public final class AvifContainerParser {
                         ? sampleTransform.bitDepth()
                         : AvifBitDepth.fromBits(colorGrid.representativeAv1C.bitDepth()),
                 colorGrid.representativeAv1C.chromaFormat(),
+                null,
+                transformInfo,
+                null,
+                auxiliaryImages(gridItem.id, colorGrid.outputWidth, colorGrid.outputHeight),
                 alphaPayloads.present(),
-                false,
-                1,
+                alphaPremultiplied,
+                gainMapPayloads.info,
                 gridItem.firstProperty(AvifColorInfo.class),
                 metadata.iccProfile,
                 metadata.exif,
                 metadata.xmp,
-                0,
-                0,
-                null,
-                transforms[0],
-                transforms[1],
-                transforms[2],
-                transforms[3],
-                transforms[4],
-                transforms[5],
-                null,
-                auxiliaryImages(gridItem.id, colorGrid.outputWidth, colorGrid.outputHeight),
-                gainMapPayloads.info,
-                AvifImageInfo.REPETITION_COUNT_UNKNOWN,
-                alphaPremultiplied,
                 opaqueItemProperties(gridItem)
         );
 
@@ -1221,13 +1211,17 @@ public final class AvifContainerParser {
         return Arrays.copyOfRange(payload, 4, payload.length);
     }
 
-    /// Extracts transform parameters from the properties of one item.
+    /// Extracts typed image-transform metadata from the properties of one item.
     ///
     /// @param item the item whose properties are searched
     /// @param imageWidth the image width before clap
     /// @param imageHeight the image height before clap
-    /// @return an array of [clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis]
-    private static int[] extractTransformParams(Item item, int imageWidth, int imageHeight) {
+    /// @return the normalized image-transform metadata, or `null` when no transform is present
+    private static @Nullable AvifImageTransformInfo extractTransformInfo(
+            Item item,
+            int imageWidth,
+            int imageHeight
+    ) {
         int clapCropX = -1;
         int clapCropY = -1;
         int clapCropWidth = -1;
@@ -1277,19 +1271,37 @@ public final class AvifContainerParser {
             mirrorAxis = imir.axis;
         }
 
-        return new int[]{clapCropX, clapCropY, clapCropWidth, clapCropHeight, rotationCode, mirrorAxis};
+        if (clapCropX == -1 && rotationCode == -1 && mirrorAxis == -1) {
+            return null;
+        }
+        return new AvifImageTransformInfo(
+                clapCropX,
+                clapCropY,
+                clapCropWidth,
+                clapCropHeight,
+                rotationCode,
+                mirrorAxis
+        );
     }
 
     /// Returns the display dimensions after applying clean-aperture cropping and rotation.
     ///
     /// @param imageWidth the image width before item transforms
     /// @param imageHeight the image height before item transforms
-    /// @param transformParams the normalized transform parameters returned by [#extractTransformParams(Item, int, int)]
+    /// @param transformInfo the normalized transform metadata, or `null` when no transform is present
     /// @return the transformed display dimensions
-    private static DisplaySize transformedDisplaySize(int imageWidth, int imageHeight, int[] transformParams) {
-        int width = transformParams[2] > 0 ? transformParams[2] : imageWidth;
-        int height = transformParams[3] > 0 ? transformParams[3] : imageHeight;
-        int rotationCode = transformParams[4];
+    private static DisplaySize transformedDisplaySize(
+            int imageWidth,
+            int imageHeight,
+            @Nullable AvifImageTransformInfo transformInfo
+    ) {
+        int width = transformInfo != null && transformInfo.hasCleanApertureCrop()
+                ? transformInfo.cleanApertureCropWidth()
+                : imageWidth;
+        int height = transformInfo != null && transformInfo.hasCleanApertureCrop()
+                ? transformInfo.cleanApertureCropHeight()
+                : imageHeight;
+        int rotationCode = transformInfo == null ? -1 : transformInfo.rotationCode();
         return rotationCode == 1 || rotationCode == 3
                 ? new DisplaySize(height, width)
                 : new DisplaySize(width, height);
@@ -1927,27 +1939,25 @@ public final class AvifContainerParser {
                 s.height > 0 ? s.height : 1,
                 AvifBitDepth.fromBits(s.bitDepth > 0 ? s.bitDepth : 8),
                 s.chromaFormat != null ? s.chromaFormat : Av1ChromaFormat.YUV420,
+                new AvifSequenceInfo(
+                        colorPayloads.sampleCount,
+                        ts,
+                        dur,
+                        repetitionCount,
+                        colorPayloads.frameDeltas
+                ),
+                null,
+                meta.moovAuxiliaryTypes.toArray(String[]::new),
+                null,
                 alphaPayloads != null,
-                true,
-                colorPayloads.sampleCount,
+                sequenceAlphaPremultiplied(),
+                null,
                 s.colr,
                 s.iccProfile,
                 null,
                 null,
-                ts,
-                dur,
-                colorPayloads.frameDeltas,
-                -1,
-                -1,
-                -1,
-                -1,
-                -1,
-                -1,
-                meta.moovAuxiliaryTypes.toArray(String[]::new),
-                null,
-                null,
-                repetitionCount,
-                sequenceAlphaPremultiplied());
+                null
+        );
         return new AvifContainer(info,
                 colorPayloads.payloads,
                 alphaPayloads,

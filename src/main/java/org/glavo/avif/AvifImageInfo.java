@@ -44,32 +44,8 @@ public final class AvifImageInfo {
     private final boolean alphaPresent;
     /// Whether color samples are premultiplied by the alpha auxiliary image.
     private final boolean alphaPremultiplied;
-    /// Whether the input is an animated image sequence.
-    private final boolean animated;
-    /// The number of frames advertised by the container.
-    private final int frameCount;
-    /// The media timescale for animated sequences, or zero when absent.
-    private final int mediaTimescale;
-    /// The total media duration in media timescale units, or zero when absent.
-    private final long mediaDuration;
-    /// The repetition count for animated sequences.
-    private final int repetitionCount;
-    /// Per-frame durations in media timescale units.
-    private final int @Unmodifiable [] frameDurations;
     /// The typed sequence descriptor for animated inputs, or `null` for still images.
     private final @Nullable AvifSequenceInfo sequenceInfo;
-    /// The clean-aperture crop x coordinate, or -1 when absent.
-    private final int cleanApertureCropX;
-    /// The clean-aperture crop y coordinate, or -1 when absent.
-    private final int cleanApertureCropY;
-    /// The clean-aperture crop width, or -1 when absent.
-    private final int cleanApertureCropWidth;
-    /// The clean-aperture crop height, or -1 when absent.
-    private final int cleanApertureCropHeight;
-    /// The AVIF `irot` rotation code, or -1 when absent.
-    private final int rotationCode;
-    /// The AVIF `imir` mirror axis, or -1 when absent.
-    private final int mirrorAxis;
     /// The typed image-transform descriptor, or `null` when no image transform is present.
     private final @Nullable AvifImageTransformInfo transformInfo;
     /// Auxiliary image type strings associated with the primary image.
@@ -89,585 +65,45 @@ public final class AvifImageInfo {
     /// Opaque item properties associated with the primary image item.
     private final AvifImageItemProperty @Unmodifiable [] itemProperties;
 
-    /// Creates image metadata.
+    /// Creates immutable image metadata.
     ///
     /// @param width the display width in pixels
     /// @param height the display height in pixels
     /// @param bitDepth the decoded bit depth
     /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo
-    ) {
-        this(width, height, bitDepth, chromaFormat, alphaPresent, animated, frameCount, colorInfo, null, null, null);
-    }
-
-    /// Creates image metadata with embedded ICC, Exif, and XMP payloads.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp
-    ) {
-        this(
-                width,
-                height,
-                bitDepth,
-                chromaFormat,
-                alphaPresent,
-                animated,
-                frameCount,
-                colorInfo,
-                iccProfile,
-                exif,
-                xmp,
-                0,
-                0,
-                null
-        );
-    }
-
-    /// Creates image metadata with embedded metadata payloads and sequence timing.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
-    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            int mediaTimescale,
-            long mediaDuration,
-            int @Nullable [] frameDurations
-    ) {
-        this(
-                width,
-                height,
-                bitDepth,
-                chromaFormat,
-                alphaPresent,
-                animated,
-                frameCount,
-                colorInfo,
-                iccProfile,
-                exif,
-                xmp,
-                mediaTimescale,
-                mediaDuration,
-                frameDurations,
-                -1,
-                -1,
-                -1,
-                -1,
-                -1,
-                -1,
-                null
-        );
-    }
-
-    /// Creates image metadata with embedded metadata payloads, sequence timing, transforms, and auxiliary types.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
-    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
-    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
-    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
-    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
-    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            int mediaTimescale,
-            long mediaDuration,
-            int @Nullable [] frameDurations,
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight,
-            int rotationCode,
-            int mirrorAxis,
-            String @Nullable [] auxiliaryImageTypes
-    ) {
-        this(
-                width,
-                height,
-                bitDepth,
-                chromaFormat,
-                alphaPresent,
-                animated,
-                frameCount,
-                colorInfo,
-                iccProfile,
-                exif,
-                xmp,
-                mediaTimescale,
-                mediaDuration,
-                frameDurations,
-                cleanApertureCropX,
-                cleanApertureCropY,
-                cleanApertureCropWidth,
-                cleanApertureCropHeight,
-                rotationCode,
-                mirrorAxis,
-                auxiliaryImageTypes,
-                null
-        );
-    }
-
-    /// Creates image metadata with embedded metadata payloads, sequence timing, transforms, and auxiliary metadata.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
-    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
-    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
-    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
-    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
-    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
-    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
-    @SuppressWarnings("checkstyle:ParameterNumber")
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            int mediaTimescale,
-            long mediaDuration,
-            int @Nullable [] frameDurations,
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight,
-            int rotationCode,
-            int mirrorAxis,
-            String @Nullable [] auxiliaryImageTypes,
-            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages
-    ) {
-        this(
-                width,
-                height,
-                bitDepth,
-                chromaFormat,
-                alphaPresent,
-                animated,
-                frameCount,
-                colorInfo,
-                iccProfile,
-                exif,
-                xmp,
-                mediaTimescale,
-                mediaDuration,
-                frameDurations,
-                cleanApertureCropX,
-                cleanApertureCropY,
-                cleanApertureCropWidth,
-                cleanApertureCropHeight,
-                rotationCode,
-                mirrorAxis,
-                auxiliaryImageTypes,
-                auxiliaryImages,
-                null
-        );
-    }
-
-    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, and gain-map metadata.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
-    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
-    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
-    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
-    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
-    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
-    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
+    /// @param sequenceInfo the sequence descriptor, or `null` for a still image
+    /// @param transformInfo the image-transform descriptor, or `null` when no transform is present
+    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null` to derive
+    /// them from `auxiliaryImages`
+    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null` when absent
+    /// @param alphaPresent whether an alpha image is present; alpha auxiliary metadata also implies this value
+    /// @param alphaPremultiplied whether color samples are premultiplied by an alpha auxiliary image; ignored when no
+    /// alpha auxiliary image is present
     /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
+    /// @param colorInfo the parsed color information, or `null`
+    /// @param iccProfile the embedded ICC profile payload, or `null`; the array is copied
+    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`; the array
+    /// is copied
+    /// @param xmp the embedded XMP metadata payload, or `null`; the array is copied
+    /// @param itemProperties opaque item properties associated with the primary image item, or `null` when absent; the
+    /// array is copied
     @SuppressWarnings("checkstyle:ParameterNumber")
     public AvifImageInfo(
             int width,
             int height,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            int mediaTimescale,
-            long mediaDuration,
-            int @Nullable [] frameDurations,
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight,
-            int rotationCode,
-            int mirrorAxis,
+            @Nullable AvifSequenceInfo sequenceInfo,
+            @Nullable AvifImageTransformInfo transformInfo,
             String @Nullable [] auxiliaryImageTypes,
             AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
-            @Nullable AvifGainMapInfo gainMapInfo
-    ) {
-        this(
-                width,
-                height,
-                bitDepth,
-                chromaFormat,
-                alphaPresent,
-                animated,
-                frameCount,
-                colorInfo,
-                iccProfile,
-                exif,
-                xmp,
-                mediaTimescale,
-                mediaDuration,
-                frameDurations,
-                cleanApertureCropX,
-                cleanApertureCropY,
-                cleanApertureCropWidth,
-                cleanApertureCropHeight,
-                rotationCode,
-                mirrorAxis,
-                auxiliaryImageTypes,
-                auxiliaryImages,
-                gainMapInfo,
-                REPETITION_COUNT_UNKNOWN
-        );
-    }
-
-    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, gain-map metadata,
-    /// and sequence repetition metadata.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
-    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
-    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
-    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
-    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
-    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
-    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
-    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
-    /// @param repetitionCount the animated-sequence repetition count, `REPETITION_COUNT_UNKNOWN`, or
-    /// `REPETITION_COUNT_INFINITE`
-    @SuppressWarnings("checkstyle:ParameterNumber")
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
             boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            int mediaTimescale,
-            long mediaDuration,
-            int @Nullable [] frameDurations,
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight,
-            int rotationCode,
-            int mirrorAxis,
-            String @Nullable [] auxiliaryImageTypes,
-            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
-            @Nullable AvifGainMapInfo gainMapInfo,
-            int repetitionCount
-    ) {
-        this(
-                width,
-                height,
-                bitDepth,
-                chromaFormat,
-                alphaPresent,
-                animated,
-                frameCount,
-                colorInfo,
-                iccProfile,
-                exif,
-                xmp,
-                mediaTimescale,
-                mediaDuration,
-                frameDurations,
-                cleanApertureCropX,
-                cleanApertureCropY,
-                cleanApertureCropWidth,
-                cleanApertureCropHeight,
-                rotationCode,
-                mirrorAxis,
-                auxiliaryImageTypes,
-                auxiliaryImages,
-                gainMapInfo,
-                repetitionCount,
-                false
-        );
-    }
-
-    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, gain-map metadata,
-    /// sequence repetition metadata, and alpha premultiplication metadata.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
-    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
-    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
-    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
-    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
-    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
-    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
-    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
-    /// @param repetitionCount the animated-sequence repetition count, `REPETITION_COUNT_UNKNOWN`, or
-    /// `REPETITION_COUNT_INFINITE`
-    /// @param alphaPremultiplied whether color samples are premultiplied by the alpha auxiliary image
-    @SuppressWarnings("checkstyle:ParameterNumber")
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            int mediaTimescale,
-            long mediaDuration,
-            int @Nullable [] frameDurations,
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight,
-            int rotationCode,
-            int mirrorAxis,
-            String @Nullable [] auxiliaryImageTypes,
-            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
-            @Nullable AvifGainMapInfo gainMapInfo,
-            int repetitionCount,
-            boolean alphaPremultiplied
-    ) {
-        this(
-                width,
-                height,
-                bitDepth,
-                chromaFormat,
-                alphaPresent,
-                animated,
-                frameCount,
-                colorInfo,
-                iccProfile,
-                exif,
-                xmp,
-                mediaTimescale,
-                mediaDuration,
-                frameDurations,
-                cleanApertureCropX,
-                cleanApertureCropY,
-                cleanApertureCropWidth,
-                cleanApertureCropHeight,
-                rotationCode,
-                mirrorAxis,
-                auxiliaryImageTypes,
-                auxiliaryImages,
-                gainMapInfo,
-                repetitionCount,
-                alphaPremultiplied,
-                null
-        );
-    }
-
-    /// Creates image metadata with embedded metadata payloads, transforms, auxiliary metadata, gain-map metadata,
-    /// sequence repetition metadata, alpha premultiplication metadata, and opaque item property metadata.
-    ///
-    /// @param width the display width in pixels
-    /// @param height the display height in pixels
-    /// @param bitDepth the decoded bit depth
-    /// @param chromaFormat the AV1 chroma sampling layout
-    /// @param alphaPresent whether an alpha auxiliary image is present
-    /// @param animated whether the input is an animated image sequence
-    /// @param frameCount the number of frames advertised by the container
-    /// @param colorInfo the parsed color information, or `null`
-    /// @param iccProfile the embedded ICC profile payload, or `null`
-    /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`
-    /// @param xmp the embedded XMP metadata payload, or `null`
-    /// @param mediaTimescale the media timescale for animated sequences, or zero when absent
-    /// @param mediaDuration the total media duration in media timescale units, or zero when absent
-    /// @param frameDurations per-frame durations in media timescale units, or `null` when absent
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate, or -1 when absent
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate, or -1 when absent
-    /// @param cleanApertureCropWidth the clean-aperture crop width, or -1 when absent
-    /// @param cleanApertureCropHeight the clean-aperture crop height, or -1 when absent
-    /// @param rotationCode the AVIF `irot` rotation code, or -1 when absent
-    /// @param mirrorAxis the AVIF `imir` mirror axis, or -1 when absent
-    /// @param auxiliaryImageTypes auxiliary image type strings associated with the primary image, or `null`
-    /// @param auxiliaryImages auxiliary image descriptors associated with the primary image, or `null`
-    /// @param gainMapInfo the gain-map descriptor associated with the primary image, or `null`
-    /// @param repetitionCount the animated-sequence repetition count, `REPETITION_COUNT_UNKNOWN`, or
-    /// `REPETITION_COUNT_INFINITE`
-    /// @param alphaPremultiplied whether color samples are premultiplied by the alpha auxiliary image
-    /// @param itemProperties opaque item properties associated with the primary image item, or `null`
-    @SuppressWarnings("checkstyle:ParameterNumber")
-    public AvifImageInfo(
-            int width,
-            int height,
-            AvifBitDepth bitDepth,
-            Av1ChromaFormat chromaFormat,
-            boolean alphaPresent,
-            boolean animated,
-            int frameCount,
-            @Nullable AvifColorInfo colorInfo,
-            byte @Nullable [] iccProfile,
-            byte @Nullable [] exif,
-            byte @Nullable [] xmp,
-            int mediaTimescale,
-            long mediaDuration,
-            int @Nullable [] frameDurations,
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight,
-            int rotationCode,
-            int mirrorAxis,
-            String @Nullable [] auxiliaryImageTypes,
-            AvifAuxiliaryImageInfo @Nullable [] auxiliaryImages,
-            @Nullable AvifGainMapInfo gainMapInfo,
-            int repetitionCount,
             boolean alphaPremultiplied,
+            @Nullable AvifGainMapInfo gainMapInfo,
+            @Nullable AvifColorInfo colorInfo,
+            byte @Nullable [] iccProfile,
+            byte @Nullable [] exif,
+            byte @Nullable [] xmp,
             AvifImageItemProperty @Nullable [] itemProperties
     ) {
         if (width <= 0) {
@@ -676,77 +112,21 @@ public final class AvifImageInfo {
         if (height <= 0) {
             throw new IllegalArgumentException("height <= 0: " + height);
         }
-        if (frameCount <= 0) {
-            throw new IllegalArgumentException("frameCount <= 0: " + frameCount);
-        }
-        if (mediaTimescale < 0) {
-            throw new IllegalArgumentException("mediaTimescale < 0: " + mediaTimescale);
-        }
-        if (mediaDuration < 0) {
-            throw new IllegalArgumentException("mediaDuration < 0: " + mediaDuration);
-        }
-        if (!isAbsentCleanAperture(cleanApertureCropX, cleanApertureCropY, cleanApertureCropWidth, cleanApertureCropHeight)
-                && (cleanApertureCropX < 0 || cleanApertureCropY < 0
-                || cleanApertureCropWidth <= 0 || cleanApertureCropHeight <= 0)) {
-            throw new IllegalArgumentException("Invalid clean-aperture crop parameters");
-        }
-        if (rotationCode < -1 || rotationCode > 3) {
-            throw new IllegalArgumentException("rotationCode must be -1 or between 0 and 3: " + rotationCode);
-        }
-        if (mirrorAxis < -1 || mirrorAxis > 1) {
-            throw new IllegalArgumentException("mirrorAxis must be -1, 0, or 1: " + mirrorAxis);
-        }
-        if (repetitionCount < 0
-                && repetitionCount != REPETITION_COUNT_UNKNOWN
-                && repetitionCount != REPETITION_COUNT_INFINITE) {
-            throw new IllegalArgumentException("Invalid repetition count: " + repetitionCount);
-        }
-
-        int @Unmodifiable [] checkedFrameDurations = immutableFrameDurations(frameDurations);
-        if (checkedFrameDurations.length != 0 && checkedFrameDurations.length != frameCount) {
-            throw new IllegalArgumentException(
-                    "frameDurations length must match frameCount: " + checkedFrameDurations.length
-            );
-        }
-
         this.width = width;
         this.height = height;
         this.bitDepth = Objects.requireNonNull(bitDepth, "bitDepth");
         this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
-        this.alphaPresent = alphaPresent;
-        this.alphaPremultiplied = alphaPresent && alphaPremultiplied;
-        this.animated = animated;
-        this.frameCount = frameCount;
-        this.mediaTimescale = mediaTimescale;
-        this.mediaDuration = mediaDuration;
-        this.repetitionCount = repetitionCount;
-        this.frameDurations = checkedFrameDurations;
-        this.sequenceInfo = animated ? new AvifSequenceInfo(
-                frameCount,
-                mediaTimescale,
-                mediaDuration,
-                repetitionCount,
-                checkedFrameDurations
-        ) : null;
-        this.cleanApertureCropX = cleanApertureCropX;
-        this.cleanApertureCropY = cleanApertureCropY;
-        this.cleanApertureCropWidth = cleanApertureCropWidth;
-        this.cleanApertureCropHeight = cleanApertureCropHeight;
-        this.rotationCode = rotationCode;
-        this.mirrorAxis = mirrorAxis;
-        this.transformInfo = imageTransformInfo(
-                cleanApertureCropX,
-                cleanApertureCropY,
-                cleanApertureCropWidth,
-                cleanApertureCropHeight,
-                rotationCode,
-                mirrorAxis
-        );
+        this.sequenceInfo = sequenceInfo;
+        this.transformInfo = transformInfo;
         AvifAuxiliaryImageInfo @Unmodifiable [] checkedAuxiliaryImages = immutableAuxiliaryImages(auxiliaryImages);
         this.auxiliaryImageTypes = auxiliaryImageTypes != null
                 ? immutableAuxiliaryImageTypes(auxiliaryImageTypes)
                 : auxiliaryImageTypesFromDescriptors(checkedAuxiliaryImages);
         this.auxiliaryImages = checkedAuxiliaryImages;
+        this.alphaPresent = alphaPresent
+                || containsAuxiliaryImageType(this.auxiliaryImageTypes, AvifAuxiliaryImageInfo.ALPHA_TYPE)
+                || containsAlphaAuxiliaryImage(checkedAuxiliaryImages);
+        this.alphaPremultiplied = this.alphaPresent && alphaPremultiplied;
         this.gainMapInfo = gainMapInfo;
         this.colorInfo = colorInfo;
         this.iccProfile = immutableBytes(iccProfile);
@@ -804,14 +184,14 @@ public final class AvifImageInfo {
     ///
     /// @return whether the input is an animated image sequence
     public boolean animated() {
-        return animated;
+        return sequenceInfo != null;
     }
 
     /// Returns the number of frames advertised by the container.
     ///
     /// @return the number of frames advertised by the container
     public int frameCount() {
-        return frameCount;
+        return sequenceInfo == null ? 1 : sequenceInfo.frameCount();
     }
 
     /// Returns the media timescale for animated sequences.
@@ -820,7 +200,7 @@ public final class AvifImageInfo {
     ///
     /// @return the media timescale, or zero when absent
     public int mediaTimescale() {
-        return mediaTimescale;
+        return sequenceInfo == null ? 0 : sequenceInfo.mediaTimescale();
     }
 
     /// Returns the total media duration for animated sequences.
@@ -830,7 +210,7 @@ public final class AvifImageInfo {
     ///
     /// @return the total media duration, or zero when absent
     public long mediaDuration() {
-        return mediaDuration;
+        return sequenceInfo == null ? 0 : sequenceInfo.mediaDuration();
     }
 
     /// Returns the animated-sequence repetition count.
@@ -841,7 +221,7 @@ public final class AvifImageInfo {
     ///
     /// @return the repetition count, `REPETITION_COUNT_UNKNOWN`, or `REPETITION_COUNT_INFINITE`
     public int repetitionCount() {
-        return repetitionCount;
+        return sequenceInfo == null ? REPETITION_COUNT_UNKNOWN : sequenceInfo.repetitionCount();
     }
 
     /// Returns the typed animated-sequence descriptor.
@@ -860,14 +240,14 @@ public final class AvifImageInfo {
     ///
     /// @return per-frame durations in media timescale units
     public int @Unmodifiable [] frameDurations() {
-        return frameDurations.clone();
+        return sequenceInfo == null ? new int[0] : sequenceInfo.frameDurations();
     }
 
     /// Returns whether a clean-aperture crop is present.
     ///
     /// @return whether a clean-aperture crop is present
     public boolean hasCleanApertureCrop() {
-        return cleanApertureCropX >= 0;
+        return transformInfo != null && transformInfo.hasCleanApertureCrop();
     }
 
     /// Returns the clean-aperture crop x coordinate.
@@ -876,7 +256,7 @@ public final class AvifImageInfo {
     ///
     /// @return the clean-aperture crop x coordinate, or -1 when absent
     public int cleanApertureCropX() {
-        return cleanApertureCropX;
+        return transformInfo == null ? -1 : transformInfo.cleanApertureCropX();
     }
 
     /// Returns the clean-aperture crop y coordinate.
@@ -885,7 +265,7 @@ public final class AvifImageInfo {
     ///
     /// @return the clean-aperture crop y coordinate, or -1 when absent
     public int cleanApertureCropY() {
-        return cleanApertureCropY;
+        return transformInfo == null ? -1 : transformInfo.cleanApertureCropY();
     }
 
     /// Returns the clean-aperture crop width.
@@ -894,7 +274,7 @@ public final class AvifImageInfo {
     ///
     /// @return the clean-aperture crop width, or -1 when absent
     public int cleanApertureCropWidth() {
-        return cleanApertureCropWidth;
+        return transformInfo == null ? -1 : transformInfo.cleanApertureCropWidth();
     }
 
     /// Returns the clean-aperture crop height.
@@ -903,7 +283,7 @@ public final class AvifImageInfo {
     ///
     /// @return the clean-aperture crop height, or -1 when absent
     public int cleanApertureCropHeight() {
-        return cleanApertureCropHeight;
+        return transformInfo == null ? -1 : transformInfo.cleanApertureCropHeight();
     }
 
     /// Returns the AVIF `irot` rotation code.
@@ -913,7 +293,7 @@ public final class AvifImageInfo {
     ///
     /// @return the rotation code, or -1 when absent
     public int rotationCode() {
-        return rotationCode;
+        return transformInfo == null ? -1 : transformInfo.rotationCode();
     }
 
     /// Returns the AVIF `imir` mirror axis.
@@ -923,7 +303,7 @@ public final class AvifImageInfo {
     ///
     /// @return the mirror axis, or -1 when absent
     public int mirrorAxis() {
-        return mirrorAxis;
+        return transformInfo == null ? -1 : transformInfo.mirrorAxis();
     }
 
     /// Returns the typed AVIF image-transform descriptor.
@@ -1016,23 +396,6 @@ public final class AvifImageInfo {
         return ByteBuffer.wrap(Arrays.copyOf(bytes, bytes.length)).asReadOnlyBuffer();
     }
 
-    /// Creates immutable storage for optional frame-duration data.
-    ///
-    /// @param frameDurations the source frame durations, or `null`
-    /// @return immutable frame-duration storage
-    private static int @Unmodifiable [] immutableFrameDurations(int @Nullable [] frameDurations) {
-        if (frameDurations == null || frameDurations.length == 0) {
-            return new int[0];
-        }
-        int[] result = frameDurations.clone();
-        for (int duration : result) {
-            if (duration < 0) {
-                throw new IllegalArgumentException("frameDurations contains a negative duration: " + duration);
-            }
-        }
-        return result;
-    }
-
     /// Creates immutable storage for auxiliary image type strings.
     ///
     /// @param auxiliaryImageTypes the source auxiliary image type strings, or `null`
@@ -1110,54 +473,36 @@ public final class AvifImageInfo {
         return Arrays.copyOf(result, size);
     }
 
-    /// Returns whether clean-aperture parameters represent an absent property.
+    /// Returns whether an auxiliary image type list contains the requested type.
     ///
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate
-    /// @param cleanApertureCropWidth the clean-aperture crop width
-    /// @param cleanApertureCropHeight the clean-aperture crop height
-    /// @return whether the clean-aperture property is absent
-    private static boolean isAbsentCleanAperture(
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight
+    /// @param auxiliaryImageTypes the auxiliary image type strings
+    /// @param expectedType the type to find
+    /// @return whether the requested type is present
+    private static boolean containsAuxiliaryImageType(
+            String @Unmodifiable [] auxiliaryImageTypes,
+            String expectedType
     ) {
-        return cleanApertureCropX == -1
-                && cleanApertureCropY == -1
-                && cleanApertureCropWidth == -1
-                && cleanApertureCropHeight == -1;
+        for (String auxiliaryImageType : auxiliaryImageTypes) {
+            if (expectedType.equals(auxiliaryImageType)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    /// Creates typed image-transform metadata when any transform property is present.
+    /// Returns whether any auxiliary image descriptor represents alpha samples.
     ///
-    /// @param cleanApertureCropX the clean-aperture crop x coordinate
-    /// @param cleanApertureCropY the clean-aperture crop y coordinate
-    /// @param cleanApertureCropWidth the clean-aperture crop width
-    /// @param cleanApertureCropHeight the clean-aperture crop height
-    /// @param rotationCode the AVIF `irot` rotation code
-    /// @param mirrorAxis the AVIF `imir` mirror axis
-    /// @return typed image-transform metadata, or `null`
-    private static @Nullable AvifImageTransformInfo imageTransformInfo(
-            int cleanApertureCropX,
-            int cleanApertureCropY,
-            int cleanApertureCropWidth,
-            int cleanApertureCropHeight,
-            int rotationCode,
-            int mirrorAxis
+    /// @param auxiliaryImages the auxiliary image descriptors
+    /// @return whether an alpha auxiliary image is present
+    private static boolean containsAlphaAuxiliaryImage(
+            AvifAuxiliaryImageInfo @Unmodifiable [] auxiliaryImages
     ) {
-        if (isAbsentCleanAperture(cleanApertureCropX, cleanApertureCropY, cleanApertureCropWidth, cleanApertureCropHeight)
-                && rotationCode == -1 && mirrorAxis == -1) {
-            return null;
+        for (AvifAuxiliaryImageInfo auxiliaryImage : auxiliaryImages) {
+            if (auxiliaryImage.isAlpha()) {
+                return true;
+            }
         }
-        return new AvifImageTransformInfo(
-                cleanApertureCropX,
-                cleanApertureCropY,
-                cleanApertureCropWidth,
-                cleanApertureCropHeight,
-                rotationCode,
-                mirrorAxis
-        );
+        return false;
     }
 
     /// Returns a read-only view over immutable payload storage.
