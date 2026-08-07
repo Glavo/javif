@@ -256,9 +256,10 @@ final class AvifImageReaderTest {
     /// Verifies that the default packed pixel format follows the decoded source bit depth.
     @Test
     void pixelFormatDefaultsFollowSourceBitDepth() {
-        assertEquals(AvifPixelFormat.ARGB_8888, AvifPixelFormat.defaultFor(AvifBitDepth.EIGHT_BITS));
-        assertEquals(AvifPixelFormat.ARGB_16161616, AvifPixelFormat.defaultFor(AvifBitDepth.TEN_BITS));
-        assertEquals(AvifPixelFormat.ARGB_16161616, AvifPixelFormat.defaultFor(AvifBitDepth.TWELVE_BITS));
+        assertEquals(AvifPixelFormat.ARGB_8888, AvifBitDepth.EIGHT_BITS.defaultPixelFormat());
+        assertEquals(AvifPixelFormat.ARGB_16161616, AvifBitDepth.TEN_BITS.defaultPixelFormat());
+        assertEquals(AvifPixelFormat.ARGB_16161616, AvifBitDepth.TWELVE_BITS.defaultPixelFormat());
+        assertEquals(AvifPixelFormat.ARGB_16161616, AvifBitDepth.SIXTEEN_BITS.defaultPixelFormat());
     }
 
     /// Verifies that the output pixel format is automatic by default and can be reset to automatic.

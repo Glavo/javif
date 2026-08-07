@@ -21,22 +21,26 @@ import org.jetbrains.annotations.NotNullByDefault;
 @NotNullByDefault
 public enum AvifBitDepth {
     /// Eight bits per decoded sample.
-    EIGHT_BITS(8),
+    EIGHT_BITS(8, AvifPixelFormat.ARGB_8888),
     /// Ten bits per decoded sample.
-    TEN_BITS(10),
+    TEN_BITS(10, AvifPixelFormat.ARGB_16161616),
     /// Twelve bits per decoded sample.
-    TWELVE_BITS(12),
+    TWELVE_BITS(12, AvifPixelFormat.ARGB_16161616),
     /// Sixteen bits per reconstructed sample.
-    SIXTEEN_BITS(16);
+    SIXTEEN_BITS(16, AvifPixelFormat.ARGB_16161616);
 
     /// The decoded sample bit count.
     private final int bits;
+    /// The default packed output pixel format for this bit depth.
+    private final AvifPixelFormat defaultPixelFormat;
 
     /// Creates a supported decoded sample bit depth.
     ///
     /// @param bits the decoded sample bit count
-    AvifBitDepth(int bits) {
+    /// @param defaultPixelFormat the default packed output pixel format
+    AvifBitDepth(int bits, AvifPixelFormat defaultPixelFormat) {
         this.bits = bits;
+        this.defaultPixelFormat = defaultPixelFormat;
     }
 
     /// Returns the decoded sample bit count.
@@ -51,6 +55,15 @@ public enum AvifBitDepth {
     /// @return the largest sample value
     public int maxSampleValue() {
         return (1 << bits) - 1;
+    }
+
+    /// Returns the default packed output pixel format for this bit depth.
+    ///
+    /// Readers may use another format when the caller explicitly selects one.
+    ///
+    /// @return `ARGB_8888` for 8-bit samples, otherwise `ARGB_16161616`
+    public AvifPixelFormat defaultPixelFormat() {
+        return defaultPixelFormat;
     }
 
     /// Returns whether this is the 8-bit output path.

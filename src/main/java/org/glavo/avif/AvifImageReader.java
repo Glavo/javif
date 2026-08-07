@@ -856,7 +856,7 @@ public final class AvifImageReader implements AutoCloseable {
     ) throws AvifDecodeException {
         AvifPixelFormat pixelFormat = outputPixelFormat != null
                 ? outputPixelFormat
-                : AvifPixelFormat.defaultFor(planes.bitDepth());
+                : planes.bitDepth().defaultPixelFormat();
         try {
             YuvToRgbTransform transform = colorInfo != null
                     ? YuvToRgbTransform.fromColorInfo(colorInfo, planes.chromaFormat() == Av1ChromaFormat.MONOCHROME)
@@ -1671,7 +1671,7 @@ public final class AvifImageReader implements AutoCloseable {
     ) throws AvifDecodeException {
         AvifPixelFormat pixelFormat = outputPixelFormat != null
                 ? outputPixelFormat
-                : AvifPixelFormat.defaultFor(frame.bitDepth());
+                : frame.bitDepth().defaultPixelFormat();
         if (colorInfo != null && planes != null) {
             try {
                 return adaptFrameFromPlanes(frame, planes, colorInfo, frameIndex, pixelFormat);

@@ -23,13 +23,5 @@ public enum AvifPixelFormat {
     /// Stores each pixel in an `IntBuffer` element as `0xAARRGGBB`.
     ARGB_8888,
     /// Stores each pixel in a `LongBuffer` element as `0xAAAA_RRRR_GGGG_BBBB`.
-    ARGB_16161616;
-
-    /// Returns the default output format for a decoded source bit depth.
-    ///
-    /// @param bitDepth the decoded source bit depth
-    /// @return `ARGB_8888` for 8-bit sources, otherwise `ARGB_16161616`
-    public static AvifPixelFormat defaultFor(AvifBitDepth bitDepth) {
-        return bitDepth.isEightBit() ? ARGB_8888 : ARGB_16161616;
-    }
+    ARGB_16161616
 }

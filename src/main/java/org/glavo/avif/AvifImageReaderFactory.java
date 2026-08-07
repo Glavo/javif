@@ -72,7 +72,7 @@ public final class AvifImageReaderFactory {
 
     /// Returns the configured packed ARGB output format.
     ///
-    /// A `null` value selects [AvifPixelFormat#defaultFor(AvifBitDepth)] after the source bit depth
+    /// A `null` value selects [AvifBitDepth#defaultPixelFormat()] after the source bit depth
     /// is known.
     ///
     /// @return the configured output format, or `null` for automatic selection
