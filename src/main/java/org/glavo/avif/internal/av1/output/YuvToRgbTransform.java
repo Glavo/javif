@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.output;
 
 import org.glavo.avif.AvifColorInfo;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.internal.color.CicpColorPrimaries;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -211,8 +211,8 @@ public final class YuvToRgbTransform {
     /// @param colorConfig the AV1 color configuration
     /// @return the selected fixed-point YUV-to-RGB transform
     /// @throws UnsupportedOperationException if a chroma stream signals an unsupported explicit matrix family
-    public static YuvToRgbTransform fromColorConfig(SequenceHeader.ColorConfig colorConfig) {
-        SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
+    public static YuvToRgbTransform fromColorConfig(Av1ColorConfig colorConfig) {
+        Av1ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         boolean fullRange = checkedColorConfig.colorRange();
         return fromMatrixCoefficients(
                 checkedColorConfig.matrixCoefficients(),

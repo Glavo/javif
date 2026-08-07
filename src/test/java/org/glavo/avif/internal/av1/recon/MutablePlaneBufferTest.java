@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.decode.DecodedPlane;
 import org.glavo.avif.internal.av1.model.FilterIntraMode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;

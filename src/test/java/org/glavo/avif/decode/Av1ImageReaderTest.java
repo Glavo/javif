@@ -44,8 +44,6 @@ import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
 import org.glavo.avif.internal.av1.postfilter.FilmGrainSynthesizer;
 import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.internal.io.BufferedInput;
@@ -61,6 +59,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -153,11 +152,46 @@ final class Av1ImageReaderTest {
     /// @throws IOException if the reader cannot be closed
     @Test
     void readFrameReturnsNullAtEndOfStream() throws IOException {
-        try (Av1ImageReader reader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN))
-        )) {
+        try (Av1ImageReader reader = Av1ImageReader.open(ByteBuffer.allocate(0))) {
             assertNull(reader.readFrame());
         }
+    }
+
+    /// Verifies that the public byte-buffer entry point reads from an independent view.
+    ///
+    /// @throws IOException if the reader cannot consume the test stream
+    @Test
+    void byteBufferEntryPointPreservesCallerPositionAndLimit() throws IOException {
+        byte[] stream = obu(1, reducedStillPicturePayload());
+        ByteBuffer source = ByteBuffer.allocate(stream.length + 2);
+        source.put((byte) 0x55);
+        source.put(stream);
+        source.put((byte) 0x66);
+        source.flip();
+        source.position(1);
+        source.limit(1 + stream.length);
+        int originalPosition = source.position();
+        int originalLimit = source.limit();
+
+        try (Av1ImageReader reader = Av1ImageReader.open(source)) {
+            assertNull(reader.readFrame());
+        }
+
+        assertEquals(originalPosition, source.position());
+        assertEquals(originalLimit, source.limit());
+    }
+
+    /// Verifies that closing a reader closes a channel supplied through the public entry point.
+    ///
+    /// @throws IOException if the reader or channel cannot be closed
+    @Test
+    void channelEntryPointTransfersCloseOwnership() throws IOException {
+        TrackingChannel channel = new TrackingChannel(new byte[0]);
+        Av1ImageReader reader = Av1ImageReader.open(channel);
+
+        reader.close();
+
+        assertFalse(channel.isOpen());
     }
 
     /// Verifies that `close()` is idempotent.
@@ -269,9 +303,7 @@ final class Av1ImageReaderTest {
                 obu(6, reducedStillPictureCombinedFramePayload())
         ));
 
-        try (Av1ImageReader reader = Av1ImageReader.openAnnexB(
-                new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
-        )) {
+        try (Av1ImageReader reader = Av1ImageReader.openAnnexB(ByteBuffer.wrap(stream))) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
             assertNull(reader.readFrame());
         }
@@ -1798,7 +1830,7 @@ final class Av1ImageReaderTest {
                         false,
                         false
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         8,
                         false,
                         false,
@@ -1964,7 +1996,7 @@ final class Av1ImageReaderTest {
                         false,
                         false
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         8,
                         false,
                         false,
@@ -2858,7 +2890,7 @@ final class Av1ImageReaderTest {
         if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) {
             throw new IllegalArgumentException("Unsupported synthetic stored reference bit depth: " + bitDepth);
         }
-        SequenceHeader.ColorConfig baseColorConfig = baseSequenceHeader.colorConfig();
+        Av1ColorConfig baseColorConfig = baseSequenceHeader.colorConfig();
         int profile = switch (chromaFormat) {
             case YUV422 -> 2;
             case YUV444 -> bitDepth == 12 ? 2 : 1;
@@ -2894,7 +2926,7 @@ final class Av1ImageReaderTest {
                 baseSequenceHeader.deltaFrameIdBits(),
                 baseSequenceHeader.frameIdBits(),
                 baseSequenceHeader.features(),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         bitDepth,
                         baseColorConfig.monochrome(),
                         baseColorConfig.colorDescriptionPresent(),
@@ -5276,6 +5308,65 @@ final class Av1ImageReaderTest {
                 false,
                 false
         );
+    }
+
+    /// In-memory channel that records close propagation from a reader.
+    @NotNullByDefault
+    private static final class TrackingChannel implements ReadableByteChannel {
+        /// The unread source bytes.
+        private final ByteBuffer source;
+        /// Whether this channel remains open.
+        private boolean open = true;
+
+        /// Creates a channel over the supplied bytes.
+        ///
+        /// @param bytes the bytes to expose
+        private TrackingChannel(byte[] bytes) {
+            this.source = ByteBuffer.wrap(Objects.requireNonNull(bytes, "bytes"));
+        }
+
+        /// Reads source bytes into a destination buffer.
+        ///
+        /// @param destination the destination buffer
+        /// @return the transferred byte count, zero for a full destination, or `-1` at end-of-input
+        /// @throws IOException if the channel is closed
+        @Override
+        public int read(ByteBuffer destination) throws IOException {
+            Objects.requireNonNull(destination, "destination");
+            if (!open) {
+                throw new IOException("Channel is closed");
+            }
+            if (!destination.hasRemaining()) {
+                return 0;
+            }
+            if (!source.hasRemaining()) {
+                return -1;
+            }
+
+            int count = Math.min(destination.remaining(), source.remaining());
+            int originalLimit = source.limit();
+            source.limit(source.position() + count);
+            try {
+                destination.put(source);
+            } finally {
+                source.limit(originalLimit);
+            }
+            return count;
+        }
+
+        /// Returns whether this channel remains open.
+        ///
+        /// @return whether this channel remains open
+        @Override
+        public boolean isOpen() {
+            return open;
+        }
+
+        /// Closes this channel.
+        @Override
+        public void close() {
+            open = false;
+        }
     }
 
     /// Small MSB-first bit writer used to build AV1 test payloads.

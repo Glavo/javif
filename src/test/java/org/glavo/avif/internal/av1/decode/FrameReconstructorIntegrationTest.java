@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
@@ -45,8 +46,8 @@ import org.glavo.avif.internal.av1.parse.SequenceHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileBitstreamParser;
 import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.glavo.avif.testutil.HexFixtureResources;
@@ -5665,7 +5666,7 @@ final class FrameReconstructorIntegrationTest {
                         false,
                         false
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         8,
                         monochrome,
                         false,

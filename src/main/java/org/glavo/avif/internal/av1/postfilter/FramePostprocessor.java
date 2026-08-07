@@ -17,7 +17,7 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 

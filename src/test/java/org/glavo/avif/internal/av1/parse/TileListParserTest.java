@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.FrameType;
@@ -150,7 +151,7 @@ final class TileListParserTest {
                         false,
                         false
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         8,
                         false,
                         false,

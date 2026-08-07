@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.ReferenceFrameSyntaxState;
 import org.glavo.avif.internal.av1.model.FrameHeader;

@@ -26,8 +26,8 @@ import org.glavo.avif.internal.av1.model.SingleInterPredictionMode;
 import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 

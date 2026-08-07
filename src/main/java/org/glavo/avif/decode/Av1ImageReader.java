@@ -38,7 +38,6 @@ import org.glavo.avif.internal.av1.parse.TileGroupHeaderParser;
 import org.glavo.avif.internal.av1.parse.TileListParser;
 import org.glavo.avif.internal.av1.postfilter.FilmGrainSynthesizer;
 import org.glavo.avif.internal.av1.postfilter.FramePostprocessor;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.av1.recon.InvalidFrameReconstructionException;
 import org.glavo.avif.internal.av1.recon.LargeScaleTileOutputBuilder;
@@ -52,6 +51,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.ReadableByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -135,21 +136,50 @@ public final class Av1ImageReader implements AutoCloseable {
         this.filmGrainSynthesizer = new FilmGrainSynthesizer();
     }
 
-    /// Opens an AV1 image reader using the default decoder configuration.
+    /// Opens a low-overhead AV1 image reader over a byte channel.
     ///
-    /// @param source the forward-only buffered byte source
+    /// The returned reader owns and closes `source`.
+    ///
+    /// @param source the channel to read
     /// @return the new AV1 image reader
-    public static Av1ImageReader open(BufferedInput source) {
+    public static Av1ImageReader open(ReadableByteChannel source) {
         return open(source, Av1DecoderConfig.DEFAULT);
     }
 
-    /// Opens an AV1 image reader using the supplied decoder configuration.
+    /// Opens a low-overhead AV1 image reader over a byte channel.
     ///
-    /// @param source the forward-only buffered byte source
+    /// The returned reader owns and closes `source`.
+    ///
+    /// @param source the channel to read
     /// @param config the immutable decoder configuration
     /// @return the new AV1 image reader
-    public static Av1ImageReader open(BufferedInput source, Av1DecoderConfig config) {
-        return new Av1ImageReader(source, config, false);
+    public static Av1ImageReader open(ReadableByteChannel source, Av1DecoderConfig config) {
+        return new Av1ImageReader(bufferedInput(source), config, false);
+    }
+
+    /// Opens a low-overhead AV1 image reader over a byte buffer.
+    ///
+    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// It reads the remaining content without copying, so that content must not be modified until
+    /// the reader is closed.
+    ///
+    /// @param source the buffer to read
+    /// @return the new AV1 image reader
+    public static Av1ImageReader open(ByteBuffer source) {
+        return open(source, Av1DecoderConfig.DEFAULT);
+    }
+
+    /// Opens a low-overhead AV1 image reader over a byte buffer.
+    ///
+    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// It reads the remaining content without copying, so that content must not be modified until
+    /// the reader is closed.
+    ///
+    /// @param source the buffer to read
+    /// @param config the immutable decoder configuration
+    /// @return the new AV1 image reader
+    public static Av1ImageReader open(ByteBuffer source, Av1DecoderConfig config) {
+        return new Av1ImageReader(new BufferedInput.OfByteBuffer(source), config, false);
     }
 
     /// Opens an Annex B AV1 image reader using the default decoder configuration.
@@ -157,9 +187,9 @@ public final class Av1ImageReader implements AutoCloseable {
     /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
     /// Annex B of the AV1 bitstream specification. The returned reader owns and closes `source`.
     ///
-    /// @param source the forward-only buffered byte source
+    /// @param source the channel to read
     /// @return the new Annex B AV1 image reader
-    public static Av1ImageReader openAnnexB(BufferedInput source) {
+    public static Av1ImageReader openAnnexB(ReadableByteChannel source) {
         return openAnnexB(source, Av1DecoderConfig.DEFAULT);
     }
 
@@ -168,11 +198,50 @@ public final class Av1ImageReader implements AutoCloseable {
     /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
     /// Annex B of the AV1 bitstream specification. The returned reader owns and closes `source`.
     ///
-    /// @param source the forward-only buffered byte source
+    /// @param source the channel to read
     /// @param config the immutable decoder configuration
     /// @return the new Annex B AV1 image reader
-    public static Av1ImageReader openAnnexB(BufferedInput source, Av1DecoderConfig config) {
-        return new Av1ImageReader(source, config, true);
+    public static Av1ImageReader openAnnexB(ReadableByteChannel source, Av1DecoderConfig config) {
+        return new Av1ImageReader(bufferedInput(source), config, true);
+    }
+
+    /// Opens an Annex B AV1 image reader over a byte buffer.
+    ///
+    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// It reads the remaining content without copying, so that content must not be modified until
+    /// the reader is closed.
+    ///
+    /// @param source the buffer to read
+    /// @return the new Annex B AV1 image reader
+    public static Av1ImageReader openAnnexB(ByteBuffer source) {
+        return openAnnexB(source, Av1DecoderConfig.DEFAULT);
+    }
+
+    /// Opens an Annex B AV1 image reader over a byte buffer.
+    ///
+    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// It reads the remaining content without copying, so that content must not be modified until
+    /// the reader is closed.
+    ///
+    /// @param source the buffer to read
+    /// @param config the immutable decoder configuration
+    /// @return the new Annex B AV1 image reader
+    public static Av1ImageReader openAnnexB(ByteBuffer source, Av1DecoderConfig config) {
+        return new Av1ImageReader(new BufferedInput.OfByteBuffer(source), config, true);
+    }
+
+    /// Returns a buffered decoder input over a channel.
+    ///
+    /// Internal channel implementations are retained so container-provided unit boundaries remain
+    /// visible to the low-overhead OBU reader.
+    ///
+    /// @param source the channel to adapt
+    /// @return a buffered decoder input
+    private static BufferedInput bufferedInput(ReadableByteChannel source) {
+        ReadableByteChannel checkedSource = Objects.requireNonNull(source, "source");
+        return checkedSource instanceof BufferedInput bufferedInput
+                ? bufferedInput
+                : new BufferedInput.OfByteChannel(checkedSource);
     }
 
     /// Reads the next decoded frame from the source.
@@ -353,7 +422,7 @@ public final class Av1ImageReader implements AutoCloseable {
     /// Returns the color configuration from the active AV1 sequence header.
     ///
     /// @return the active color configuration, or `null` before a sequence header is parsed
-    public @Nullable SequenceHeader.ColorConfig lastColorConfig() {
+    public @Nullable Av1ColorConfig lastColorConfig() {
         SequenceHeader activeSequenceHeader = sequenceHeader;
         return activeSequenceHeader != null ? activeSequenceHeader.colorConfig() : null;
     }
@@ -810,8 +879,8 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param current the current sequence color configuration
     /// @return whether every reference-relevant color property matches
     private static boolean compatibleReferenceColorConfig(
-            SequenceHeader.ColorConfig stored,
-            SequenceHeader.ColorConfig current
+            Av1ColorConfig stored,
+            Av1ColorConfig current
     ) {
         return stored.bitDepth() == current.bitDepth()
                 && stored.monochrome() == current.monochrome()
@@ -1379,11 +1448,11 @@ public final class Av1ImageReader implements AutoCloseable {
     private DecodedPlanes applyPresentationFilters(
             DecodedPlanes decodedPlanes,
             FrameHeader frameHeader,
-            SequenceHeader.ColorConfig colorConfig
+            Av1ColorConfig colorConfig
     ) {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
-        SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
+        Av1ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         if (FrameOutputPolicy.requiresFilmGrainSynthesis(checkedFrameHeader, config)) {
             return filmGrainSynthesizer.apply(checkedDecodedPlanes, checkedFrameHeader, checkedColorConfig);
         }
@@ -1688,7 +1757,7 @@ public final class Av1ImageReader implements AutoCloseable {
     @NotNullByDefault
     private record PendingOutput(
             DecodedPlanes planes,
-            @Nullable SequenceHeader.ColorConfig colorConfig,
+            @Nullable Av1ColorConfig colorConfig,
             FrameHeader frameHeader,
             boolean showFrame,
             long presentationIndex,
@@ -1706,7 +1775,7 @@ public final class Av1ImageReader implements AutoCloseable {
         /// @return one pending output for a newly decoded frame
         private static PendingOutput normal(
                 DecodedPlanes planes,
-                SequenceHeader.ColorConfig colorConfig,
+                Av1ColorConfig colorConfig,
                 FrameHeader frameHeader,
                 boolean showFrame,
                 long presentationIndex,

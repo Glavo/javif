@@ -16,10 +16,10 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.Av1ChromaFormat;
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.MotionVector;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
@@ -53,7 +53,7 @@ final class IntrabcDisplacementValidator {
         BlockPosition nonNullPosition = Objects.requireNonNull(position, "position");
         BlockSize nonNullSize = Objects.requireNonNull(size, "size");
         MotionVector nonNullDisplacementVector = Objects.requireNonNull(displacementVector, "displacementVector");
-        SequenceHeader.ColorConfig colorConfig = nonNullTileContext.sequenceHeader().colorConfig();
+        Av1ColorConfig colorConfig = nonNullTileContext.sequenceHeader().colorConfig();
         int tileStartX4 = nonNullTileContext.startX() >> 2;
         int tileStartY4 = nonNullTileContext.startY() >> 2;
         if (!isValid(

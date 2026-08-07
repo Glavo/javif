@@ -15,6 +15,8 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;

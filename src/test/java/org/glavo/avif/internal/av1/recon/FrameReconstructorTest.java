@@ -15,6 +15,9 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -5263,7 +5266,7 @@ final class FrameReconstructorTest {
                         false,
                         false
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         bitDepth,
                         chromaFormat == Av1ChromaFormat.MONOCHROME,
                         false,

@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
@@ -34,8 +35,8 @@ import org.glavo.avif.internal.av1.model.TransformLayout;
 import org.glavo.avif.internal.av1.model.TransformResidualUnit;
 import org.glavo.avif.internal.av1.model.TransformSize;
 import org.glavo.avif.internal.av1.model.TransformUnit;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -592,7 +593,7 @@ final class PostfilterTestFixtures {
                         false,
                         false
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         8,
                         false,
                         false,

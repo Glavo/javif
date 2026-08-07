@@ -16,6 +16,7 @@
 package org.glavo.avif.internal.av1.model;
 
 import org.glavo.avif.Av1ChromaFormat;
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -53,7 +54,7 @@ public final class SequenceHeader {
     /// The feature flags enabled by the sequence.
     private final FeatureConfig features;
     /// The color and chroma configuration for the sequence.
-    private final ColorConfig colorConfig;
+    private final Av1ColorConfig colorConfig;
 
     /// Creates a parsed sequence header.
     ///
@@ -85,7 +86,7 @@ public final class SequenceHeader {
             int deltaFrameIdBits,
             int frameIdBits,
             FeatureConfig features,
-            ColorConfig colorConfig
+            Av1ColorConfig colorConfig
     ) {
         this.profile = profile;
         this.maxWidth = maxWidth;
@@ -212,7 +213,7 @@ public final class SequenceHeader {
     /// Returns the color and chroma configuration for the sequence.
     ///
     /// @return the color and chroma configuration
-    public ColorConfig colorConfig() {
+    public Av1ColorConfig colorConfig() {
         return colorConfig;
     }
 
@@ -517,161 +518,6 @@ public final class SequenceHeader {
         /// @return whether low-delay mode is enabled
         public boolean lowDelayMode() {
             return lowDelayMode;
-        }
-    }
-
-    /// Color and chroma configuration declared by the sequence.
-    @NotNullByDefault
-    public static final class ColorConfig {
-        /// The decoded bit depth.
-        private final int bitDepth;
-        /// Whether the sequence is monochrome.
-        private final boolean monochrome;
-        /// Whether explicit color description fields are present.
-        private final boolean colorDescriptionPresent;
-        /// The AV1 color primaries code.
-        private final int colorPrimaries;
-        /// The AV1 transfer characteristics code.
-        private final int transferCharacteristics;
-        /// The AV1 matrix coefficients code.
-        private final int matrixCoefficients;
-        /// Whether full-range color samples are used.
-        private final boolean colorRange;
-        /// The decoded chroma layout.
-        private final Av1ChromaFormat chromaFormat;
-        /// The AV1 chroma sample position code.
-        private final int chromaSamplePosition;
-        /// Whether chroma is subsampled horizontally.
-        private final boolean chromaSubsamplingX;
-        /// Whether chroma is subsampled vertically.
-        private final boolean chromaSubsamplingY;
-        /// Whether separate UV delta quantization is enabled.
-        private final boolean separateUvDeltaQ;
-
-        /// Creates a color and chroma configuration.
-        ///
-        /// @param bitDepth the decoded bit depth
-        /// @param monochrome whether the sequence is monochrome
-        /// @param colorDescriptionPresent whether explicit color description fields are present
-        /// @param colorPrimaries the AV1 color primaries code
-        /// @param transferCharacteristics the AV1 transfer characteristics code
-        /// @param matrixCoefficients the AV1 matrix coefficients code
-        /// @param colorRange whether full-range color samples are used
-        /// @param chromaFormat the decoded chroma layout
-        /// @param chromaSamplePosition the AV1 chroma sample position code
-        /// @param chromaSubsamplingX whether chroma is subsampled horizontally
-        /// @param chromaSubsamplingY whether chroma is subsampled vertically
-        /// @param separateUvDeltaQ whether separate UV delta quantization is enabled
-        public ColorConfig(
-                int bitDepth,
-                boolean monochrome,
-                boolean colorDescriptionPresent,
-                int colorPrimaries,
-                int transferCharacteristics,
-                int matrixCoefficients,
-                boolean colorRange,
-                Av1ChromaFormat chromaFormat,
-                int chromaSamplePosition,
-                boolean chromaSubsamplingX,
-                boolean chromaSubsamplingY,
-                boolean separateUvDeltaQ
-        ) {
-            this.bitDepth = bitDepth;
-            this.monochrome = monochrome;
-            this.colorDescriptionPresent = colorDescriptionPresent;
-            this.colorPrimaries = colorPrimaries;
-            this.transferCharacteristics = transferCharacteristics;
-            this.matrixCoefficients = matrixCoefficients;
-            this.colorRange = colorRange;
-            this.chromaFormat = Objects.requireNonNull(chromaFormat, "chromaFormat");
-            this.chromaSamplePosition = chromaSamplePosition;
-            this.chromaSubsamplingX = chromaSubsamplingX;
-            this.chromaSubsamplingY = chromaSubsamplingY;
-            this.separateUvDeltaQ = separateUvDeltaQ;
-        }
-
-        /// Returns the decoded bit depth.
-        ///
-        /// @return the decoded bit depth
-        public int bitDepth() {
-            return bitDepth;
-        }
-
-        /// Returns whether the sequence is monochrome.
-        ///
-        /// @return whether the sequence is monochrome
-        public boolean monochrome() {
-            return monochrome;
-        }
-
-        /// Returns whether explicit color description fields are present.
-        ///
-        /// @return whether explicit color description fields are present
-        public boolean colorDescriptionPresent() {
-            return colorDescriptionPresent;
-        }
-
-        /// Returns the AV1 color primaries code.
-        ///
-        /// @return the AV1 color primaries code
-        public int colorPrimaries() {
-            return colorPrimaries;
-        }
-
-        /// Returns the AV1 transfer characteristics code.
-        ///
-        /// @return the AV1 transfer characteristics code
-        public int transferCharacteristics() {
-            return transferCharacteristics;
-        }
-
-        /// Returns the AV1 matrix coefficients code.
-        ///
-        /// @return the AV1 matrix coefficients code
-        public int matrixCoefficients() {
-            return matrixCoefficients;
-        }
-
-        /// Returns whether full-range color samples are used.
-        ///
-        /// @return whether full-range color samples are used
-        public boolean colorRange() {
-            return colorRange;
-        }
-
-        /// Returns the decoded chroma layout.
-        ///
-        /// @return the decoded chroma layout
-        public Av1ChromaFormat chromaFormat() {
-            return chromaFormat;
-        }
-
-        /// Returns the AV1 chroma sample position code.
-        ///
-        /// @return the AV1 chroma sample position code
-        public int chromaSamplePosition() {
-            return chromaSamplePosition;
-        }
-
-        /// Returns whether chroma is subsampled horizontally.
-        ///
-        /// @return whether chroma is subsampled horizontally
-        public boolean chromaSubsamplingX() {
-            return chromaSubsamplingX;
-        }
-
-        /// Returns whether chroma is subsampled vertically.
-        ///
-        /// @return whether chroma is subsampled vertically
-        public boolean chromaSubsamplingY() {
-            return chromaSubsamplingY;
-        }
-
-        /// Returns whether separate UV delta quantization is enabled.
-        ///
-        /// @return whether separate UV delta quantization is enabled
-        public boolean separateUvDeltaQ() {
-            return separateUvDeltaQ;
         }
     }
 

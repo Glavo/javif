@@ -15,11 +15,11 @@
  */
 package org.glavo.avif.internal.av1.postfilter;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -408,9 +408,9 @@ final class FilmGrainSynthesizerTest {
     /// @param planes the decoded planes whose bit depth and chroma layout are copied
     /// @param matrixCoefficients the AV1 matrix-coefficients code
     /// @return the matching color configuration
-    private static SequenceHeader.ColorConfig colorConfig(DecodedPlanes planes, int matrixCoefficients) {
+    private static Av1ColorConfig colorConfig(DecodedPlanes planes, int matrixCoefficients) {
         Av1ChromaFormat chromaFormat = planes.chromaFormat();
-        return new SequenceHeader.ColorConfig(
+        return new Av1ColorConfig(
                 planes.bitDepth(),
                 chromaFormat == Av1ChromaFormat.MONOCHROME,
                 true,

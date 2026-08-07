@@ -16,12 +16,12 @@
 package org.glavo.avif.internal.av1.runtime;
 
 import org.glavo.avif.decode.DecodedFrame;
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.OutputFrameMetadata;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 
@@ -66,7 +66,7 @@ public final class OutputFrameFactory {
     /// @return one public decoded frame backed by the appropriate ARGB storage type
     public static DecodedFrame createFrame(
             DecodedPlanes decodedPlanes,
-            SequenceHeader.ColorConfig colorConfig,
+            Av1ColorConfig colorConfig,
             FrameHeader frameHeader,
             boolean visible,
             long presentationIndex

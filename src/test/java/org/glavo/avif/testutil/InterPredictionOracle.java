@@ -1,7 +1,7 @@
 package org.glavo.avif.testutil;
 
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 

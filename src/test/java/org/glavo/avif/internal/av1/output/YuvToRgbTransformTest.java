@@ -15,9 +15,9 @@
  */
 package org.glavo.avif.internal.av1.output;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.AvifColorInfo;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -186,7 +186,7 @@ final class YuvToRgbTransformTest {
     /// @param fullRange whether samples are full-range
     /// @param chromaFormat the decoded chroma layout
     /// @return one AV1 color configuration
-    private static SequenceHeader.ColorConfig colorConfig(
+    private static Av1ColorConfig colorConfig(
             int matrixCoefficients,
             boolean fullRange,
             Av1ChromaFormat chromaFormat
@@ -201,13 +201,13 @@ final class YuvToRgbTransformTest {
     /// @param fullRange whether samples are full-range
     /// @param chromaFormat the decoded chroma layout
     /// @return one AV1 color configuration
-    private static SequenceHeader.ColorConfig colorConfig(
+    private static Av1ColorConfig colorConfig(
             int colorPrimaries,
             int matrixCoefficients,
             boolean fullRange,
             Av1ChromaFormat chromaFormat
     ) {
-        return new SequenceHeader.ColorConfig(
+        return new Av1ColorConfig(
                 8,
                 chromaFormat == Av1ChromaFormat.MONOCHROME,
                 true,

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.internal.av1.recon;
+package org.glavo.avif.decode;
 
 import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -21,12 +21,10 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/// Immutable decoded-plane snapshot used by AV1 reconstruction and post-filtering stages.
+/// Immutable decoded-plane snapshot produced by AV1 decoding.
 ///
-/// This contract sits between reconstruction and public output conversion. Stored planes represent
-/// the current pipeline stage's sample domain; their width may therefore be either the coded width
-/// or the post-super-resolution width. The render dimensions are AV1 display hints and do not alter
-/// the stored plane dimensions.
+/// Stored planes contain the postprocessed presentation samples. The render dimensions are AV1
+/// display hints and do not crop or resample the stored planes.
 @NotNullByDefault
 public final class DecodedPlanes {
     /// The decoded bit depth.

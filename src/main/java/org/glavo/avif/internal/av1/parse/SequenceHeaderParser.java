@@ -18,6 +18,7 @@ package org.glavo.avif.internal.av1.parse;
 import org.glavo.avif.decode.DecodeErrorCode;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodeStage;
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -393,7 +394,7 @@ public final class SequenceHeaderParser {
                         restoration,
                         filmGrainPresent
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         bitDepth,
                         monochrome,
                         colorDescriptionPresent,

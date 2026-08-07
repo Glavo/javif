@@ -18,7 +18,6 @@ package org.glavo.avif.internal.io;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,7 +36,7 @@ import java.util.Objects;
 ///
 /// The class is not thread-safe.
 @NotNullByDefault
-public abstract class BufferedInput implements Closeable {
+public abstract class BufferedInput implements ReadableByteChannel {
     private static final int DEFAULT_BUFFER_SIZE = 8192;
 
     protected final ByteBuffer buffer;
@@ -293,6 +292,50 @@ public abstract class BufferedInput implements Closeable {
     public long currentUnitRemaining() throws IOException {
         ensureOpen();
         return -1L;
+    }
+
+    /// Reads available bytes into a destination buffer.
+    ///
+    /// The method returns after transferring the currently buffered bytes and does not attempt to
+    /// fill the destination completely. A zero-length destination produces zero without advancing
+    /// the input.
+    ///
+    /// @param destination the destination buffer
+    /// @return the number of bytes read, zero when the destination has no remaining space, or `-1`
+    ///         at end-of-input
+    /// @throws IOException if the input is closed or its backing source is unreadable
+    @Override
+    public final int read(ByteBuffer destination) throws IOException {
+        Objects.requireNonNull(destination, "destination");
+        ensureOpen();
+        if (!destination.hasRemaining()) {
+            return 0;
+        }
+        if (!buffer.hasRemaining()) {
+            try {
+                ensureBufferRemaining(1);
+            } catch (EOFException ignored) {
+                return -1;
+            }
+        }
+
+        int count = Math.min(destination.remaining(), buffer.remaining());
+        int originalLimit = buffer.limit();
+        buffer.limit(buffer.position() + count);
+        try {
+            destination.put(buffer);
+        } finally {
+            buffer.limit(originalLimit);
+        }
+        return count;
+    }
+
+    /// Returns whether this input remains open.
+    ///
+    /// @return `true` until [#close()] is called
+    @Override
+    public final boolean isOpen() {
+        return !closed;
     }
 
     /// `BufferedInput` backed by an `InputStream`.

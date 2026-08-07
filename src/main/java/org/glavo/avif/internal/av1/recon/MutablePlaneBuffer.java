@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
+import org.glavo.avif.decode.DecodedPlane;
 import org.jetbrains.annotations.NotNullByDefault;
 
 /// Mutable decoded-plane buffer used while reconstruction is still in progress.

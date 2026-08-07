@@ -16,14 +16,14 @@
 package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1ImageReader;
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.decode.DecodeErrorCode;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.YuvToRgbTransform;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
 import org.glavo.avif.internal.bmff.AvifImageSource;
@@ -605,7 +605,7 @@ public final class AvifImageReader implements AutoCloseable {
                 if (!matchesSelection) {
                     continue;
                 }
-                SequenceHeader.ColorConfig colorConfig = rawReader.lastColorConfig();
+                Av1ColorConfig colorConfig = rawReader.lastColorConfig();
                 if (colorConfig == null) {
                     throw new AvifDecodeException(
                             AvifErrorCode.AV1_DECODE_FAILED,
@@ -642,7 +642,7 @@ public final class AvifImageReader implements AutoCloseable {
     private DecodedSampleTransform decodeSampleTransform(SampleTransform sampleTransform, boolean alpha)
             throws IOException {
         AvifPlanes[] inputPlanes = new AvifPlanes[sampleTransform.inputCount()];
-        @Nullable SequenceHeader.ColorConfig primaryColorConfig = null;
+        @Nullable Av1ColorConfig primaryColorConfig = null;
         for (int inputIndex = 0; inputIndex < sampleTransform.inputCount(); inputIndex++) {
             SampleTransform.Input input = sampleTransform.input(inputIndex);
             @Nullable AvifImageSource source = alpha ? input.alphaSource() : input.colorSource();
@@ -709,7 +709,7 @@ public final class AvifImageReader implements AutoCloseable {
             );
         }
         AvifPlanes[] cellPlanes = new AvifPlanes[cellPayloads.length];
-        @Nullable SequenceHeader.ColorConfig colorConfig = null;
+        @Nullable Av1ColorConfig colorConfig = null;
         for (int cellIndex = 0; cellIndex < cellPayloads.length; cellIndex++) {
             DecodedRawImage decoded = decodeRawImage(
                     cellPayloads[cellIndex],
@@ -849,7 +849,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @throws AvifDecodeException if the selected color conversion is unsupported
     private static AvifFrame adaptRawPlanes(
             AvifPlanes planes,
-            SequenceHeader.ColorConfig av1ColorConfig,
+            Av1ColorConfig av1ColorConfig,
             @Nullable AvifColorInfo colorInfo,
             int frameIndex,
             @Nullable AvifPixelFormat outputPixelFormat
@@ -2091,7 +2091,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param planes the decoded raw planes
     /// @param colorConfig the active AV1 sequence-header color configuration
     @NotNullByDefault
-    private record DecodedRawImage(AvifPlanes planes, SequenceHeader.ColorConfig colorConfig) {
+    private record DecodedRawImage(AvifPlanes planes, Av1ColorConfig colorConfig) {
     }
 
     /// Reconstructed Sample Transform planes and the primary input's AV1 color configuration.
@@ -2101,7 +2101,7 @@ public final class AvifImageReader implements AutoCloseable {
     @NotNullByDefault
     private record DecodedSampleTransform(
             AvifPlanes planes,
-            SequenceHeader.ColorConfig primaryColorConfig
+            Av1ColorConfig primaryColorConfig
     ) {
     }
 

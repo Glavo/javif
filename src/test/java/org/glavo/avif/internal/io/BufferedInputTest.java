@@ -87,6 +87,26 @@ final class BufferedInputTest {
         }
     }
 
+    /// Verifies the `ReadableByteChannel` view of a buffered input.
+    ///
+    /// @throws IOException if the test input cannot be read or closed
+    @Test
+    void exposesReadableByteChannelSemantics() throws IOException {
+        byte[] bytes = sampleBytes();
+        BufferedInput input = new BufferedInput.OfByteBuffer(ByteBuffer.wrap(bytes));
+        ByteBuffer destination = ByteBuffer.allocate(bytes.length);
+
+        assertTrue(input.isOpen());
+        assertEquals(0, input.read(ByteBuffer.allocate(0)));
+        assertEquals(bytes.length, input.read(destination));
+        assertEquals(-1, input.read(ByteBuffer.allocate(1)));
+        assertArrayEquals(bytes, destination.array());
+
+        input.close();
+        assertFalse(input.isOpen());
+        assertThrows(IOException.class, () -> input.read(ByteBuffer.allocate(1)));
+    }
+
     /// Verifies that `readByteArray(int)` refills across internal buffer boundaries.
     ///
     /// @throws IOException if the test input cannot be read

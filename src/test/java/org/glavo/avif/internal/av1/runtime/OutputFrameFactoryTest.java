@@ -15,13 +15,14 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.decode.DecodedFrame;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlanes;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -81,7 +82,7 @@ final class OutputFrameFactoryTest {
     @Test
     void createFrameUsesSequenceColorConfigForOutputTransform() {
         DecodedPlanes decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 16);
-        SequenceHeader.ColorConfig colorConfig = new SequenceHeader.ColorConfig(
+        Av1ColorConfig colorConfig = new Av1ColorConfig(
                 8,
                 true,
                 true,

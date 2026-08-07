@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.decode.DecodeException;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -65,7 +66,7 @@ final class SequenceHeaderParserTest {
         assertTrue(features.restoration());
         assertFalse(features.filmGrainPresent());
 
-        SequenceHeader.ColorConfig color = header.colorConfig();
+        Av1ColorConfig color = header.colorConfig();
         assertEquals(8, color.bitDepth());
         assertFalse(color.monochrome());
         assertEquals(Av1ChromaFormat.YUV420, color.chromaFormat());
@@ -144,7 +145,7 @@ final class SequenceHeaderParserTest {
         assertFalse(features.restoration());
         assertTrue(features.filmGrainPresent());
 
-        SequenceHeader.ColorConfig color = header.colorConfig();
+        Av1ColorConfig color = header.colorConfig();
         assertEquals(12, color.bitDepth());
         assertFalse(color.monochrome());
         assertTrue(color.colorDescriptionPresent());

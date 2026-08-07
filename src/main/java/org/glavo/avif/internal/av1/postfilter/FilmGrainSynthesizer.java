@@ -17,9 +17,9 @@ package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
-import org.glavo.avif.internal.av1.model.SequenceHeader;
-import org.glavo.avif.internal.av1.recon.DecodedPlane;
-import org.glavo.avif.internal.av1.recon.DecodedPlanes;
+import org.glavo.avif.decode.DecodedPlane;
+import org.glavo.avif.decode.DecodedPlanes;
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -87,11 +87,11 @@ public final class FilmGrainSynthesizer {
     public DecodedPlanes apply(
             DecodedPlanes decodedPlanes,
             FrameHeader frameHeader,
-            SequenceHeader.ColorConfig colorConfig
+            Av1ColorConfig colorConfig
     ) {
         DecodedPlanes checkedDecodedPlanes = Objects.requireNonNull(decodedPlanes, "decodedPlanes");
         FrameHeader checkedFrameHeader = Objects.requireNonNull(frameHeader, "frameHeader");
-        SequenceHeader.ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
+        Av1ColorConfig checkedColorConfig = Objects.requireNonNull(colorConfig, "colorConfig");
         FrameHeader.FilmGrainParams filmGrain = checkedFrameHeader.filmGrain();
         if (!filmGrain.applyGrain()) {
             return checkedDecodedPlanes;

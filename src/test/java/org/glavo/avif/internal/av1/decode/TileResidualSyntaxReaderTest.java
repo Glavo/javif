@@ -15,6 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
+import org.glavo.avif.decode.Av1ColorConfig;
 import org.glavo.avif.decode.FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -2022,7 +2023,7 @@ final class TileResidualSyntaxReaderTest {
                         false,
                         false
                 ),
-                new SequenceHeader.ColorConfig(
+                new Av1ColorConfig(
                         8,
                         chromaFormat == Av1ChromaFormat.MONOCHROME,
                         false,
