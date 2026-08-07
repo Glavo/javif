@@ -15,9 +15,12 @@
  */
 package org.glavo.avif.internal.io;
 
+import org.glavo.avif.AvifDecodeException;
+import org.glavo.avif.AvifErrorCode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -29,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests owned memory and file-backed random-access data sources.
+/// Tests memory, file-backed, and bounded progressive data sources.
 @NotNullByDefault
 final class RandomAccessDataSourceTest {
     /// Verifies positional scalar and bulk reads over owned memory.
@@ -65,19 +68,64 @@ final class RandomAccessDataSourceTest {
         assertFalse(Files.exists(path));
     }
 
-    /// Verifies that closing a temporary source removes its owned spool file.
+    /// Verifies progressive reads retain only a bounded recent window and never close the stream.
     ///
-    /// @throws IOException if the fixture cannot be created, opened, or closed
+    /// @throws IOException if the source cannot be read or closed
     @Test
-    void deletesTemporaryFileOnClose() throws IOException {
-        Path path = workspaceTempPath("temporary");
-        Files.write(path, new byte[]{4, 3, 2, 1});
-        RandomAccessDataSource source = RandomAccessDataSource.openTemporary(path);
-        assertTrue(Files.exists(path));
-        assertEquals(4, source.readByte(0));
+    void readsProgressivelyAndRejectsDiscardedPrefixesWithoutClosingStream() throws IOException {
+        byte[] bytes = new byte[80 * 1024];
+        bytes[0] = 11;
+        bytes[70 * 1024] = 22;
+        TrackingInputStream input = new TrackingInputStream(bytes);
+        RandomAccessDataSource source = RandomAccessDataSource.progressive(input, bytes.length);
+
+        assertTrue(source.forwardOnly());
+        assertEquals(11, source.readByte(0));
+        assertEquals(22, source.readByte(70 * 1024L));
+        AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> source.readByte(0));
+        assertEquals(AvifErrorCode.SEEKABLE_SOURCE_REQUIRED, exception.code());
 
         source.close();
-        assertFalse(Files.exists(path));
+        assertFalse(input.closed());
+    }
+
+    /// Verifies that a progressive source enforces its configured maximum position.
+    @Test
+    void progressiveSourceEnforcesMaximumSize() {
+        RandomAccessDataSource source = RandomAccessDataSource.progressive(
+                new ByteArrayInputStream(new byte[16]),
+                8
+        );
+
+        AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> source.readByte(8));
+        assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
+    }
+
+    /// Byte-array stream that records whether it was closed.
+    private static final class TrackingInputStream extends ByteArrayInputStream {
+        /// Whether [#close()] was invoked.
+        private boolean closed;
+
+        /// Creates a stream over the supplied bytes.
+        ///
+        /// @param bytes the stream contents
+        private TrackingInputStream(byte[] bytes) {
+            super(bytes);
+        }
+
+        /// Records closure while retaining normal byte-array stream behavior.
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            super.close();
+        }
+
+        /// Returns whether [#close()] was invoked.
+        ///
+        /// @return whether the stream was closed
+        private boolean closed() {
+            return closed;
+        }
     }
 
     /// Creates a unique test path under the workspace-local build directory.

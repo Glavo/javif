@@ -28,7 +28,7 @@ import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Describes one logical AV1 payload as one or more ranges of random-access source data.
+/// Describes one logical AV1 payload as one or more ranges of retained source data.
 ///
 /// A payload does not own or close its source. Its views remain readable only while the owning
 /// [org.glavo.avif.AvifImageReader] remains open.

@@ -30,6 +30,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.nio.ShortBuffer;
 import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -384,18 +385,74 @@ final class AvifImageReaderTest {
         assertFalse(Files.exists(moved));
     }
 
-    /// Verifies that large non-seekable inputs are decoded without transferring stream ownership.
+    /// Verifies that a large non-seekable input is read progressively without transferring stream ownership.
     ///
-    /// @throws IOException if the spooled input cannot be parsed or decoded
+    /// @throws IOException if the progressive input cannot be parsed or decoded
     @Test
-    void largeInputStreamSpoolsWithoutClosingCallerStream() throws IOException {
-        byte[] bytes = withTrailingFreeBox(minimalAvifStillImage(), 9 * 1024 * 1024);
+    void largeInputStreamReadsProgressivelyWithoutClosingCallerStream() throws IOException {
+        byte[] image = minimalAvifStillImage();
+        byte[] bytes = withTrailingFreeBox(image, 9 * 1024 * 1024);
         CloseTrackingInputStream input = new CloseTrackingInputStream(bytes);
-        try (AvifImageReader reader = AvifImageReader.open(input)) {
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT.withInputSizeLimit(image.length);
+        try (AvifImageReader reader = factory.open(input)) {
             assertFalse(input.closed());
+            assertEquals(image.length, input.bytesRead());
             assertEquals(64, reader.readFrame().width());
+            assertEquals(image.length, input.bytesRead());
         }
         assertFalse(input.closed());
+    }
+
+    /// Verifies that a progressively read channel remains owned by its caller.
+    ///
+    /// @throws IOException if the channel input cannot be parsed, decoded, or closed
+    @Test
+    void readableChannelRemainsOpenAfterProgressiveReaderCloses() throws IOException {
+        ReadableByteChannel channel = Channels.newChannel(new ByteArrayInputStream(minimalAvifStillImage()));
+        try (AvifImageReader reader = AvifImageReader.open(channel)) {
+            assertEquals(64, reader.readFrame().height());
+        }
+        assertTrue(channel.isOpen());
+        channel.close();
+    }
+
+    /// Verifies that a parsing failure does not transfer ownership of a borrowed stream.
+    @Test
+    void failedProgressiveOpenDoesNotCloseCallerStream() {
+        CloseTrackingInputStream input = new CloseTrackingInputStream(new byte[]{0, 0, 0, 8, 'x', 'x', 'x', 'x'});
+        assertThrows(AvifDecodeException.class, () -> AvifImageReader.open(input));
+        assertFalse(input.closed());
+    }
+
+    /// Verifies that indexed operations reject a forward-only source without consuming its frame.
+    ///
+    /// @throws IOException if the sequential frame cannot be decoded
+    @Test
+    void forwardOnlyReaderRejectsIndexedAccessButRetainsSequentialAccess() throws IOException {
+        try (AvifImageReader reader = AvifImageReader.open(new ByteArrayInputStream(minimalAvifStillImage()))) {
+            assertSeekableSourceRequired(() -> reader.readFrame(0));
+            assertSeekableSourceRequired(() -> reader.readRawColorPlanes(0));
+            assertSeekableSourceRequired(() -> reader.readRawAlphaPlanes(0));
+            assertSeekableSourceRequired(() -> reader.readRawGainMapPlanes(0));
+            assertSeekableSourceRequired(() -> reader.readToneMappedFrame(0, 1.0));
+            assertSeekableSourceRequired(() -> reader.readRawDepthPlanes(0));
+            assertEquals(64, reader.readFrame().width());
+        }
+    }
+
+    /// Verifies that a backward container layout is supported by seekable inputs and rejected
+    /// explicitly by a progressive input after its bounded window has advanced.
+    ///
+    /// @throws IOException if the fixture cannot be parsed or decoded
+    @Test
+    void progressiveReaderRejectsContainerLayoutRequiringBackwardAccess() throws IOException {
+        byte[] bytes = minimalAvifStillImageWithPayloadBeforeMetadata();
+        try (AvifImageReader reader = AvifImageReader.open(bytes)) {
+            assertEquals(64, reader.readFrame().width());
+        }
+        try (AvifImageReader reader = AvifImageReader.open(new ByteArrayInputStream(bytes))) {
+            assertSeekableSourceRequired(reader::readFrame);
+        }
     }
 
     /// Writes bytes to a temporary path under the workspace-local build directory.
@@ -458,6 +515,13 @@ final class AvifImageReaderTest {
         private boolean closed() {
             return closed;
         }
+
+        /// Returns the number of source bytes consumed so far.
+        ///
+        /// @return the consumed byte count
+        private int bytesRead() {
+            return pos;
+        }
     }
 
     /// Asserts that an input-open operation fails with `INPUT_TOO_LARGE`.
@@ -466,6 +530,14 @@ final class AvifImageReaderTest {
     private static void assertInputTooLarge(ThrowingOpen operation) {
         AvifDecodeException exception = assertThrows(AvifDecodeException.class, operation::open);
         assertEquals(AvifErrorCode.INPUT_TOO_LARGE, exception.code());
+    }
+
+    /// Asserts that an operation fails because its input is not seekable.
+    ///
+    /// @param operation the operation expected to fail
+    private static void assertSeekableSourceRequired(ThrowingOpen operation) {
+        AvifDecodeException exception = assertThrows(AvifDecodeException.class, operation::open);
+        assertEquals(AvifErrorCode.SEEKABLE_SOURCE_REQUIRED, exception.code());
     }
 
     /// Open operation that may fail with `IOException`.
@@ -3126,6 +3198,22 @@ final class AvifImageReaderTest {
         int itemPayloadOffset = ftyp.length + firstMeta.length + 8;
         byte[] meta = metaBox(itemPayloadOffset, av1Payload.length, width, height);
         return concat(ftyp, meta, box("mdat", av1Payload));
+    }
+
+    /// Creates a still image whose media payload precedes distant container metadata.
+    ///
+    /// @return the complete AVIF test file bytes
+    private static byte[] minimalAvifStillImageWithPayloadBeforeMetadata() {
+        byte[] av1Payload = av1StillPicturePayload();
+        byte[] ftyp = fileTypeBox();
+        int itemPayloadOffset = ftyp.length + 8;
+        byte[] meta = metaBox(itemPayloadOffset, av1Payload.length, 64, 64);
+        return concat(
+                ftyp,
+                box("mdat", av1Payload),
+                box("free", new byte[128 * 1024]),
+                meta
+        );
     }
 
     /// Creates a one-cell grid AVIF fixture.

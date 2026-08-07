@@ -48,11 +48,16 @@ import java.util.List;
 import java.util.Objects;
 
 /// High-level reader for AVIF images.
+///
+/// Readers opened from an input stream or readable channel support sequential [#readFrame()] and
+/// [#readAllFrames()] access. Their indexed, raw-plane, and tone-mapping operations fail with
+/// [AvifErrorCode#SEEKABLE_SOURCE_REQUIRED]. Sequential decoding also reports that code when the
+/// container layout requires revisiting data outside the bounded progressive read window.
 @NotNullByDefault
 public final class AvifImageReader implements AutoCloseable {
     /// The immutable factory options used to create this reader.
     private final AvifImageReaderFactory factory;
-    /// The owned random-access container source.
+    /// The retained container source.
     private final RandomAccessDataSource source;
     /// The parsed container data.
     private final AvifContainer container;
@@ -71,7 +76,7 @@ public final class AvifImageReader implements AutoCloseable {
 
     /// Creates an AVIF image reader.
     ///
-    /// @param source the owned random-access AVIF source
+    /// @param source the retained AVIF source
     /// @param factory the immutable factory that owns the decoding options
     /// @throws AvifDecodeException if the source is not a supported AVIF container
     AvifImageReader(RandomAccessDataSource source, AvifImageReaderFactory factory) throws AvifDecodeException {
@@ -114,7 +119,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// Opens an AVIF image reader over an input stream.
     ///
     /// This method is equivalent to `AvifImageReaderFactory.DEFAULT.open(source)`.
-    /// It consumes the stream through end-of-stream without closing it.
+    /// It borrows the stream and reads container metadata and encoded frames progressively without
+    /// closing the stream. The caller must keep the stream open until the reader is closed.
     ///
     /// @param source the source input stream
     /// @return a new AVIF image reader
@@ -126,7 +132,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// Opens an AVIF image reader over a readable byte channel.
     ///
     /// This method is equivalent to `AvifImageReaderFactory.DEFAULT.open(source)`.
-    /// It consumes the channel through end-of-stream without closing it.
+    /// It borrows the channel and reads container metadata and encoded frames progressively without
+    /// closing the channel. The caller must keep the channel open until the reader is closed.
     ///
     /// @param source the source byte channel
     /// @return a new AVIF image reader
@@ -168,7 +175,7 @@ public final class AvifImageReader implements AutoCloseable {
         }
         AvifFrame frame = container.isSequence()
                 ? readSequenceFrameSequential(nextFrameIndex)
-                : readFrame(nextFrameIndex);
+                : readFrameAtIndex(nextFrameIndex);
         nextFrameIndex++;
         return frame;
     }
@@ -177,8 +184,19 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param frameIndex the zero-based frame index
     /// @return the decoded frame
-    /// @throws IOException if the frame cannot be decoded
+    /// @throws IOException if the frame cannot be decoded or the reader was opened from a
+    ///                     forward-only stream or channel
     public AvifFrame readFrame(int frameIndex) throws IOException {
+        ensureRandomAccess("readFrame(int)");
+        return readFrameAtIndex(frameIndex);
+    }
+
+    /// Reads a frame without applying the public indexed-access capability check.
+    ///
+    /// @param frameIndex the zero-based frame index
+    /// @return the decoded frame
+    /// @throws IOException if the frame cannot be decoded
+    private AvifFrame readFrameAtIndex(int frameIndex) throws IOException {
         ensureOpen();
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
@@ -233,9 +251,10 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded color planes
-    /// @throws IOException if the frame cannot be decoded
+    /// @throws IOException if the frame cannot be decoded or the reader was opened from a
+    ///                     forward-only stream or channel
     public AvifPlanes readRawColorPlanes(int frameIndex) throws IOException {
-        ensureOpen();
+        ensureRandomAccess("readRawColorPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
@@ -260,9 +279,10 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded alpha auxiliary planes, or `null` when no alpha auxiliary image is present
-    /// @throws IOException if the alpha auxiliary image cannot be decoded
+    /// @throws IOException if the alpha auxiliary image cannot be decoded or the reader was opened
+    ///                     from a forward-only stream or channel
     public @Nullable AvifPlanes readRawAlphaPlanes(int frameIndex) throws IOException {
-        ensureOpen();
+        ensureRandomAccess("readRawAlphaPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
@@ -298,9 +318,10 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded gain-map planes, or `null` when no gain-map image is present
-    /// @throws IOException if the gain-map image cannot be decoded
+    /// @throws IOException if the gain-map image cannot be decoded or the reader was opened from a
+    ///                     forward-only stream or channel
     public @Nullable AvifPlanes readRawGainMapPlanes(int frameIndex) throws IOException {
-        ensureOpen();
+        ensureRandomAccess("readRawGainMapPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
@@ -365,7 +386,7 @@ public final class AvifImageReader implements AutoCloseable {
             double hdrHeadroom,
             @Nullable AvifColorInfo outputColorInfo
     ) throws IOException {
-        ensureOpen();
+        ensureRandomAccess("readToneMappedFrame");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
@@ -410,9 +431,10 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// @param frameIndex the zero-based frame index
     /// @return raw decoded depth auxiliary planes, or `null` when no depth auxiliary image is present
-    /// @throws IOException if the depth auxiliary image cannot be decoded
+    /// @throws IOException if the depth auxiliary image cannot be decoded or the reader was opened
+    ///                     from a forward-only stream or channel
     public @Nullable AvifPlanes readRawDepthPlanes(int frameIndex) throws IOException {
-        ensureOpen();
+        ensureRandomAccess("readRawDepthPlanes(int)");
         if (frameIndex < 0 || frameIndex >= container.info().frameCount()) {
             throw new IndexOutOfBoundsException("frameIndex out of range: " + frameIndex);
         }
@@ -1292,11 +1314,11 @@ public final class AvifImageReader implements AutoCloseable {
         }
     }
 
-    /// Closes this reader and its owned container source.
+    /// Closes this reader and its owned container resources.
     ///
-    /// Repeated calls have no effect. The reader is closed even if releasing an AV1 decoder, file
-    /// handle, or temporary spool file fails. When multiple releases fail, later failures are
-    /// suppressed on the first.
+    /// Repeated calls have no effect. A borrowed input stream or readable channel remains open.
+    /// The reader is closed even if releasing an AV1 decoder or owned file handle fails. When
+    /// multiple releases fail, later failures are suppressed on the first.
     ///
     /// @throws IOException if an owned decoder or source cannot be released
     @Override
@@ -1346,6 +1368,21 @@ public final class AvifImageReader implements AutoCloseable {
     private void ensureOpen() throws AvifDecodeException {
         if (closed) {
             throw new AvifDecodeException(AvifErrorCode.CLOSED, "AvifImageReader is closed", null);
+        }
+    }
+
+    /// Ensures that this reader is open and backed by a seekable source.
+    ///
+    /// @param operation the public operation requiring arbitrary source access
+    /// @throws AvifDecodeException if this reader is closed or its source is forward-only
+    private void ensureRandomAccess(String operation) throws AvifDecodeException {
+        ensureOpen();
+        if (source.forwardOnly()) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.SEEKABLE_SOURCE_REQUIRED,
+                    operation + " requires Path, byte[], or ByteBuffer input",
+                    null
+            );
         }
     }
 
@@ -2102,6 +2139,13 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param exception the low-level decoding failure
     /// @return the corresponding AVIF decoding failure
     private static AvifDecodeException wrapAv1DecodeFailure(IOException exception) {
+        @Nullable Throwable cause = exception;
+        while (cause != null) {
+            if (cause instanceof AvifDecodeException decodeException) {
+                return decodeException;
+            }
+            cause = cause.getCause();
+        }
         AvifErrorCode code = AvifErrorCode.AV1_DECODE_FAILED;
         if (exception instanceof DecodeException decodeException) {
             code = switch (decodeException.code()) {

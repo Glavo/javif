@@ -85,12 +85,12 @@ public final class AvifContainerParser {
         return parse(RandomAccessDataSource.ofOwnedBytes(Objects.requireNonNull(source, "source")));
     }
 
-    /// Parses AVIF container data from a retained random-access source.
+    /// Parses AVIF container data from a retained positional source.
     ///
     /// The returned container may retain payload ranges backed by `source`; the source must remain
     /// open while those payloads are decoded.
     ///
-    /// @param source the retained random-access source
+    /// @param source the retained positional source
     /// @return parsed AVIF container data
     /// @throws AvifDecodeException if the container is malformed or unsupported
     public static AvifContainer parse(RandomAccessDataSource source) throws AvifDecodeException {
@@ -120,6 +120,9 @@ public final class AvifContainerParser {
                 }
             }
             input.skipBoxPayload(header);
+            if (forwardMetadataComplete(header.type())) {
+                break;
+            }
         }
 
         if (!compatibleFileTypeSeen) {
@@ -228,6 +231,24 @@ public final class AvifContainerParser {
                 gainMapPayloads.source,
                 sampleTransform
         );
+    }
+
+    /// Returns whether a forward-only source has supplied all required top-level metadata.
+    ///
+    /// Seekable sources continue through the complete container so malformed trailing boxes remain
+    /// observable. Forward-only sources stop before media payloads or unrelated trailing data and
+    /// leave those bytes available for lazy frame decoding.
+    ///
+    /// @param parsedBoxType the type of the top-level box most recently parsed
+    /// @return whether top-level parsing can finish without reading another box
+    private boolean forwardMetadataComplete(String parsedBoxType) {
+        if (!source.forwardOnly() || !compatibleFileTypeSeen) {
+            return false;
+        }
+        if (avisBrandSeen) {
+            return "moov".equals(parsedBoxType);
+        }
+        return "meta".equals(parsedBoxType) && meta.primaryItemId != 0;
     }
 
     /// Parses a grid derived image container.
@@ -2120,8 +2141,10 @@ public final class AvifContainerParser {
             throws AvifDecodeException {
         if (offset < 0 || size < 0 || offset > source.size() || size > source.size() - offset) {
             throw new AvifDecodeException(
-                    AvifErrorCode.TRUNCATED_DATA,
-                    label + " sample outside source: " + sampleIndex,
+                    source.forwardOnly() ? AvifErrorCode.INPUT_TOO_LARGE : AvifErrorCode.TRUNCATED_DATA,
+                    source.forwardOnly()
+                            ? label + " sample exceeds the configured input-size limit: " + sampleIndex
+                            : label + " sample outside source: " + sampleIndex,
                     offset
             );
         }
@@ -3282,9 +3305,12 @@ public final class AvifContainerParser {
             if (extent.offset < 0
                     || extent.offset > storageLength
                     || extent.length > storageLength - extent.offset) {
+                boolean exceedsProgressiveLimit = source.forwardOnly() && !item.idatStored;
                 throw new AvifDecodeException(
-                        AvifErrorCode.TRUNCATED_DATA,
-                        "Item extent is outside available data: " + item.id,
+                        exceedsProgressiveLimit ? AvifErrorCode.INPUT_TOO_LARGE : AvifErrorCode.TRUNCATED_DATA,
+                        exceedsProgressiveLimit
+                                ? "Item extent exceeds the configured input-size limit: " + item.id
+                                : "Item extent is outside available data: " + item.id,
                         extent.offset
                 );
             }
@@ -3306,6 +3332,8 @@ public final class AvifContainerParser {
     private byte[] mergeItemExtents(Item item) throws AvifDecodeException {
         try {
             return itemPayload(item).readBytes();
+        } catch (AvifDecodeException exception) {
+            throw exception;
         } catch (IOException exception) {
             throw new AvifDecodeException(
                     AvifErrorCode.BMFF_PARSE_FAILED,

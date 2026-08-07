@@ -41,5 +41,7 @@ public enum AvifErrorCode {
     /// The reader was used after being closed.
     CLOSED,
     /// The input exceeds the configured maximum input size.
-    INPUT_TOO_LARGE
+    INPUT_TOO_LARGE,
+    /// A forward-only input requires data that has already passed outside the retained window.
+    SEEKABLE_SOURCE_REQUIRED
 }

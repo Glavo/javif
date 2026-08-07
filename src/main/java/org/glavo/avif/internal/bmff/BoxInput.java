@@ -27,7 +27,7 @@ import java.util.Objects;
 /// Bounded big-endian byte reader for BMFF boxes.
 @NotNullByDefault
 public final class BoxInput {
-    /// The complete random-access source.
+    /// The retained positional source.
     private final RandomAccessDataSource source;
     /// The inclusive lower bound for this view.
     private final int start;
@@ -46,16 +46,16 @@ public final class BoxInput {
         this(RandomAccessDataSource.ofOwnedBytes(Objects.requireNonNull(source, "source")));
     }
 
-    /// Creates a bounded input over a complete random-access source.
+    /// Creates a bounded input over a retained positional source.
     ///
-    /// @param source the complete random-access source
+    /// @param source the retained positional source
     public BoxInput(RandomAccessDataSource source) {
         this(source, 0, checkedSourceSize(source));
     }
 
     /// Creates a bounded input over one source slice.
     ///
-    /// @param source the complete random-access source
+    /// @param source the retained positional source
     /// @param start the inclusive lower bound
     /// @param end the exclusive upper bound
     private BoxInput(RandomAccessDataSource source, int start, int end) {
@@ -277,6 +277,9 @@ public final class BoxInput {
     /// @param absoluteOffset the attempted absolute source offset
     /// @return the translated decode exception
     private static AvifDecodeException readFailed(IOException cause, int absoluteOffset) {
+        if (cause instanceof AvifDecodeException decodeException) {
+            return decodeException;
+        }
         return new AvifDecodeException(
                 AvifErrorCode.BMFF_PARSE_FAILED,
                 "Cannot read AVIF container data: " + cause.getMessage(),
