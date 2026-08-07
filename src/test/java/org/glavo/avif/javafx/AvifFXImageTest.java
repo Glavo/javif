@@ -18,6 +18,7 @@ package org.glavo.avif.javafx;
 import javafx.animation.Timeline;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifFrame;
+import org.glavo.avif.AvifImage;
 import org.glavo.avif.AvifImageReader;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifSequenceInfo;
@@ -27,6 +28,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.LongBuffer;
 import java.util.List;
@@ -39,6 +41,24 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /// Tests for converting decoded AVIF frames into JavaFX images.
 @NotNullByDefault
 final class AvifFXImageTest {
+    /// Verifies that fully decoded animated content supplies frames and timing directly.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void createsAnimatedJavaFxImageFromAvifImage() throws IOException {
+        AvifImage decoded = AvifImage.read(new ByteArrayInputStream(
+                TestResources.readBytes("libavif-test-data/colors-animated-8bpc.avif")
+        ));
+
+        AvifFXImage image = new AvifFXImage(decoded, false);
+        @Nullable Timeline timeline = image.getAnimation();
+
+        assertEquals(decoded.info().width(), (int) image.getWidth());
+        assertEquals(decoded.info().height(), (int) image.getHeight());
+        assertNotNull(timeline);
+        assertEquals(decoded.frames().size() + 1, timeline.getKeyFrames().size());
+    }
+
     /// Verifies that high-bit-depth frames are reduced to JavaFX-compatible ARGB pixels.
     @Test
     void rendersHighBitDepthFrameAsJavaFxArgbPixels() {

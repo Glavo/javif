@@ -36,9 +36,7 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifFrame;
-import org.glavo.avif.AvifImageInfo;
-import org.glavo.avif.AvifImageReader;
-import org.glavo.avif.AvifSequenceInfo;
+import org.glavo.avif.AvifImage;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -54,7 +52,7 @@ import java.util.Objects;
 ///
 /// The application is intentionally lightweight and uses the public decoding API directly.
 /// Static images are displayed immediately and animated AVIF files are played back in an
-/// [ImageView] according to the frame duration information exposed by [AvifImageReader].
+/// [ImageView] according to the frame duration information exposed by [AvifImage].
 @NotNullByDefault
 public final class AvifViewerApp extends Application {
 
@@ -78,7 +76,7 @@ public final class AvifViewerApp extends Application {
     /// The image viewport after [#start(Stage)] initializes it.
     private @Nullable ScrollPane scrollPane;
     /// The active background decode, or `null` when no load is pending.
-    private @Nullable Task<LoadedImage> loadTask;
+    private @Nullable Task<AvifImage> loadTask;
     /// Monotonically increasing identifier used to discard stale load completions.
     private long loadRequestId;
     /// The pointer position at which the active pan gesture started, or `null` outside a gesture.
@@ -238,9 +236,9 @@ public final class AvifViewerApp extends Application {
 
         long startNanos = System.nanoTime();
         long requestId = ++loadRequestId;
-        Task<LoadedImage> task = new Task<>() {
+        Task<AvifImage> task = new Task<>() {
             @Override
-            protected LoadedImage call() throws Exception {
+            protected AvifImage call() throws Exception {
                 return decodeImage(path);
             }
         };
@@ -287,11 +285,8 @@ public final class AvifViewerApp extends Application {
     /// @param path the AVIF file to decode
     /// @return the decoded viewer input
     /// @throws IOException if the file cannot be opened or decoded
-    private static LoadedImage decodeImage(Path path) throws IOException {
-        try (AvifImageReader reader = AvifImageReader.open(path)) {
-            AvifImageInfo info = reader.info();
-            return new LoadedImage(reader.readAllFrames(), info.sequenceInfo());
-        }
+    private static AvifImage decodeImage(Path path) throws IOException {
+        return AvifImage.read(path);
     }
 
     /// Stops active animation and clears the current file state.
@@ -339,17 +334,14 @@ public final class AvifViewerApp extends Application {
     /// Installs one successfully decoded image and starts sequence playback when applicable.
     ///
     /// @param path the decoded file path
-    /// @param loadedImage the decoded frames and sequence metadata
+    /// @param loadedImage the fully decoded AVIF content
     /// @param startNanos the load start time returned by `System.nanoTime()`
-    private void applyLoadedImage(Path path, LoadedImage loadedImage, long startNanos) {
+    private void applyLoadedImage(Path path, AvifImage loadedImage, long startNanos) {
         long elapsedMillis = elapsedMillis(startNanos);
 
         @Unmodifiable List<AvifFrame> frames = loadedImage.frames();
         boolean animated = frames.size() > 1;
-        @Nullable AvifSequenceInfo sequenceInfo = loadedImage.sequenceInfo();
-        AvifFXImage fxImage = sequenceInfo == null
-                ? new AvifFXImage(frames, false)
-                : new AvifFXImage(frames, sequenceInfo, false);
+        AvifFXImage fxImage = new AvifFXImage(loadedImage, false);
 
         currentPath = path;
         currentImage = fxImage;
@@ -391,7 +383,7 @@ public final class AvifViewerApp extends Application {
 
     /// Cancels the active decode task, if any, and hides the loading overlay.
     private void cancelLoadTask() {
-        @Nullable Task<LoadedImage> task = loadTask;
+        @Nullable Task<AvifImage> task = loadTask;
         loadTask = null;
         if (task != null) {
             task.cancel();
@@ -404,7 +396,7 @@ public final class AvifViewerApp extends Application {
     /// @param requestId the request identifier captured when the task was created
     /// @param task the background decode task
     /// @return whether the task may update the viewer
-    private boolean isCurrentLoad(long requestId, Task<LoadedImage> task) {
+    private boolean isCurrentLoad(long requestId, Task<AvifImage> task) {
         return loadRequestId == requestId && loadTask == task;
     }
 
@@ -529,14 +521,4 @@ public final class AvifViewerApp extends Application {
         return overlay;
     }
 
-    /// Holds decoded viewer frames and optional AVIS playback metadata.
-    ///
-    /// @param frames the immutable decoded frames in presentation order
-    /// @param sequenceInfo the sequence timing and repetition metadata, or `null` for a still image
-    @NotNullByDefault
-    private record LoadedImage(
-            @Unmodifiable List<AvifFrame> frames,
-            @Nullable AvifSequenceInfo sequenceInfo
-    ) {
-    }
 }

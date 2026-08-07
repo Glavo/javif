@@ -22,7 +22,7 @@ import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.util.Duration;
 import org.glavo.avif.AvifFrame;
-import org.glavo.avif.AvifImageInfo;
+import org.glavo.avif.AvifImage;
 import org.glavo.avif.AvifSequenceInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -35,8 +35,8 @@ import java.util.Objects;
 /// JavaFX image adapter for decoded AVIF content.
 ///
 /// The adapter writes packed non-premultiplied `ARGB` pixels from decoded [AvifFrame]
-/// instances into a `WritableImage`. When constructed from a list of frames, it can also
-/// play animated AVIF content with frame-accurate timing.
+/// instances into a `WritableImage`. When constructed from an [AvifImage], it can also play
+/// animated AVIF content using the container timing and repetition metadata.
 @NotNullByDefault
 public final class AvifFXImage extends WritableImage {
     /// The decoded frames in presentation order.
@@ -49,6 +49,32 @@ public final class AvifFXImage extends WritableImage {
     private @Nullable Timeline timeline;
     /// The index of the frame currently stored in this image.
     private int renderedFrameIndex = -1;
+
+    /// Creates a JavaFX image from fully decoded AVIF content and starts sequence playback.
+    ///
+    /// The first frame is written immediately. Animated content uses the frame timing and
+    /// repetition metadata stored in the image.
+    ///
+    /// @param image the fully decoded AVIF content
+    public AvifFXImage(AvifImage image) {
+        this(image, true);
+    }
+
+    /// Creates a JavaFX image from fully decoded AVIF content.
+    ///
+    /// The first frame is written immediately. Animated content uses the frame timing and
+    /// repetition metadata stored in the image. Call [#getAnimation()] to control playback.
+    ///
+    /// @param image the fully decoded AVIF content
+    /// @param autoPlay whether to start playing the animation automatically
+    public AvifFXImage(AvifImage image, boolean autoPlay) {
+        this(Objects.requireNonNull(image, "image").frames(), image.info().sequenceInfo());
+
+        if (autoPlay && isAnimated()) {
+            Timeline animation = Objects.requireNonNull(getAnimation());
+            animation.play();
+        }
+    }
 
     /// Creates a JavaFX image from one decoded frame.
     ///

@@ -36,21 +36,22 @@ The main, source, and Javadoc JARs are written to `build/libs`.
 
 ```java
 import org.glavo.avif.AvifFrame;
-import org.glavo.avif.AvifImageInfo;
-import org.glavo.avif.AvifImageReader;
+import org.glavo.avif.AvifImage;
 
 import java.nio.IntBuffer;
 import java.nio.file.Path;
 
-try (AvifImageReader reader = AvifImageReader.open(Path.of("image.avif"))) {
-    AvifImageInfo info = reader.info();
-    AvifFrame frame = reader.readFrame(0);
-    IntBuffer argb = frame.intPixelBuffer();
+AvifImage image = AvifImage.read(Path.of("image.avif"));
+AvifFrame frame = image.firstFrame();
+IntBuffer argb = frame.intPixelBuffer();
 
-    System.out.printf("%dx%d, frames=%d%n", info.width(), info.height(), info.frameCount());
-    System.out.printf("first ARGB pixel: %08x%n", argb.get(0));
-}
+System.out.printf("%dx%d, frames=%d%n",
+        image.info().width(), image.info().height(), image.frames().size());
+System.out.printf("first ARGB pixel: %08x%n", argb.get(0));
 ```
+
+Use `new AvifFXImage(image)` to adapt fully decoded content to JavaFX. Use
+`AvifImageReader` when frames should be decoded lazily or when raw YUV planes are needed.
 
 Use `AvifImageReader.readRawColorPlanes(int)` when a caller needs the decoded YUV planes instead of
 the built-in CICP-to-RGB conversion.
