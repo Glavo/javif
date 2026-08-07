@@ -26,6 +26,10 @@ import java.nio.LongBuffer;
 import java.util.Objects;
 
 /// Decoded AVIF frame output.
+///
+/// After construction, instances are safe for concurrent read access, subject to the immutable
+/// storage requirement of the buffer constructors. Each returned pixel buffer has independent
+/// position and limit state.
 @NotNullByDefault
 public final class AvifFrame {
     /// The frame width in pixels.
@@ -41,9 +45,9 @@ public final class AvifFrame {
     /// The packed ARGB pixel format used by this frame's native storage.
     private final AvifPixelFormat pixelFormat;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
-    private @Nullable @Unmodifiable IntBuffer intPixels;
+    private volatile @Nullable @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
-    private @Nullable @Unmodifiable LongBuffer longPixels;
+    private volatile @Nullable @Unmodifiable LongBuffer longPixels;
 
     /// Creates an AVIF frame from packed `int` ARGB pixels.
     ///
@@ -269,7 +273,13 @@ public final class AvifFrame {
     public @UnmodifiableView IntBuffer intPixelBuffer() {
         IntBuffer pixels = intPixels;
         if (pixels == null) {
-            intPixels = pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
+            synchronized (this) {
+                pixels = intPixels;
+                if (pixels == null) {
+                    pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
+                    intPixels = pixels;
+                }
+            }
         }
         return pixels.slice();
     }
@@ -295,7 +305,13 @@ public final class AvifFrame {
     public @UnmodifiableView LongBuffer longPixelBuffer() {
         LongBuffer pixels = longPixels;
         if (pixels == null) {
-            longPixels = pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
+            synchronized (this) {
+                pixels = longPixels;
+                if (pixels == null) {
+                    pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
+                    longPixels = pixels;
+                }
+            }
         }
         return pixels.slice();
     }

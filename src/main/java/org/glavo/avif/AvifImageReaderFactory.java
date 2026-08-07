@@ -199,10 +199,10 @@ public final class AvifImageReaderFactory {
     ///
     /// This method reads only the prefix needed to parse the container metadata. Later reader
     /// operations consume encoded image data progressively. The channel is borrowed, remains
-    /// open, and must remain usable until the reader is closed. No temporary file or complete
-    /// in-memory copy is created. The reader may consume a bounded amount of input beyond the bytes
-    /// currently needed for parsing or decoding. Top-level boxes after the metadata required for
-    /// decoding may remain unread and are not validated.
+    /// open, and must remain usable in blocking mode until the reader is closed. No temporary file
+    /// or complete in-memory copy is created. The reader may consume a bounded amount of input
+    /// beyond the bytes currently needed for parsing or decoding. Top-level boxes after the
+    /// metadata required for decoding may remain unread and are not validated.
     ///
     /// Because the channel is treated as forward-only, indexed access and a container layout that
     /// requires revisiting discarded bytes fail with [AvifErrorCode#SEEKABLE_SOURCE_REQUIRED]. Use
@@ -213,6 +213,8 @@ public final class AvifImageReaderFactory {
     /// @return a new AVIF image reader
     /// @throws IOException if the source cannot be read, exceeds the configured limit, or does not
     ///                     contain a supported AVIF container
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
     public AvifImageReader open(ReadableByteChannel source) throws IOException {
         return new AvifImageReader(
                 AvifDataSource.progressive(

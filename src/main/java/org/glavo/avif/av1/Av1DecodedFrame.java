@@ -29,6 +29,10 @@ import java.nio.LongBuffer;
 import java.util.Objects;
 
 /// Decoded AV1 frame output exposed by the public API.
+///
+/// After construction, instances are safe for concurrent read access, subject to the immutable
+/// storage requirement of the buffer constructors. Each returned pixel buffer has independent
+/// position and limit state.
 @NotNullByDefault
 public final class Av1DecodedFrame {
     /// The output frame width in pixels.
@@ -52,9 +56,9 @@ public final class Av1DecodedFrame {
     /// The AV1 spatial-layer identifier carried by the frame OBU.
     private final int spatialId;
     /// Packed non-premultiplied ARGB pixels in `0xAARRGGBB` format, or `null` until converted.
-    private @Nullable @Unmodifiable IntBuffer intPixels;
+    private volatile @Nullable @Unmodifiable IntBuffer intPixels;
     /// Packed non-premultiplied ARGB pixels in `0xAAAA_RRRR_GGGG_BBBB` format, or `null` until converted.
-    private @Nullable @Unmodifiable LongBuffer longPixels;
+    private volatile @Nullable @Unmodifiable LongBuffer longPixels;
 
     /// Creates a decoded frame from a packed `int` ARGB pixel buffer.
     ///
@@ -326,7 +330,13 @@ public final class Av1DecodedFrame {
     public @UnmodifiableView IntBuffer intPixelBuffer() {
         IntBuffer pixels = intPixels;
         if (pixels == null) {
-            intPixels = pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
+            synchronized (this) {
+                pixels = intPixels;
+                if (pixels == null) {
+                    pixels = PixelBuffers.convertLongPixelsToIntPixels(requireLongPixels());
+                    intPixels = pixels;
+                }
+            }
         }
         return pixels.slice();
     }
@@ -352,7 +362,13 @@ public final class Av1DecodedFrame {
     public @UnmodifiableView LongBuffer longPixelBuffer() {
         LongBuffer pixels = longPixels;
         if (pixels == null) {
-            longPixels = pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
+            synchronized (this) {
+                pixels = longPixels;
+                if (pixels == null) {
+                    pixels = PixelBuffers.convertIntPixelsToLongPixels(requireIntPixels());
+                    longPixels = pixels;
+                }
+            }
         }
         return pixels.slice();
     }

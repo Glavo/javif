@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.SelectableChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.util.Arrays;
 import java.util.Objects;
@@ -428,9 +429,16 @@ public abstract class BufferedInput implements ReadableByteChannel {
         /// Creates a buffered view of the supplied channel.
         ///
         /// @param channel the channel to read from
+        /// @throws IllegalArgumentException if `channel` is selectable and configured as
+        ///                                  non-blocking
         public OfByteChannel(ReadableByteChannel channel) {
             super(DEFAULT_BUFFER_SIZE, true);
-            this.channel = Objects.requireNonNull(channel, "channel");
+            ReadableByteChannel checkedChannel = Objects.requireNonNull(channel, "channel");
+            if (checkedChannel instanceof SelectableChannel selectableChannel
+                    && !selectableChannel.isBlocking()) {
+                throw new IllegalArgumentException("channel must be in blocking mode");
+            }
+            this.channel = checkedChannel;
         }
 
         @Override

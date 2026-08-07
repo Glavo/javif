@@ -30,6 +30,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.nio.ShortBuffer;
 import java.nio.channels.Channels;
+import java.nio.channels.Pipe;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -424,6 +425,21 @@ final class AvifImageReaderTest {
         }
         assertTrue(channel.isOpen());
         channel.close();
+    }
+
+    /// Verifies that progressive readers reject a selectable channel in non-blocking mode without
+    /// taking ownership of it.
+    ///
+    /// @throws IOException if the pipe cannot be opened, configured, or closed
+    @Test
+    void readableChannelRejectsNonBlockingModeWithoutClosingInput() throws IOException {
+        Pipe pipe = Pipe.open();
+        try (Pipe.SourceChannel source = pipe.source(); Pipe.SinkChannel sink = pipe.sink()) {
+            source.configureBlocking(false);
+
+            assertThrows(IllegalArgumentException.class, () -> AvifImageReader.open(source));
+            assertTrue(source.isOpen());
+        }
     }
 
     /// Verifies that a parsing failure does not transfer ownership of a borrowed stream.

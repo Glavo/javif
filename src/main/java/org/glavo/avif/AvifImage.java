@@ -20,6 +20,8 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -34,6 +36,72 @@ public final class AvifImage {
     private final AvifImageInfo info;
     /// The decoded frames in presentation order.
     private final @Unmodifiable List<AvifFrame> frames;
+
+    /// Reads and fully decodes AVIF bytes using the default reader factory.
+    ///
+    /// The array is borrowed only for the duration of this call and is not retained after the
+    /// method returns. The caller must not modify it while decoding is in progress.
+    ///
+    /// @param source the complete AVIF source bytes
+    /// @return the fully decoded image
+    /// @throws IOException if the input exceeds the configured limit, is not a supported AVIF
+    ///                     container, or cannot be decoded
+    public static AvifImage read(byte[] source) throws IOException {
+        return read(source, AvifImageReaderFactory.DEFAULT);
+    }
+
+    /// Reads and fully decodes AVIF bytes using the supplied reader factory.
+    ///
+    /// The array is borrowed only for the duration of this call and is not retained after the
+    /// method returns. The caller must not modify it while decoding is in progress.
+    ///
+    /// @param source the complete AVIF source bytes
+    /// @param factory the reader factory that supplies decoding options
+    /// @return the fully decoded image
+    /// @throws IOException if the input exceeds the configured limit, is not a supported AVIF
+    ///                     container, or cannot be decoded
+    public static AvifImage read(byte[] source, AvifImageReaderFactory factory) throws IOException {
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(factory, "factory");
+        try (AvifImageReader reader = factory.open(source)) {
+            return collect(reader);
+        }
+    }
+
+    /// Reads and fully decodes the remaining bytes of a byte buffer using the default reader
+    /// factory.
+    ///
+    /// The region from the source's current position to its limit is borrowed only for the
+    /// duration of this call. The source's position and limit are unchanged, and the caller must
+    /// not modify the region while decoding is in progress.
+    ///
+    /// @param source the source byte buffer
+    /// @return the fully decoded image
+    /// @throws IOException if the input exceeds the configured limit, is not a supported AVIF
+    ///                     container, or cannot be decoded
+    public static AvifImage read(ByteBuffer source) throws IOException {
+        return read(source, AvifImageReaderFactory.DEFAULT);
+    }
+
+    /// Reads and fully decodes the remaining bytes of a byte buffer using the supplied reader
+    /// factory.
+    ///
+    /// The region from the source's current position to its limit is borrowed only for the
+    /// duration of this call. The source's position and limit are unchanged, and the caller must
+    /// not modify the region while decoding is in progress.
+    ///
+    /// @param source the source byte buffer
+    /// @param factory the reader factory that supplies decoding options
+    /// @return the fully decoded image
+    /// @throws IOException if the input exceeds the configured limit, is not a supported AVIF
+    ///                     container, or cannot be decoded
+    public static AvifImage read(ByteBuffer source, AvifImageReaderFactory factory) throws IOException {
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(factory, "factory");
+        try (AvifImageReader reader = factory.open(source)) {
+            return collect(reader);
+        }
+    }
 
     /// Reads and fully decodes an AVIF file using the default reader factory.
     ///
@@ -88,6 +156,45 @@ public final class AvifImage {
     /// @return the fully decoded image
     /// @throws IOException if the stream cannot be read, parsed, or decoded
     public static AvifImage read(InputStream source, AvifImageReaderFactory factory) throws IOException {
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(factory, "factory");
+        try (AvifImageReader reader = factory.open(source)) {
+            return collect(reader);
+        }
+    }
+
+    /// Reads and fully decodes an AVIF byte channel using the default reader factory.
+    ///
+    /// The channel is borrowed and remains open. It must use blocking mode and remain usable for
+    /// the duration of this call. Decoding consumes input progressively through the final encoded
+    /// frame and may read ahead by a bounded amount; trailing top-level boxes may remain unread.
+    /// If decoding fails, bytes already consumed remain consumed.
+    ///
+    /// @param source the AVIF byte channel
+    /// @return the fully decoded image
+    /// @throws IOException if the channel cannot be read, exceeds the configured limit, or does
+    ///                     not contain a supported AVIF container
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
+    public static AvifImage read(ReadableByteChannel source) throws IOException {
+        return read(source, AvifImageReaderFactory.DEFAULT);
+    }
+
+    /// Reads and fully decodes an AVIF byte channel using the supplied reader factory.
+    ///
+    /// The channel is borrowed and remains open. It must use blocking mode and remain usable for
+    /// the duration of this call. Decoding consumes input progressively through the final encoded
+    /// frame and may read ahead by a bounded amount; trailing top-level boxes may remain unread.
+    /// If decoding fails, bytes already consumed remain consumed.
+    ///
+    /// @param source the AVIF byte channel
+    /// @param factory the reader factory that supplies decoding options
+    /// @return the fully decoded image
+    /// @throws IOException if the channel cannot be read, exceeds the configured limit, or does
+    ///                     not contain a supported AVIF container
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
+    public static AvifImage read(ReadableByteChannel source, AvifImageReaderFactory factory) throws IOException {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(factory, "factory");
         try (AvifImageReader reader = factory.open(source)) {

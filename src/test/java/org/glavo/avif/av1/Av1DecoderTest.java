@@ -61,6 +61,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.Channels;
+import java.nio.channels.Pipe;
 import java.nio.channels.ReadableByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -194,6 +195,21 @@ final class Av1DecoderTest {
         reader.close();
 
         assertFalse(channel.isOpen());
+    }
+
+    /// Verifies that channel entry points reject non-blocking mode without taking ownership.
+    ///
+    /// @throws IOException if the pipe cannot be opened, configured, or closed
+    @Test
+    void channelEntryPointsRejectNonBlockingModeWithoutClosingInput() throws IOException {
+        Pipe pipe = Pipe.open();
+        try (Pipe.SourceChannel source = pipe.source(); Pipe.SinkChannel sink = pipe.sink()) {
+            source.configureBlocking(false);
+
+            assertThrows(IllegalArgumentException.class, () -> Av1Decoder.open(source));
+            assertThrows(IllegalArgumentException.class, () -> Av1Decoder.openAnnexB(source));
+            assertTrue(source.isOpen());
+        }
     }
 
     /// Verifies that `close()` is idempotent.

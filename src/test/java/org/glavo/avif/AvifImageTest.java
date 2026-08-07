@@ -21,6 +21,9 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -63,6 +66,34 @@ final class AvifImageTest {
         assertFalse(Files.exists(path));
     }
 
+    /// Verifies that array and buffer inputs are borrowed without changing buffer bounds.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readsBorrowedArrayAndBufferRegion() throws IOException {
+        byte[] bytes = TestResources.readBytes(STILL_FIXTURE);
+
+        AvifImage arrayImage = AvifImage.read(bytes);
+
+        byte[] envelope = new byte[bytes.length + 2];
+        System.arraycopy(bytes, 0, envelope, 1, bytes.length);
+        ByteBuffer buffer = ByteBuffer.wrap(envelope);
+        buffer.position(1);
+        buffer.limit(1 + bytes.length);
+        int position = buffer.position();
+        int limit = buffer.limit();
+
+        AvifImage bufferImage = AvifImage.read(buffer);
+
+        assertEquals(1, arrayImage.info().width());
+        assertEquals(1, arrayImage.info().height());
+        assertEquals(arrayImage.info().width(), bufferImage.info().width());
+        assertEquals(arrayImage.info().height(), bufferImage.info().height());
+        assertEquals(arrayImage.info().frameCount(), bufferImage.info().frameCount());
+        assertEquals(position, buffer.position());
+        assertEquals(limit, buffer.limit());
+    }
+
     /// Verifies that stream input materializes every sequence frame without taking ownership.
     ///
     /// @throws IOException if the fixture cannot be read or decoded
@@ -95,6 +126,26 @@ final class AvifImageTest {
 
         assertEquals(AvifPixelFormat.ARGB_8888, image.firstFrame().pixelFormat());
         assertFalse(input.closed());
+    }
+
+    /// Verifies that channel input remains open and honors a supplied reader factory.
+    ///
+    /// @throws IOException if the fixture cannot be read or decoded
+    @Test
+    void readsChannelWithoutClosingBorrowedInput() throws IOException {
+        AvifImageReaderFactory factory = AvifImageReaderFactory.DEFAULT
+                .withOutputPixelFormat(AvifPixelFormat.ARGB_8888);
+        ReadableByteChannel channel = Channels.newChannel(new ByteArrayInputStream(
+                TestResources.readBytes(HIGH_BIT_DEPTH_FIXTURE)
+        ));
+        try {
+            AvifImage image = AvifImage.read(channel, factory);
+
+            assertEquals(AvifPixelFormat.ARGB_8888, image.firstFrame().pixelFormat());
+            assertTrue(channel.isOpen());
+        } finally {
+            channel.close();
+        }
     }
 
     /// Verifies that a parsing failure does not close a borrowed stream.

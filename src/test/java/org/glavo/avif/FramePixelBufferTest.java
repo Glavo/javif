@@ -22,6 +22,13 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -148,6 +155,58 @@ final class FramePixelBufferTest {
         assertEquals(0x80FF_4020, longFrame.intPixelBuffer().get(0));
         assertEquals(AvifPixelFormat.ARGB_8888, intFrame.pixelFormat());
         assertEquals(AvifPixelFormat.ARGB_16161616, longFrame.pixelFormat());
+    }
+
+    /// Verifies that both frame types safely publish their first lazy pixel conversion to
+    /// concurrent readers.
+    ///
+    /// @throws InterruptedException if the test thread is interrupted while awaiting workers
+    /// @throws ExecutionException if a worker assertion fails
+    @Test
+    void lazyPixelConversionsAreSafeForConcurrentReaders() throws InterruptedException, ExecutionException {
+        AvifFrame avifFrame = new AvifFrame(
+                2,
+                1,
+                AvifBitDepth.TEN_BITS,
+                Av1ChromaFormat.YUV444,
+                0,
+                LongBuffer.wrap(new long[]{
+                        0xFFFF_8080_4040_0000L,
+                        0x8000_2020_6060_FFFFL
+                }).asReadOnlyBuffer()
+        );
+        Av1DecodedFrame av1Frame = new Av1DecodedFrame(
+                2,
+                1,
+                AvifBitDepth.EIGHT_BITS,
+                Av1ChromaFormat.YUV444,
+                Av1FrameType.KEY,
+                true,
+                0,
+                IntBuffer.wrap(new int[]{0xFF00_80FF, 0x8040_2000}).asReadOnlyBuffer()
+        );
+        List<Callable<Boolean>> tasks = new ArrayList<>();
+        for (int taskIndex = 0; taskIndex < 64; taskIndex++) {
+            tasks.add(() -> {
+                for (int iteration = 0; iteration < 64; iteration++) {
+                    assertEquals(0xFF80_4000, avifFrame.intPixelBuffer().get(0));
+                    assertEquals(0xFFFF_0000_8080_FFFFL, av1Frame.longPixelBuffer().get(0));
+                    assertEquals(0xFFFF_8080_4040_0000L, avifFrame.longPixelBuffer().get(0));
+                    assertEquals(0xFF00_80FF, av1Frame.intPixelBuffer().get(0));
+                }
+                return true;
+            });
+        }
+
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        try {
+            List<Future<Boolean>> futures = executor.invokeAll(tasks);
+            for (Future<Boolean> future : futures) {
+                assertTrue(future.get());
+            }
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     /// Verifies that AVIF frames reject dimensions, pixel counts, and frame indexes that cannot

@@ -137,21 +137,27 @@ public final class Av1Decoder implements AutoCloseable {
 
     /// Opens a low-overhead AV1 decoder over a byte channel.
     ///
-    /// The returned decoder owns and closes `source`.
+    /// On success, the returned decoder owns and closes `source`. The channel must use blocking
+    /// mode and remain blocking until the decoder is closed.
     ///
     /// @param source the channel to read
     /// @return the new AV1 decoder
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
     public static Av1Decoder open(ReadableByteChannel source) {
         return open(source, Av1DecoderConfig.DEFAULT);
     }
 
     /// Opens a low-overhead AV1 decoder over a byte channel.
     ///
-    /// The returned decoder owns and closes `source`.
+    /// On success, the returned decoder owns and closes `source`. The channel must use blocking
+    /// mode and remain blocking until the decoder is closed.
     ///
     /// @param source the channel to read
     /// @param config the immutable decoder configuration
     /// @return the new AV1 decoder
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
     public static Av1Decoder open(ReadableByteChannel source, Av1DecoderConfig config) {
         return new Av1Decoder(bufferedInput(source), config, false);
     }
@@ -184,10 +190,13 @@ public final class Av1Decoder implements AutoCloseable {
     /// Opens an Annex B AV1 decoder using the default decoder configuration.
     ///
     /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
-    /// Annex B of the AV1 bitstream specification. The returned decoder owns and closes `source`.
+    /// Annex B of the AV1 bitstream specification. On success, the returned decoder owns and closes
+    /// `source`. The channel must use blocking mode and remain blocking until the decoder is closed.
     ///
     /// @param source the channel to read
     /// @return the new Annex B AV1 decoder
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
     public static Av1Decoder openAnnexB(ReadableByteChannel source) {
         return openAnnexB(source, Av1DecoderConfig.DEFAULT);
     }
@@ -195,11 +204,14 @@ public final class Av1Decoder implements AutoCloseable {
     /// Opens an Annex B AV1 decoder using the supplied decoder configuration.
     ///
     /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
-    /// Annex B of the AV1 bitstream specification. The returned decoder owns and closes `source`.
+    /// Annex B of the AV1 bitstream specification. On success, the returned decoder owns and closes
+    /// `source`. The channel must use blocking mode and remain blocking until the decoder is closed.
     ///
     /// @param source the channel to read
     /// @param config the immutable decoder configuration
     /// @return the new Annex B AV1 decoder
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
     public static Av1Decoder openAnnexB(ReadableByteChannel source, Av1DecoderConfig config) {
         return new Av1Decoder(bufferedInput(source), config, true);
     }

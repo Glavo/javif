@@ -135,11 +135,14 @@ public final class AvifImageReader implements AutoCloseable {
     ///
     /// This method is equivalent to `AvifImageReaderFactory.DEFAULT.open(source)`.
     /// It borrows the channel and reads container metadata and encoded frames progressively without
-    /// closing the channel. The caller must keep the channel open until the reader is closed.
+    /// closing the channel. The caller must keep the channel open and in blocking mode until the
+    /// reader is closed.
     ///
     /// @param source the source byte channel
     /// @return a new AVIF image reader
     /// @throws IOException if the source cannot be read or decoded
+    /// @throws IllegalArgumentException if the channel is selectable and configured as
+    ///                                  non-blocking
     public static AvifImageReader open(ReadableByteChannel source) throws IOException {
         return AvifImageReaderFactory.DEFAULT.open(source);
     }

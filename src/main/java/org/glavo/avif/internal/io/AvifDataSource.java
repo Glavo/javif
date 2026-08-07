@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.SelectableChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -104,8 +105,15 @@ public abstract sealed class AvifDataSource implements Closeable {
     /// @param channel the readable channel to borrow
     /// @param maximumPosition the maximum permitted exclusive source position
     /// @return the progressive source
+    /// @throws IllegalArgumentException if `maximumPosition` is not positive or `channel` is
+    ///                                  selectable and configured as non-blocking
     public static AvifDataSource progressive(ReadableByteChannel channel, long maximumPosition) {
-        return new ProgressiveSource(channel, maximumPosition);
+        ReadableByteChannel checkedChannel = Objects.requireNonNull(channel, "channel");
+        if (checkedChannel instanceof SelectableChannel selectableChannel
+                && !selectableChannel.isBlocking()) {
+            throw new IllegalArgumentException("channel must be in blocking mode");
+        }
+        return new ProgressiveSource(checkedChannel, maximumPosition);
     }
 
     /// Returns the exclusive source-position limit.
