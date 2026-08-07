@@ -17,18 +17,18 @@ package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
+import org.glavo.avif.internal.io.RandomAccessDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Unmodifiable;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Objects;
 
 /// Bounded big-endian byte reader for BMFF boxes.
 @NotNullByDefault
 public final class BoxInput {
-    /// The complete source bytes.
-    private final byte @Unmodifiable [] source;
+    /// The complete random-access source.
+    private final RandomAccessDataSource source;
     /// The inclusive lower bound for this view.
     private final int start;
     /// The exclusive upper bound for this view.
@@ -38,19 +38,29 @@ public final class BoxInput {
 
     /// Creates a bounded input over a byte array.
     ///
+    /// The input retains the array without copying it. The caller must not modify the array while
+    /// this input or one of its slices is in use.
+    ///
     /// @param source the complete source bytes
     public BoxInput(byte[] source) {
-        this(source, 0, Objects.requireNonNull(source, "source").length);
+        this(RandomAccessDataSource.ofOwnedBytes(Objects.requireNonNull(source, "source")));
+    }
+
+    /// Creates a bounded input over a complete random-access source.
+    ///
+    /// @param source the complete random-access source
+    public BoxInput(RandomAccessDataSource source) {
+        this(source, 0, checkedSourceSize(source));
     }
 
     /// Creates a bounded input over one source slice.
     ///
-    /// @param source the complete source bytes
+    /// @param source the complete random-access source
     /// @param start the inclusive lower bound
     /// @param end the exclusive upper bound
-    public BoxInput(byte[] source, int start, int end) {
+    private BoxInput(RandomAccessDataSource source, int start, int end) {
         this.source = Objects.requireNonNull(source, "source");
-        if (start < 0 || end < start || end > source.length) {
+        if (start < 0 || end < start || end > source.size()) {
             throw new IllegalArgumentException("invalid input bounds: " + start + ".." + end);
         }
         this.start = start;
@@ -92,7 +102,7 @@ public final class BoxInput {
     /// @throws AvifDecodeException if the input is truncated
     public int readU8() throws AvifDecodeException {
         ensureAvailable(1);
-        return Byte.toUnsignedInt(source[offset++]);
+        return Byte.toUnsignedInt(readSourceByte(offset++));
     }
 
     /// Reads one signed 8-bit integer.
@@ -109,8 +119,8 @@ public final class BoxInput {
     /// @throws AvifDecodeException if the input is truncated
     public int readU16() throws AvifDecodeException {
         ensureAvailable(2);
-        int value = (Byte.toUnsignedInt(source[offset]) << 8)
-                | Byte.toUnsignedInt(source[offset + 1]);
+        int value = (Byte.toUnsignedInt(readSourceByte(offset)) << 8)
+                | Byte.toUnsignedInt(readSourceByte(offset + 1));
         offset += 2;
         return value;
     }
@@ -129,9 +139,9 @@ public final class BoxInput {
     /// @throws AvifDecodeException if the input is truncated
     public int readU24() throws AvifDecodeException {
         ensureAvailable(3);
-        int value = (Byte.toUnsignedInt(source[offset]) << 16)
-                | (Byte.toUnsignedInt(source[offset + 1]) << 8)
-                | Byte.toUnsignedInt(source[offset + 2]);
+        int value = (Byte.toUnsignedInt(readSourceByte(offset)) << 16)
+                | (Byte.toUnsignedInt(readSourceByte(offset + 1)) << 8)
+                | Byte.toUnsignedInt(readSourceByte(offset + 2));
         offset += 3;
         return value;
     }
@@ -142,10 +152,10 @@ public final class BoxInput {
     /// @throws AvifDecodeException if the input is truncated
     public long readU32() throws AvifDecodeException {
         ensureAvailable(4);
-        long value = ((long) Byte.toUnsignedInt(source[offset]) << 24)
-                | ((long) Byte.toUnsignedInt(source[offset + 1]) << 16)
-                | ((long) Byte.toUnsignedInt(source[offset + 2]) << 8)
-                | Byte.toUnsignedInt(source[offset + 3]);
+        long value = ((long) Byte.toUnsignedInt(readSourceByte(offset)) << 24)
+                | ((long) Byte.toUnsignedInt(readSourceByte(offset + 1)) << 16)
+                | ((long) Byte.toUnsignedInt(readSourceByte(offset + 2)) << 8)
+                | Byte.toUnsignedInt(readSourceByte(offset + 3));
         offset += 4;
         return value;
     }
@@ -187,10 +197,7 @@ public final class BoxInput {
     /// @return one fixed-length four-character code
     /// @throws AvifDecodeException if the input is truncated
     public String readFourCc() throws AvifDecodeException {
-        ensureAvailable(4);
-        String value = new String(source, offset, 4, StandardCharsets.ISO_8859_1);
-        offset += 4;
-        return value;
+        return new String(readBytes(4), StandardCharsets.ISO_8859_1);
     }
 
     /// Reads one byte array.
@@ -203,7 +210,12 @@ public final class BoxInput {
             throw new IllegalArgumentException("length < 0: " + length);
         }
         ensureAvailable(length);
-        byte[] result = Arrays.copyOfRange(source, offset, offset + length);
+        byte[] result;
+        try {
+            result = source.readBytes(offset, length);
+        } catch (IOException exception) {
+            throw readFailed(exception, offset);
+        }
         offset += length;
         return result;
     }
@@ -231,6 +243,46 @@ public final class BoxInput {
             throw truncated("child box exceeds parent bounds", absoluteStart);
         }
         return new BoxInput(source, absoluteStart, absoluteStart + size);
+    }
+
+    /// Returns the supported integer size of a complete source.
+    ///
+    /// @param source the source to inspect
+    /// @return the source size as an integer
+    /// @throws IllegalArgumentException if the source exceeds the parser's integer offset range
+    private static int checkedSourceSize(RandomAccessDataSource source) {
+        long size = Objects.requireNonNull(source, "source").size();
+        if (size > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("source exceeds supported size: " + size);
+        }
+        return (int) size;
+    }
+
+    /// Reads one source byte and translates I/O failures to a container parse failure.
+    ///
+    /// @param absoluteOffset the absolute source offset
+    /// @return the requested byte
+    /// @throws AvifDecodeException if the source cannot be read
+    private byte readSourceByte(int absoluteOffset) throws AvifDecodeException {
+        try {
+            return source.readByte(absoluteOffset);
+        } catch (IOException exception) {
+            throw readFailed(exception, absoluteOffset);
+        }
+    }
+
+    /// Creates a container parse failure for an underlying positional-read failure.
+    ///
+    /// @param cause the source read failure
+    /// @param absoluteOffset the attempted absolute source offset
+    /// @return the translated decode exception
+    private static AvifDecodeException readFailed(IOException cause, int absoluteOffset) {
+        return new AvifDecodeException(
+                AvifErrorCode.BMFF_PARSE_FAILED,
+                "Cannot read AVIF container data: " + cause.getMessage(),
+                (long) absoluteOffset,
+                cause
+        );
     }
 
     /// Reads the next BMFF box header.

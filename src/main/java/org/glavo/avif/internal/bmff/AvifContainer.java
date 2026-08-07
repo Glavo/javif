@@ -19,11 +19,7 @@ import org.glavo.avif.AvifImageInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import org.jetbrains.annotations.UnmodifiableView;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.Arrays;
 import java.util.Objects;
 
 /// Parsed AVIF container data required to decode still images and image sequences.
@@ -46,11 +42,11 @@ public final class AvifContainer {
     /// The gain-map image source, or `null` when absent or descriptor-only.
     private final @Nullable AvifImageSource gainMapSource;
     /// The AV1 OBU payloads for sequence color samples, or `null` for a still image.
-    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] samplePayloads;
+    private final AvifPayload @Nullable @Unmodifiable [] samplePayloads;
     /// The AV1 OBU payloads for sequence alpha samples, or `null` when absent.
-    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads;
+    private final AvifPayload @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads;
     /// The AV1 OBU payloads for sequence depth samples, or `null` when absent.
-    private final @Unmodifiable ByteBuffer @Nullable @Unmodifiable [] sequenceDepthSamplePayloads;
+    private final AvifPayload @Nullable @Unmodifiable [] sequenceDepthSamplePayloads;
 
     /// Creates parsed still-image container data from normalized image sources.
     ///
@@ -90,9 +86,9 @@ public final class AvifContainer {
     /// @param sequenceDepthSamplePayloads the AV1 OBU payloads for depth samples, or `null`
     public AvifContainer(
             AvifImageInfo info,
-            byte @Unmodifiable [] @Unmodifiable [] samplePayloads,
-            byte @Unmodifiable [] @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads,
-            byte @Unmodifiable [] @Nullable @Unmodifiable [] sequenceDepthSamplePayloads
+            AvifPayload @Unmodifiable [] samplePayloads,
+            AvifPayload @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads,
+            AvifPayload @Nullable @Unmodifiable [] sequenceDepthSamplePayloads
     ) {
         this.info = Objects.requireNonNull(info, "info");
         if (!info.animated()) {
@@ -113,12 +109,12 @@ public final class AvifContainer {
         this.alphaSource = null;
         this.depthSource = null;
         this.gainMapSource = null;
-        this.samplePayloads = immutablePayloads(samplePayloads);
+        this.samplePayloads = copyPayloadDescriptors(samplePayloads);
         this.sequenceAlphaSamplePayloads = sequenceAlphaSamplePayloads != null
-                ? immutablePayloads(sequenceAlphaSamplePayloads)
+                ? copyPayloadDescriptors(sequenceAlphaSamplePayloads)
                 : null;
         this.sequenceDepthSamplePayloads = sequenceDepthSamplePayloads != null
-                ? immutablePayloads(sequenceDepthSamplePayloads)
+                ? copyPayloadDescriptors(sequenceDepthSamplePayloads)
                 : null;
     }
 
@@ -173,52 +169,35 @@ public final class AvifContainer {
 
     /// Returns the AV1 OBU payloads for color samples in presentation order.
     ///
-    /// @return read-only payload views, or `null` for a still image
-    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] samplePayloads() {
-        return samplePayloads != null ? payloadViews(samplePayloads) : null;
+    /// @return immutable payload descriptors, or `null` for a still image
+    public AvifPayload @Nullable @Unmodifiable [] samplePayloads() {
+        return samplePayloads != null ? samplePayloads.clone() : null;
     }
 
     /// Returns the AV1 OBU payloads for alpha samples in presentation order.
     ///
-    /// @return read-only payload views, or `null` when no sequence alpha track is present
-    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads() {
-        return sequenceAlphaSamplePayloads != null ? payloadViews(sequenceAlphaSamplePayloads) : null;
+    /// @return immutable payload descriptors, or `null` when no sequence alpha track is present
+    public AvifPayload @Nullable @Unmodifiable [] sequenceAlphaSamplePayloads() {
+        return sequenceAlphaSamplePayloads != null ? sequenceAlphaSamplePayloads.clone() : null;
     }
 
     /// Returns the AV1 OBU payloads for depth samples in presentation order.
     ///
-    /// @return read-only payload views, or `null` when no sequence depth track is present
-    public @UnmodifiableView ByteBuffer @Nullable @Unmodifiable [] sequenceDepthSamplePayloads() {
-        return sequenceDepthSamplePayloads != null ? payloadViews(sequenceDepthSamplePayloads) : null;
+    /// @return immutable payload descriptors, or `null` when no sequence depth track is present
+    public AvifPayload @Nullable @Unmodifiable [] sequenceDepthSamplePayloads() {
+        return sequenceDepthSamplePayloads != null ? sequenceDepthSamplePayloads.clone() : null;
     }
 
-    /// Copies payload byte arrays into immutable little-endian buffers.
+    /// Copies and validates a payload descriptor array.
     ///
-    /// @param payloads the source payload arrays
-    /// @return immutable payload buffers
-    private static @Unmodifiable ByteBuffer @Unmodifiable [] immutablePayloads(
-            byte @Unmodifiable [] @Unmodifiable [] payloads
+    /// @param payloads the source payload descriptors
+    /// @return an independent descriptor array
+    private static AvifPayload @Unmodifiable [] copyPayloadDescriptors(
+            AvifPayload @Unmodifiable [] payloads
     ) {
-        ByteBuffer[] result = new ByteBuffer[payloads.length];
+        AvifPayload[] result = payloads.clone();
         for (int i = 0; i < payloads.length; i++) {
-            byte[] payload = Objects.requireNonNull(payloads[i], "payloads[" + i + "]");
-            result[i] = ByteBuffer.wrap(Arrays.copyOf(payload, payload.length))
-                    .asReadOnlyBuffer()
-                    .order(ByteOrder.LITTLE_ENDIAN);
-        }
-        return result;
-    }
-
-    /// Returns read-only views over stored payloads.
-    ///
-    /// @param payloads the stored payload buffers
-    /// @return independent little-endian payload views
-    private static @UnmodifiableView ByteBuffer @Unmodifiable [] payloadViews(
-            @Unmodifiable ByteBuffer @Unmodifiable [] payloads
-    ) {
-        ByteBuffer[] result = new ByteBuffer[payloads.length];
-        for (int i = 0; i < payloads.length; i++) {
-            result[i] = payloads[i].slice().order(ByteOrder.LITTLE_ENDIAN);
+            Objects.requireNonNull(result[i], "payloads[" + i + "]");
         }
         return result;
     }

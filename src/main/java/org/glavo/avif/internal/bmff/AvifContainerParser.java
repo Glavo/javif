@@ -27,11 +27,13 @@ import org.glavo.avif.AvifImageItemProperty;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifSignedFraction;
 import org.glavo.avif.AvifUnsignedFraction;
+import org.glavo.avif.internal.io.RandomAccessDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -53,8 +55,8 @@ public final class AvifContainerParser {
     /// Internal marker for an indefinite track duration.
     private static final long INDEFINITE_TRACK_DURATION = -1L;
 
-    /// The source bytes.
-    private final byte @Unmodifiable [] source;
+    /// The random-access container source.
+    private final RandomAccessDataSource source;
     /// The parsed metadata state.
     private final MetaState meta = new MetaState();
     /// Whether an AVIF-compatible `ftyp` box was parsed.
@@ -66,17 +68,32 @@ public final class AvifContainerParser {
 
     /// Creates an AVIF container parser.
     ///
-    /// @param source the source bytes
-    private AvifContainerParser(byte[] source) {
+    /// @param source the random-access container source
+    private AvifContainerParser(RandomAccessDataSource source) {
         this.source = Objects.requireNonNull(source, "source");
     }
 
     /// Parses AVIF container data.
     ///
+    /// The returned container retains the supplied array for lazy AV1 payload reads. The caller
+    /// must not modify the array while using the returned container.
+    ///
     /// @param source the source bytes
     /// @return parsed AVIF container data
     /// @throws AvifDecodeException if the container is malformed or unsupported
     public static AvifContainer parse(byte[] source) throws AvifDecodeException {
+        return parse(RandomAccessDataSource.ofOwnedBytes(Objects.requireNonNull(source, "source")));
+    }
+
+    /// Parses AVIF container data from a retained random-access source.
+    ///
+    /// The returned container may retain payload ranges backed by `source`; the source must remain
+    /// open while those payloads are decoded.
+    ///
+    /// @param source the retained random-access source
+    /// @return parsed AVIF container data
+    /// @throws AvifDecodeException if the container is malformed or unsupported
+    public static AvifContainer parse(RandomAccessDataSource source) throws AvifDecodeException {
         return new AvifContainerParser(source).parse();
     }
 
@@ -162,7 +179,7 @@ public final class AvifContainerParser {
         );
 
         AvifImageSource primarySource = AvifImageSource.item(
-                mergeItemExtents(primaryItem),
+                itemPayload(primaryItem),
                 operatingPoint(primaryItem),
                 selectedSpatialLayer(primaryItem),
                 ispe.width,
@@ -402,7 +419,7 @@ public final class AvifContainerParser {
                     throw parseFailed("Sample Transform AV1 input is missing av1C: " + inputId, 0);
                 }
                 colorSource = AvifImageSource.item(
-                        mergeItemExtents(inputItem),
+                        itemPayload(inputItem),
                         operatingPoint(inputItem),
                         selectedSpatialLayer(inputItem),
                         expectedWidth,
@@ -693,7 +710,7 @@ public final class AvifContainerParser {
         }
 
         Av1Config representativeAv1C = null;
-        List<byte[]> cellPayloads = new ArrayList<>(expectedCellCount);
+        List<AvifPayload> cellPayloads = new ArrayList<>(expectedCellCount);
         int[] cellOperatingPoints = new int[expectedCellCount];
         int[] cellSelectedSpatialLayers = new int[expectedCellCount];
         int[] cellWidths = new int[expectedCellCount];
@@ -735,7 +752,7 @@ public final class AvifContainerParser {
             if (representativeAv1C == null) {
                 representativeAv1C = cellAv1C;
             }
-            cellPayloads.add(mergeItemExtents(cellItem));
+            cellPayloads.add(itemPayload(cellItem));
             cellOperatingPoints[i] = operatingPoint(cellItem);
             cellSelectedSpatialLayers[i] = selectedSpatialLayer(cellItem);
             cellWidths[i] = cellIspe.width;
@@ -744,7 +761,7 @@ public final class AvifContainerParser {
 
         assert representativeAv1C != null;
 
-        byte[][] payloads = cellPayloads.toArray(byte[][]::new);
+        AvifPayload[] payloads = cellPayloads.toArray(AvifPayload[]::new);
         return new GridPayloads(
                 rows,
                 columns,
@@ -809,7 +826,7 @@ public final class AvifContainerParser {
             outputHeight = auxiliaryIspe.height;
         }
         return AuxiliaryPayloads.of(AvifImageSource.item(
-                mergeItemExtents(auxiliaryItem),
+                itemPayload(auxiliaryItem),
                 operatingPoint(auxiliaryItem),
                 selectedSpatialLayer(auxiliaryItem),
                 outputWidth,
@@ -866,7 +883,7 @@ public final class AvifContainerParser {
                 outputHeight = auxiliaryIspe.height;
             }
             return AuxiliaryPayloads.of(AvifImageSource.item(
-                    mergeItemExtents(auxiliaryItem),
+                    itemPayload(auxiliaryItem),
                     operatingPoint(auxiliaryItem),
                     selectedSpatialLayer(auxiliaryItem),
                     outputWidth,
@@ -892,7 +909,7 @@ public final class AvifContainerParser {
             String label
     ) throws AvifDecodeException {
         List<Integer> cellIds = gridItem.dimgCellIds;
-        byte[][] auxiliaryCellPayloads = new byte[cellIds.size()][];
+        AvifPayload[] auxiliaryCellPayloads = new AvifPayload[cellIds.size()];
         int[] auxiliaryCellOperatingPoints = new int[cellIds.size()];
         int[] auxiliaryCellSelectedSpatialLayers = new int[cellIds.size()];
         int[] auxiliaryCellWidths = new int[cellIds.size()];
@@ -941,7 +958,7 @@ public final class AvifContainerParser {
                 auxiliaryCellWidths[i] = auxiliaryIspe.width;
                 auxiliaryCellHeights[i] = auxiliaryIspe.height;
             }
-            auxiliaryCellPayloads[i] = mergeItemExtents(auxiliaryCellItem);
+            auxiliaryCellPayloads[i] = itemPayload(auxiliaryCellItem);
             auxiliaryCellOperatingPoints[i] = operatingPoint(auxiliaryCellItem);
             auxiliaryCellSelectedSpatialLayers[i] = selectedSpatialLayer(auxiliaryCellItem);
         }
@@ -1432,7 +1449,9 @@ public final class AvifContainerParser {
                 }
                 case "idat" -> {
                     unique(uniqueBoxes, "idat", child.offset());
-                    meta.idat = payload.readBytes(payload.remaining());
+                    meta.idatOffset = payload.offset();
+                    meta.idatLength = payload.remaining();
+                    payload.skip(payload.remaining());
                 }
                 default -> {
                 }
@@ -1869,12 +1888,12 @@ public final class AvifContainerParser {
         MoovState s = meta.moovState;
         validateSequencePremultipliedAlphaReferences();
         SequencePayloads colorPayloads = sequencePayloads(s, "Color sequence");
-        byte @Nullable [][] alphaPayloads = sequenceAuxiliaryPayloads(
+        AvifPayload @Nullable [] alphaPayloads = sequenceAuxiliaryPayloads(
                 meta.moovAlphaState,
                 colorPayloads.sampleCount,
                 "Alpha sequence"
         );
-        byte @Nullable [][] depthPayloads = sequenceAuxiliaryPayloads(
+        AvifPayload @Nullable [] depthPayloads = sequenceAuxiliaryPayloads(
                 meta.moovDepthState,
                 colorPayloads.sampleCount,
                 "Depth sequence"
@@ -2022,12 +2041,12 @@ public final class AvifContainerParser {
                     null
             );
         }
-        byte[][] payloads = new byte[sampleCount][];
+        AvifPayload[] payloads = new AvifPayload[sampleCount];
         int[] deltas = new int[sampleCount];
 
         int sampleIndex = 0;
         if (track.sampleToChunkEntries.isEmpty()) {
-            sampleIndex = copySequentialChunkSamples(track, label, payloads, deltas, sampleIndex, 0, sampleCount);
+            sampleIndex = collectSequentialChunkSamples(track, label, payloads, deltas, sampleIndex, 0, sampleCount);
         } else {
             int entryIndex = 0;
             for (int chunkIndex = 1; chunkIndex <= track.chunkOffsets.size() && sampleIndex < sampleCount; chunkIndex++) {
@@ -2036,7 +2055,7 @@ public final class AvifContainerParser {
                     entryIndex++;
                 }
                 SampleToChunkEntry entry = track.sampleToChunkEntries.get(entryIndex);
-                sampleIndex = copySequentialChunkSamples(
+                sampleIndex = collectSequentialChunkSamples(
                         track,
                         label,
                         payloads,
@@ -2057,7 +2076,7 @@ public final class AvifContainerParser {
         return new SequencePayloads(payloads, deltas, sampleCount);
     }
 
-    /// Copies sequential samples from one chunk.
+    /// Collects sequential sample descriptors from one chunk.
     ///
     /// @param track the parsed track state
     /// @param label the diagnostic label
@@ -2068,10 +2087,10 @@ public final class AvifContainerParser {
     /// @param exclusiveSampleEnd the exclusive sample index end
     /// @return the next uncopied sample index
     /// @throws AvifDecodeException if the chunk sample data is outside the source
-    private int copySequentialChunkSamples(
+    private int collectSequentialChunkSamples(
             MoovState track,
             String label,
-            byte[][] payloads,
+            AvifPayload[] payloads,
             int[] deltas,
             int firstSampleIndex,
             int chunkIndex,
@@ -2081,7 +2100,7 @@ public final class AvifContainerParser {
         int sampleIndex = firstSampleIndex;
         while (sampleIndex < exclusiveSampleEnd) {
             int size = track.sampleSizes.get(sampleIndex);
-            payloads[sampleIndex] = copySequenceSample(label, sampleIndex, offset, size);
+            payloads[sampleIndex] = sequenceSample(label, sampleIndex, offset, size);
             deltas[sampleIndex] = sampleIndex < track.sampleDeltas.size() ? track.sampleDeltas.get(sampleIndex) : 1;
             offset += size;
             sampleIndex++;
@@ -2089,26 +2108,24 @@ public final class AvifContainerParser {
         return sampleIndex;
     }
 
-    /// Copies one AVIS sample payload.
+    /// Describes one AVIS sample payload without copying its contents.
     ///
     /// @param label the diagnostic label
     /// @param sampleIndex the zero-based sample index
     /// @param offset the absolute payload offset
     /// @param size the sample size in bytes
-    /// @return the copied sample payload
+    /// @return the sample payload descriptor
     /// @throws AvifDecodeException if the sample is outside the source
-    private byte[] copySequenceSample(String label, int sampleIndex, long offset, int size)
+    private AvifPayload sequenceSample(String label, int sampleIndex, long offset, int size)
             throws AvifDecodeException {
-        if (offset < 0 || size < 0 || offset > source.length || size > source.length - offset) {
+        if (offset < 0 || size < 0 || offset > source.size() || size > source.size() - offset) {
             throw new AvifDecodeException(
                     AvifErrorCode.TRUNCATED_DATA,
                     label + " sample outside source: " + sampleIndex,
                     offset
             );
         }
-        byte[] payload = new byte[size];
-        System.arraycopy(source, (int) offset, payload, 0, size);
-        return payload;
+        return AvifPayload.ofRanges(source, new long[]{offset}, new int[]{size});
     }
 
     /// Extracts auxiliary sample payloads and validates the sample count.
@@ -2118,7 +2135,7 @@ public final class AvifContainerParser {
     /// @param label the diagnostic label
     /// @return extracted auxiliary payloads, or `null`
     /// @throws AvifDecodeException if the auxiliary sample table is malformed
-    private byte @Nullable [][] sequenceAuxiliaryPayloads(
+    private AvifPayload @Nullable [] sequenceAuxiliaryPayloads(
             @Nullable MoovState track,
             int colorSampleCount,
             String label
@@ -2966,7 +2983,7 @@ public final class AvifContainerParser {
                 return GainMapPayloads.item(
                         info,
                         AvifImageSource.item(
-                                mergeItemExtents(gainMapItem),
+                                itemPayload(gainMapItem),
                                 operatingPoint(gainMapItem),
                                 selectedSpatialLayer(gainMapItem),
                                 gainMapDimensions.width,
@@ -3234,32 +3251,69 @@ public final class AvifContainerParser {
         return false;
     }
 
-    /// Merges item extents into one contiguous payload.
+    /// Describes item extents as one logical payload without copying their contents.
     ///
-    /// @param item the item whose extents should be merged
-    /// @return one contiguous item payload
-    /// @throws AvifDecodeException if the item data is malformed or truncated
-    private byte[] mergeItemExtents(Item item) throws AvifDecodeException {
+    /// @param item the item whose extents should be described
+    /// @return the logical item payload
+    /// @throws AvifDecodeException if the item data is malformed, truncated, or too large
+    private AvifPayload itemPayload(Item item) throws AvifDecodeException {
         if (item.extents.isEmpty()) {
             throw new AvifDecodeException(AvifErrorCode.TRUNCATED_DATA, "Item has no extents: " + item.id, null);
         }
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] storage = item.idatStored ? meta.idat : source;
-        if (item.idatStored && storage == null) {
-            throw new AvifDecodeException(AvifErrorCode.TRUNCATED_DATA, "Item is stored in missing idat: " + item.id, null);
+        long storageOffset = 0L;
+        long storageLength = source.size();
+        if (item.idatStored) {
+            if (meta.idatOffset < 0) {
+                throw new AvifDecodeException(
+                        AvifErrorCode.TRUNCATED_DATA,
+                        "Item is stored in missing idat: " + item.id,
+                        null
+                );
+            }
+            storageOffset = meta.idatOffset;
+            storageLength = meta.idatLength;
         }
-        Objects.requireNonNull(storage, "storage");
-        for (Extent extent : item.extents) {
-            if (extent.offset < 0 || extent.offset > storage.length || extent.length > storage.length - extent.offset) {
+
+        long[] offsets = new long[item.extents.size()];
+        int[] lengths = new int[item.extents.size()];
+        long totalLength = 0L;
+        for (int i = 0; i < item.extents.size(); i++) {
+            Extent extent = item.extents.get(i);
+            if (extent.offset < 0
+                    || extent.offset > storageLength
+                    || extent.length > storageLength - extent.offset) {
                 throw new AvifDecodeException(
                         AvifErrorCode.TRUNCATED_DATA,
                         "Item extent is outside available data: " + item.id,
                         extent.offset
                 );
             }
-            output.write(storage, (int) extent.offset, extent.length);
+            offsets[i] = storageOffset + extent.offset;
+            lengths[i] = extent.length;
+            totalLength += extent.length;
+            if (totalLength > Integer.MAX_VALUE - 8L) {
+                throw unsupported("Item payload exceeds supported size: " + item.id, null);
+            }
         }
-        return output.toByteArray();
+        return AvifPayload.ofRanges(source, offsets, lengths);
+    }
+
+    /// Merges item extents into one contiguous payload.
+    ///
+    /// @param item the item whose extents should be merged
+    /// @return one contiguous item payload
+    /// @throws AvifDecodeException if the item data is malformed or truncated
+    private byte[] mergeItemExtents(Item item) throws AvifDecodeException {
+        try {
+            return itemPayload(item).readBytes();
+        } catch (IOException exception) {
+            throw new AvifDecodeException(
+                    AvifErrorCode.BMFF_PARSE_FAILED,
+                    "Cannot read item payload " + item.id + ": " + exception.getMessage(),
+                    null,
+                    exception
+            );
+        }
     }
 
     /// Reads one full-box header.
@@ -3433,7 +3487,7 @@ public final class AvifContainerParser {
     @NotNullByDefault
     private static final class SequencePayloads {
         /// The AV1 OBU payloads for each sample in order.
-        private final byte @Unmodifiable [] @Unmodifiable [] payloads;
+        private final AvifPayload @Unmodifiable [] payloads;
         /// The frame duration deltas in media timescale units.
         private final int @Unmodifiable [] frameDeltas;
         /// The number of samples.
@@ -3445,7 +3499,7 @@ public final class AvifContainerParser {
         /// @param frameDeltas the frame duration deltas in media timescale units
         /// @param sampleCount the number of samples
         private SequencePayloads(
-                byte @Unmodifiable [] @Unmodifiable [] payloads,
+                AvifPayload @Unmodifiable [] payloads,
                 int @Unmodifiable [] frameDeltas,
                 int sampleCount
         ) {
@@ -3545,8 +3599,10 @@ public final class AvifContainerParser {
         private @Nullable MoovState moovAlphaState;
         /// The parsed AVIS depth auxiliary track state, or `null`.
         private @Nullable MoovState moovDepthState;
-        /// The optional `idat` payload for construction method 1.
-        private @Nullable byte[] idat;
+        /// The absolute offset of the optional `idat` payload, or `-1` when absent.
+        private long idatOffset = -1L;
+        /// The optional `idat` payload length.
+        private int idatLength;
         /// The parsed AVIS moov state.
         private final MoovState moovState = new MoovState();
 

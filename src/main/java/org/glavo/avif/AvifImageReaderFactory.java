@@ -16,13 +16,16 @@
 package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1DecoderConfig;
+import org.glavo.avif.internal.io.RandomAccessDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +43,10 @@ public final class AvifImageReaderFactory {
 
     /// The chunk size used when accumulating stream and channel inputs.
     private static final int INPUT_READ_BUFFER_SIZE = 8192;
+    /// The maximum non-seekable input prefix retained in memory before spooling to a file.
+    private static final int MEMORY_SPOOL_THRESHOLD = 8 * 1024 * 1024;
+    /// The maximum encoded input size supported by the integer-offset BMFF parser.
+    private static final long MAX_SUPPORTED_INPUT_SIZE = Integer.MAX_VALUE - 8L;
 
     /// The underlying AV1 decoder configuration.
     private final Av1DecoderConfig av1DecoderConfig;
@@ -82,7 +89,8 @@ public final class AvifImageReaderFactory {
 
     /// Returns the maximum accepted encoded AVIF input size.
     ///
-    /// A value of `0` means that readers created by this factory do not apply an input-size limit.
+    /// A value of `0` means that readers created by this factory do not apply an additional
+    /// configured limit. The parser's implementation limit still applies.
     ///
     /// @return the maximum accepted encoded AVIF input size in bytes, or `0` for no limit
     public long inputSizeLimit() {
@@ -115,8 +123,9 @@ public final class AvifImageReaderFactory {
 
     /// Returns a factory using the supplied maximum encoded input size.
     ///
-    /// A value of `0` disables the limit. Positive values are applied before copying array and
-    /// buffer inputs and while accumulating stream, channel, and path inputs.
+    /// A value of `0` disables the configured limit. Positive values are applied before retaining
+    /// array, buffer, and path inputs and while spooling stream and channel inputs. The parser's
+    /// implementation limit still applies when this value is `0`.
     ///
     /// @param value the maximum accepted encoded input size in bytes, or `0` for no limit
     /// @return a factory with the supplied input-size limit
@@ -141,7 +150,7 @@ public final class AvifImageReaderFactory {
     public AvifImageReader open(byte[] source) throws AvifDecodeException {
         byte[] checkedSource = Objects.requireNonNull(source, "source");
         validateInputSize(checkedSource.length);
-        return new AvifImageReader(checkedSource.clone(), this);
+        return new AvifImageReader(RandomAccessDataSource.ofOwnedBytes(checkedSource.clone()), this);
     }
 
     /// Opens an AVIF image reader over a byte buffer.
@@ -158,40 +167,45 @@ public final class AvifImageReaderFactory {
         validateInputSize(copy.remaining());
         byte[] bytes = new byte[copy.remaining()];
         copy.get(bytes);
-        return new AvifImageReader(bytes, this);
+        return new AvifImageReader(RandomAccessDataSource.ofOwnedBytes(bytes), this);
     }
 
     /// Opens an AVIF image reader over an input stream.
     ///
-    /// This method reads the stream through end-of-stream but does not close it. If reading fails,
-    /// the consumed prefix remains consumed.
+    /// This method reads the stream through end-of-stream but does not close it. Inputs larger than
+    /// an internal memory threshold are spooled to a temporary file owned by the returned reader.
+    /// If reading fails, the consumed prefix remains consumed.
     ///
     /// @param source the source input stream
     /// @return a new AVIF image reader
     /// @throws IOException if the source cannot be read, exceeds the configured limit, or does not
     ///                     contain a supported AVIF container
     public AvifImageReader open(InputStream source) throws IOException {
-        byte[] bytes = readInputStream(Objects.requireNonNull(source, "source"));
-        return new AvifImageReader(bytes, this);
+        RandomAccessDataSource retainedSource = spoolInput(Objects.requireNonNull(source, "source"));
+        return new AvifImageReader(retainedSource, this);
     }
 
     /// Opens an AVIF image reader over a readable byte channel.
     ///
-    /// This method reads the channel through end-of-stream but does not close it. If reading fails,
-    /// the consumed prefix remains consumed.
+    /// This method reads the channel through end-of-stream but does not close it. Inputs larger
+    /// than an internal memory threshold are spooled to a temporary file owned by the returned
+    /// reader. If reading fails, the consumed prefix remains consumed.
     ///
     /// @param source the source byte channel
     /// @return a new AVIF image reader
     /// @throws IOException if the source cannot be read, exceeds the configured limit, or does not
     ///                     contain a supported AVIF container
     public AvifImageReader open(ReadableByteChannel source) throws IOException {
-        byte[] bytes = readByteChannel(Objects.requireNonNull(source, "source"));
-        return new AvifImageReader(bytes, this);
+        RandomAccessDataSource retainedSource = spoolInput(
+                Channels.newInputStream(Objects.requireNonNull(source, "source"))
+        );
+        return new AvifImageReader(retainedSource, this);
     }
 
     /// Opens an AVIF image reader over a file path.
     ///
-    /// The file is closed before this method returns.
+    /// The returned reader owns an open read-only file handle and releases it from
+    /// [AvifImageReader#close()]. The file must not be modified until the reader is closed.
     ///
     /// @param source the source file path
     /// @return a new AVIF image reader
@@ -199,62 +213,79 @@ public final class AvifImageReaderFactory {
     ///                     contain a supported AVIF container
     public AvifImageReader open(Path source) throws IOException {
         Path checkedSource = Objects.requireNonNull(source, "source");
-        if (inputSizeLimit > 0) {
-            validateInputSize(Files.size(checkedSource));
-        }
-        try (InputStream input = Files.newInputStream(checkedSource)) {
-            return new AvifImageReader(readInputStream(input), this);
+        RandomAccessDataSource retainedSource = RandomAccessDataSource.open(checkedSource);
+        try {
+            validateInputSize(retainedSource.size());
+            return new AvifImageReader(retainedSource, this);
+        } catch (IOException | RuntimeException | Error exception) {
+            try {
+                retainedSource.close();
+            } catch (IOException closeException) {
+                exception.addSuppressed(closeException);
+            }
+            throw exception;
         }
     }
 
-    /// Reads an input stream into bounded memory.
+    /// Spools a non-seekable input into bounded memory or an owned temporary file.
     ///
     /// @param source the source input stream
-    /// @return the complete source bytes
+    /// @return an owned random-access source
     /// @throws IOException if the source cannot be read or exceeds the configured limit
-    private byte[] readInputStream(InputStream source) throws IOException {
+    private RandomAccessDataSource spoolInput(InputStream source) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         byte[] buffer = new byte[INPUT_READ_BUFFER_SIZE];
         long totalBytes = 0;
-        while (true) {
-            int read = source.read(buffer);
-            if (read < 0) {
-                break;
+        @Nullable Path temporaryFile = null;
+        @Nullable OutputStream fileOutput = null;
+        try {
+            while (true) {
+                int read = source.read(buffer);
+                if (read < 0) {
+                    break;
+                }
+                if (read == 0) {
+                    throw new IOException("InputStream made no progress while reading AVIF input");
+                }
+                validateAdditionalInputSize(totalBytes, read);
+                if (fileOutput == null && totalBytes + read > MEMORY_SPOOL_THRESHOLD) {
+                    temporaryFile = Files.createTempFile("javif-input-", ".avif");
+                    fileOutput = Files.newOutputStream(temporaryFile);
+                    output.writeTo(fileOutput);
+                }
+                if (fileOutput != null) {
+                    fileOutput.write(buffer, 0, read);
+                } else {
+                    output.write(buffer, 0, read);
+                }
+                totalBytes += read;
             }
-            if (read == 0) {
-                throw new IOException("InputStream made no progress while reading AVIF input");
-            }
-            validateAdditionalInputSize(totalBytes, read);
-            output.write(buffer, 0, read);
-            totalBytes += read;
-        }
-        return output.toByteArray();
-    }
 
-    /// Reads a byte channel into bounded memory.
-    ///
-    /// @param source the source byte channel
-    /// @return the complete source bytes
-    /// @throws IOException if the source cannot be read or exceeds the configured limit
-    private byte[] readByteChannel(ReadableByteChannel source) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ByteBuffer buffer = ByteBuffer.allocate(INPUT_READ_BUFFER_SIZE);
-        byte[] bytes = buffer.array();
-        long totalBytes = 0;
-        while (true) {
-            int read = source.read(buffer);
-            if (read < 0) {
-                break;
+            if (fileOutput == null) {
+                return RandomAccessDataSource.ofOwnedBytes(output.toByteArray());
             }
-            if (read == 0) {
-                throw new IOException("ReadableByteChannel made no progress while reading AVIF input");
+            fileOutput.close();
+            fileOutput = null;
+            return RandomAccessDataSource.openTemporary(
+                    Objects.requireNonNull(temporaryFile, "temporaryFile")
+            );
+        } catch (IOException | RuntimeException | Error exception) {
+            if (fileOutput != null) {
+                try {
+                    fileOutput.close();
+                } catch (IOException closeException) {
+                    exception.addSuppressed(closeException);
+                }
             }
-            validateAdditionalInputSize(totalBytes, read);
-            output.write(bytes, 0, read);
-            totalBytes += read;
-            buffer.clear();
+            if (temporaryFile != null) {
+                try {
+                    Files.deleteIfExists(temporaryFile);
+                } catch (IOException deleteException) {
+                    exception.addSuppressed(deleteException);
+                }
+            }
+            throw exception;
         }
-        return output.toByteArray();
     }
 
     /// Validates a complete input size against this factory's limit.
@@ -262,8 +293,8 @@ public final class AvifImageReaderFactory {
     /// @param inputSize the complete input size in bytes
     /// @throws AvifDecodeException if the size exceeds the configured limit
     private void validateInputSize(long inputSize) throws AvifDecodeException {
-        if (inputSizeLimit > 0 && inputSize > inputSizeLimit) {
-            throw inputTooLarge();
+        if (inputSize > maximumInputSize()) {
+            throw inputTooLarge(maximumInputSize());
         }
     }
 
@@ -273,18 +304,29 @@ public final class AvifImageReaderFactory {
     /// @param additionalSize the number of additional bytes about to be accepted
     /// @throws AvifDecodeException if the new size would exceed the configured limit
     private void validateAdditionalInputSize(long currentSize, long additionalSize) throws AvifDecodeException {
-        if (inputSizeLimit > 0 && additionalSize > inputSizeLimit - currentSize) {
-            throw inputTooLarge();
+        long maximumInputSize = maximumInputSize();
+        if (additionalSize > maximumInputSize - currentSize) {
+            throw inputTooLarge(maximumInputSize);
         }
     }
 
-    /// Creates an input-too-large exception for this factory's limit.
+    /// Returns the effective configured and implementation input limit.
     ///
+    /// @return the maximum supported input size in bytes
+    private long maximumInputSize() {
+        return inputSizeLimit == 0
+                ? MAX_SUPPORTED_INPUT_SIZE
+                : Math.min(inputSizeLimit, MAX_SUPPORTED_INPUT_SIZE);
+    }
+
+    /// Creates an input-too-large exception for an effective limit.
+    ///
+    /// @param maximumInputSize the effective maximum input size
     /// @return an input-too-large exception
-    private AvifDecodeException inputTooLarge() {
+    private static AvifDecodeException inputTooLarge(long maximumInputSize) {
         return new AvifDecodeException(
                 AvifErrorCode.INPUT_TOO_LARGE,
-                "AVIF input exceeds configured inputSizeLimit: " + inputSizeLimit + " bytes",
+                "AVIF input exceeds supported size limit: " + maximumInputSize + " bytes",
                 null
         );
     }

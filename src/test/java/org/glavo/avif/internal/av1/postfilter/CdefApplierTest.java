@@ -28,7 +28,6 @@ import org.glavo.avif.internal.av1.recon.FrameReconstructor;
 import org.glavo.avif.internal.bmff.AvifContainer;
 import org.glavo.avif.internal.bmff.AvifContainerParser;
 import org.glavo.avif.internal.bmff.AvifImageSource;
-import org.glavo.avif.internal.io.BufferedInput;
 import org.glavo.avif.testutil.TestResources;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -39,7 +38,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -60,9 +58,8 @@ final class CdefApplierTest {
         byte[] bytes = TestResources.readBytes(KODIM23_RESOURCE);
         AvifContainer container = AvifContainerParser.parse(bytes);
         AvifImageSource primarySource = Objects.requireNonNull(container.primarySource(), "primarySource");
-        ByteBuffer primaryPayload = primarySource.payload(0);
         try (Av1ImageReader reader = Av1ImageReader.open(
-                new BufferedInput.OfByteBuffer(primaryPayload),
+                primarySource.payload(0).openInput(),
                 Av1DecoderConfig.DEFAULT
         )) {
             reader.readFrame();

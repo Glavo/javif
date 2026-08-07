@@ -18,6 +18,7 @@ package org.glavo.avif.internal.bmff;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ReadOnlyBufferException;
@@ -33,19 +34,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class AvifImageSourceTest {
     /// Verifies that a standalone source owns its payload and returns independent read-only views.
     @Test
-    void itemDefensivelyCopiesPayload() {
+    void itemDefensivelyCopiesPayload() throws IOException {
         byte[] payload = {1, 2, 3};
         AvifImageSource source = AvifImageSource.item(payload, 7, 16, 9);
         payload[0] = 99;
 
-        ByteBuffer firstView = source.payload(0);
+        ByteBuffer firstView = source.payload(0).readBuffer();
         assertTrue(firstView.isReadOnly());
         assertEquals(ByteOrder.LITTLE_ENDIAN, firstView.order());
         assertEquals(1, firstView.get(0));
         assertThrows(ReadOnlyBufferException.class, () -> firstView.put(0, (byte) 4));
 
         firstView.position(2);
-        assertEquals(0, source.payload(0).position());
+        assertEquals(0, source.payload(0).readBuffer().position());
         assertFalse(source.isGrid());
         assertEquals(1, source.payloadCount());
         assertEquals(7, source.operatingPoint(0));
@@ -58,7 +59,7 @@ final class AvifImageSourceTest {
 
     /// Verifies that a grid source retains per-cell selections without aliasing input arrays.
     @Test
-    void gridDefensivelyCopiesPayloadsAndOperatingPoints() {
+    void gridDefensivelyCopiesPayloadsAndOperatingPoints() throws IOException {
         byte[][] payloads = {{1}, {2}, {3}, {4}};
         int[] operatingPoints = {0, 1, 2, 3};
         int[] selectedSpatialLayers = {
@@ -88,7 +89,7 @@ final class AvifImageSourceTest {
 
         assertTrue(source.isGrid());
         assertEquals(4, source.payloadCount());
-        assertEquals(2, source.payload(1).get(0));
+        assertEquals(2, source.payload(1).readBuffer().get(0));
         assertEquals(1, source.operatingPoint(1));
         assertArrayEquals(new int[]{0, 1, 2, 3}, source.operatingPoints());
         assertEquals(0, source.selectedSpatialLayer(1));
@@ -102,9 +103,9 @@ final class AvifImageSourceTest {
         assertEquals(31, source.outputWidth());
         assertEquals(17, source.outputHeight());
 
-        ByteBuffer[] views = source.payloads();
-        views[0] = ByteBuffer.allocate(0);
-        assertEquals(1, source.payload(0).remaining());
+        AvifPayload[] views = source.payloads();
+        views[0] = AvifPayload.copyOf(new byte[0]);
+        assertEquals(1, source.payload(0).length());
     }
 
     /// Verifies rejection of inconsistent geometry, payload counts, and operating-point values.

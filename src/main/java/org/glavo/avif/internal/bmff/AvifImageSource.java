@@ -17,11 +17,7 @@ package org.glavo.avif.internal.bmff;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
-import org.jetbrains.annotations.UnmodifiableView;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.Arrays;
 import java.util.Objects;
 
 /// Immutable standalone or grid-derived AV1 image source selected from an AVIF item graph.
@@ -35,7 +31,7 @@ public final class AvifImageSource {
     public static final int HIGHEST_SPATIAL_LAYER = -1;
 
     /// Immutable AV1 payloads in source order.
-    private final @Unmodifiable ByteBuffer @Unmodifiable [] payloads;
+    private final AvifPayload @Unmodifiable [] payloads;
     /// Operating-point indices corresponding to the payloads.
     private final int @Unmodifiable [] operatingPoints;
     /// Selected spatial-layer identifiers corresponding to the payloads.
@@ -68,7 +64,7 @@ public final class AvifImageSource {
     /// @param outputWidth the reconstructed output width
     /// @param outputHeight the reconstructed output height
     private AvifImageSource(
-            byte @Unmodifiable [] @Unmodifiable [] payloads,
+            AvifPayload @Unmodifiable [] payloads,
             int @Unmodifiable [] operatingPoints,
             int @Unmodifiable [] selectedSpatialLayers,
             int @Unmodifiable [] itemWidths,
@@ -106,6 +102,7 @@ public final class AvifImageSource {
             throw new IllegalArgumentException("Standalone image sources must contain exactly one payload");
         }
         for (int i = 0; i < operatingPoints.length; i++) {
+            Objects.requireNonNull(payloads[i], "payloads[" + i + "]");
             int operatingPoint = operatingPoints[i];
             if (operatingPoint < 0 || operatingPoint > 31) {
                 throw new IllegalArgumentException("Operating point out of range at index " + i + ": " + operatingPoint);
@@ -123,7 +120,7 @@ public final class AvifImageSource {
                 );
             }
         }
-        this.payloads = immutablePayloads(payloads);
+        this.payloads = payloads.clone();
         this.operatingPoints = operatingPoints.clone();
         this.selectedSpatialLayers = selectedSpatialLayers.clone();
         this.itemWidths = itemWidths.clone();
@@ -162,7 +159,36 @@ public final class AvifImageSource {
             int outputHeight
     ) {
         return new AvifImageSource(
-                new byte[][]{Objects.requireNonNull(payload, "payload")},
+                new AvifPayload[]{AvifPayload.copyOf(Objects.requireNonNull(payload, "payload"))},
+                new int[]{operatingPoint},
+                new int[]{selectedSpatialLayer},
+                new int[]{outputWidth},
+                new int[]{outputHeight},
+                false,
+                1,
+                1,
+                outputWidth,
+                outputHeight
+        );
+    }
+
+    /// Creates a standalone AV1 item source over an existing payload descriptor.
+    ///
+    /// @param payload the AV1 item payload descriptor
+    /// @param operatingPoint the selected AV1 operating-point index
+    /// @param selectedSpatialLayer the selected spatial-layer identifier, or [#HIGHEST_SPATIAL_LAYER]
+    /// @param outputWidth the reconstructed output width
+    /// @param outputHeight the reconstructed output height
+    /// @return the immutable standalone source
+    public static AvifImageSource item(
+            AvifPayload payload,
+            int operatingPoint,
+            int selectedSpatialLayer,
+            int outputWidth,
+            int outputHeight
+    ) {
+        return new AvifImageSource(
+                new AvifPayload[]{Objects.requireNonNull(payload, "payload")},
                 new int[]{operatingPoint},
                 new int[]{selectedSpatialLayer},
                 new int[]{outputWidth},
@@ -190,6 +216,48 @@ public final class AvifImageSource {
     /// @return the immutable grid source
     public static AvifImageSource grid(
             byte @Unmodifiable [] @Unmodifiable [] cellPayloads,
+            int @Unmodifiable [] operatingPoints,
+            int @Unmodifiable [] selectedSpatialLayers,
+            int @Unmodifiable [] cellWidths,
+            int @Unmodifiable [] cellHeights,
+            int rows,
+            int columns,
+            int outputWidth,
+            int outputHeight
+    ) {
+        Objects.requireNonNull(cellPayloads, "cellPayloads");
+        AvifPayload[] payloads = new AvifPayload[cellPayloads.length];
+        for (int i = 0; i < cellPayloads.length; i++) {
+            payloads[i] = AvifPayload.copyOf(Objects.requireNonNull(cellPayloads[i], "cellPayloads[" + i + "]"));
+        }
+        return grid(
+                payloads,
+                operatingPoints,
+                selectedSpatialLayers,
+                cellWidths,
+                cellHeights,
+                rows,
+                columns,
+                outputWidth,
+                outputHeight
+        );
+    }
+
+    /// Creates a grid-derived AV1 image source over existing payload descriptors.
+    ///
+    /// @param cellPayloads the cell AV1 payload descriptors in row-major order
+    /// @param operatingPoints the selected operating point for each cell
+    /// @param selectedSpatialLayers the selected spatial layer for each cell, using
+    ///        [#HIGHEST_SPATIAL_LAYER] where the highest output layer should be used
+    /// @param cellWidths the `ispe` width for each cell
+    /// @param cellHeights the `ispe` height for each cell
+    /// @param rows the grid row count
+    /// @param columns the grid column count
+    /// @param outputWidth the reconstructed output width
+    /// @param outputHeight the reconstructed output height
+    /// @return the immutable grid source
+    public static AvifImageSource grid(
+            AvifPayload @Unmodifiable [] cellPayloads,
             int @Unmodifiable [] operatingPoints,
             int @Unmodifiable [] selectedSpatialLayers,
             int @Unmodifiable [] cellWidths,
@@ -227,23 +295,19 @@ public final class AvifImageSource {
         return payloads.length;
     }
 
-    /// Returns one AV1 payload as a read-only view.
+    /// Returns one AV1 payload descriptor.
     ///
     /// @param index the zero-based payload or cell index
-    /// @return the read-only little-endian payload view
-    public @UnmodifiableView ByteBuffer payload(int index) {
-        return payloadView(payloads[index]);
+    /// @return the immutable payload descriptor
+    public AvifPayload payload(int index) {
+        return payloads[index];
     }
 
-    /// Returns all AV1 payloads as read-only views.
+    /// Returns all AV1 payload descriptors.
     ///
-    /// @return the read-only little-endian payload views
-    public @UnmodifiableView ByteBuffer @Unmodifiable [] payloads() {
-        ByteBuffer[] result = new ByteBuffer[payloads.length];
-        for (int i = 0; i < payloads.length; i++) {
-            result[i] = payloadView(payloads[i]);
-        }
-        return result;
+    /// @return a shallow copy of the immutable payload descriptors
+    public AvifPayload @Unmodifiable [] payloads() {
+        return payloads.clone();
     }
 
     /// Returns the operating-point index for one payload.
@@ -334,28 +398,4 @@ public final class AvifImageSource {
         return outputHeight;
     }
 
-    /// Copies payload byte arrays into immutable read-only buffers.
-    ///
-    /// @param payloads the source payload arrays
-    /// @return immutable payload buffers
-    private static @Unmodifiable ByteBuffer @Unmodifiable [] immutablePayloads(
-            byte @Unmodifiable [] @Unmodifiable [] payloads
-    ) {
-        ByteBuffer[] result = new ByteBuffer[payloads.length];
-        for (int i = 0; i < payloads.length; i++) {
-            byte[] payload = Objects.requireNonNull(payloads[i], "payloads[" + i + "]");
-            result[i] = ByteBuffer.wrap(Arrays.copyOf(payload, payload.length))
-                    .asReadOnlyBuffer()
-                    .order(ByteOrder.LITTLE_ENDIAN);
-        }
-        return result;
-    }
-
-    /// Returns a read-only little-endian view of one stored payload.
-    ///
-    /// @param payload the stored payload
-    /// @return the payload view
-    private static @UnmodifiableView ByteBuffer payloadView(@Unmodifiable ByteBuffer payload) {
-        return payload.slice().order(ByteOrder.LITTLE_ENDIAN);
-    }
 }

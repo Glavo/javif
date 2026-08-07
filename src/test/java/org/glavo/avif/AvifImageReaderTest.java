@@ -340,6 +340,64 @@ final class AvifImageReaderTest {
         }
     }
 
+    /// Verifies that array and buffer inputs are retained independently of caller mutations.
+    ///
+    /// @throws IOException if either reader cannot parse or decode the copied input
+    @Test
+    void openCopiesCallerOwnedMemoryInputs() throws IOException {
+        byte[] arrayBytes = minimalAvifStillImage();
+        try (AvifImageReader reader = AvifImageReader.open(arrayBytes)) {
+            Arrays.fill(arrayBytes, (byte) 0);
+            assertEquals(64, reader.readFrame().width());
+        }
+
+        byte[] bufferBytes = minimalAvifStillImage();
+        ByteBuffer buffer = ByteBuffer.allocate(bufferBytes.length + 3);
+        buffer.put(new byte[]{1, 2, 3});
+        buffer.put(bufferBytes);
+        buffer.flip();
+        buffer.position(3);
+        int originalPosition = buffer.position();
+        int originalLimit = buffer.limit();
+        try (AvifImageReader reader = AvifImageReader.open(buffer)) {
+            Arrays.fill(buffer.array(), (byte) 0);
+            assertEquals(64, reader.readFrame().width());
+        }
+        assertEquals(originalPosition, buffer.position());
+        assertEquals(originalLimit, buffer.limit());
+    }
+
+    /// Verifies that a path-backed reader decodes lazily and releases its file handle on close.
+    ///
+    /// @throws IOException if the fixture cannot be created, decoded, moved, or deleted
+    @Test
+    void pathInputRemainsReadableAndReleasesFileHandle() throws IOException {
+        Path path = writeWorkspaceTempFile("retained-path", minimalAvifStillImage());
+        try (AvifImageReader reader = AvifImageReader.open(path)) {
+            assertEquals(64, reader.info().width());
+            assertEquals(64, reader.readFrame().height());
+        }
+
+        Path moved = path.resolveSibling(path.getFileName() + ".moved");
+        Files.move(path, moved);
+        Files.delete(moved);
+        assertFalse(Files.exists(moved));
+    }
+
+    /// Verifies that large non-seekable inputs are decoded without transferring stream ownership.
+    ///
+    /// @throws IOException if the spooled input cannot be parsed or decoded
+    @Test
+    void largeInputStreamSpoolsWithoutClosingCallerStream() throws IOException {
+        byte[] bytes = withTrailingFreeBox(minimalAvifStillImage(), 9 * 1024 * 1024);
+        CloseTrackingInputStream input = new CloseTrackingInputStream(bytes);
+        try (AvifImageReader reader = AvifImageReader.open(input)) {
+            assertFalse(input.closed());
+            assertEquals(64, reader.readFrame().width());
+        }
+        assertFalse(input.closed());
+    }
+
     /// Writes bytes to a temporary path under the workspace-local build directory.
     ///
     /// @param name the logical fixture name
@@ -352,6 +410,54 @@ final class AvifImageReaderTest {
         Path path = directory.resolve(name + "-" + System.nanoTime() + ".avif");
         Files.write(path, bytes);
         return path;
+    }
+
+    /// Appends one ignored top-level `free` box of the requested total size.
+    ///
+    /// @param source the valid AVIF prefix
+    /// @param freeBoxSize the total `free` box size, including its eight-byte header
+    /// @return the padded AVIF input
+    private static byte[] withTrailingFreeBox(byte[] source, int freeBoxSize) {
+        if (freeBoxSize < 8) {
+            throw new IllegalArgumentException("freeBoxSize < 8: " + freeBoxSize);
+        }
+        byte[] result = Arrays.copyOf(source, Math.addExact(source.length, freeBoxSize));
+        int offset = source.length;
+        result[offset] = (byte) (freeBoxSize >>> 24);
+        result[offset + 1] = (byte) (freeBoxSize >>> 16);
+        result[offset + 2] = (byte) (freeBoxSize >>> 8);
+        result[offset + 3] = (byte) freeBoxSize;
+        result[offset + 4] = 'f';
+        result[offset + 5] = 'r';
+        result[offset + 6] = 'e';
+        result[offset + 7] = 'e';
+        return result;
+    }
+
+    /// Byte-array input stream that records whether caller ownership was taken.
+    private static final class CloseTrackingInputStream extends ByteArrayInputStream {
+        /// Whether [#close()] has been invoked.
+        private boolean closed;
+
+        /// Creates a stream over the supplied bytes.
+        ///
+        /// @param bytes the source bytes
+        private CloseTrackingInputStream(byte[] bytes) {
+            super(bytes);
+        }
+
+        /// Records closure without changing byte-array readability.
+        @Override
+        public void close() {
+            closed = true;
+        }
+
+        /// Returns whether this stream has been closed.
+        ///
+        /// @return whether [#close()] has been invoked
+        private boolean closed() {
+            return closed;
+        }
     }
 
     /// Asserts that an input-open operation fails with `INPUT_TOO_LARGE`.
