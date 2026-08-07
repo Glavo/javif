@@ -30,7 +30,7 @@ import org.glavo.avif.internal.bmff.AvifImageSource;
 import org.glavo.avif.internal.bmff.AvifPayload;
 import org.glavo.avif.internal.bmff.SampleTransform;
 import org.glavo.avif.internal.io.BufferedInput;
-import org.glavo.avif.internal.io.RandomAccessDataSource;
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -58,7 +58,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// The immutable factory options used to create this reader.
     private final AvifImageReaderFactory factory;
     /// The retained container source.
-    private final RandomAccessDataSource source;
+    private final AvifDataSource source;
     /// The parsed container data.
     private final AvifContainer container;
     /// The next frame index for sequential reads.
@@ -79,7 +79,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @param source the retained AVIF source
     /// @param factory the immutable factory that owns the decoding options
     /// @throws AvifDecodeException if the source is not a supported AVIF container
-    AvifImageReader(RandomAccessDataSource source, AvifImageReaderFactory factory) throws AvifDecodeException {
+    AvifImageReader(AvifDataSource source, AvifImageReaderFactory factory) throws AvifDecodeException {
         this.factory = Objects.requireNonNull(factory, "factory");
         this.source = Objects.requireNonNull(source, "source");
         try {
@@ -1380,7 +1380,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// @throws AvifDecodeException if this reader is closed or its source is forward-only
     private void ensureRandomAccess(String operation) throws AvifDecodeException {
         ensureOpen();
-        if (source.forwardOnly()) {
+        if (!source.isSeekable()) {
             throw new AvifDecodeException(
                     AvifErrorCode.SEEKABLE_SOURCE_REQUIRED,
                     operation + " requires Path, byte[], or ByteBuffer input",

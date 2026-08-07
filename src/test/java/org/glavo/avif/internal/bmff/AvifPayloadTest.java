@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.internal.io.BufferedInput;
-import org.glavo.avif.internal.io.RandomAccessDataSource;
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +33,7 @@ final class AvifPayloadTest {
     /// @throws IOException if the payload cannot be read
     @Test
     void readsMultipleExtentsWithoutChangingLogicalOrder() throws IOException {
-        RandomAccessDataSource source = RandomAccessDataSource.ofBytes(
+        AvifDataSource source = AvifDataSource.ofBytes(
                 new byte[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
         );
         AvifPayload payload = AvifPayload.ofRanges(source, new long[]{1, 6}, new int[]{2, 3});
@@ -52,7 +52,7 @@ final class AvifPayloadTest {
     /// @throws IOException if the payload input cannot be read
     @Test
     void preservesPayloadUnitBoundaries() throws IOException {
-        RandomAccessDataSource source = RandomAccessDataSource.ofBytes(
+        AvifDataSource source = AvifDataSource.ofBytes(
                 new byte[]{10, 11, 12, 13, 14, 15, 16}
         );
         AvifPayload first = AvifPayload.ofRanges(source, new long[]{0}, new int[]{3});

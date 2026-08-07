@@ -17,7 +17,7 @@ package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
-import org.glavo.avif.internal.io.RandomAccessDataSource;
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.io.IOException;
@@ -28,7 +28,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class BoxInput {
     /// The retained positional source.
-    private final RandomAccessDataSource source;
+    private final AvifDataSource source;
     /// The inclusive lower bound for this view.
     private final int start;
     /// The exclusive upper bound for this view.
@@ -43,13 +43,13 @@ public final class BoxInput {
     ///
     /// @param source the complete source bytes
     public BoxInput(byte[] source) {
-        this(RandomAccessDataSource.ofBytes(Objects.requireNonNull(source, "source")));
+        this(AvifDataSource.ofBytes(Objects.requireNonNull(source, "source")));
     }
 
     /// Creates a bounded input over a retained positional source.
     ///
     /// @param source the retained positional source
-    public BoxInput(RandomAccessDataSource source) {
+    public BoxInput(AvifDataSource source) {
         this(source, 0, checkedSourceSize(source));
     }
 
@@ -58,9 +58,9 @@ public final class BoxInput {
     /// @param source the retained positional source
     /// @param start the inclusive lower bound
     /// @param end the exclusive upper bound
-    private BoxInput(RandomAccessDataSource source, int start, int end) {
+    private BoxInput(AvifDataSource source, int start, int end) {
         this.source = Objects.requireNonNull(source, "source");
-        if (start < 0 || end < start || end > source.size()) {
+        if (start < 0 || end < start || end > source.limit()) {
             throw new IllegalArgumentException("invalid input bounds: " + start + ".." + end);
         }
         this.start = start;
@@ -248,10 +248,10 @@ public final class BoxInput {
     /// Returns the supported integer size of a complete source.
     ///
     /// @param source the source to inspect
-    /// @return the source size as an integer
+    /// @return the source-position limit as an integer
     /// @throws IllegalArgumentException if the source exceeds the parser's integer offset range
-    private static int checkedSourceSize(RandomAccessDataSource source) {
-        long size = Objects.requireNonNull(source, "source").size();
+    private static int checkedSourceSize(AvifDataSource source) {
+        long size = Objects.requireNonNull(source, "source").limit();
         if (size > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("source exceeds supported size: " + size);
         }

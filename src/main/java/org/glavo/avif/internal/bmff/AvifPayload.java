@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.bmff;
 
 import org.glavo.avif.internal.io.BufferedInput;
-import org.glavo.avif.internal.io.RandomAccessDataSource;
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.UnmodifiableView;
@@ -38,7 +38,7 @@ public final class AvifPayload {
     private static final int MAX_PAYLOAD_SIZE = Integer.MAX_VALUE - 8;
 
     /// The source containing every extent.
-    private final RandomAccessDataSource source;
+    private final AvifDataSource source;
     /// The absolute source offset of each extent.
     private final long @Unmodifiable [] offsets;
     /// The byte length of each extent.
@@ -52,7 +52,7 @@ public final class AvifPayload {
     /// @param offsets the absolute source offsets
     /// @param lengths the source-range lengths
     private AvifPayload(
-            RandomAccessDataSource source,
+            AvifDataSource source,
             long @Unmodifiable [] offsets,
             int @Unmodifiable [] lengths
     ) {
@@ -67,7 +67,7 @@ public final class AvifPayload {
         for (int i = 0; i < offsets.length; i++) {
             long offset = offsets[i];
             int rangeLength = lengths[i];
-            if (offset < 0 || rangeLength < 0 || offset > source.size() || rangeLength > source.size() - offset) {
+            if (offset < 0 || rangeLength < 0 || offset > source.limit() || rangeLength > source.limit() - offset) {
                 throw new IllegalArgumentException(
                         "Payload range outside source at index " + i + ": " + offset + " + " + rangeLength
                 );
@@ -89,7 +89,7 @@ public final class AvifPayload {
     /// @param lengths the source-range lengths
     /// @return the immutable payload descriptor
     public static AvifPayload ofRanges(
-            RandomAccessDataSource source,
+            AvifDataSource source,
             long @Unmodifiable [] offsets,
             int @Unmodifiable [] lengths
     ) {
@@ -102,7 +102,7 @@ public final class AvifPayload {
     /// @return the independently owned payload
     public static AvifPayload copyOf(byte[] bytes) {
         byte[] copy = Objects.requireNonNull(bytes, "bytes").clone();
-        RandomAccessDataSource source = RandomAccessDataSource.ofBytes(copy);
+        AvifDataSource source = AvifDataSource.ofBytes(copy);
         return new AvifPayload(source, new long[]{0L}, new int[]{copy.length});
     }
 
@@ -163,7 +163,7 @@ public final class AvifPayload {
     /// Buffered logical concatenation of payload ranges.
     private static final class PayloadInput extends BufferedInput {
         /// The source corresponding to each flattened extent.
-        private final RandomAccessDataSource @Unmodifiable [] sources;
+        private final AvifDataSource @Unmodifiable [] sources;
         /// The absolute source offset of each flattened extent.
         private final long @Unmodifiable [] sourceOffsets;
         /// The logical exclusive end offset of each flattened extent.
@@ -192,7 +192,7 @@ public final class AvifPayload {
                         Objects.requireNonNull(payloads[i], "payloads[" + i + "]").offsets.length
                 );
             }
-            this.sources = new RandomAccessDataSource[extentCount];
+            this.sources = new AvifDataSource[extentCount];
             this.sourceOffsets = new long[extentCount];
             this.extentEndOffsets = new long[extentCount];
             this.payloadEndOffsets = new long[payloads.length];

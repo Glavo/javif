@@ -16,7 +16,7 @@
 package org.glavo.avif;
 
 import org.glavo.avif.decode.Av1DecoderConfig;
-import org.glavo.avif.internal.io.RandomAccessDataSource;
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -146,7 +146,7 @@ public final class AvifImageReaderFactory {
     public AvifImageReader open(byte[] source) throws AvifDecodeException {
         byte[] checkedSource = Objects.requireNonNull(source, "source");
         validateInputSize(checkedSource.length);
-        return new AvifImageReader(RandomAccessDataSource.ofBytes(checkedSource), this);
+        return new AvifImageReader(AvifDataSource.ofBytes(checkedSource), this);
     }
 
     /// Opens an AVIF image reader over a byte buffer.
@@ -164,7 +164,7 @@ public final class AvifImageReaderFactory {
     public AvifImageReader open(ByteBuffer source) throws AvifDecodeException {
         ByteBuffer checkedSource = Objects.requireNonNull(source, "source");
         validateInputSize(checkedSource.remaining());
-        return new AvifImageReader(RandomAccessDataSource.ofByteBuffer(checkedSource), this);
+        return new AvifImageReader(AvifDataSource.ofByteBuffer(checkedSource), this);
     }
 
     /// Opens an AVIF image reader over an input stream.
@@ -187,8 +187,8 @@ public final class AvifImageReaderFactory {
     ///                     contain a supported AVIF container
     public AvifImageReader open(InputStream source) throws IOException {
         return new AvifImageReader(
-                RandomAccessDataSource.progressive(
-                        Objects.requireNonNull(source, "source"),
+                AvifDataSource.progressive(
+                        Channels.newChannel(Objects.requireNonNull(source, "source")),
                         maximumInputSize()
                 ),
                 this
@@ -215,8 +215,8 @@ public final class AvifImageReaderFactory {
     ///                     contain a supported AVIF container
     public AvifImageReader open(ReadableByteChannel source) throws IOException {
         return new AvifImageReader(
-                RandomAccessDataSource.progressive(
-                        Channels.newInputStream(Objects.requireNonNull(source, "source")),
+                AvifDataSource.progressive(
+                        Objects.requireNonNull(source, "source"),
                         maximumInputSize()
                 ),
                 this
@@ -234,9 +234,9 @@ public final class AvifImageReaderFactory {
     ///                     contain a supported AVIF container
     public AvifImageReader open(Path source) throws IOException {
         Path checkedSource = Objects.requireNonNull(source, "source");
-        RandomAccessDataSource retainedSource = RandomAccessDataSource.open(checkedSource);
+        AvifDataSource retainedSource = AvifDataSource.open(checkedSource);
         try {
-            validateInputSize(retainedSource.size());
+            validateInputSize(retainedSource.limit());
             return new AvifImageReader(retainedSource, this);
         } catch (IOException | RuntimeException | Error exception) {
             try {

@@ -27,7 +27,7 @@ import org.glavo.avif.AvifImageItemProperty;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifSignedFraction;
 import org.glavo.avif.AvifUnsignedFraction;
-import org.glavo.avif.internal.io.RandomAccessDataSource;
+import org.glavo.avif.internal.io.AvifDataSource;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -55,8 +55,8 @@ public final class AvifContainerParser {
     /// Internal marker for an indefinite track duration.
     private static final long INDEFINITE_TRACK_DURATION = -1L;
 
-    /// The random-access container source.
-    private final RandomAccessDataSource source;
+    /// The retained container data source.
+    private final AvifDataSource source;
     /// The parsed metadata state.
     private final MetaState meta = new MetaState();
     /// Whether an AVIF-compatible `ftyp` box was parsed.
@@ -68,8 +68,8 @@ public final class AvifContainerParser {
 
     /// Creates an AVIF container parser.
     ///
-    /// @param source the random-access container source
-    private AvifContainerParser(RandomAccessDataSource source) {
+    /// @param source the retained container data source
+    private AvifContainerParser(AvifDataSource source) {
         this.source = Objects.requireNonNull(source, "source");
     }
 
@@ -82,7 +82,7 @@ public final class AvifContainerParser {
     /// @return parsed AVIF container data
     /// @throws AvifDecodeException if the container is malformed or unsupported
     public static AvifContainer parse(byte[] source) throws AvifDecodeException {
-        return parse(RandomAccessDataSource.ofBytes(Objects.requireNonNull(source, "source")));
+        return parse(AvifDataSource.ofBytes(Objects.requireNonNull(source, "source")));
     }
 
     /// Parses AVIF container data from a retained positional source.
@@ -93,7 +93,7 @@ public final class AvifContainerParser {
     /// @param source the retained positional source
     /// @return parsed AVIF container data
     /// @throws AvifDecodeException if the container is malformed or unsupported
-    public static AvifContainer parse(RandomAccessDataSource source) throws AvifDecodeException {
+    public static AvifContainer parse(AvifDataSource source) throws AvifDecodeException {
         return new AvifContainerParser(source).parse();
     }
 
@@ -242,7 +242,7 @@ public final class AvifContainerParser {
     /// @param parsedBoxType the type of the top-level box most recently parsed
     /// @return whether top-level parsing can finish without reading another box
     private boolean forwardMetadataComplete(String parsedBoxType) {
-        if (!source.forwardOnly() || !compatibleFileTypeSeen) {
+        if (source.isSeekable() || !compatibleFileTypeSeen) {
             return false;
         }
         if (avisBrandSeen) {
@@ -2139,12 +2139,12 @@ public final class AvifContainerParser {
     /// @throws AvifDecodeException if the sample is outside the source
     private AvifPayload sequenceSample(String label, int sampleIndex, long offset, int size)
             throws AvifDecodeException {
-        if (offset < 0 || size < 0 || offset > source.size() || size > source.size() - offset) {
+        if (offset < 0 || size < 0 || offset > source.limit() || size > source.limit() - offset) {
             throw new AvifDecodeException(
-                    source.forwardOnly() ? AvifErrorCode.INPUT_TOO_LARGE : AvifErrorCode.TRUNCATED_DATA,
-                    source.forwardOnly()
-                            ? label + " sample exceeds the configured input-size limit: " + sampleIndex
-                            : label + " sample outside source: " + sampleIndex,
+                    source.isSeekable() ? AvifErrorCode.TRUNCATED_DATA : AvifErrorCode.INPUT_TOO_LARGE,
+                    source.isSeekable()
+                            ? label + " sample outside source: " + sampleIndex
+                            : label + " sample exceeds the configured input-size limit: " + sampleIndex,
                     offset
             );
         }
@@ -3284,7 +3284,7 @@ public final class AvifContainerParser {
             throw new AvifDecodeException(AvifErrorCode.TRUNCATED_DATA, "Item has no extents: " + item.id, null);
         }
         long storageOffset = 0L;
-        long storageLength = source.size();
+        long storageLength = source.limit();
         if (item.idatStored) {
             if (meta.idatOffset < 0) {
                 throw new AvifDecodeException(
@@ -3305,7 +3305,7 @@ public final class AvifContainerParser {
             if (extent.offset < 0
                     || extent.offset > storageLength
                     || extent.length > storageLength - extent.offset) {
-                boolean exceedsProgressiveLimit = source.forwardOnly() && !item.idatStored;
+                boolean exceedsProgressiveLimit = !source.isSeekable() && !item.idatStored;
                 throw new AvifDecodeException(
                         exceedsProgressiveLimit ? AvifErrorCode.INPUT_TOO_LARGE : AvifErrorCode.TRUNCATED_DATA,
                         exceedsProgressiveLimit

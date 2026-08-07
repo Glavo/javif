@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -34,14 +35,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests memory, file-backed, and bounded progressive data sources.
 @NotNullByDefault
-final class RandomAccessDataSourceTest {
+final class AvifDataSourceTest {
     /// Verifies positional scalar and bulk reads over borrowed array memory.
     ///
     /// @throws IOException if the source cannot be read or closed
     @Test
     void readsBorrowedBytesAndRejectsReadsAfterClose() throws IOException {
-        RandomAccessDataSource source = RandomAccessDataSource.ofBytes(new byte[]{1, 2, 3, 4, 5});
-        assertEquals(5L, source.size());
+        AvifDataSource source = AvifDataSource.ofBytes(new byte[]{1, 2, 3, 4, 5});
+        assertEquals(5L, source.limit());
+        assertTrue(source.isSeekable());
         assertEquals(3, source.readByte(2));
 
         ByteBuffer destination = ByteBuffer.allocate(3);
@@ -61,9 +63,10 @@ final class RandomAccessDataSourceTest {
         buffer.put(new byte[]{9, 1, 2, 3, 8, 7});
         buffer.position(1);
         buffer.limit(4);
-        RandomAccessDataSource source = RandomAccessDataSource.ofByteBuffer(buffer);
+        AvifDataSource source = AvifDataSource.ofByteBuffer(buffer);
 
-        assertEquals(3L, source.size());
+        assertEquals(3L, source.limit());
+        assertTrue(source.isSeekable());
         assertEquals(1, source.readByte(0));
         assertArrayEquals(new byte[]{2, 3}, source.readBytes(1, 2));
         assertEquals(1, buffer.position());
@@ -81,7 +84,7 @@ final class RandomAccessDataSourceTest {
     void closesPersistentFileHandle() throws IOException {
         Path path = workspaceTempPath("persistent");
         Files.write(path, new byte[]{9, 8, 7, 6});
-        RandomAccessDataSource source = RandomAccessDataSource.open(path);
+        AvifDataSource source = AvifDataSource.open(path);
         assertEquals(8, source.readByte(1));
         assertArrayEquals(new byte[]{7, 6}, source.readBytes(2, 2));
 
@@ -99,9 +102,9 @@ final class RandomAccessDataSourceTest {
         bytes[0] = 11;
         bytes[70 * 1024] = 22;
         TrackingInputStream input = new TrackingInputStream(bytes);
-        RandomAccessDataSource source = RandomAccessDataSource.progressive(input, bytes.length);
+        AvifDataSource source = AvifDataSource.progressive(Channels.newChannel(input), bytes.length);
 
-        assertTrue(source.forwardOnly());
+        assertFalse(source.isSeekable());
         assertEquals(11, source.readByte(0));
         assertEquals(22, source.readByte(70 * 1024L));
         AvifDecodeException exception = assertThrows(AvifDecodeException.class, () -> source.readByte(0));
@@ -114,8 +117,8 @@ final class RandomAccessDataSourceTest {
     /// Verifies that a progressive source enforces its configured maximum position.
     @Test
     void progressiveSourceEnforcesMaximumSize() {
-        RandomAccessDataSource source = RandomAccessDataSource.progressive(
-                new ByteArrayInputStream(new byte[16]),
+        AvifDataSource source = AvifDataSource.progressive(
+                Channels.newChannel(new ByteArrayInputStream(new byte[16])),
                 8
         );
 
@@ -156,7 +159,7 @@ final class RandomAccessDataSourceTest {
     /// @return the path, which does not yet exist
     /// @throws IOException if the parent directory cannot be created
     private static Path workspaceTempPath(String name) throws IOException {
-        Path directory = Path.of("build", "tmp", "test", "RandomAccessDataSourceTest");
+        Path directory = Path.of("build", "tmp", "test", "AvifDataSourceTest");
         Files.createDirectories(directory);
         return directory.resolve(name + "-" + System.nanoTime() + ".bin");
     }
