@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.AvifColorInfo;
 import org.glavo.avif.Av1ChromaFormat;
 import org.jetbrains.annotations.NotNullByDefault;

@@ -8,6 +8,6 @@ module org.glavo.avif {
     requires static javafx.controls;
 
     exports org.glavo.avif;
-    exports org.glavo.avif.decode;
+    exports org.glavo.avif.av1;
     exports org.glavo.avif.javafx;
 }

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.glavo.avif.DecodedPlanes;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
@@ -26,7 +26,7 @@ import java.util.Objects;
 /// Immutable decoded AV1 presentation output with YUV planes and frame metadata.
 ///
 /// Plane access does not perform color conversion. [#toFrame()] converts the same output to packed
-/// ARGB on first use and caches the resulting [DecodedFrame].
+/// ARGB on first use and caches the resulting [Av1DecodedFrame].
 @NotNullByDefault
 public final class Av1DecodedOutput {
     /// The internal postprocessed presentation surface used for color conversion.
@@ -36,7 +36,7 @@ public final class Av1DecodedOutput {
     /// The color configuration used to interpret the planes.
     private final Av1ColorConfig colorConfig;
     /// The frame category of the presented surface.
-    private final FrameType frameType;
+    private final Av1FrameType frameType;
     /// Whether the output is visible.
     private final boolean visible;
     /// The zero-based presentation index.
@@ -46,7 +46,7 @@ public final class Av1DecodedOutput {
     /// The spatial-layer identifier of the presentation request.
     private final int spatialId;
     /// The cached packed-pixel representation, or `null` before conversion.
-    private volatile @Nullable DecodedFrame frame;
+    private volatile @Nullable Av1DecodedFrame frame;
 
     /// Creates a decoded output from validated decoder state.
     ///
@@ -60,7 +60,7 @@ public final class Av1DecodedOutput {
     Av1DecodedOutput(
             DecodedSurface planes,
             Av1ColorConfig colorConfig,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             int temporalId,
@@ -104,7 +104,7 @@ public final class Av1DecodedOutput {
     /// For `show_existing_frame`, this is the category of the referenced surface.
     ///
     /// @return the AV1 frame category
-    public FrameType frameType() {
+    public Av1FrameType frameType() {
         return frameType;
     }
 
@@ -143,8 +143,8 @@ public final class Av1DecodedOutput {
     ///
     /// @return the packed-pixel frame
     /// @throws UnsupportedOperationException if the color configuration cannot be converted
-    public DecodedFrame toFrame() {
-        DecodedFrame result = frame;
+    public Av1DecodedFrame toFrame() {
+        Av1DecodedFrame result = frame;
         if (result != null) {
             return result;
         }

@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.output;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
@@ -27,7 +27,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class OutputFrameMetadata {
     /// The AV1 frame category.
-    private final FrameType frameType;
+    private final Av1FrameType frameType;
 
     /// Whether the frame should be exposed as visible output.
     private final boolean visible;
@@ -46,7 +46,7 @@ public final class OutputFrameMetadata {
     /// @param frameType the AV1 frame category
     /// @param visible whether the frame should be exposed as visible output
     /// @param presentationIndex the zero-based presentation index of the frame
-    public OutputFrameMetadata(FrameType frameType, boolean visible, long presentationIndex) {
+    public OutputFrameMetadata(Av1FrameType frameType, boolean visible, long presentationIndex) {
         this(frameType, visible, presentationIndex, 0, 0);
     }
 
@@ -58,7 +58,7 @@ public final class OutputFrameMetadata {
     /// @param temporalId the AV1 temporal-layer identifier in `[0, 7]`
     /// @param spatialId the AV1 spatial-layer identifier in `[0, 3]`
     public OutputFrameMetadata(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             int temporalId,
@@ -83,7 +83,7 @@ public final class OutputFrameMetadata {
     /// Returns the AV1 frame category.
     ///
     /// @return the AV1 frame category
-    public FrameType frameType() {
+    public Av1FrameType frameType() {
         return frameType;
     }
 

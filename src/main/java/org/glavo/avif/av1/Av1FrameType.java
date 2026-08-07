@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
 /// AV1 frame categories exposed by decoded frame metadata.
 @NotNullByDefault
-public enum FrameType {
+public enum Av1FrameType {
     /// A key intra frame.
     KEY,
     /// An inter frame.

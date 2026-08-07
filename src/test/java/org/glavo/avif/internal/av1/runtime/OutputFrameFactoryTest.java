@@ -15,10 +15,10 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.decode.DecodedFrame;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodedFrame;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
@@ -32,34 +32,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for runtime frame-output factory dispatch.
 @NotNullByDefault
 final class OutputFrameFactoryTest {
-    /// Verifies that 8-bit decoded planes produce one public `DecodedFrame`.
+    /// Verifies that 8-bit decoded planes produce one public `Av1DecodedFrame`.
     @Test
     void createFrameReturnsDecodedFrameForEightBitPlanes() {
         DecodedSurface decodedPlanes = RuntimeTestFixtures.createDecodedPlanes(8, 73);
-        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(3, 2, FrameType.KEY, true, 0x01);
+        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(3, 2, Av1FrameType.KEY, true, 0x01);
 
-        DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, frameHeader, false, 5L);
+        Av1DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, frameHeader, false, 5L);
 
         assertEquals(AvifBitDepth.EIGHT_BITS, frame.bitDepth());
         assertEquals(1, frame.intPixels().length);
         assertTrue(frame.intPixelBuffer().isReadOnly());
         assertEquals(3, frame.temporalId());
         assertEquals(2, frame.spatialId());
-        assertFrameMetadata(frame, 8, Av1ChromaFormat.MONOCHROME, FrameType.KEY, false, 5L);
+        assertFrameMetadata(frame, 8, Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, false, 5L);
     }
 
-    /// Verifies that 10-bit and 12-bit decoded planes both produce one public `DecodedFrame`.
+    /// Verifies that 10-bit and 12-bit decoded planes both produce one public `Av1DecodedFrame`.
     @Test
     void createFrameReturnsDecodedFrameForHighBitDepthPlanes() {
-        FrameHeader intraFrameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.INTRA, true, 0x00);
+        FrameHeader intraFrameHeader = RuntimeTestFixtures.createFrameHeader(Av1FrameType.INTRA, true, 0x00);
 
-        DecodedFrame tenBitFrame = OutputFrameFactory.createFrame(
+        Av1DecodedFrame tenBitFrame = OutputFrameFactory.createFrame(
                 RuntimeTestFixtures.createDecodedPlanes(10, 512),
                 intraFrameHeader,
                 true,
                 8L
         );
-        DecodedFrame twelveBitFrame = OutputFrameFactory.createFrame(
+        Av1DecodedFrame twelveBitFrame = OutputFrameFactory.createFrame(
                 RuntimeTestFixtures.createDecodedPlanes(12, 2048),
                 intraFrameHeader,
                 false,
@@ -69,12 +69,12 @@ final class OutputFrameFactoryTest {
         assertTrue(tenBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, tenBitFrame.longPixels().length);
         assertTrue(tenBitFrame.longPixelBuffer().isReadOnly());
-        assertFrameMetadata(tenBitFrame, 10, Av1ChromaFormat.MONOCHROME, FrameType.INTRA, true, 8L);
+        assertFrameMetadata(tenBitFrame, 10, Av1ChromaFormat.MONOCHROME, Av1FrameType.INTRA, true, 8L);
 
         assertTrue(twelveBitFrame.bitDepth().isHighBitDepth());
         assertEquals(1, twelveBitFrame.longPixels().length);
         assertTrue(twelveBitFrame.longPixelBuffer().isReadOnly());
-        assertFrameMetadata(twelveBitFrame, 12, Av1ChromaFormat.MONOCHROME, FrameType.INTRA, false, 9L);
+        assertFrameMetadata(twelveBitFrame, 12, Av1ChromaFormat.MONOCHROME, Av1FrameType.INTRA, false, 9L);
     }
 
     /// Verifies that sequence color range metadata is used when creating public frames.
@@ -95,9 +95,9 @@ final class OutputFrameFactoryTest {
                 true,
                 false
         );
-        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x00);
+        FrameHeader frameHeader = RuntimeTestFixtures.createFrameHeader(Av1FrameType.KEY, true, 0x00);
 
-        DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, colorConfig, frameHeader, true, 0L);
+        Av1DecodedFrame frame = OutputFrameFactory.createFrame(decodedPlanes, colorConfig, frameHeader, true, 0L);
 
         assertEquals(0xFF00_0000, frame.intPixels()[0]);
     }
@@ -105,7 +105,7 @@ final class OutputFrameFactoryTest {
     /// Verifies that stored reference surfaces are exposed through the existing-frame path as visible output.
     @Test
     void createExistingFrameReturnsVisibleFrameBackedByStoredSurfaceBitDepth() {
-        FrameHeader referencedFrameHeader = RuntimeTestFixtures.createFrameHeader(FrameType.SWITCH, false, 0x20);
+        FrameHeader referencedFrameHeader = RuntimeTestFixtures.createFrameHeader(Av1FrameType.SWITCH, false, 0x20);
         ReferenceSurfaceSnapshot surfaceSnapshot = RuntimeTestFixtures.createReferenceSurfaceSnapshot(
                 referencedFrameHeader,
                 12,
@@ -114,12 +114,12 @@ final class OutputFrameFactoryTest {
         FrameHeader outputRequestHeader = RuntimeTestFixtures.createFrameHeader(
                 5,
                 3,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 0
         );
 
-        DecodedFrame frame = OutputFrameFactory.createExistingFrame(
+        Av1DecodedFrame frame = OutputFrameFactory.createExistingFrame(
                 surfaceSnapshot.decodedPlanes(),
                 surfaceSnapshot,
                 outputRequestHeader,
@@ -131,7 +131,7 @@ final class OutputFrameFactoryTest {
         assertTrue(frame.longPixelBuffer().isReadOnly());
         assertEquals(5, frame.temporalId());
         assertEquals(3, frame.spatialId());
-        assertFrameMetadata(frame, 12, Av1ChromaFormat.MONOCHROME, FrameType.SWITCH, true, 12L);
+        assertFrameMetadata(frame, 12, Av1ChromaFormat.MONOCHROME, Av1FrameType.SWITCH, true, 12L);
     }
 
     /// Asserts public frame metadata on one runtime-created decoded frame.
@@ -143,10 +143,10 @@ final class OutputFrameFactoryTest {
     /// @param visible the expected visibility flag
     /// @param presentationIndex the expected zero-based presentation index
     private static void assertFrameMetadata(
-            DecodedFrame frame,
+            Av1DecodedFrame frame,
             int bitDepth,
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex
     ) {

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -23,11 +23,11 @@ import java.util.Objects;
 
 /// Checked exception thrown when AV1 input cannot be decoded.
 @NotNullByDefault
-public final class DecodeException extends IOException {
+public final class Av1DecodeException extends IOException {
     /// The stable error code describing the failure category.
-    private final DecodeErrorCode code;
+    private final Av1DecodeErrorCode code;
     /// The high-level decode stage where the failure occurred.
-    private final DecodeStage stage;
+    private final Av1DecodeStage stage;
     /// The byte offset of the relevant OBU or payload location when known.
     private final @Nullable Long streamOffset;
     /// The zero-based OBU index when known.
@@ -43,9 +43,9 @@ public final class DecodeException extends IOException {
     /// @param streamOffset the byte offset when known
     /// @param obuIndex the OBU index when known
     /// @param frameIndex the frame index when known
-    public DecodeException(
-            DecodeErrorCode code,
-            DecodeStage stage,
+    public Av1DecodeException(
+            Av1DecodeErrorCode code,
+            Av1DecodeStage stage,
             String message,
             @Nullable Long streamOffset,
             @Nullable Integer obuIndex,
@@ -63,9 +63,9 @@ public final class DecodeException extends IOException {
     /// @param obuIndex the OBU index when known
     /// @param frameIndex the frame index when known
     /// @param cause the underlying cause, if any
-    public DecodeException(
-            DecodeErrorCode code,
-            DecodeStage stage,
+    public Av1DecodeException(
+            Av1DecodeErrorCode code,
+            Av1DecodeStage stage,
             String message,
             @Nullable Long streamOffset,
             @Nullable Integer obuIndex,
@@ -83,14 +83,14 @@ public final class DecodeException extends IOException {
     /// Returns the stable error code.
     ///
     /// @return the stable error code
-    public DecodeErrorCode code() {
+    public Av1DecodeErrorCode code() {
         return code;
     }
 
     /// Returns the high-level decode stage where the failure occurred.
     ///
     /// @return the failing decode stage
-    public DecodeStage stage() {
+    public Av1DecodeStage stage() {
         return stage;
     }
 

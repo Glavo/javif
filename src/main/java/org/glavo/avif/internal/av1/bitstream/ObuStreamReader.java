@@ -15,9 +15,9 @@
  */
 package org.glavo.avif.internal.av1.bitstream;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -228,7 +228,7 @@ public final class ObuStreamReader {
         int temporalId = 0;
         int spatialId = 0;
         if (extensionFlag) {
-            int extensionByte = readUnsignedByte(DecodeErrorCode.UNEXPECTED_EOF, "Unexpected end of OBU extension", obuOffset, currentObuIndex);
+            int extensionByte = readUnsignedByte(Av1DecodeErrorCode.UNEXPECTED_EOF, "Unexpected end of OBU extension", obuOffset, currentObuIndex);
             streamOffset++;
             temporalId = (extensionByte >>> 5) & 0x07;
             spatialId = (extensionByte >>> 3) & 0x03;
@@ -243,9 +243,9 @@ public final class ObuStreamReader {
             try {
                 sizeResult = Leb128.readUnsigned(input, 8);
             } catch (EOFException ex) {
-                throw new DecodeException(
-                        DecodeErrorCode.UNEXPECTED_EOF,
-                        DecodeStage.OBU_READ,
+                throw new Av1DecodeException(
+                        Av1DecodeErrorCode.UNEXPECTED_EOF,
+                        Av1DecodeStage.OBU_READ,
                         "Unexpected end of OBU size field",
                         obuOffset,
                         currentObuIndex,
@@ -253,9 +253,9 @@ public final class ObuStreamReader {
                         ex
                 );
             } catch (IOException ex) {
-                throw new DecodeException(
-                        DecodeErrorCode.INVALID_LEB128,
-                        DecodeStage.OBU_READ,
+                throw new Av1DecodeException(
+                        Av1DecodeErrorCode.INVALID_LEB128,
+                        Av1DecodeStage.OBU_READ,
                         ex.getMessage(),
                         obuOffset,
                         currentObuIndex,
@@ -269,9 +269,9 @@ public final class ObuStreamReader {
 
         long headerSize = streamOffset - obuOffset;
         if (unitRemainingAtObuStart >= 0L && headerSize > unitRemainingAtObuStart) {
-            throw new DecodeException(
-                    DecodeErrorCode.UNEXPECTED_EOF,
-                    DecodeStage.OBU_READ,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.UNEXPECTED_EOF,
+                    Av1DecodeStage.OBU_READ,
                     "OBU header exceeds its externally bounded input unit",
                     obuOffset,
                     currentObuIndex,
@@ -289,9 +289,9 @@ public final class ObuStreamReader {
             }
         } else if (unitRemainingAtObuStart >= 0L
                 && payloadSize > unitRemainingAtObuStart - headerSize) {
-            throw new DecodeException(
-                    DecodeErrorCode.UNEXPECTED_EOF,
-                    DecodeStage.OBU_READ,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.UNEXPECTED_EOF,
+                    Av1DecodeStage.OBU_READ,
                     "OBU payload exceeds its externally bounded input unit",
                     obuOffset,
                     currentObuIndex,
@@ -307,9 +307,9 @@ public final class ObuStreamReader {
             );
         }
         if (payloadSize > MAX_PAYLOAD_SIZE) {
-            throw new DecodeException(
-                    DecodeErrorCode.INVALID_BITSTREAM,
-                    DecodeStage.OBU_READ,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeStage.OBU_READ,
                     "OBU payload exceeds the supported allocation size: " + payloadSize,
                     obuOffset,
                     currentObuIndex,
@@ -324,9 +324,9 @@ public final class ObuStreamReader {
             try {
                 payload = input.readByteArray((int) payloadSize);
             } catch (EOFException ex) {
-                throw new DecodeException(
-                        DecodeErrorCode.UNEXPECTED_EOF,
-                        DecodeStage.OBU_READ,
+                throw new Av1DecodeException(
+                        Av1DecodeErrorCode.UNEXPECTED_EOF,
+                        Av1DecodeStage.OBU_READ,
                         "Unexpected end of OBU payload",
                         obuOffset,
                         currentObuIndex,
@@ -423,9 +423,9 @@ public final class ObuStreamReader {
                 return payload.toByteArray();
             }
             if (payload.size() == MAX_PAYLOAD_SIZE) {
-                throw new DecodeException(
-                        DecodeErrorCode.INVALID_BITSTREAM,
-                        DecodeStage.OBU_READ,
+                throw new Av1DecodeException(
+                        Av1DecodeErrorCode.INVALID_BITSTREAM,
+                        Av1DecodeStage.OBU_READ,
                         "OBU payload exceeds the supported allocation size: " + (MAX_PAYLOAD_SIZE + 1L),
                         obuOffset,
                         currentObuIndex,
@@ -445,7 +445,7 @@ public final class ObuStreamReader {
     /// @return the next unsigned byte
     /// @throws IOException if the source is truncated or unreadable
     private int readUnsignedByte(
-            DecodeErrorCode errorCode,
+            Av1DecodeErrorCode errorCode,
             String message,
             long obuOffset,
             int currentObuIndex
@@ -453,9 +453,9 @@ public final class ObuStreamReader {
         try {
             return input.readUnsignedByte();
         } catch (EOFException ex) {
-            throw new DecodeException(
+            throw new Av1DecodeException(
                     errorCode,
-                    DecodeStage.OBU_READ,
+                    Av1DecodeStage.OBU_READ,
                     message,
                     obuOffset,
                     currentObuIndex,
@@ -471,10 +471,10 @@ public final class ObuStreamReader {
     /// @param offset the byte offset of the failing external length or enclosed OBU
     /// @param cause the underlying I/O failure, or `null`
     /// @return the contextual invalid-bitstream exception
-    private DecodeException invalidAnnexBFraming(String message, long offset, @Nullable Throwable cause) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_BITSTREAM,
-                DecodeStage.OBU_READ,
+    private Av1DecodeException invalidAnnexBFraming(String message, long offset, @Nullable Throwable cause) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_BITSTREAM,
+                Av1DecodeStage.OBU_READ,
                 message,
                 offset,
                 obuIndex,
@@ -489,10 +489,10 @@ public final class ObuStreamReader {
     /// @param offset the byte offset of the failing length field
     /// @param cause the underlying I/O failure, or `null`
     /// @return the contextual invalid-LEB128 exception
-    private DecodeException invalidAnnexBLeb128(String message, long offset, @Nullable Throwable cause) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_LEB128,
-                DecodeStage.OBU_READ,
+    private Av1DecodeException invalidAnnexBLeb128(String message, long offset, @Nullable Throwable cause) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_LEB128,
+                Av1DecodeStage.OBU_READ,
                 message,
                 offset,
                 obuIndex,
@@ -507,10 +507,10 @@ public final class ObuStreamReader {
     /// @param offset the byte offset where the truncated structure started
     /// @param cause the underlying end-of-input exception
     /// @return the contextual unexpected-EOF exception
-    private DecodeException unexpectedAnnexBEof(String message, long offset, EOFException cause) {
-        return new DecodeException(
-                DecodeErrorCode.UNEXPECTED_EOF,
-                DecodeStage.OBU_READ,
+    private Av1DecodeException unexpectedAnnexBEof(String message, long offset, EOFException cause) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.UNEXPECTED_EOF,
+                Av1DecodeStage.OBU_READ,
                 message,
                 offset,
                 obuIndex,
@@ -525,10 +525,10 @@ public final class ObuStreamReader {
     /// @param obuOffset the OBU header offset
     /// @param currentObuIndex the OBU index
     /// @return the contextual invalid-header exception
-    private static DecodeException invalidHeader(String message, long obuOffset, int currentObuIndex) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_OBU_HEADER,
-                DecodeStage.OBU_READ,
+    private static Av1DecodeException invalidHeader(String message, long obuOffset, int currentObuIndex) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_OBU_HEADER,
+                Av1DecodeStage.OBU_READ,
                 message,
                 obuOffset,
                 currentObuIndex,

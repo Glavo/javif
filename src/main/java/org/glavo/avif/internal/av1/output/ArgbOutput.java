@@ -16,8 +16,8 @@
 package org.glavo.avif.internal.av1.output;
 
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.decode.DecodedFrame;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodedFrame;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
@@ -110,18 +110,18 @@ public final class ArgbOutput {
         };
     }
 
-    /// Converts one decoded-plane snapshot into a `DecodedFrame` backed by ARGB_8888 storage.
+    /// Converts one decoded-plane snapshot into a `Av1DecodedFrame` backed by ARGB_8888 storage.
     ///
     /// This convenience overload uses `BT.601` full-range coefficients.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
     /// @return one opaque decoded frame backed by ARGB_8888 storage
-    public static DecodedFrame toOpaqueArgb8Frame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
+    public static Av1DecodedFrame toOpaqueArgb8Frame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
         return toOpaqueArgb8Frame(decodedPlanes, metadata, DEFAULT_TRANSFORM);
     }
 
-    /// Converts one decoded-plane snapshot into a `DecodedFrame` backed by ARGB_8888 storage.
+    /// Converts one decoded-plane snapshot into a `Av1DecodedFrame` backed by ARGB_8888 storage.
     ///
     /// This overload accepts the public frame metadata directly, which keeps later integration code
     /// simple when it already has those values separately from `DecodedPlanes`.
@@ -131,16 +131,16 @@ public final class ArgbOutput {
     /// @param visible whether the frame should be exposed as visible output
     /// @param presentationIndex the zero-based presentation index of the frame
     /// @return one opaque decoded frame backed by ARGB_8888 storage
-    public static DecodedFrame toOpaqueArgb8Frame(
+    public static Av1DecodedFrame toOpaqueArgb8Frame(
             DecodedSurface decodedPlanes,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex
     ) {
         return toOpaqueArgb8Frame(decodedPlanes, frameType, visible, presentationIndex, DEFAULT_TRANSFORM);
     }
 
-    /// Converts one decoded-plane snapshot into a `DecodedFrame` backed by ARGB_8888 storage.
+    /// Converts one decoded-plane snapshot into a `Av1DecodedFrame` backed by ARGB_8888 storage.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param frameType the AV1 frame category
@@ -148,9 +148,9 @@ public final class ArgbOutput {
     /// @param presentationIndex the zero-based presentation index of the frame
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque decoded frame backed by ARGB_8888 storage
-    public static DecodedFrame toOpaqueArgb8Frame(
+    public static Av1DecodedFrame toOpaqueArgb8Frame(
             DecodedSurface decodedPlanes,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             YuvToRgbTransform transform
@@ -162,13 +162,13 @@ public final class ArgbOutput {
         );
     }
 
-    /// Converts one decoded-plane snapshot into a `DecodedFrame` backed by ARGB_8888 storage.
+    /// Converts one decoded-plane snapshot into a `Av1DecodedFrame` backed by ARGB_8888 storage.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque decoded frame backed by ARGB_8888 storage
-    public static DecodedFrame toOpaqueArgb8Frame(
+    public static Av1DecodedFrame toOpaqueArgb8Frame(
             DecodedSurface decodedPlanes,
             OutputFrameMetadata metadata,
             YuvToRgbTransform transform
@@ -176,7 +176,7 @@ public final class ArgbOutput {
         DecodedSurface checkedDecodedPlanes = requireIntOutputDecodedPlanes(decodedPlanes);
         OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
         int[] pixels = toOpaqueArgbPixels(checkedDecodedPlanes, transform);
-        return new DecodedFrame(
+        return new Av1DecodedFrame(
                 checkedDecodedPlanes.codedWidth(),
                 checkedDecodedPlanes.codedHeight(),
                 AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),
@@ -258,34 +258,34 @@ public final class ArgbOutput {
         };
     }
 
-    /// Converts one decoded-plane snapshot into a high-bit-depth `DecodedFrame`.
+    /// Converts one decoded-plane snapshot into a high-bit-depth `Av1DecodedFrame`.
     ///
     /// This convenience overload uses `BT.601` full-range coefficients.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
     /// @return one opaque high-bit-depth decoded frame
-    public static DecodedFrame toOpaqueArgbHighBitDepthFrame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
+    public static Av1DecodedFrame toOpaqueArgbHighBitDepthFrame(DecodedSurface decodedPlanes, OutputFrameMetadata metadata) {
         return toOpaqueArgbHighBitDepthFrame(decodedPlanes, metadata, DEFAULT_TRANSFORM);
     }
 
-    /// Converts one decoded-plane snapshot into a high-bit-depth `DecodedFrame`.
+    /// Converts one decoded-plane snapshot into a high-bit-depth `Av1DecodedFrame`.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param frameType the AV1 frame category
     /// @param visible whether the frame should be exposed as visible output
     /// @param presentationIndex the zero-based presentation index of the frame
     /// @return one opaque high-bit-depth decoded frame
-    public static DecodedFrame toOpaqueArgbHighBitDepthFrame(
+    public static Av1DecodedFrame toOpaqueArgbHighBitDepthFrame(
             DecodedSurface decodedPlanes,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex
     ) {
         return toOpaqueArgbHighBitDepthFrame(decodedPlanes, frameType, visible, presentationIndex, DEFAULT_TRANSFORM);
     }
 
-    /// Converts one decoded-plane snapshot into a high-bit-depth `DecodedFrame`.
+    /// Converts one decoded-plane snapshot into a high-bit-depth `Av1DecodedFrame`.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param frameType the AV1 frame category
@@ -293,9 +293,9 @@ public final class ArgbOutput {
     /// @param presentationIndex the zero-based presentation index of the frame
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque high-bit-depth decoded frame
-    public static DecodedFrame toOpaqueArgbHighBitDepthFrame(
+    public static Av1DecodedFrame toOpaqueArgbHighBitDepthFrame(
             DecodedSurface decodedPlanes,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             YuvToRgbTransform transform
@@ -307,13 +307,13 @@ public final class ArgbOutput {
         );
     }
 
-    /// Converts one decoded-plane snapshot into a high-bit-depth `DecodedFrame`.
+    /// Converts one decoded-plane snapshot into a high-bit-depth `Av1DecodedFrame`.
     ///
     /// @param decodedPlanes the decoded planes to convert
     /// @param metadata the decoded-frame metadata that is not stored in `DecodedPlanes`
     /// @param transform the fixed-point YUV-to-RGB transform used for color conversion
     /// @return one opaque high-bit-depth decoded frame
-    public static DecodedFrame toOpaqueArgbHighBitDepthFrame(
+    public static Av1DecodedFrame toOpaqueArgbHighBitDepthFrame(
             DecodedSurface decodedPlanes,
             OutputFrameMetadata metadata,
             YuvToRgbTransform transform
@@ -321,7 +321,7 @@ public final class ArgbOutput {
         DecodedSurface checkedDecodedPlanes = requireLongOutputDecodedPlanes(decodedPlanes);
         OutputFrameMetadata checkedMetadata = Objects.requireNonNull(metadata, "metadata");
         long[] pixels = toOpaqueArgbLongPixels(checkedDecodedPlanes, transform);
-        return new DecodedFrame(
+        return new Av1DecodedFrame(
                 checkedDecodedPlanes.codedWidth(),
                 checkedDecodedPlanes.codedHeight(),
                 AvifBitDepth.fromBits(checkedDecodedPlanes.bitDepth()),

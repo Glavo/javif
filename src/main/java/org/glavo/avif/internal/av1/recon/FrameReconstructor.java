@@ -17,7 +17,7 @@ package org.glavo.avif.internal.av1.recon;
 
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TileBlockHeaderReader;
@@ -589,8 +589,8 @@ public final class FrameReconstructor {
                             + sequenceHeader.colorConfig().chromaFormat()
             );
         }
-        if (frameHeader.frameType() != FrameType.KEY && frameHeader.frameType() != FrameType.INTRA) {
-            if (frameHeader.frameType() == FrameType.INTER || frameHeader.frameType() == FrameType.SWITCH) {
+        if (frameHeader.frameType() != Av1FrameType.KEY && frameHeader.frameType() != Av1FrameType.INTRA) {
+            if (frameHeader.frameType() == Av1FrameType.INTER || frameHeader.frameType() == Av1FrameType.SWITCH) {
                 return;
             }
             throw new IllegalStateException(

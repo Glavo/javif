@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -459,14 +459,14 @@ final class FrameReconstructorIntegrationTest {
     /// output surface.
     @Test
     void reconstructsSyntheticI420InterLeafWithSuperResolutionFromStoredReferenceSurface() {
-        assertSyntheticI420InterSuperResolution(FrameType.INTER);
+        assertSyntheticI420InterSuperResolution(Av1FrameType.INTER);
     }
 
     /// Verifies that the same minimal synthetic inter super-resolution subset also applies to one
     /// `SWITCH` frame.
     @Test
     void reconstructsSyntheticI420SwitchLeafWithSuperResolutionFromStoredReferenceSurface() {
-        assertSyntheticI420InterSuperResolution(FrameType.SWITCH);
+        assertSyntheticI420InterSuperResolution(Av1FrameType.SWITCH);
     }
 
     /// Verifies that the same deterministic real inter tile payload reconstructs through one
@@ -513,7 +513,7 @@ final class FrameReconstructorIntegrationTest {
                 72,
                 64,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 interpolationFilter
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = new FrameSyntaxDecoder(null).decode(assembly);
@@ -1021,7 +1021,7 @@ final class FrameReconstructorIntegrationTest {
                 8,
                 4,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, leafNode);
@@ -3166,7 +3166,7 @@ final class FrameReconstructorIntegrationTest {
             throw new IllegalArgumentException("tileRoots.length == 0");
         }
         SequenceHeader sequenceHeader = createSyntheticSequenceHeader(chromaFormat, width, height, false);
-        FrameHeader frameHeader = createSyntheticFrameHeader(FrameType.KEY, width, height, tileRoots.length);
+        FrameHeader frameHeader = createSyntheticFrameHeader(Av1FrameType.KEY, width, height, tileRoots.length);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         TileBitstream[] tiles = new TileBitstream[tileRoots.length];
         for (int i = 0; i < tileRoots.length; i++) {
@@ -5022,7 +5022,7 @@ final class FrameReconstructorIntegrationTest {
             boolean filterIntraEnabled
     ) {
         SequenceHeader sequenceHeader = createSyntheticSequenceHeader(chromaFormat, codedWidth, codedHeight, filterIntraEnabled);
-        FrameHeader frameHeader = createSyntheticFrameHeader(FrameType.KEY, codedWidth, codedHeight, 1, transformMode);
+        FrameHeader frameHeader = createSyntheticFrameHeader(Av1FrameType.KEY, codedWidth, codedHeight, 1, transformMode);
         FrameAssembly assembly = new FrameAssembly(sequenceHeader, frameHeader, 0, 0);
         assembly.addTileGroup(
                 new ObuPacket(new ObuHeader(ObuType.TILE_GROUP, false, true, 0, 0), new byte[0], 0, 0),
@@ -5166,7 +5166,7 @@ final class FrameReconstructorIntegrationTest {
     /// block and then normatively upsamples it to the stored/output domain.
     ///
     /// @param frameType the inter-like frame type to expose
-    private static void assertSyntheticI420InterSuperResolution(FrameType frameType) {
+    private static void assertSyntheticI420InterSuperResolution(Av1FrameType frameType) {
         BlockPosition position = new BlockPosition(0, 0);
         BlockSize blockSize = BlockSize.SIZE_4X4;
         MotionVector motionVector = new MotionVector(0, 0);
@@ -5428,7 +5428,7 @@ final class FrameReconstructorIntegrationTest {
             int upscaledWidth,
             int codedHeight,
             int referenceSlot,
-            FrameType frameType,
+            Av1FrameType frameType,
             FrameHeader.InterpolationFilter subpelFilterMode
     ) {
         SequenceHeader sequenceHeader = createSyntheticSequenceHeader(chromaFormat, upscaledWidth, codedHeight, false);
@@ -5533,7 +5533,7 @@ final class FrameReconstructorIntegrationTest {
                 SequenceHeader.AdaptiveBoolean.ON
         );
         FrameHeader frameHeader = createSyntheticFrameHeader(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 codedWidth,
                 codedHeight,
                 1,
@@ -5575,7 +5575,7 @@ final class FrameReconstructorIntegrationTest {
                 SequenceHeader.AdaptiveBoolean.ON
         );
         FrameHeader frameHeader = createSyntheticFrameHeader(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 codedWidth,
                 codedHeight,
                 1,
@@ -5691,7 +5691,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param tileColumns the number of horizontal tiles to expose
     /// @return one synthetic frame header for reconstruction integration tests
     private static FrameHeader createSyntheticFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int codedHeight,
             int tileColumns
@@ -5715,7 +5715,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param transformMode the frame transform mode
     /// @return one synthetic frame header for reconstruction integration tests
     private static FrameHeader createSyntheticFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int codedHeight,
             int tileColumns,
@@ -5734,7 +5734,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param allowScreenContentTools whether the synthetic frame enables screen-content tools
     /// @return one synthetic frame header for reconstruction integration tests
     private static FrameHeader createSyntheticFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int codedHeight,
             int tileColumns,
@@ -5763,7 +5763,7 @@ final class FrameReconstructorIntegrationTest {
     /// @param allowIntrabc whether the synthetic frame enables `allow_intrabc`
     /// @return one synthetic frame header for reconstruction integration tests
     private static FrameHeader createSyntheticFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int codedHeight,
             int tileColumns,
@@ -5887,7 +5887,7 @@ final class FrameReconstructorIntegrationTest {
             int upscaledWidth,
             int codedHeight,
             int referenceSlot,
-            FrameType frameType,
+            Av1FrameType frameType,
             FrameHeader.InterpolationFilter subpelFilterMode
     ) {
         return new FrameHeader(
@@ -5988,7 +5988,7 @@ final class FrameReconstructorIntegrationTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 true,
                 true,
@@ -6082,7 +6082,7 @@ final class FrameReconstructorIntegrationTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 true,
                 true,
@@ -6177,7 +6177,7 @@ final class FrameReconstructorIntegrationTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 true,
                 true,
@@ -6269,7 +6269,7 @@ final class FrameReconstructorIntegrationTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 true,
                 true,
@@ -6783,7 +6783,7 @@ final class FrameReconstructorIntegrationTest {
                 upscaledWidth,
                 codedHeight,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 FrameHeader.InterpolationFilter.BILINEAR
         );
         FrameSyntaxDecodeResult syntaxDecodeResult = createSyntheticResult(assembly, new TilePartitionTreeReader.Node[0]);

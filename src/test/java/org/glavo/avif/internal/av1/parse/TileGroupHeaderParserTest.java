@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -105,7 +105,7 @@ final class TileGroupHeaderParserTest {
                 0,
                 0,
                 0,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 true,
                 false,
                 true,

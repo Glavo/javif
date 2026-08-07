@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.AvifPixelFormat;
@@ -30,7 +30,7 @@ import java.util.Objects;
 
 /// Decoded AV1 frame output exposed by the public API.
 @NotNullByDefault
-public final class DecodedFrame {
+public final class Av1DecodedFrame {
     /// The output frame width in pixels.
     private final int width;
     /// The output frame height in pixels.
@@ -40,7 +40,7 @@ public final class DecodedFrame {
     /// The chroma layout of the decoded frame.
     private final Av1ChromaFormat chromaFormat;
     /// The AV1 frame type.
-    private final FrameType frameType;
+    private final Av1FrameType frameType;
     /// Whether the frame is visible.
     private final boolean visible;
     /// The zero-based presentation index of the frame.
@@ -69,12 +69,12 @@ public final class DecodedFrame {
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
     /// @param pixels            the packed non-premultiplied ARGB pixels
-    public DecodedFrame(
+    public Av1DecodedFrame(
             int width,
             int height,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             @Unmodifiable IntBuffer pixels
@@ -98,12 +98,12 @@ public final class DecodedFrame {
     /// @param temporalId        the AV1 temporal-layer identifier in `[0, 7]`
     /// @param spatialId         the AV1 spatial-layer identifier in `[0, 3]`
     /// @param pixels            the packed non-premultiplied ARGB pixels
-    public DecodedFrame(
+    public Av1DecodedFrame(
             int width,
             int height,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             int temporalId,
@@ -127,12 +127,12 @@ public final class DecodedFrame {
     /// @param visible           whether the frame is visible
     /// @param presentationIndex the zero-based presentation index
     /// @param pixels            the packed non-premultiplied ARGB pixels
-    public DecodedFrame(
+    public Av1DecodedFrame(
             int width,
             int height,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             @Unmodifiable LongBuffer pixels
@@ -156,12 +156,12 @@ public final class DecodedFrame {
     /// @param temporalId        the AV1 temporal-layer identifier in `[0, 7]`
     /// @param spatialId         the AV1 spatial-layer identifier in `[0, 3]`
     /// @param pixels            the packed non-premultiplied ARGB pixels
-    public DecodedFrame(
+    public Av1DecodedFrame(
             int width,
             int height,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             int temporalId,
@@ -185,12 +185,12 @@ public final class DecodedFrame {
     /// @param spatialId         the AV1 spatial-layer identifier
     /// @param intPixels         packed `int` pixels, or `null`
     /// @param longPixels        packed `long` pixels, or `null`
-    private DecodedFrame(
+    private Av1DecodedFrame(
             int width,
             int height,
             AvifBitDepth bitDepth,
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             int temporalId,
@@ -266,7 +266,7 @@ public final class DecodedFrame {
     /// Returns the AV1 frame type.
     ///
     /// @return the AV1 frame type
-    public FrameType frameType() {
+    public Av1FrameType frameType() {
         return frameType;
     }
 

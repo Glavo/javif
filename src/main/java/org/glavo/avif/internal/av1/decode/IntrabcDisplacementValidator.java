@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.MotionVector;

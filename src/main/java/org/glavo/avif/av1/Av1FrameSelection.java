@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Selects the AV1 frame categories decoded by [Av1ImageReader].
+/// Selects the AV1 frame categories decoded by [Av1Decoder].
 @NotNullByDefault
 public enum Av1FrameSelection {
     /// Decodes every frame that becomes available.

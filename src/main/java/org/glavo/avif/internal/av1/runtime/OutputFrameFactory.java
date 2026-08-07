@@ -15,9 +15,9 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.decode.DecodedFrame;
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodedFrame;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.output.ArgbOutput;
 import org.glavo.avif.internal.av1.output.OutputFrameMetadata;
@@ -28,7 +28,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Creates public `DecodedFrame` instances from reconstructed decoder state.
+/// Creates public `Av1DecodedFrame` instances from reconstructed decoder state.
 @NotNullByDefault
 public final class OutputFrameFactory {
     /// Prevents instantiation.
@@ -42,7 +42,7 @@ public final class OutputFrameFactory {
     /// @param visible whether the returned frame should be exposed as visible output
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @return one public decoded frame backed by the appropriate ARGB storage type
-    public static DecodedFrame createFrame(
+    public static Av1DecodedFrame createFrame(
             DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             boolean visible,
@@ -65,7 +65,7 @@ public final class OutputFrameFactory {
     /// @param visible whether the returned frame should be exposed as visible output
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @return one public decoded frame backed by the appropriate ARGB storage type
-    public static DecodedFrame createFrame(
+    public static Av1DecodedFrame createFrame(
             DecodedSurface decodedPlanes,
             Av1ColorConfig colorConfig,
             FrameHeader frameHeader,
@@ -91,10 +91,10 @@ public final class OutputFrameFactory {
     /// @param temporalId the temporal-layer identifier
     /// @param spatialId the spatial-layer identifier
     /// @return one public decoded frame backed by the appropriate ARGB storage type
-    public static DecodedFrame createFrame(
+    public static Av1DecodedFrame createFrame(
             DecodedSurface decodedPlanes,
             Av1ColorConfig colorConfig,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean visible,
             long presentationIndex,
             int temporalId,
@@ -115,7 +115,7 @@ public final class OutputFrameFactory {
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @param transform the selected YUV-to-RGB output transform
     /// @return one public decoded frame backed by the appropriate ARGB storage type
-    private static DecodedFrame createFrame(
+    private static Av1DecodedFrame createFrame(
             DecodedSurface decodedPlanes,
             FrameHeader frameHeader,
             boolean visible,
@@ -141,7 +141,7 @@ public final class OutputFrameFactory {
     /// @param metadata the public output-frame metadata
     /// @param transform the selected YUV-to-RGB output transform
     /// @return one public decoded frame backed by the appropriate ARGB storage type
-    private static DecodedFrame createFrame(
+    private static Av1DecodedFrame createFrame(
             DecodedSurface decodedPlanes,
             OutputFrameMetadata metadata,
             YuvToRgbTransform transform
@@ -174,7 +174,7 @@ public final class OutputFrameFactory {
     /// @param outputRequestHeader the current show-existing-frame request header
     /// @param presentationIndex the zero-based presentation index of the output frame
     /// @return one public decoded frame backed by the appropriate ARGB storage type
-    public static DecodedFrame createExistingFrame(
+    public static Av1DecodedFrame createExistingFrame(
             DecodedSurface decodedPlanes,
             ReferenceSurfaceSnapshot surfaceSnapshot,
             FrameHeader outputRequestHeader,

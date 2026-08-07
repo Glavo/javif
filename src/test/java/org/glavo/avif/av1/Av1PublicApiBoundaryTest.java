@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.glavo.avif.DecodedPlane;
 import org.glavo.avif.DecodedPlanes;
@@ -32,28 +32,41 @@ import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /// Verifies that the exported raw AV1 API does not expose implementation-only types.
 @NotNullByDefault
 final class Av1PublicApiBoundaryTest {
+    /// The package that owns every public raw AV1 API type.
+    private static final String PUBLIC_AV1_PACKAGE = "org.glavo.avif.av1";
     /// The implementation package prefix forbidden in exported signatures.
     private static final String INTERNAL_PACKAGE_PREFIX = "org.glavo.avif.internal.";
 
     /// Verifies public fields, constructors, and methods on the raw AV1 boundary types.
     @Test
     void exportedSignaturesDoNotReferenceInternalPackages() {
-        for (Class<?> apiType : List.of(
-                Av1ImageReader.class,
+        List<Class<?>> av1ApiTypes = List.of(
+                Av1Decoder.class,
                 Av1DecodedOutput.class,
+                Av1DecodedFrame.class,
                 Av1ColorConfig.class,
                 Av1DecoderConfig.class,
                 Av1FrameSelection.class,
-                DecodedFrame.class,
+                Av1FrameType.class,
+                Av1DecodeException.class,
+                Av1DecodeErrorCode.class,
+                Av1DecodeStage.class
+        );
+        for (Class<?> apiType : av1ApiTypes) {
+            assertEquals(PUBLIC_AV1_PACKAGE, apiType.getPackageName());
+            assertPublicSignatures(apiType);
+        }
+        for (Class<?> sharedApiType : List.of(
                 DecodedPlane.class,
                 DecodedPlanes.class
         )) {
-            assertPublicSignatures(apiType);
+            assertPublicSignatures(sharedApiType);
         }
     }
 

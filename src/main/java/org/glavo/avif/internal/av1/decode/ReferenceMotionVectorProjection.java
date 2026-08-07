@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.model.FrameAssembly;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.InterMotionVector;
@@ -326,15 +326,15 @@ final class ReferenceMotionVectorProjection {
     /// @param currentHeight the current coded height in pixels
     /// @return whether the saved frame has an inter motion field with compatible grid dimensions
     static boolean canProjectSourceMotionField(
-            FrameType sourceFrameType,
+            Av1FrameType sourceFrameType,
             int sourceWidth,
             int sourceHeight,
             int currentWidth,
             int currentHeight
     ) {
-        FrameType nonNullSourceFrameType = Objects.requireNonNull(sourceFrameType, "sourceFrameType");
-        return nonNullSourceFrameType != FrameType.KEY
-                && nonNullSourceFrameType != FrameType.INTRA
+        Av1FrameType nonNullSourceFrameType = Objects.requireNonNull(sourceFrameType, "sourceFrameType");
+        return nonNullSourceFrameType != Av1FrameType.KEY
+                && nonNullSourceFrameType != Av1FrameType.INTRA
                 && ((sourceWidth + 7) >> 3) == ((currentWidth + 7) >> 3)
                 && ((sourceHeight + 7) >> 3) == ((currentHeight + 7) >> 3);
     }

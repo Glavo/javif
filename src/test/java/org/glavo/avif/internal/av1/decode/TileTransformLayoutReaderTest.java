@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -111,7 +111,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void readsSwitchableKeyFrameTransformLayout() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
@@ -146,7 +146,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void buildsLosslessTransformLayoutFromRepeatedFourByFourUnits() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 Av1ChromaFormat.YUV420,
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 true,
@@ -178,7 +178,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void buildsWideLosslessTransformUnitsInSixtyFourSampleRegionOrder() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 true,
@@ -209,7 +209,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void buildsClippedI422ChromaTransformUnits() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 Av1ChromaFormat.YUV422,
                 FrameHeader.TransformMode.LARGEST,
                 false,
@@ -242,7 +242,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void buildsLosslessI444ChromaTransformUnitsInRasterOrder() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 Av1ChromaFormat.YUV444,
                 FrameHeader.TransformMode.FOUR_BY_FOUR_ONLY,
                 true,
@@ -275,7 +275,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void readsSwitchableInterEightByEightTransformTree() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
@@ -306,7 +306,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void readsSwitchableInterSixteenBySixteenTransformTree() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 false,
@@ -338,7 +338,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void storesCodedDimensionsForSkippedLosslessInterBlock() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.SWITCHABLE,
                 true,
@@ -372,7 +372,7 @@ final class TileTransformLayoutReaderTest {
     @Test
     void partitionTreeLeafCarriesTransformLayout() {
         TileDecodeContext tileContext = createTileContext(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 Av1ChromaFormat.MONOCHROME,
                 FrameHeader.TransformMode.LARGEST,
                 false,
@@ -409,7 +409,7 @@ final class TileTransformLayoutReaderTest {
     /// @param codedHeight the coded frame height
     /// @return one synthetic tile-local decode context used by transform-layout tests
     private static TileDecodeContext createTileContext(
-            FrameType frameType,
+            Av1FrameType frameType,
             Av1ChromaFormat chromaFormat,
             FrameHeader.TransformMode transformMode,
             boolean allLossless,

@@ -16,8 +16,8 @@
 package org.glavo.avif.internal.av1.postfilter;
 
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.Av1DecoderConfig;
-import org.glavo.avif.decode.Av1ImageReader;
+import org.glavo.avif.av1.Av1DecoderConfig;
+import org.glavo.avif.av1.Av1Decoder;
 import org.glavo.avif.internal.av1.decode.FrameLocalPartitionTrees;
 import org.glavo.avif.internal.av1.decode.FrameSyntaxDecodeResult;
 import org.glavo.avif.internal.av1.decode.TilePartitionTreeReader;
@@ -58,7 +58,7 @@ final class CdefApplierTest {
         byte[] bytes = TestResources.readBytes(KODIM23_RESOURCE);
         AvifContainer container = AvifContainerParser.parse(bytes);
         AvifImageSource primarySource = Objects.requireNonNull(container.primarySource(), "primarySource");
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 primarySource.payload(0).openInput(),
                 Av1DecoderConfig.DEFAULT
         )) {
@@ -337,13 +337,13 @@ final class CdefApplierTest {
         return null;
     }
 
-    /// Returns the last decoded frame syntax result stored on one `Av1ImageReader`.
+    /// Returns the last decoded frame syntax result stored on one `Av1Decoder`.
     ///
     /// @param reader the image reader that decoded one frame
     /// @return the stored frame syntax result, or `null`
-    private static @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult(Av1ImageReader reader) {
+    private static @Nullable FrameSyntaxDecodeResult lastFrameSyntaxDecodeResult(Av1Decoder reader) {
         try {
-            Field field = Av1ImageReader.class.getDeclaredField("lastFrameSyntaxDecodeResult");
+            Field field = Av1Decoder.class.getDeclaredField("lastFrameSyntaxDecodeResult");
             field.setAccessible(true);
             return (FrameSyntaxDecodeResult) field.get(reader);
         } catch (IllegalAccessException | NoSuchFieldException exception) {

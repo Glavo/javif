@@ -15,9 +15,9 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -45,9 +45,9 @@ public final class TileGroupHeaderParser {
 
         int totalTiles = frameHeader.tiling().columns() * frameHeader.tiling().rows();
         if (totalTiles <= 0) {
-            throw new DecodeException(
-                    DecodeErrorCode.INVALID_BITSTREAM,
-                    DecodeStage.FRAME_ASSEMBLY,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeStage.FRAME_ASSEMBLY,
                     "Frame header does not describe any tiles",
                     obu.streamOffset(),
                     obu.obuIndex(),
@@ -83,9 +83,9 @@ public final class TileGroupHeaderParser {
 
             return new TileGroupHeader(explicitTilePositions, startTileIndex, endTileIndex, totalTiles);
         } catch (EOFException ex) {
-            throw new DecodeException(
-                    DecodeErrorCode.UNEXPECTED_EOF,
-                    DecodeStage.FRAME_ASSEMBLY,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.UNEXPECTED_EOF,
+                    Av1DecodeStage.FRAME_ASSEMBLY,
                     "Unexpected end of tile-group header",
                     obu.streamOffset(),
                     obu.obuIndex(),
@@ -100,10 +100,10 @@ public final class TileGroupHeaderParser {
     /// @param obu the source OBU packet
     /// @param message the detailed validation message
     /// @return the contextual invalid-bitstream exception
-    private static DecodeException invalidBitstream(ObuPacket obu, String message) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_BITSTREAM,
-                DecodeStage.FRAME_ASSEMBLY,
+    private static Av1DecodeException invalidBitstream(ObuPacket obu, String message) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_BITSTREAM,
+                Av1DecodeStage.FRAME_ASSEMBLY,
                 message,
                 obu.streamOffset(),
                 obu.obuIndex(),

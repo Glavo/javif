@@ -15,9 +15,9 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.Av1DecoderConfig;
-import org.glavo.avif.decode.Av1ImageReader;
-import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.av1.Av1DecoderConfig;
+import org.glavo.avif.av1.Av1Decoder;
+import org.glavo.avif.av1.Av1DecodeException;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuStreamReader;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -557,11 +557,11 @@ final class ArgonAv1CorpusTest {
                 .withOutputAllLayers(true)
                 .withLargeScaleTileMode(testCase.largeScaleTileMode());
 
-        assertThrows(DecodeException.class, () -> {
+        assertThrows(Av1DecodeException.class, () -> {
             BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry));
-            try (Av1ImageReader reader = testCase.annexB()
-                    ? Av1ImageReader.openAnnexB(input, config)
-                    : Av1ImageReader.open(input, config)) {
+            try (Av1Decoder reader = testCase.annexB()
+                    ? Av1Decoder.openAnnexB(input, config)
+                    : Av1Decoder.open(input, config)) {
                 while (reader.readPlanes() != null) {
                     // Continue until strict decoding reaches the malformed portion of the stream.
                 }
@@ -599,9 +599,9 @@ final class ArgonAv1CorpusTest {
                 : null;
         try {
             BufferedInput input = new BufferedInput.OfInputStream(archive.getInputStream(streamEntry));
-            try (Av1ImageReader reader = testCase.annexB()
-                    ? Av1ImageReader.openAnnexB(input, config)
-                    : Av1ImageReader.open(input, config)) {
+            try (Av1Decoder reader = testCase.annexB()
+                    ? Av1Decoder.openAnnexB(input, config)
+                    : Av1Decoder.open(input, config)) {
                 @Nullable DecodedPlanes decodedPlanes;
                 while ((decodedPlanes = reader.readPlanes()) != null) {
                     DecodedPlanes requiredPlanes = decodedPlanes;
@@ -620,7 +620,7 @@ final class ArgonAv1CorpusTest {
                     frameCount++;
                 }
             }
-        } catch (DecodeException exception) {
+        } catch (Av1DecodeException exception) {
             throw new AssertionError(
                     referenceCase.displayName() + " failed at OBU " + exception.obuIndex()
                             + " (offset " + exception.streamOffset() + ", stage " + exception.stage() + ")",

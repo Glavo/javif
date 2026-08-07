@@ -15,7 +15,7 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.Av1DecoderConfig;
+import org.glavo.avif.av1.Av1DecoderConfig;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;

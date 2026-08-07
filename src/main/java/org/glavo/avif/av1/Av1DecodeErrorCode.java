@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Stable error codes exposed by the public decoder API.
+/// Stable error codes exposed by the public AV1 decoder API.
 @NotNullByDefault
-public enum DecodeErrorCode {
+public enum Av1DecodeErrorCode {
     /// The input ended before the expected number of bytes or bits were available.
     UNEXPECTED_EOF,
     /// The OBU header contains invalid or unsupported flag combinations.

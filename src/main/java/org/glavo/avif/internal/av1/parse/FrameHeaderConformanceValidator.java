@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.SequenceHeader;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -134,7 +134,7 @@ final class FrameHeaderConformanceValidator {
         if (frameHeader.showExistingFrame()) {
             throw new IOException("Large Scale Tile camera frames must not signal show_existing_frame");
         }
-        if (frameHeader.frameType() != FrameType.INTER) {
+        if (frameHeader.frameType() != Av1FrameType.INTER) {
             throw new IOException("Large Scale Tile camera frames must use INTER_FRAME");
         }
         if (!frameHeader.showFrame()) {

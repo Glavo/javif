@@ -77,7 +77,7 @@ try (AvifImageReader reader = factory.open(Path.of("image.avif"))) {
 The JPMS module name is `org.glavo.avif`. Its supported public packages are:
 
 - `org.glavo.avif` for AVIF and AVIS decoding;
-- `org.glavo.avif.decode` for raw AV1 low-overhead bitstreams;
+- `org.glavo.avif.av1` for raw AV1 low-overhead bitstreams;
 - `org.glavo.avif.javafx` for the optional JavaFX adapter and viewer.
 
 ## Desktop viewer

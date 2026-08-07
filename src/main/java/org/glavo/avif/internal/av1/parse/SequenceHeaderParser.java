@@ -15,10 +15,10 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -68,21 +68,21 @@ public final class SequenceHeaderParser {
             checkTrailingBits(reader, strictStdCompliance);
             return header;
         } catch (EOFException ex) {
-            throw new DecodeException(
-                    DecodeErrorCode.UNEXPECTED_EOF,
-                    DecodeStage.SEQUENCE_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.UNEXPECTED_EOF,
+                    Av1DecodeStage.SEQUENCE_HEADER_PARSE,
                     "Unexpected end of sequence header OBU",
                     obu.streamOffset(),
                     obu.obuIndex(),
                     null,
                     ex
             );
-        } catch (DecodeException ex) {
+        } catch (Av1DecodeException ex) {
             throw ex;
         } catch (IOException ex) {
-            throw new DecodeException(
-                    DecodeErrorCode.INVALID_BITSTREAM,
-                    DecodeStage.SEQUENCE_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeStage.SEQUENCE_HEADER_PARSE,
                     ex.getMessage(),
                     obu.streamOffset(),
                     obu.obuIndex(),

@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Immutable decoder configuration for [Av1ImageReader].
+/// Immutable decoder configuration for [Av1Decoder].
 ///
 /// Configuration changes are expressed by `withXxx` methods. Each method returns this instance
 /// when the requested value is already selected and otherwise returns a new configuration.

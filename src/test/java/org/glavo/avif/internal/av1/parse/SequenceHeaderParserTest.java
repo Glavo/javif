@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1DecodeException;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
@@ -163,7 +163,7 @@ final class SequenceHeaderParserTest {
     /// Verifies that strict mode rejects an identity matrix with subsampled chroma.
     @Test
     void strictModeRejectsIdentityMatrixWithSubsampledChroma() {
-        assertThrows(DecodeException.class, () ->
+        assertThrows(Av1DecodeException.class, () ->
                 new SequenceHeaderParser().parse(sequenceHeaderObu(invalidStrictIdentityPayload()), true)
         );
     }

@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -96,7 +96,7 @@ final class TileBlockHeaderReaderTest {
     @Test
     void readsKeyFrameBlockHeader() {
         byte[] payload = new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
         BlockPosition position = new BlockPosition(0, 0);
@@ -153,7 +153,7 @@ final class TileBlockHeaderReaderTest {
     @Test
     void readsInterBlockHeader() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -192,7 +192,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.DeltaInfo deltaInfo = new FrameHeader.DeltaInfo(true, 0, true, 0, false);
         FrameHeader.CdefInfo cdefInfo = new FrameHeader.CdefInfo(3, 2, new int[]{0, 0, 0, 0}, new int[]{0, 0, 0, 0});
         TileDecodeContext tileContext = createTileContext(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 false,
                 payload,
                 false,
@@ -231,7 +231,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.DeltaInfo deltaInfo = new FrameHeader.DeltaInfo(true, 0, true, 0, false);
         FrameHeader.CdefInfo cdefInfo = new FrameHeader.CdefInfo(3, 2, new int[]{0, 0, 0, 0}, new int[]{0, 0, 0, 0});
         TileDecodeContext tileContext = createTileContext(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 false,
                 payload,
                 false,
@@ -262,7 +262,7 @@ final class TileBlockHeaderReaderTest {
     @Test
     void readsSkippedInterBlockWithInterDecision() {
         byte[] payload = findPayloadForSkippedInterBlock();
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -291,7 +291,7 @@ final class TileBlockHeaderReaderTest {
     void readsSkipModeBlockHeaderWithoutSkipSyntax() {
         byte[] payload = findPayloadForSkipModeInterBlock();
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -345,7 +345,7 @@ final class TileBlockHeaderReaderTest {
     void readsCompoundReferenceBlockHeader() {
         byte[] payload = findPayloadForCompoundReferenceBlock();
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -392,7 +392,7 @@ final class TileBlockHeaderReaderTest {
     void readsSingleReferenceBlockHeader() {
         byte[] payload = findPayloadForSingleReferenceBlock();
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -437,7 +437,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.SegmentData[] segments = defaultSegments();
         segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, 0, false, false);
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -485,7 +485,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.SegmentData[] segments = defaultSegments();
         segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, 1, false, false);
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -534,7 +534,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.SegmentData[] segments = defaultSegments();
         segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, true);
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -617,7 +617,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.SegmentData[] segments = defaultSegments();
         segments[0] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, false, true);
         TileDecodeContext baseContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -661,7 +661,7 @@ final class TileBlockHeaderReaderTest {
     void readsSingleInterModeBlockHeader() {
         byte[] payload = findPayloadForSingleInterModeBlock();
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -738,7 +738,7 @@ final class TileBlockHeaderReaderTest {
     void readsCompoundInterModeBlockHeader() {
         byte[] payload = findPayloadForCompoundInterModeBlock();
         TileDecodeContext tileContext = createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -808,7 +808,7 @@ final class TileBlockHeaderReaderTest {
     @Test
     void readsIntrabcBlockHeaderWithImplicitDcModes() {
         byte[] payload = findPayloadForIntrabc();
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, true, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, true, payload);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -850,7 +850,7 @@ final class TileBlockHeaderReaderTest {
     @Test
     void readsLargeLosslessBlockWithoutCflMode() {
         byte[] payload = new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -893,7 +893,7 @@ final class TileBlockHeaderReaderTest {
     @Test
     void readsFilterIntraBlockHeader() {
         byte[] payload = findPayloadForFilterIntraBlock();
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, true);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload, true);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -955,7 +955,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.SegmentData[] segments = defaultSegments();
         segments[1] = new FrameHeader.SegmentData(0, 0, 0, 0, 0, -1, true, false);
         FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(true, 1, segments, new boolean[8], new int[8]);
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload, false, segmentation, false, false);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -1017,7 +1017,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(true, true, 2, segments, new boolean[8], new int[8]);
         BlockPosition position = new BlockPosition(4, 4);
         TileDecodeContext tileContext = withReferenceSegmentId(
-                createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false),
+                createTileContext(Av1FrameType.KEY, false, payload, false, segmentation, false, false),
                 position,
                 BlockSize.SIZE_8X8,
                 2
@@ -1052,7 +1052,7 @@ final class TileBlockHeaderReaderTest {
         int[] qIndexBySegment = new int[8];
         qIndexBySegment[0] = 1;
         FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, 1, defaultSegments(), losslessBySegment, qIndexBySegment);
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload, false, segmentation, false, false);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -1102,7 +1102,7 @@ final class TileBlockHeaderReaderTest {
         FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, true, 2, defaultSegments(), new boolean[8], new int[8]);
         BlockPosition position = new BlockPosition(4, 4);
         TileDecodeContext tileContext = withReferenceSegmentId(
-                createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false),
+                createTileContext(Av1FrameType.KEY, false, payload, false, segmentation, false, false),
                 position,
                 BlockSize.SIZE_8X8,
                 2
@@ -1136,7 +1136,7 @@ final class TileBlockHeaderReaderTest {
     void readsSkippedPostskipTemporalSegmentIdWithoutPredictionFlag() {
         byte[] payload = findPayloadForSkippedPostskipTemporalPrediction();
         FrameHeader.SegmentationInfo segmentation = createSegmentationInfo(false, true, 1, defaultSegments(), new boolean[8], new int[8]);
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, segmentation, false, false);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload, false, segmentation, false, false);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
         BlockPosition position = new BlockPosition(4, 4);
@@ -1186,7 +1186,7 @@ final class TileBlockHeaderReaderTest {
     @Test
     void readsPaletteBlockHeaderSizes() {
         byte[] payload = findPayloadForPaletteBlock();
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload, false, defaultDisabledSegmentation(), true, true);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload, false, defaultDisabledSegmentation(), true, true);
         TileBlockHeaderReader reader = new TileBlockHeaderReader(tileContext);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(tileContext);
 
@@ -2021,7 +2021,7 @@ final class TileBlockHeaderReaderTest {
     /// @param allowIntrabc whether the synthetic frame allows `intrabc`
     /// @param payload the collected tile entropy payload
     /// @return a simple tile context used by block-header tests
-    private static TileDecodeContext createTileContext(FrameType frameType, boolean allowIntrabc, byte[] payload) {
+    private static TileDecodeContext createTileContext(Av1FrameType frameType, boolean allowIntrabc, byte[] payload) {
         return createTileContext(frameType, allowIntrabc, payload, false);
     }
 
@@ -2033,7 +2033,7 @@ final class TileBlockHeaderReaderTest {
     /// @param filterIntra whether the synthetic sequence enables filter intra
     /// @return a simple tile context used by block-header tests
     private static TileDecodeContext createTileContext(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean allowIntrabc,
             byte[] payload,
             boolean filterIntra
@@ -2061,7 +2061,7 @@ final class TileBlockHeaderReaderTest {
     /// @param allLossless whether all segments in the synthetic frame are lossless
     /// @return a simple tile context used by block-header tests
     private static TileDecodeContext createTileContext(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean allowIntrabc,
             byte[] payload,
             boolean filterIntra,
@@ -2095,7 +2095,7 @@ final class TileBlockHeaderReaderTest {
     /// @param switchableCompoundReferences whether compound-reference mode is switchable for the synthetic frame
     /// @return a simple tile context used by block-header tests
     private static TileDecodeContext createTileContext(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean allowIntrabc,
             byte[] payload,
             boolean filterIntra,
@@ -2137,7 +2137,7 @@ final class TileBlockHeaderReaderTest {
     /// @param cdefInfo the synthetic frame CDEF state
     /// @return a simple tile context used by block-header tests
     private static TileDecodeContext createTileContext(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean allowIntrabc,
             byte[] payload,
             boolean filterIntra,
@@ -2179,7 +2179,7 @@ final class TileBlockHeaderReaderTest {
             FrameHeader.SegmentationInfo segmentation
     ) {
         return createTileContext(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 false,
                 payload,
                 false,
@@ -2216,7 +2216,7 @@ final class TileBlockHeaderReaderTest {
     /// @param warpedMotion whether sequence and frame warped-motion syntax is enabled
     /// @return a configurable tile context used by block-header tests
     private static TileDecodeContext createTileContext(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean allowIntrabc,
             byte[] payload,
             boolean filterIntra,

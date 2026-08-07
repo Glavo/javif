@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -49,7 +49,7 @@ final class TilePartitionTreeReaderTest {
     @Test
     void readsTilePartitionTree() {
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createTileContext(FrameType.KEY, FIXED_TILE_PAYLOAD)
+                createTileContext(Av1FrameType.KEY, FIXED_TILE_PAYLOAD)
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
@@ -93,7 +93,7 @@ final class TilePartitionTreeReaderTest {
     /// Verifies that a non-origin tile retains frame-relative coordinates in its decoded tree.
     @Test
     void retainsFrameRelativeCoordinatesForOffsetTile() {
-        TileDecodeContext directContext = createContext(FrameType.KEY, 128, 64, FIXED_TILE_PAYLOAD, 2, 1);
+        TileDecodeContext directContext = createContext(Av1FrameType.KEY, 128, 64, FIXED_TILE_PAYLOAD, 2, 1);
         BlockNeighborContext neighborContext = BlockNeighborContext.create(directContext);
         TileBlockHeaderReader.BlockHeader header = new TileBlockHeaderReader(directContext).read(
                 new BlockPosition(0, 0),
@@ -118,7 +118,7 @@ final class TilePartitionTreeReaderTest {
         assertEquals(16, directResidualLayout.lumaUnits()[0].position().x4());
 
         TilePartitionTreeReader reader = new TilePartitionTreeReader(
-                createContext(FrameType.KEY, 128, 64, FIXED_TILE_PAYLOAD, 2, 1)
+                createContext(Av1FrameType.KEY, 128, 64, FIXED_TILE_PAYLOAD, 2, 1)
         );
 
         TilePartitionTreeReader.Node[] roots = reader.readTile();
@@ -204,7 +204,7 @@ final class TilePartitionTreeReaderTest {
     /// @param frameType the synthetic frame type
     /// @param payload the collected tile entropy payload
     /// @return a simple 64x64 tile context used by partition-tree tests
-    private static TileDecodeContext createTileContext(FrameType frameType, byte[] payload) {
+    private static TileDecodeContext createTileContext(Av1FrameType frameType, byte[] payload) {
         return createContext(frameType, 64, 64, payload);
     }
 
@@ -213,7 +213,7 @@ final class TilePartitionTreeReaderTest {
     /// @param payload the collected tile entropy payload
     /// @return a clipped tile context whose coded size is smaller than one full 64x64 superblock
     private static TileDecodeContext createClippedTileContext(byte[] payload) {
-        return createContext(FrameType.KEY, 40, 28, payload);
+        return createContext(Av1FrameType.KEY, 40, 28, payload);
     }
 
     /// Returns the first leaf node in raster order from one partition subtree.
@@ -235,7 +235,7 @@ final class TilePartitionTreeReaderTest {
     /// @param codedHeight the coded frame height
     /// @param payload the collected tile entropy payload
     /// @return a synthetic tile context used by partition-tree tests
-    private static TileDecodeContext createContext(FrameType frameType, int codedWidth, int codedHeight, byte[] payload) {
+    private static TileDecodeContext createContext(Av1FrameType frameType, int codedWidth, int codedHeight, byte[] payload) {
         return createContext(frameType, codedWidth, codedHeight, payload, 1, 0);
     }
 
@@ -249,7 +249,7 @@ final class TilePartitionTreeReaderTest {
     /// @param tileIndex the tile index whose context is returned
     /// @return a synthetic tile context used by partition-tree tests
     private static TileDecodeContext createContext(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int codedHeight,
             byte[] payload,

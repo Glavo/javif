@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.bitstream;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
 import org.glavo.avif.internal.io.BufferedInput;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -143,13 +143,13 @@ final class ObuStreamReaderTest {
         byte[] malformedFrame = lengthDelimited(concat(new byte[]{4}, new byte[]{0x28}));
         byte[] stream = annexBTemporalUnit(malformedFrame);
 
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
             try (BufferedInput input = new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))) {
                 ObuStreamReader.forAnnexB(input).readObu();
             }
         });
 
-        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
     }
 
     /// Verifies that an Annex B external OBU length must exactly match a redundant internal size.
@@ -158,7 +158,7 @@ final class ObuStreamReaderTest {
         byte[] sizedObu = obu(ObuType.METADATA, false, 0, 0, new byte[]{7});
         byte[] stream = annexBTemporalUnit(annexBFrameUnit(concat(sizedObu, new byte[]{8})));
 
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
             try (BufferedInput input = new BufferedInput.OfByteBuffer(
                     ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)
             )) {
@@ -166,7 +166,7 @@ final class ObuStreamReaderTest {
             }
         });
 
-        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
     }
 
     /// Verifies that physical EOF inside an otherwise consistent Annex B nesting is reported as
@@ -175,13 +175,13 @@ final class ObuStreamReaderTest {
     void reportsUnexpectedEofForTruncatedAnnexBPayload() {
         byte[] stream = new byte[]{4, 3, 2, 0x28};
 
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
             try (BufferedInput input = new BufferedInput.OfInputStream(new ByteArrayInputStream(stream))) {
                 ObuStreamReader.forAnnexB(input).readObu();
             }
         });
 
-        assertEquals(DecodeErrorCode.UNEXPECTED_EOF, exception.code());
+        assertEquals(Av1DecodeErrorCode.UNEXPECTED_EOF, exception.code());
     }
 
     /// Verifies that malformed OBU headers are rejected.
@@ -189,7 +189,7 @@ final class ObuStreamReaderTest {
     void rejectsInvalidHeader() {
         byte[] stream = new byte[]{(byte) 0x80};
 
-        assertThrows(DecodeException.class, () -> {
+        assertThrows(Av1DecodeException.class, () -> {
             try (BufferedInput input = new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))) {
                 new ObuStreamReader(input).readObu();
             }
@@ -263,13 +263,13 @@ final class ObuStreamReaderTest {
         ByteBuffer first = ByteBuffer.wrap(new byte[]{0b0001_1010, 2, 1}).order(ByteOrder.LITTLE_ENDIAN);
         ByteBuffer second = ByteBuffer.wrap(new byte[]{2}).order(ByteOrder.LITTLE_ENDIAN);
 
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
             try (BufferedInput input = new BufferedInput.OfByteBuffers(new ByteBuffer[]{first, second})) {
                 new ObuStreamReader(input).readObu();
             }
         });
 
-        assertEquals(DecodeErrorCode.UNEXPECTED_EOF, exception.code());
+        assertEquals(Av1DecodeErrorCode.UNEXPECTED_EOF, exception.code());
     }
 
     /// Verifies that truncated payloads report unexpected EOF.
@@ -277,13 +277,13 @@ final class ObuStreamReaderTest {
     void reportsUnexpectedEofForTruncatedPayload() {
         byte[] stream = new byte[]{0b0000_1010, 0x02, 0x01};
 
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
             try (BufferedInput input = new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))) {
                 new ObuStreamReader(input).readObu();
             }
         });
 
-        assertEquals(DecodeErrorCode.UNEXPECTED_EOF, exception.code());
+        assertEquals(Av1DecodeErrorCode.UNEXPECTED_EOF, exception.code());
     }
 
     /// Encodes a single self-delimited OBU.

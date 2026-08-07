@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.model;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -38,7 +38,7 @@ public final class FrameHeader {
     /// The frame presentation delay when present.
     private final long framePresentationDelay;
     /// The AV1 frame type.
-    private final FrameType frameType;
+    private final Av1FrameType frameType;
     /// Whether the frame is shown immediately.
     private final boolean showFrame;
     /// Whether the frame can be shown by a later show-existing-frame header.
@@ -157,7 +157,7 @@ public final class FrameHeader {
             int existingFrameIndex,
             long frameId,
             long framePresentationDelay,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean showFrame,
             boolean showableFrame,
             boolean errorResilientMode,
@@ -261,7 +261,7 @@ public final class FrameHeader {
             int existingFrameIndex,
             long frameId,
             long framePresentationDelay,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean showFrame,
             boolean showableFrame,
             boolean errorResilientMode,
@@ -387,7 +387,7 @@ public final class FrameHeader {
             int existingFrameIndex,
             long frameId,
             long framePresentationDelay,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean showFrame,
             boolean showableFrame,
             boolean errorResilientMode,
@@ -524,7 +524,7 @@ public final class FrameHeader {
             int existingFrameIndex,
             long frameId,
             long framePresentationDelay,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean showFrame,
             boolean showableFrame,
             boolean errorResilientMode,
@@ -733,7 +733,7 @@ public final class FrameHeader {
     /// Returns the AV1 frame type.
     ///
     /// @return the AV1 frame type
-    public FrameType frameType() {
+    public Av1FrameType frameType() {
         return frameType;
     }
 

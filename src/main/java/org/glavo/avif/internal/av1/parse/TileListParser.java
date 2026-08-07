@@ -15,9 +15,9 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
@@ -48,13 +48,13 @@ public final class TileListParser {
     /// @param cameraFrameHeader the active common camera frame header
     /// @param strictStdCompliance whether Large Scale Tile conformance constraints must be enforced
     /// @return the parsed tile list
-    /// @throws DecodeException if the payload or an entry violates tile-list syntax
+    /// @throws Av1DecodeException if the payload or an entry violates tile-list syntax
     public TileList parse(
             ObuPacket obu,
             SequenceHeader sequenceHeader,
             FrameHeader cameraFrameHeader,
             boolean strictStdCompliance
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         Objects.requireNonNull(obu, "obu");
         Objects.requireNonNull(sequenceHeader, "sequenceHeader");
         Objects.requireNonNull(cameraFrameHeader, "cameraFrameHeader");
@@ -124,13 +124,13 @@ public final class TileListParser {
     /// @param sequenceHeader the sequence header associated with the camera frame
     /// @param cameraFrameHeader the common camera frame header
     /// @param strictStdCompliance whether conformance constraints must be enforced
-    /// @throws DecodeException if strict validation finds a nonconformant value
+    /// @throws Av1DecodeException if strict validation finds a nonconformant value
     public void validateCameraFrame(
             ObuPacket obu,
             SequenceHeader sequenceHeader,
             FrameHeader cameraFrameHeader,
             boolean strictStdCompliance
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         Objects.requireNonNull(obu, "obu");
         Objects.requireNonNull(sequenceHeader, "sequenceHeader");
         Objects.requireNonNull(cameraFrameHeader, "cameraFrameHeader");
@@ -158,10 +158,10 @@ public final class TileListParser {
     /// @param obu the source OBU
     /// @param message the detailed validation message
     /// @return the contextual exception
-    private static DecodeException invalidBitstream(ObuPacket obu, String message) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_BITSTREAM,
-                DecodeStage.FRAME_ASSEMBLY,
+    private static Av1DecodeException invalidBitstream(ObuPacket obu, String message) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_BITSTREAM,
+                Av1DecodeStage.FRAME_ASSEMBLY,
                 message,
                 obu.streamOffset(),
                 obu.obuIndex(),

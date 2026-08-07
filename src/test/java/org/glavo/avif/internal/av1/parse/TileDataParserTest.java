@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 final class TileDataParserTest {
     /// Verifies that a single tile consumes the full tile-data payload.
     @Test
-    void parsesSingleTilePayload() throws DecodeException {
+    void parsesSingleTilePayload() throws Av1DecodeException {
         TileDataParser parser = new TileDataParser();
         ObuPacket obu = tileGroupObu(new byte[]{0x12, 0x34});
         FrameHeader frameHeader = tileGroupFrameHeader(1, 1, 0, 0, 0);
@@ -50,7 +50,7 @@ final class TileDataParserTest {
 
     /// Verifies that multi-tile groups use the frame-header `sizeBytes` table for all but the last tile.
     @Test
-    void parsesMultipleTilesWithSizeTable() throws DecodeException {
+    void parsesMultipleTilesWithSizeTable() throws Av1DecodeException {
         TileDataParser parser = new TileDataParser();
         ObuPacket obu = tileGroupObu(new byte[]{
                 0x01,
@@ -84,7 +84,7 @@ final class TileDataParserTest {
         FrameHeader frameHeader = tileGroupFrameHeader(2, 1, 1, 0, 1);
         TileGroupHeader tileGroupHeader = new TileGroupHeader(true, 0, 1, 2);
 
-        assertThrows(DecodeException.class, () -> parser.parse(obu, frameHeader, tileGroupHeader, 0));
+        assertThrows(Av1DecodeException.class, () -> parser.parse(obu, frameHeader, tileGroupHeader, 0));
     }
 
     /// Wraps raw bytes in a synthetic tile-group OBU.
@@ -116,7 +116,7 @@ final class TileDataParserTest {
                 0,
                 0,
                 0,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 true,
                 false,
                 true,

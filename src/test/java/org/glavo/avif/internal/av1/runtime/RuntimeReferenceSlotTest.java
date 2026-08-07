@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.recon.ReferenceSurfaceSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -44,12 +44,12 @@ final class RuntimeReferenceSlotTest {
     void refreshReplacesCompleteStateAndClearEmptiesSlot() {
         RuntimeReferenceSlot slot = new RuntimeReferenceSlot();
         ReferenceSurfaceSnapshot first = RuntimeTestFixtures.createReferenceSurfaceSnapshot(
-                RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x01),
+                RuntimeTestFixtures.createFrameHeader(Av1FrameType.KEY, true, 0x01),
                 8,
                 96
         );
         ReferenceSurfaceSnapshot second = RuntimeTestFixtures.createReferenceSurfaceSnapshot(
-                RuntimeTestFixtures.createFrameHeader(FrameType.INTRA, false, 0x08),
+                RuntimeTestFixtures.createFrameHeader(Av1FrameType.INTRA, false, 0x08),
                 8,
                 144
         );

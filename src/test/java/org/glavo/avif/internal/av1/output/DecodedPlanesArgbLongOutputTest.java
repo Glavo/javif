@@ -16,8 +16,8 @@
 package org.glavo.avif.internal.av1.output;
 
 import org.glavo.avif.AvifBitDepth;
-import org.glavo.avif.decode.DecodedFrame;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodedFrame;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
@@ -38,7 +38,7 @@ final class DecodedPlanesArgbLongOutputTest {
     private static final YuvToRgbTransform DEFAULT_TRANSFORM = YuvToRgbTransform.BT601_FULL_RANGE;
 
     /// The test frame type supplied to frame-returning long-output converters.
-    private static final FrameType TEST_FRAME_TYPE = FrameType.SWITCH;
+    private static final Av1FrameType TEST_FRAME_TYPE = Av1FrameType.SWITCH;
 
     /// The test visibility flag supplied to frame-returning long-output converters.
     private static final boolean TEST_VISIBLE = false;
@@ -116,7 +116,7 @@ final class DecodedPlanesArgbLongOutputTest {
     }
 
     /// Verifies that one frame-returning long-output overload preserves public frame metadata on
-    /// `DecodedFrame`.
+    /// `Av1DecodedFrame`.
     @Test
     void returnsDecodedFrameMetadataForTwelveBitI444Output() {
         DecodedSurface planes = new DecodedSurface(
@@ -131,7 +131,7 @@ final class DecodedPlanesArgbLongOutputTest {
                 plane(2, 1, 3, 2048, 3072, 3)
         );
 
-        DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
+        Av1DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
                 planes,
                 TEST_FRAME_TYPE,
                 TEST_VISIBLE,
@@ -169,7 +169,7 @@ final class DecodedPlanesArgbLongOutputTest {
         };
 
         long[] pixels = ArgbOutput.toOpaqueArgbLongPixels(planes);
-        DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
+        Av1DecodedFrame frame = ArgbOutput.toOpaqueArgbHighBitDepthFrame(
                 planes,
                 TEST_FRAME_TYPE,
                 TEST_VISIBLE,
@@ -183,11 +183,11 @@ final class DecodedPlanesArgbLongOutputTest {
         assertFrameMetadata(frame, planes);
     }
 
-    /// Asserts public frame metadata on one `DecodedFrame`.
+    /// Asserts public frame metadata on one `Av1DecodedFrame`.
     ///
     /// @param frame the frame to validate
     /// @param planes the source decoded planes
-    private static void assertFrameMetadata(DecodedFrame frame, DecodedSurface planes) {
+    private static void assertFrameMetadata(Av1DecodedFrame frame, DecodedSurface planes) {
         assertEquals(planes.codedWidth(), frame.width());
         assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());

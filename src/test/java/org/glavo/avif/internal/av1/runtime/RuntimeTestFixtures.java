@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -47,7 +47,7 @@ final class RuntimeTestFixtures {
     /// @param showFrame whether the frame is shown immediately
     /// @param refreshFrameFlags the refresh-frame bitset carried by the header
     /// @return one minimal frame header with caller-controlled output-policy fields
-    static FrameHeader createFrameHeader(FrameType frameType, boolean showFrame, int refreshFrameFlags) {
+    static FrameHeader createFrameHeader(Av1FrameType frameType, boolean showFrame, int refreshFrameFlags) {
         return createFrameHeader(0, 0, frameType, showFrame, refreshFrameFlags);
     }
 
@@ -62,7 +62,7 @@ final class RuntimeTestFixtures {
     static FrameHeader createFrameHeader(
             int temporalId,
             int spatialId,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean showFrame,
             int refreshFrameFlags
     ) {
@@ -142,7 +142,7 @@ final class RuntimeTestFixtures {
     /// @param applyGrain whether normalized film-grain state should request synthesis
     /// @return one minimal frame header with caller-controlled output-policy fields and film grain
     static FrameHeader createFrameHeaderWithFilmGrain(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean showFrame,
             int refreshFrameFlags,
             boolean applyGrain

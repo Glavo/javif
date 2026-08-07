@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -51,49 +51,49 @@ final class ReferenceMotionVectorProjectionTest {
     @Test
     void requiresInterSourceWithMatchingMotionFieldGrid() {
         assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 460,
                 2892,
                 460,
                 2892
         ));
         assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
-                FrameType.INTRA,
+                Av1FrameType.INTRA,
                 460,
                 2892,
                 460,
                 2892
         ));
         assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 23,
                 595,
                 19,
                 595
         ));
         assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
-                FrameType.SWITCH,
+                Av1FrameType.SWITCH,
                 460,
                 2892,
                 460,
                 2892
         ));
         assertTrue(ReferenceMotionVectorProjection.canProjectSourceMotionField(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 461,
                 2892,
                 460,
                 2892
         ));
         assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 465,
                 2892,
                 460,
                 2892
         ));
         assertFalse(ReferenceMotionVectorProjection.canProjectSourceMotionField(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 460,
                 2897,
                 460,

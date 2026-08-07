@@ -15,8 +15,8 @@
  */
 package org.glavo.avif;
 
-import org.glavo.avif.decode.DecodedFrame;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodedFrame;
+import org.glavo.avif.av1.Av1FrameType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -79,25 +79,25 @@ final class FramePixelBufferTest {
         assertArrayEquals(new int[]{0xFF80_4000}, frame.intPixels());
     }
 
-    /// Verifies that `DecodedFrame` exposes the same shared lazy-conversion contract.
+    /// Verifies that `Av1DecodedFrame` exposes the same shared lazy-conversion contract.
     @Test
     void decodedFrameLazilyConvertsBothPixelRepresentations() {
-        DecodedFrame intFrame = new DecodedFrame(
+        Av1DecodedFrame intFrame = new Av1DecodedFrame(
                 1,
                 1,
                 AvifBitDepth.EIGHT_BITS,
                 Av1ChromaFormat.MONOCHROME,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 true,
                 3L,
                 IntBuffer.wrap(new int[]{0xFF00_80FF}).asReadOnlyBuffer()
         );
-        DecodedFrame longFrame = new DecodedFrame(
+        Av1DecodedFrame longFrame = new Av1DecodedFrame(
                 1,
                 1,
                 AvifBitDepth.TWELVE_BITS,
                 Av1ChromaFormat.MONOCHROME,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 true,
                 4L,
                 LongBuffer.wrap(new long[]{0x8000_FFFF_4040_2020L}).asReadOnlyBuffer()
@@ -128,21 +128,21 @@ final class FramePixelBufferTest {
     @Test
     void decodedFrameRejectsInvalidPresentationState() {
         IntBuffer pixel = IntBuffer.wrap(new int[1]).asReadOnlyBuffer();
-        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+        assertThrows(IllegalArgumentException.class, () -> new Av1DecodedFrame(
                 1, 0, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
-                FrameType.KEY, true, 0, pixel
+                Av1FrameType.KEY, true, 0, pixel
         ));
-        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+        assertThrows(IllegalArgumentException.class, () -> new Av1DecodedFrame(
                 1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
-                FrameType.KEY, true, -1, pixel
+                Av1FrameType.KEY, true, -1, pixel
         ));
-        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+        assertThrows(IllegalArgumentException.class, () -> new Av1DecodedFrame(
                 1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
-                FrameType.KEY, true, 0, 8, 0, pixel
+                Av1FrameType.KEY, true, 0, 8, 0, pixel
         ));
-        assertThrows(IllegalArgumentException.class, () -> new DecodedFrame(
+        assertThrows(IllegalArgumentException.class, () -> new Av1DecodedFrame(
                 1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME,
-                FrameType.KEY, true, 0, 0, 4, pixel
+                Av1FrameType.KEY, true, 0, 0, 4, pixel
         ));
     }
 }

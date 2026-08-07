@@ -15,10 +15,10 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.bitstream.ObuType;
@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 final class TileListParserTest {
     /// Verifies big-endian entry fields, source tile indices, and exact coded-payload views.
     @Test
-    void parsesTileListEntries() throws DecodeException {
+    void parsesTileListEntries() throws Av1DecodeException {
         ObuPacket packet = tileListObu(new byte[]{
                 0x01, 0x00, 0x00, 0x01,
                 0x03, 0x01, 0x01, 0x00, 0x01, 0x55, 0x66,
@@ -67,7 +67,7 @@ final class TileListParserTest {
         ObuPacket packet = tileListObu(new byte[]{0x00, 0x00, 0x00, 0x01});
 
         assertThrows(
-                DecodeException.class,
+                Av1DecodeException.class,
                 () -> new TileListParser().parse(packet, sequenceHeader(), cameraFrameHeader(), false)
         );
     }
@@ -79,25 +79,25 @@ final class TileListParserTest {
         SequenceHeader sequenceHeader = sequenceHeader();
         FrameHeader frameHeader = cameraFrameHeader();
 
-        assertThrows(DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> parser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, (byte) 128, 0, 0, 0, 0, 1}),
                 sequenceHeader,
                 frameHeader,
                 false
         ));
-        assertThrows(DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> parser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, 0, 2, 0, 0, 0, 1}),
                 sequenceHeader,
                 frameHeader,
                 false
         ));
-        assertThrows(DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> parser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 1, 1}),
                 sequenceHeader,
                 frameHeader,
                 false
         ));
-        assertThrows(DecodeException.class, () -> parser.parse(
+        assertThrows(Av1DecodeException.class, () -> parser.parse(
                 tileListObu(new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2}),
                 sequenceHeader,
                 frameHeader,
@@ -179,7 +179,7 @@ final class TileListParserTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 false,
                 true,

@@ -15,9 +15,9 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.decode.Av1DecoderConfig;
-import org.glavo.avif.decode.Av1FrameSelection;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecoderConfig;
+import org.glavo.avif.av1.Av1FrameSelection;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -31,7 +31,7 @@ final class FrameOutputPolicyTest {
     /// Verifies that invisible current frames stay suppressed unless the decoder explicitly exposes them.
     @Test
     void shouldOutputFrameSuppressesInvisibleFramesUnlessConfiguredOtherwise() {
-        FrameHeader invisibleKeyFrame = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, false, 0x01);
+        FrameHeader invisibleKeyFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.KEY, false, 0x01);
 
         assertFalse(FrameOutputPolicy.shouldOutputFrame(invisibleKeyFrame, config(false, Av1FrameSelection.ALL)));
         assertTrue(FrameOutputPolicy.shouldOutputFrame(invisibleKeyFrame, config(true, Av1FrameSelection.KEY)));
@@ -40,10 +40,10 @@ final class FrameOutputPolicyTest {
     /// Verifies that current-frame output obeys the configured decode-frame-type filter.
     @Test
     void shouldOutputFrameMatchesFrameSelectionFilter() {
-        FrameHeader keyFrame = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, true, 0x00);
-        FrameHeader intraFrame = RuntimeTestFixtures.createFrameHeader(FrameType.INTRA, true, 0x00);
-        FrameHeader interFrame = RuntimeTestFixtures.createFrameHeader(FrameType.INTER, true, 0x00);
-        FrameHeader switchReferenceFrame = RuntimeTestFixtures.createFrameHeader(FrameType.SWITCH, true, 0x02);
+        FrameHeader keyFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.KEY, true, 0x00);
+        FrameHeader intraFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.INTRA, true, 0x00);
+        FrameHeader interFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.INTER, true, 0x00);
+        FrameHeader switchReferenceFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.SWITCH, true, 0x02);
 
         assertTrue(FrameOutputPolicy.shouldOutputFrame(keyFrame, config(false, Av1FrameSelection.ALL)));
 
@@ -61,9 +61,9 @@ final class FrameOutputPolicyTest {
     /// Verifies that existing-frame output ignores `showFrame` visibility but still applies frame-type filters.
     @Test
     void shouldOutputExistingFrameIgnoresVisibilityButMatchesFrameSelectionFilter() {
-        FrameHeader hiddenKeyFrame = RuntimeTestFixtures.createFrameHeader(FrameType.KEY, false, 0x00);
-        FrameHeader hiddenInterFrame = RuntimeTestFixtures.createFrameHeader(FrameType.INTER, false, 0x00);
-        FrameHeader hiddenReferenceSwitchFrame = RuntimeTestFixtures.createFrameHeader(FrameType.SWITCH, false, 0x04);
+        FrameHeader hiddenKeyFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.KEY, false, 0x00);
+        FrameHeader hiddenInterFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.INTER, false, 0x00);
+        FrameHeader hiddenReferenceSwitchFrame = RuntimeTestFixtures.createFrameHeader(Av1FrameType.SWITCH, false, 0x04);
 
         assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenKeyFrame, config(false, Av1FrameSelection.ALL)));
         assertTrue(FrameOutputPolicy.shouldOutputExistingFrame(hiddenReferenceSwitchFrame, config(false, Av1FrameSelection.REFERENCE)));
@@ -76,8 +76,8 @@ final class FrameOutputPolicyTest {
     /// normalized frame-header state request it.
     @Test
     void requiresFilmGrainSynthesisMatchesConfigurationAndNormalizedFrameState() {
-        FrameHeader grainFrame = RuntimeTestFixtures.createFrameHeaderWithFilmGrain(FrameType.KEY, true, 0x01, true);
-        FrameHeader plainFrame = RuntimeTestFixtures.createFrameHeaderWithFilmGrain(FrameType.KEY, true, 0x01, false);
+        FrameHeader grainFrame = RuntimeTestFixtures.createFrameHeaderWithFilmGrain(Av1FrameType.KEY, true, 0x01, true);
+        FrameHeader plainFrame = RuntimeTestFixtures.createFrameHeaderWithFilmGrain(Av1FrameType.KEY, true, 0x01, false);
 
         assertTrue(FrameOutputPolicy.requiresFilmGrainSynthesis(grainFrame, config(false, Av1FrameSelection.ALL)));
         assertFalse(FrameOutputPolicy.requiresFilmGrainSynthesis(

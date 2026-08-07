@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -52,7 +52,7 @@ final class BlockNeighborContextTest {
     /// Verifies key-frame initialization and neighbor-state updates from one decoded leaf header.
     @Test
     void initializesAndUpdatesKeyFrameNeighborState() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.KEY));
         BlockPosition position = new BlockPosition(0, 0);
 
         assertEquals(16, context.tileWidth4());
@@ -116,7 +116,7 @@ final class BlockNeighborContextTest {
     /// classes used by AV1 coefficient coding.
     @Test
     void derivesDcSignContextsFromStoredCoefficientState() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.KEY));
         context.updateLumaCoefficientContext(
                 new TransformUnit(new BlockPosition(1, 0), TransformSize.TX_4X4),
                 0x83
@@ -144,7 +144,7 @@ final class BlockNeighborContextTest {
     /// Verifies that inter-reference contexts track compound and single-reference neighbors.
     @Test
     void derivesInterReferenceContextsFromUpdatedNeighbors() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
 
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
@@ -178,7 +178,7 @@ final class BlockNeighborContextTest {
     /// Verifies that intra neighbors do not count as backward references for the compound flag context.
     @Test
     void excludesIntraNeighborsFromCompoundReferenceDirection() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -221,7 +221,7 @@ final class BlockNeighborContextTest {
     /// Verifies that compound blend-type contexts track masked and joint compound neighbor state.
     @Test
     void derivesCompoundBlendTypeContextsFromUpdatedNeighbors() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
 
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
@@ -249,7 +249,7 @@ final class BlockNeighborContextTest {
     /// Verifies that switchable interpolation-filter contexts merge matching neighbor filters and sentinels.
     @Test
     void derivesInterpolationFilterContextsFromUpdatedNeighbors() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         BlockPosition position = new BlockPosition(4, 4);
 
         assertEquals(3, context.interpolationFilterContext(position, 0, -1, 0));
@@ -305,7 +305,7 @@ final class BlockNeighborContextTest {
     /// Verifies provisional inter-mode contexts derive stable mode and DRL contexts from neighbors.
     @Test
     void derivesProvisionalInterModeContextsFromUpdatedNeighbors() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
 
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
@@ -367,7 +367,7 @@ final class BlockNeighborContextTest {
     /// global vector before their stored vector is reused by the extended candidate scan.
     @Test
     void provisionalInterModeContextsReevaluateGlobalWarpNeighborsAtCurrentBlock() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         MotionVector neighborGlobalMotion = new MotionVector(-154, 370);
         MotionVector currentGlobalMotion = new MotionVector(-158, 366);
         context.updateFromBlockHeader(singleReferenceInterBlock(
@@ -410,7 +410,7 @@ final class BlockNeighborContextTest {
     /// candidate, exposing the third candidate to `NEARMV` DRL syntax.
     @Test
     void provisionalInterModeContextsKeepBothComponentsFromOneExtendedNeighbor() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         MotionVector exactMotionVector = new MotionVector(192, 422);
         MotionVector extendedMotionVector0 = MotionVector.zero();
         MotionVector extendedMotionVector1 = new MotionVector(256, 394);
@@ -462,7 +462,7 @@ final class BlockNeighborContextTest {
     /// Verifies that direct matching neighbors carrying `NEWMV` lower the `newmv` syntax context.
     @Test
     void provisionalInterModeContextsTrackNewMvMatches() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -491,7 +491,7 @@ final class BlockNeighborContextTest {
     /// Verifies that direct row and column scans cover the full current-block span instead of only its first cell.
     @Test
     void provisionalInterModeContextsScanDirectSpans() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_8X8,
@@ -539,7 +539,7 @@ final class BlockNeighborContextTest {
     /// Verifies that bounded secondary spatial scans contribute `refmvs` contexts even after direct edges diverge.
     @Test
     void provisionalInterModeContextsIncludeSecondarySpatialMatches() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 0),
                 BlockSize.SIZE_8X8,
@@ -587,7 +587,7 @@ final class BlockNeighborContextTest {
     /// Verifies that top-right spatial neighbors contribute to the provisional `refmvs` stack.
     @Test
     void provisionalInterModeContextsIncludeTopRightMatches() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 0),
                 BlockSize.SIZE_8X8,
@@ -627,7 +627,7 @@ final class BlockNeighborContextTest {
     /// Verifies real reference candidates are clamped to the extended coded-frame boundary.
     @Test
     void provisionalInterModeContextsClampReferenceCandidatesAtFrameBoundary() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(14, 12),
                 BlockSize.SIZE_8X8,
@@ -659,7 +659,7 @@ final class BlockNeighborContextTest {
     /// Verifies that top-left spatial neighbors contribute to the provisional `refmvs` stack.
     @Test
     void provisionalInterModeContextsIncludeTopLeftMatches() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_8X8,
@@ -700,7 +700,7 @@ final class BlockNeighborContextTest {
     /// have no direct matching neighbors.
     @Test
     void provisionalInterModeContextsIncludeFarSecondaryOffsetMatches() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -748,7 +748,7 @@ final class BlockNeighborContextTest {
     /// Verifies compound extended candidates reuse and sign-normalize a single-reference neighbor.
     @Test
     void provisionalInterModeContextsMatchCompoundSecondReferenceAgainstSingleNeighbor() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         InterMotionVector neighborMotionVector = InterMotionVector.resolved(new MotionVector(18, -6));
         context.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
@@ -777,7 +777,7 @@ final class BlockNeighborContextTest {
     /// Verifies that decoded inter blocks populate the current frame's saved motion-vector field.
     @Test
     void updateFromBlockHeaderWritesDecodedTemporalMotionField() {
-        TileDecodeContext tileContext = testTileContext(FrameType.INTER);
+        TileDecodeContext tileContext = testTileContext(Av1FrameType.INTER);
         BlockNeighborContext context = BlockNeighborContext.create(tileContext);
 
         context.updateFromBlockHeader(compoundInterBlock(
@@ -805,7 +805,7 @@ final class BlockNeighborContextTest {
     /// Verifies that chroma coefficient-skip contexts use dav1d's dedicated chroma range.
     @Test
     void chromaCoefficientSkipContextUsesDedicatedChromaRange() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, Av1ChromaFormat.YUV444));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.KEY, Av1ChromaFormat.YUV444));
         BlockPosition position = new BlockPosition(0, 0);
 
         assertEquals(7, context.chromaCoefficientSkipContext(
@@ -852,7 +852,7 @@ final class BlockNeighborContextTest {
     /// Verifies that chroma coefficient-skip contexts account for subsampled chroma block size.
     @Test
     void chromaCoefficientSkipContextAccountsForSubsampling() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY, Av1ChromaFormat.YUV420));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.KEY, Av1ChromaFormat.YUV420));
 
         assertEquals(7, context.chromaCoefficientSkipContext(
                 0,
@@ -871,7 +871,7 @@ final class BlockNeighborContextTest {
     /// Verifies inter-frame initialization starts with non-intra neighbors.
     @Test
     void initializesInterFrameNeighborState() {
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
 
         assertEquals(0, context.intraContext(new BlockPosition(4, 4)));
         assertEquals(0, context.skipContext(new BlockPosition(4, 4)));
@@ -885,7 +885,7 @@ final class BlockNeighborContextTest {
         BlockPosition currentPosition = new BlockPosition(4, 4);
         BlockSize currentSize = BlockSize.SIZE_16X16;
 
-        BlockNeighborContext contextWithAbove = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext contextWithAbove = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         assertFalse(contextWithAbove.hasOverlappableCandidates(currentPosition, currentSize));
         contextWithAbove.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
@@ -896,7 +896,7 @@ final class BlockNeighborContextTest {
         ));
         assertTrue(contextWithAbove.hasOverlappableCandidates(currentPosition, currentSize));
 
-        BlockNeighborContext contextWithLeft = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext contextWithLeft = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         assertFalse(contextWithLeft.hasOverlappableCandidates(currentPosition, currentSize));
         contextWithLeft.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(2, 4),
@@ -907,7 +907,7 @@ final class BlockNeighborContextTest {
         ));
         assertTrue(contextWithLeft.hasOverlappableCandidates(currentPosition, currentSize));
 
-        BlockNeighborContext contextWithIntra = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        BlockNeighborContext contextWithIntra = BlockNeighborContext.create(testTileContext(Av1FrameType.KEY));
         contextWithIntra.updateFromBlockHeader(new TileBlockHeaderReader.BlockHeader(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -945,10 +945,10 @@ final class BlockNeighborContextTest {
         BlockPosition currentPosition = new BlockPosition(4, 4);
         BlockSize currentSize = BlockSize.SIZE_16X16;
 
-        BlockNeighborContext emptyContext = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext emptyContext = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         assertFalse(emptyContext.hasLocalWarpSamples(currentPosition, currentSize, 0));
 
-        BlockNeighborContext contextWithAbove = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext contextWithAbove = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         contextWithAbove.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -958,7 +958,7 @@ final class BlockNeighborContextTest {
         ));
         assertTrue(contextWithAbove.hasLocalWarpSamples(currentPosition, currentSize, 0));
 
-        BlockNeighborContext contextWithDifferentReference = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext contextWithDifferentReference = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         contextWithDifferentReference.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -968,7 +968,7 @@ final class BlockNeighborContextTest {
         ));
         assertFalse(contextWithDifferentReference.hasLocalWarpSamples(currentPosition, currentSize, 0));
 
-        BlockNeighborContext contextWithCompoundLeft = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext contextWithCompoundLeft = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         contextWithCompoundLeft.updateFromBlockHeader(compoundInterBlock(
                 new BlockPosition(2, 4),
                 BlockSize.SIZE_8X16,
@@ -980,7 +980,7 @@ final class BlockNeighborContextTest {
         ));
         assertFalse(contextWithCompoundLeft.hasLocalWarpSamples(currentPosition, currentSize, 0));
 
-        BlockNeighborContext contextWithInterIntraAbove = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext contextWithInterIntraAbove = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         contextWithInterIntraAbove.updateFromBlockHeader(singleReferenceInterIntraBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -989,7 +989,7 @@ final class BlockNeighborContextTest {
         ));
         assertFalse(contextWithInterIntraAbove.hasLocalWarpSamples(currentPosition, currentSize, 0));
 
-        BlockNeighborContext contextWithProvisionalAbove = BlockNeighborContext.create(testTileContext(FrameType.INTER));
+        BlockNeighborContext contextWithProvisionalAbove = BlockNeighborContext.create(testTileContext(Av1FrameType.INTER));
         contextWithProvisionalAbove.updateFromBlockHeader(singleReferenceInterBlock(
                 new BlockPosition(4, 2),
                 BlockSize.SIZE_16X8,
@@ -1009,13 +1009,13 @@ final class BlockNeighborContextTest {
         MotionVector fallback = new MotionVector(0, -2560);
         MotionVector aboveVector = new MotionVector(-64, 0);
 
-        BlockNeighborContext emptyContext = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        BlockNeighborContext emptyContext = BlockNeighborContext.create(testTileContext(Av1FrameType.KEY));
         assertEquals(
                 fallback,
                 emptyContext.intrabcReferenceMotionVector(currentPosition, currentSize, fallback)
         );
 
-        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(FrameType.KEY));
+        BlockNeighborContext context = BlockNeighborContext.create(testTileContext(Av1FrameType.KEY));
         context.updateFromBlockHeader(intrabcBlock(
                 new BlockPosition(1, 3),
                 BlockSize.SIZE_4X4,
@@ -1031,7 +1031,7 @@ final class BlockNeighborContextTest {
     ///
     /// @param frameType the synthetic frame type
     /// @return a simple tile context used by neighbor-context tests
-    private static TileDecodeContext testTileContext(FrameType frameType) {
+    private static TileDecodeContext testTileContext(Av1FrameType frameType) {
         return testTileContext(frameType, Av1ChromaFormat.YUV420);
     }
 
@@ -1040,7 +1040,7 @@ final class BlockNeighborContextTest {
     /// @param frameType the synthetic frame type
     /// @param chromaFormat the synthetic decoded pixel format
     /// @return a simple tile context used by neighbor-context tests
-    private static TileDecodeContext testTileContext(FrameType frameType, Av1ChromaFormat chromaFormat) {
+    private static TileDecodeContext testTileContext(Av1FrameType frameType, Av1ChromaFormat chromaFormat) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,

@@ -17,8 +17,8 @@ package org.glavo.avif.internal.av1.output;
 
 import org.glavo.avif.AvifBitDepth;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.DecodedFrame;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodedFrame;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 final class DecodedPlanesArgbIntOutputTest {
     /// The test frame type supplied to frame-returning converters.
-    private static final FrameType TEST_FRAME_TYPE = FrameType.KEY;
+    private static final Av1FrameType TEST_FRAME_TYPE = Av1FrameType.KEY;
 
     /// The test visibility flag supplied to frame-returning converters.
     private static final boolean TEST_VISIBLE = true;
@@ -59,7 +59,7 @@ final class DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        DecodedFrame frame = convert(planes);
+        Av1DecodedFrame frame = convert(planes);
         int[] pixels = frame.intPixels();
 
         assertArrayEquals(
@@ -92,7 +92,7 @@ final class DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        DecodedFrame frame = convert(planes);
+        Av1DecodedFrame frame = convert(planes);
 
         assertEquals(3, frame.width());
         assertEquals(2, frame.height());
@@ -124,7 +124,7 @@ final class DecodedPlanesArgbIntOutputTest {
                 null
         );
 
-        DecodedFrame frame = convert(planes);
+        Av1DecodedFrame frame = convert(planes);
         int[] pixels = frame.intPixels();
 
         assertArrayEquals(
@@ -158,7 +158,7 @@ final class DecodedPlanesArgbIntOutputTest {
                 plane(2, 1, 3, 128, 0, 6)
         );
 
-        DecodedFrame frame = convert(planes);
+        Av1DecodedFrame frame = convert(planes);
         int[] pixels = frame.intPixels();
 
         assertEquals(8, pixels.length);
@@ -198,7 +198,7 @@ final class DecodedPlanesArgbIntOutputTest {
                 plane(2, 2, 3, 128, 70, 5, 220, 160, 6)
         );
 
-        DecodedFrame frame = convert(planes);
+        Av1DecodedFrame frame = convert(planes);
         int[] pixels = frame.intPixels();
 
         assertArrayEquals(
@@ -236,7 +236,7 @@ final class DecodedPlanesArgbIntOutputTest {
                 plane(4, 2, 5, 128, 90, 210, 40, 5, 150, 70, 100, 220, 6)
         );
 
-        DecodedFrame frame = convert(planes);
+        Av1DecodedFrame frame = convert(planes);
         int[] pixels = frame.intPixels();
 
         assertArrayEquals(
@@ -260,7 +260,7 @@ final class DecodedPlanesArgbIntOutputTest {
     ///
     /// @param planes the decoded planes to convert
     /// @return one opaque 8-bit ARGB frame
-    private static DecodedFrame convert(DecodedSurface planes) {
+    private static Av1DecodedFrame convert(DecodedSurface planes) {
         return ArgbOutput.toOpaqueArgb8Frame(
                 planes,
                 TEST_FRAME_TYPE,
@@ -278,11 +278,11 @@ final class DecodedPlanesArgbIntOutputTest {
         }
     }
 
-    /// Asserts public frame metadata on one `DecodedFrame`.
+    /// Asserts public frame metadata on one `Av1DecodedFrame`.
     ///
     /// @param frame the frame to validate
     /// @param planes the source decoded planes
-    private static void assertFrameMetadata(DecodedFrame frame, DecodedSurface planes) {
+    private static void assertFrameMetadata(Av1DecodedFrame frame, DecodedSurface planes) {
         assertEquals(planes.codedWidth(), frame.width());
         assertEquals(planes.codedHeight(), frame.height());
         assertEquals(AvifBitDepth.fromBits(planes.bitDepth()), frame.bitDepth());

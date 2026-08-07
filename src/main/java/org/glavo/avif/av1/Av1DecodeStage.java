@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// High-level decoder stages used for error reporting.
+/// High-level AV1 decoder stages used for error reporting.
 @NotNullByDefault
-public enum DecodeStage {
+public enum Av1DecodeStage {
     /// The decoder is interacting with the underlying byte source.
     INPUT,
     /// The decoder is reading raw OBU packets from the byte stream.

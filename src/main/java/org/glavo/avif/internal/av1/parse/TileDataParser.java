@@ -15,9 +15,9 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.TileDataEntry;
@@ -36,13 +36,13 @@ public final class TileDataParser {
     /// @param tileGroupHeader the parsed tile-group header
     /// @param tileDataOffset the byte offset of the tile-data section inside the OBU payload
     /// @return the parsed per-tile payload ranges
-    /// @throws DecodeException if the tile-data layout is malformed
+    /// @throws Av1DecodeException if the tile-data layout is malformed
     public TileDataEntry[] parse(
             ObuPacket obu,
             FrameHeader frameHeader,
             TileGroupHeader tileGroupHeader,
             int tileDataOffset
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         Objects.requireNonNull(obu, "obu");
         Objects.requireNonNull(frameHeader, "frameHeader");
         Objects.requireNonNull(tileGroupHeader, "tileGroupHeader");
@@ -93,10 +93,10 @@ public final class TileDataParser {
     /// @param obu the source OBU packet
     /// @param message the detailed validation message
     /// @return the contextual invalid-bitstream exception
-    private static DecodeException invalidBitstream(ObuPacket obu, String message) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_BITSTREAM,
-                DecodeStage.FRAME_ASSEMBLY,
+    private static Av1DecodeException invalidBitstream(ObuPacket obu, String message) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_BITSTREAM,
+                Av1DecodeStage.FRAME_ASSEMBLY,
                 message,
                 obu.streamOffset(),
                 obu.obuIndex(),

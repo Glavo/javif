@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -75,9 +75,9 @@ final class TileBitstreamParserTest {
 
     /// Verifies that tile bitstreams can start after a non-zero tile-data offset.
     ///
-    /// @throws DecodeException if the tile-data layout cannot be parsed
+    /// @throws Av1DecodeException if the tile-data layout cannot be parsed
     @Test
-    void parsesTileBitstreamsWithNonZeroTileDataOffset() throws DecodeException {
+    void parsesTileBitstreamsWithNonZeroTileDataOffset() throws Av1DecodeException {
         TileBitstreamParser parser = new TileBitstreamParser();
         ObuPacket obu = tileGroupObu(new byte[]{
                 0x00,
@@ -134,7 +134,7 @@ final class TileBitstreamParserTest {
                 0,
                 0,
                 0,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 true,
                 false,
                 true,

@@ -15,10 +15,10 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -83,7 +83,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
@@ -105,7 +105,7 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.MONOCHROME, 10, 4, 4);
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), leaf)
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(Av1FrameType.KEY, 4, 4), leaf)
         );
 
         assertEquals(10, planes.bitDepth());
@@ -126,7 +126,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
@@ -225,7 +225,7 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.YUV420, 8, 16, 16, true);
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.INTRA, 16, 16), roots)
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(Av1FrameType.INTRA, 16, 16), roots)
         );
 
         assertPlaneEquals(
@@ -256,7 +256,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, FrameType.INTRA, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, Av1FrameType.INTRA, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
@@ -280,7 +280,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, FrameType.INTRA, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, Av1FrameType.INTRA, 4, 4, leaf)
         );
 
         assertEquals(8, planes.bitDepth());
@@ -304,7 +304,7 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.YUV444, 12, 4, 4);
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.INTRA, 4, 4), leaf)
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(Av1FrameType.INTRA, 4, 4), leaf)
         );
 
         assertEquals(12, planes.bitDepth());
@@ -365,7 +365,7 @@ final class FrameReconstructorTest {
         );
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.MONOCHROME, 8, 4);
-        FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.KEY, 4, 8, 4);
+        FrameHeader frameHeader = createSuperResolvedFrameHeader(Av1FrameType.KEY, 4, 8, 4);
         DecodedSurface planes = postprocess(
                 new FrameReconstructor().reconstruct(createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)),
                 frameHeader
@@ -398,7 +398,7 @@ final class FrameReconstructorTest {
         );
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.YUV420, 8, 4);
-        FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.INTRA, 4, 8, 4);
+        FrameHeader frameHeader = createSuperResolvedFrameHeader(Av1FrameType.INTRA, 4, 8, 4);
         DecodedSurface planes = postprocess(
                 new FrameReconstructor().reconstruct(createFrameSyntaxDecodeResult(sequenceHeader, frameHeader, leaf)),
                 frameHeader
@@ -778,7 +778,7 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.YUV420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
-                FrameType.SWITCH,
+                Av1FrameType.SWITCH,
                 4,
                 8,
                 4,
@@ -885,7 +885,7 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.MONOCHROME, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 4,
                 8,
                 4,
@@ -952,7 +952,7 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.YUV420, 8, 4);
         FrameHeader frameHeader = createSuperResolvedInterFrameHeader(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 4,
                 8,
                 4,
@@ -1038,7 +1038,7 @@ final class FrameReconstructorTest {
                 null
         );
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.MONOCHROME, 8, 4);
-        FrameHeader frameHeader = createSuperResolvedInterFrameHeader(FrameType.INTER, 4, 8, 4, 0);
+        FrameHeader frameHeader = createSuperResolvedInterFrameHeader(Av1FrameType.INTER, 4, 8, 4, 0);
         TilePartitionTreeReader.LeafNode baselineLeaf = new TilePartitionTreeReader.LeafNode(
                 createSingleReferenceInterBlockHeader(position, size, false, 0, MotionVector.zero()),
                 createTransformLayout(position, size, Av1ChromaFormat.MONOCHROME),
@@ -1111,7 +1111,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 8, 8, leaf)
         );
 
         assertFalse(planes.hasChroma());
@@ -1155,7 +1155,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.KEY, 8, 8, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1205,7 +1205,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, Av1FrameType.KEY, 8, 8, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1255,7 +1255,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, FrameType.KEY, 8, 8, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, Av1FrameType.KEY, 8, 8, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1314,7 +1314,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(chromaFormat, FrameType.KEY, frameWidth, frameHeight, leaf)
+                createFrameSyntaxDecodeResult(chromaFormat, Av1FrameType.KEY, frameWidth, frameHeight, leaf)
         );
 
         assertPlaneEquals(
@@ -1431,10 +1431,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 8, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 8, 8, baselineLeaf)
         );
         DecodedSurface residual = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 8, 8, residualLeaf)
         );
 
         assertFalse(baseline.hasChroma());
@@ -1461,10 +1461,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 4, 4, zeroResidualLeaf)
         ).lumaPlane();
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 4, 4, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 4, 4, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1518,10 +1518,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 6, 6, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 6, 6, baselineLeaf)
         ).lumaPlane();
         PaddedPlane reconstructed = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 6, 6, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 6, 6, residualLeaf)
         ).lumaPlane();
 
         assertTrue(baseline.stride() >= transformSize.widthPixels());
@@ -1566,7 +1566,7 @@ final class FrameReconstructorTest {
         );
 
         PaddedPlane reconstructed = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 4, 4, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 4, 4, residualLeaf)
         ).lumaPlane();
         int[] dequantizedCoefficients = LumaDequantizer.dequantize(
                 residualUnit,
@@ -1607,9 +1607,9 @@ final class FrameReconstructorTest {
 
         SequenceHeader sequenceHeader = createSequenceHeader(Av1ChromaFormat.MONOCHROME, 10, 4, 4);
         FrameSyntaxDecodeResult baselineSyntax =
-                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), zeroResidualLeaf);
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(Av1FrameType.KEY, 4, 4), zeroResidualLeaf);
         FrameSyntaxDecodeResult residualSyntax =
-                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(FrameType.KEY, 4, 4), positiveResidualLeaf);
+                createFrameSyntaxDecodeResult(sequenceHeader, createFrameHeader(Av1FrameType.KEY, 4, 4), positiveResidualLeaf);
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane baseline = reconstructor.reconstruct(baselineSyntax).lumaPlane();
@@ -1638,10 +1638,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 4, 4, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 4, 4, negativeResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 4, 4, negativeResidualLeaf)
         );
 
         assertTrue(residualPlanes.hasChroma());
@@ -1681,10 +1681,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, Av1FrameType.INTRA, 4, 4, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, FrameType.INTRA, 4, 4, positiveChromaLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, Av1FrameType.INTRA, 4, 4, positiveChromaLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -1727,10 +1727,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, FrameType.INTRA, 4, 4, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, Av1FrameType.INTRA, 4, 4, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, FrameType.INTRA, 4, 4, negativeChromaLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, Av1FrameType.INTRA, 4, 4, negativeChromaLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -1760,10 +1760,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 16, 16, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 16, 16, zeroResidualLeaf)
         ).lumaPlane();
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 16, 16, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 16, 16, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1788,10 +1788,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 16, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 16, 8, zeroResidualLeaf)
         ).lumaPlane();
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 16, 8, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 16, 8, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1816,10 +1816,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 32, 32, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 32, 32, zeroResidualLeaf)
         ).lumaPlane();
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 32, 32, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 32, 32, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1845,10 +1845,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 64, 64, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 64, 64, zeroResidualLeaf)
         ).lumaPlane();
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 64, 64, positiveResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 64, 64, positiveResidualLeaf)
         );
 
         assertFalse(residualPlanes.hasChroma());
@@ -1885,10 +1885,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 64, 64, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 64, 64, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 64, 64, positiveChromaLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 64, 64, positiveChromaLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -1923,7 +1923,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.KEY, 4, 4, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -1975,7 +1975,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV422, Av1FrameType.KEY, 4, 4, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -2031,7 +2031,7 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, FrameType.KEY, 4, 4, leaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV444, Av1FrameType.KEY, 4, 4, leaf)
         );
 
         assertTrue(planes.hasChroma());
@@ -2123,12 +2123,12 @@ final class FrameReconstructorTest {
         );
 
         DecodedSurface baseline = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.KEY, 8, 8, topLeftLeaf, topRightLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.KEY, 8, 8, topLeftLeaf, topRightLeaf)
         );
         DecodedSurface planes = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(
                         Av1ChromaFormat.YUV420,
-                        FrameType.KEY,
+                        Av1FrameType.KEY,
                         8,
                         8,
                         topLeftLeaf,
@@ -2191,7 +2191,7 @@ final class FrameReconstructorTest {
         DecodedSurface baseline = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(
                         Av1ChromaFormat.YUV422,
-                        FrameType.KEY,
+                        Av1FrameType.KEY,
                         128,
                         64,
                         createWideDirectionalI422Leaf(0)
@@ -2200,7 +2200,7 @@ final class FrameReconstructorTest {
         DecodedSurface changedTopRight = new FrameReconstructor().reconstruct(
                 createFrameSyntaxDecodeResult(
                         Av1ChromaFormat.YUV422,
-                        FrameType.KEY,
+                        Av1FrameType.KEY,
                         128,
                         64,
                         createWideDirectionalI422Leaf(4096)
@@ -2289,7 +2289,7 @@ final class FrameReconstructorTest {
         DecodedSurface baseline = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
                         Av1ChromaFormat.MONOCHROME,
-                        FrameType.KEY,
+                        Av1FrameType.KEY,
                         12,
                         8,
                         topLeftLeaf,
@@ -2301,7 +2301,7 @@ final class FrameReconstructorTest {
         DecodedSurface residual = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
                         Av1ChromaFormat.MONOCHROME,
-                        FrameType.KEY,
+                        Av1FrameType.KEY,
                         12,
                         8,
                         topLeftLeaf,
@@ -2345,14 +2345,14 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         PaddedPlane expectedAfterTileZero = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 8, 4, leftTileLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 8, 4, leftTileLeaf)
         ).lumaPlane();
         PaddedPlane expectedAfterBothTiles = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, FrameType.KEY, 8, 4, leftTileLeaf, rightTileLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.MONOCHROME, Av1FrameType.KEY, 8, 4, leftTileLeaf, rightTileLeaf)
         ).lumaPlane();
 
         MutablePlaneBuffer sharedLumaPlane = new MutablePlaneBuffer(8, 4, 8);
-        FrameHeader frameHeader = createFrameHeader(FrameType.KEY, 8, 4);
+        FrameHeader frameHeader = createFrameHeader(Av1FrameType.KEY, 8, 4);
 
         reconstructSyntheticTileRootsIntoSharedLumaPlane(sharedLumaPlane, Av1ChromaFormat.MONOCHROME, frameHeader, tileZeroRoots);
         PaddedPlane afterTileZero = sharedLumaPlane.toDecodedPlane();
@@ -4943,7 +4943,7 @@ final class FrameReconstructorTest {
     /// @return one synthetic structural frame-decode result
     private static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             int width,
             int height,
             TilePartitionTreeReader.Node... roots
@@ -5303,7 +5303,7 @@ final class FrameReconstructorTest {
     /// @param width the coded and rendered frame width
     /// @param height the coded and rendered frame height
     /// @return one minimal frame header
-    private static FrameHeader createFrameHeader(FrameType frameType, int width, int height) {
+    private static FrameHeader createFrameHeader(Av1FrameType frameType, int width, int height) {
         return new FrameHeader(
                 0,
                 0,
@@ -5379,7 +5379,7 @@ final class FrameReconstructorTest {
     /// @param height the coded frame height
     /// @return one minimal key/intra frame header with super-resolution enabled
     private static FrameHeader createSuperResolvedFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int upscaledWidth,
             int height
@@ -5466,7 +5466,7 @@ final class FrameReconstructorTest {
             int referenceSlot
     ) {
         return createSuperResolvedInterFrameHeader(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 codedWidth,
                 upscaledWidth,
                 height,
@@ -5492,7 +5492,7 @@ final class FrameReconstructorTest {
             FrameHeader.InterpolationFilter interpolationFilter
     ) {
         return createSuperResolvedInterFrameHeader(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 codedWidth,
                 upscaledWidth,
                 height,
@@ -5511,7 +5511,7 @@ final class FrameReconstructorTest {
     /// @param referenceSlot the stored reference slot to expose as `LAST_FRAME`
     /// @return one minimal single-reference inter-compatible frame header with super-resolution enabled
     private static FrameHeader createSuperResolvedInterFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int upscaledWidth,
             int height,
@@ -5538,7 +5538,7 @@ final class FrameReconstructorTest {
     /// @param interpolationFilter the frame-level interpolation filter
     /// @return one minimal single-reference inter-compatible frame header with super-resolution enabled
     private static FrameHeader createSuperResolvedInterFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int upscaledWidth,
             int height,
@@ -5659,7 +5659,7 @@ final class FrameReconstructorTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 true,
                 true,
@@ -5753,7 +5753,7 @@ final class FrameReconstructorTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 true,
                 true,
@@ -6478,7 +6478,7 @@ final class FrameReconstructorTest {
         int width = lumaSamples[0].length;
         int height = lumaSamples.length;
         SequenceHeader sequenceHeader = createSequenceHeader(chromaFormat, bitDepth, width, height);
-        FrameHeader frameHeader = createFrameHeader(FrameType.KEY, width, height);
+        FrameHeader frameHeader = createFrameHeader(Av1FrameType.KEY, width, height);
         FrameSyntaxDecodeResult syntaxDecodeResult = createFrameSyntaxDecodeResult(sequenceHeader, frameHeader);
         return new ReferenceSurfaceSnapshot(
                 syntaxDecodeResult.assembly().frameHeader(),
@@ -6521,7 +6521,7 @@ final class FrameReconstructorTest {
         }
         int height = lumaSamples.length;
         SequenceHeader sequenceHeader = createSequenceHeader(chromaFormat, upscaledWidth, height);
-        FrameHeader frameHeader = createSuperResolvedFrameHeader(FrameType.KEY, codedWidth, upscaledWidth, height);
+        FrameHeader frameHeader = createSuperResolvedFrameHeader(Av1FrameType.KEY, codedWidth, upscaledWidth, height);
         FrameSyntaxDecodeResult syntaxDecodeResult = createFrameSyntaxDecodeResult(sequenceHeader, frameHeader);
         return new ReferenceSurfaceSnapshot(
                 frameHeader,
@@ -7137,10 +7137,10 @@ final class FrameReconstructorTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(chromaFormat, FrameType.KEY, 8, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(chromaFormat, Av1FrameType.KEY, 8, 8, baselineLeaf)
         );
         DecodedSurface residual = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(chromaFormat, FrameType.KEY, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(chromaFormat, Av1FrameType.KEY, 8, 8, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residual.lumaPlane());

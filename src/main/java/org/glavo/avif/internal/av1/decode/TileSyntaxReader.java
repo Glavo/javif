@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.entropy.CdfContext;
 import org.glavo.avif.internal.av1.entropy.MsacDecoder;
 import org.glavo.avif.internal.av1.model.BlockSize;
@@ -180,8 +180,8 @@ public final class TileSyntaxReader {
     /// @param context the zero-based intra-context index in `[0, 4)`
     /// @return `true` when the block is intra-coded, otherwise `false`
     public boolean readIntraBlockFlag(int context) {
-        FrameType frameType = tileContext.frameHeader().frameType();
-        if (frameType == FrameType.KEY || frameType == FrameType.INTRA) {
+        Av1FrameType frameType = tileContext.frameHeader().frameType();
+        if (frameType == Av1FrameType.KEY || frameType == Av1FrameType.INTRA) {
             return true;
         }
         return !msacDecoder.decodeBooleanAdapt(cdfContext.mutableIntraCdf(context));
@@ -642,11 +642,11 @@ public final class TileSyntaxReader {
     /// @return the fully decoded vector in eighth-pel units
     private MotionVector readMotionVectorResidual(MotionVector referenceMotionVector, boolean intrabc) {
         MotionVector nonNullReferenceMotionVector = Objects.requireNonNull(referenceMotionVector, "referenceMotionVector");
-        FrameType frameType = tileContext.frameHeader().frameType();
+        Av1FrameType frameType = tileContext.frameHeader().frameType();
         if (intrabc && !tileContext.frameHeader().allowIntrabc()) {
             throw new IllegalStateException("Intrabc displacement-vector residuals require allow_intrabc");
         }
-        if (!intrabc && frameType != FrameType.INTER && frameType != FrameType.SWITCH) {
+        if (!intrabc && frameType != Av1FrameType.INTER && frameType != Av1FrameType.SWITCH) {
             throw new IllegalStateException(
                     "Motion-vector residuals are only available in inter and switch frames"
             );

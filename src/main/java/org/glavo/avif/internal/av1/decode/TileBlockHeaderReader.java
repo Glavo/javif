@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
@@ -160,7 +160,7 @@ public final class TileBlockHeaderReader {
         TileDecodeContext.BlockSyntaxState blockSyntaxState = tileContext.blockSyntaxState();
         blockSyntaxState.enterSuperblock(nonNullPosition, tileContext.superblockSize());
         FrameHeader.SegmentationInfo segmentation = tileContext.frameHeader().segmentation();
-        FrameType frameType = tileContext.frameHeader().frameType();
+        Av1FrameType frameType = tileContext.frameHeader().frameType();
         boolean hasChroma = hasChroma(nonNullPosition, nonNullSize);
         int segmentId = 0;
         boolean segmentPredicted = false;
@@ -182,7 +182,7 @@ public final class TileBlockHeaderReader {
                         ? null
                         : segmentation.segment(segmentId);
         boolean skipMode = false;
-        if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH)
+        if ((frameType == Av1FrameType.INTER || frameType == Av1FrameType.SWITCH)
                 && canDecodeSkipMode(nonNullSize, segmentDataBeforeSkip)) {
             skipMode = syntaxReader.readSkipModeFlag(nonNullNeighborContext.skipModeContext(nonNullPosition));
         }
@@ -214,9 +214,9 @@ public final class TileBlockHeaderReader {
 
         boolean useIntrabc = false;
         boolean intra;
-        if ((frameType == FrameType.INTER || frameType == FrameType.SWITCH) && skipMode) {
+        if ((frameType == Av1FrameType.INTER || frameType == Av1FrameType.SWITCH) && skipMode) {
             intra = false;
-        } else if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
+        } else if (frameType == Av1FrameType.INTER || frameType == Av1FrameType.SWITCH) {
             int segmentReferenceFrame = segmentData.referenceFrame();
             if (segmentReferenceFrame >= 0) {
                 intra = segmentReferenceFrame == SEGMENT_REFERENCE_INTRA_FRAME;
@@ -389,7 +389,7 @@ public final class TileBlockHeaderReader {
                 uvMode = UvIntraPredictionMode.DC;
             }
         } else if (intra) {
-            if (frameType == FrameType.INTER || frameType == FrameType.SWITCH) {
+            if (frameType == Av1FrameType.INTER || frameType == Av1FrameType.SWITCH) {
                 yMode = syntaxReader.readYMode(nonNullSize.yModeSizeContext());
             } else {
                 yMode = syntaxReader.readKeyFrameYMode(

@@ -15,10 +15,10 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -104,21 +104,21 @@ public final class FrameHeaderParser {
             checkTrailingBits(reader, strictStdCompliance);
             return header;
         } catch (EOFException ex) {
-            throw new DecodeException(
-                    DecodeErrorCode.UNEXPECTED_EOF,
-                    DecodeStage.FRAME_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.UNEXPECTED_EOF,
+                    Av1DecodeStage.FRAME_HEADER_PARSE,
                     "Unexpected end of frame header payload",
                     obu.streamOffset(),
                     obu.obuIndex(),
                     null,
                     ex
             );
-        } catch (DecodeException ex) {
+        } catch (Av1DecodeException ex) {
             throw ex;
         } catch (IOException ex) {
-            throw new DecodeException(
-                    DecodeErrorCode.INVALID_BITSTREAM,
-                    DecodeStage.FRAME_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeStage.FRAME_HEADER_PARSE,
                     ex.getMessage(),
                     obu.streamOffset(),
                     obu.obuIndex(),
@@ -173,21 +173,21 @@ public final class FrameHeaderParser {
         try {
             return parse(reader, obu, sequenceHeader, strictStdCompliance, referenceFrameHeaders);
         } catch (EOFException ex) {
-            throw new DecodeException(
-                    DecodeErrorCode.UNEXPECTED_EOF,
-                    DecodeStage.FRAME_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.UNEXPECTED_EOF,
+                    Av1DecodeStage.FRAME_HEADER_PARSE,
                     "Unexpected end of frame header payload",
                     obu.streamOffset(),
                     obu.obuIndex(),
                     null,
                     ex
             );
-        } catch (DecodeException ex) {
+        } catch (Av1DecodeException ex) {
             throw ex;
         } catch (IOException ex) {
-            throw new DecodeException(
-                    DecodeErrorCode.INVALID_BITSTREAM,
-                    DecodeStage.FRAME_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeStage.FRAME_HEADER_PARSE,
                     ex.getMessage(),
                     obu.streamOffset(),
                     obu.obuIndex(),
@@ -219,7 +219,7 @@ public final class FrameHeaderParser {
         int existingFrameIndex = 0;
         long frameId = 0;
         long framePresentationDelay = 0;
-        FrameType frameType;
+        Av1FrameType frameType;
         boolean showFrame;
         boolean showableFrame;
         boolean errorResilientMode;
@@ -244,10 +244,10 @@ public final class FrameHeaderParser {
                 }
             }
 
-            FrameType existingFrameType = existingFrameHeader != null
+            Av1FrameType existingFrameType = existingFrameHeader != null
                     ? existingFrameHeader.frameType()
-                    : FrameType.INTER;
-            int existingRefreshFrameFlags = existingFrameType == FrameType.KEY ? 0xFF : 0;
+                    : Av1FrameType.INTER;
+            int existingRefreshFrameFlags = existingFrameType == Av1FrameType.KEY ? 0xFF : 0;
             FrameHeader.FilmGrainParams existingFilmGrain = existingFrameHeader != null
                     ? existingFrameHeader.filmGrain()
                     : FrameHeader.FilmGrainParams.disabled();
@@ -297,7 +297,7 @@ public final class FrameHeaderParser {
         }
 
         if (sequenceHeader.reducedStillPictureHeader()) {
-            frameType = FrameType.KEY;
+            frameType = Av1FrameType.KEY;
             showFrame = true;
         } else {
             frameType = decodeFrameType(readInt(reader, 2));
@@ -309,13 +309,13 @@ public final class FrameHeaderParser {
                     && !sequenceHeader.timingInfo().equalPictureInterval()) {
                 framePresentationDelay = readLong(reader, sequenceHeader.timingInfo().framePresentationDelayLength());
             }
-            showableFrame = frameType != FrameType.KEY;
+            showableFrame = frameType != Av1FrameType.KEY;
         } else {
             showableFrame = reader.readFlag();
         }
 
-        errorResilientMode = (frameType == FrameType.KEY && showFrame)
-                || frameType == FrameType.SWITCH
+        errorResilientMode = (frameType == Av1FrameType.KEY && showFrame)
+                || frameType == Av1FrameType.SWITCH
                 || sequenceHeader.reducedStillPictureHeader()
                 || reader.readFlag();
 
@@ -326,7 +326,7 @@ public final class FrameHeaderParser {
             forceIntegerMotionVectors = readFrameForceIntegerMotionVectors(reader, sequenceHeader);
         }
 
-        if (frameType == FrameType.KEY || frameType == FrameType.INTRA) {
+        if (frameType == Av1FrameType.KEY || frameType == Av1FrameType.INTRA) {
             forceIntegerMotionVectors = true;
         }
 
@@ -336,7 +336,7 @@ public final class FrameHeaderParser {
 
         boolean frameSizeOverride = false;
         if (!sequenceHeader.reducedStillPictureHeader()) {
-            frameSizeOverride = frameType == FrameType.SWITCH || reader.readFlag();
+            frameSizeOverride = frameType == Av1FrameType.SWITCH || reader.readFlag();
         }
 
         int frameOffset = 0;
@@ -375,11 +375,11 @@ public final class FrameHeaderParser {
         boolean useReferenceFrameMotionVectors = false;
 
         if (!isInterOrSwitch(frameType)) {
-            refreshFrameFlags = (frameType == FrameType.KEY && showFrame) ? 0xFF : readInt(reader, 8);
+            refreshFrameFlags = (frameType == Av1FrameType.KEY && showFrame) ? 0xFF : readInt(reader, 8);
             if (refreshFrameFlags != 0xFF && errorResilientMode && sequenceHeader.features().orderHint()) {
                 skipReferenceOrderHints(reader, sequenceHeader);
             }
-            if (strictStdCompliance && frameType == FrameType.INTRA && refreshFrameFlags == 0xFF) {
+            if (strictStdCompliance && frameType == Av1FrameType.INTRA && refreshFrameFlags == 0xFF) {
                 fail("Intra frame headers must not refresh all reference frames in strict mode");
             }
 
@@ -395,7 +395,7 @@ public final class FrameHeaderParser {
                 allowIntrabc = reader.readFlag();
             }
         } else {
-            refreshFrameFlags = frameType == FrameType.SWITCH ? 0xFF : readInt(reader, 8);
+            refreshFrameFlags = frameType == Av1FrameType.SWITCH ? 0xFF : readInt(reader, 8);
             if (errorResilientMode && sequenceHeader.features().orderHint()) {
                 skipReferenceOrderHints(reader, sequenceHeader);
             }
@@ -1355,7 +1355,7 @@ public final class FrameHeaderParser {
     /// @throws IOException if the payload is truncated or inherited state is unavailable
     private static FrameHeader.GlobalMotionParams[] parseGlobalMotion(
             BitReader reader,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean allowHighPrecisionMotionVectors,
             int primaryRefFrame,
             @Nullable FrameHeader[] referenceFrameHeaders,
@@ -1548,7 +1548,7 @@ public final class FrameHeaderParser {
     private static FrameHeader.FilmGrainParams parseFilmGrain(
             BitReader reader,
             SequenceHeader sequenceHeader,
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean showFrame,
             boolean showableFrame,
             @Nullable FrameHeader[] referenceFrameHeaders,
@@ -1563,7 +1563,7 @@ public final class FrameHeaderParser {
         }
 
         int grainSeed = readInt(reader, 16);
-        boolean updated = frameType != FrameType.INTER || reader.readFlag();
+        boolean updated = frameType != Av1FrameType.INTER || reader.readFlag();
         if (!updated) {
             int referenceFrameIndex = readInt(reader, 3);
             if (!usesReferenceFrameIndex(referenceFrameIndices, referenceFrameIndex)) {
@@ -1819,7 +1819,7 @@ public final class FrameHeaderParser {
     private static SkipModeResult deriveSkipMode(
             BitReader reader,
             SequenceHeader sequenceHeader,
-            FrameType frameType,
+            Av1FrameType frameType,
             int frameOffset,
             boolean switchableCompoundReferences,
             @Nullable FrameHeader[] referenceFrameHeaders,
@@ -1911,12 +1911,12 @@ public final class FrameHeaderParser {
     /// @param value the AV1 frame type code
     /// @return the mapped public enum
     /// @throws IOException if the frame type code is invalid
-    private static FrameType decodeFrameType(int value) throws IOException {
+    private static Av1FrameType decodeFrameType(int value) throws IOException {
         return switch (value) {
-            case 0 -> FrameType.KEY;
-            case 1 -> FrameType.INTER;
-            case 2 -> FrameType.INTRA;
-            case 3 -> FrameType.SWITCH;
+            case 0 -> Av1FrameType.KEY;
+            case 1 -> Av1FrameType.INTER;
+            case 2 -> Av1FrameType.INTRA;
+            case 3 -> Av1FrameType.SWITCH;
             default -> throw new IllegalStateException("Unexpected frame type code: " + value);
         };
     }
@@ -1940,8 +1940,8 @@ public final class FrameHeaderParser {
     ///
     /// @param frameType the AV1 frame type
     /// @return whether the frame type is inter or switch
-    private static boolean isInterOrSwitch(FrameType frameType) {
-        return frameType == FrameType.INTER || frameType == FrameType.SWITCH;
+    private static boolean isInterOrSwitch(Av1FrameType frameType) {
+        return frameType == Av1FrameType.INTER || frameType == Av1FrameType.SWITCH;
     }
 
     /// Reads an AV1 uniform integer.

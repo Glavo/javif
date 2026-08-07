@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -62,7 +62,7 @@ final class FrameSyntaxDecoderTest {
     /// Verifies that structural frame decoding expands tile syntax and produces a temporal motion field.
     @Test
     void decodeFrameProducesTileRootsAndTemporalMotionField() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
+        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
 
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
         TilePartitionTreeReader.Node[] roots = result.tileRoots(0);
@@ -87,7 +87,7 @@ final class FrameSyntaxDecoderTest {
     /// Verifies that structural frame decoding captures the final tile-local CDF state.
     @Test
     void decodeFrameCapturesFinalTileCdfState() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
+        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
 
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
 
@@ -107,7 +107,7 @@ final class FrameSyntaxDecoderTest {
                 6
         );
         FrameAssembly assembly = createAssembly(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 RESTORATION_WIENER_PAYLOAD,
                 false,
                 64,
@@ -135,7 +135,7 @@ final class FrameSyntaxDecoderTest {
     void decodeFrameSeedsTileSyntaxFromReferenceCdfState() {
         CdfContext inheritedCdf = CdfContext.createDefault();
         inheritedCdf.mutableSkipCdf(0)[0] = 32000;
-        FrameAssembly assembly = createAssembly(FrameType.INTER, DIFFERENT_INHERITED_SKIP_PAYLOAD, false, 8, 8);
+        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, DIFFERENT_INHERITED_SKIP_PAYLOAD, false, 8, 8);
         FrameSyntaxDecodeResult referenceResult = new FrameSyntaxDecodeResult(
                 assembly,
                 new TilePartitionTreeReader.Node[][]{new TilePartitionTreeReader.Node[0]},
@@ -161,7 +161,7 @@ final class FrameSyntaxDecoderTest {
         selectedCdf.mutableSkipCdf(0)[0] = 32000;
         selectedCdf.mutableSkipCdf(0)[1] = 32;
         FrameAssembly referenceAssembly = createAssembly(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 new byte[][]{new byte[0], new byte[0]},
                 false,
                 128,
@@ -182,7 +182,7 @@ final class FrameSyntaxDecoderTest {
                 new CdfContext[]{unselectedCdf, selectedCdf}
         );
         FrameAssembly currentAssembly = createAssembly(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 DIFFERENT_INHERITED_SKIP_PAYLOAD,
                 false,
                 8,
@@ -200,7 +200,7 @@ final class FrameSyntaxDecoderTest {
     /// when no populated runtime temporal source is available.
     @Test
     void decodeFrameAcceptsReferenceFrameMotionVectorsWithoutPopulatedSources() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 8, 8);
+        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, INTER_BLOCK_PAYLOAD, true, 8, 8);
 
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
 
@@ -211,7 +211,7 @@ final class FrameSyntaxDecoderTest {
     /// Verifies that replacing stored tile-local CDF contexts preserves the current frame's temporal results.
     @Test
     void frameSyntaxDecodeResultCanReplaceStoredTileCdfContexts() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
+        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
         CdfContext replacementCdf = CdfContext.createDefault();
         replacementCdf.mutableSkipCdf(0)[0] = 32000;
@@ -226,7 +226,7 @@ final class FrameSyntaxDecoderTest {
     /// independent mutable snapshots.
     @Test
     void compactReferenceStateRetainsLaterDecoderInputs() {
-        FrameAssembly assembly = createAssembly(FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
+        FrameAssembly assembly = createAssembly(Av1FrameType.INTER, INTER_BLOCK_PAYLOAD, false);
         FrameSyntaxDecodeResult result = new FrameSyntaxDecoder(null).decode(assembly);
 
         ReferenceFrameSyntaxState state = ReferenceFrameSyntaxState.from(result);
@@ -259,7 +259,7 @@ final class FrameSyntaxDecoderTest {
     /// @param useReferenceFrameMotionVectors whether temporal motion vectors are enabled
     /// @return a synthetic frame assembly used by structural frame-decoder tests
     private static FrameAssembly createAssembly(
-            FrameType frameType,
+            Av1FrameType frameType,
             byte[] payload,
             boolean useReferenceFrameMotionVectors
     ) {
@@ -275,7 +275,7 @@ final class FrameSyntaxDecoderTest {
     /// @param codedHeight the coded frame height
     /// @return a synthetic frame assembly used by structural frame-decoder tests
     private static FrameAssembly createAssembly(
-            FrameType frameType,
+            Av1FrameType frameType,
             byte[] payload,
             boolean useReferenceFrameMotionVectors,
             int codedWidth,
@@ -301,7 +301,7 @@ final class FrameSyntaxDecoderTest {
     /// @param restoration the frame-level loop-restoration configuration
     /// @return a synthetic frame assembly used by structural frame-decoder tests
     private static FrameAssembly createAssembly(
-            FrameType frameType,
+            Av1FrameType frameType,
             byte[] payload,
             boolean useReferenceFrameMotionVectors,
             int codedWidth,
@@ -344,7 +344,7 @@ final class FrameSyntaxDecoderTest {
     /// @param tiling the explicit tile layout
     /// @return a synthetic frame assembly used by structural frame-decoder tests
     private static FrameAssembly createAssembly(
-            FrameType frameType,
+            Av1FrameType frameType,
             byte[][] tilePayloads,
             boolean useReferenceFrameMotionVectors,
             int codedWidth,

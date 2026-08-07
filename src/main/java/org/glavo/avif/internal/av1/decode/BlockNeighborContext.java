@@ -16,7 +16,7 @@
 package org.glavo.avif.internal.av1.decode;
 
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.model.BlockPosition;
 import org.glavo.avif.internal.av1.model.BlockSize;
 import org.glavo.avif.internal.av1.model.CompoundPredictionType;
@@ -492,7 +492,7 @@ public final class BlockNeighborContext {
         int chromaSubsamplingY = chromaSubsamplingY(nonNullTileContext.sequenceHeader().colorConfig().chromaFormat());
         int chromaTileWidth4 = chromaTileSpan(tileWidth4, chromaSubsamplingX);
         int chromaTileHeight4 = chromaTileSpan(tileHeight4, chromaSubsamplingY);
-        boolean keyFrame = nonNullTileContext.frameHeader().frameType() == FrameType.KEY;
+        boolean keyFrame = nonNullTileContext.frameHeader().frameType() == Av1FrameType.KEY;
 
         byte[] aboveIntra = new byte[tileWidth4];
         byte[] leftIntra = new byte[tileHeight4];

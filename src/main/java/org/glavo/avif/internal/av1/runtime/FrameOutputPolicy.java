@@ -15,15 +15,15 @@
  */
 package org.glavo.avif.internal.av1.runtime;
 
-import org.glavo.avif.decode.Av1DecoderConfig;
-import org.glavo.avif.decode.Av1FrameSelection;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecoderConfig;
+import org.glavo.avif.av1.Av1FrameSelection;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Public-output policy helpers used by `Av1ImageReader`.
+/// Public-output policy helpers used by `Av1Decoder`.
 @NotNullByDefault
 public final class FrameOutputPolicy {
     /// Prevents instantiation.
@@ -78,8 +78,8 @@ public final class FrameOutputPolicy {
         return switch (Objects.requireNonNull(frameSelection, "frameSelection")) {
             case ALL -> true;
             case REFERENCE -> frameHeader.refreshFrameFlags() != 0;
-            case INTRA -> frameHeader.frameType() == FrameType.KEY || frameHeader.frameType() == FrameType.INTRA;
-            case KEY -> frameHeader.frameType() == FrameType.KEY;
+            case INTRA -> frameHeader.frameType() == Av1FrameType.KEY || frameHeader.frameType() == Av1FrameType.INTRA;
+            case KEY -> frameHeader.frameType() == Av1FrameType.KEY;
         };
     }
 }

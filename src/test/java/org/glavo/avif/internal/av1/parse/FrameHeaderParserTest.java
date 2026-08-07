@@ -15,12 +15,12 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.Av1ChromaFormat;
-import org.glavo.avif.decode.DecodeErrorCode;
-import org.glavo.avif.decode.DecodeException;
-import org.glavo.avif.decode.DecodeStage;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1DecodeErrorCode;
+import org.glavo.avif.av1.Av1DecodeException;
+import org.glavo.avif.av1.Av1DecodeStage;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.internal.av1.bitstream.BitReader;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -51,7 +51,7 @@ final class FrameHeaderParserTest {
         FrameHeader header = new FrameHeaderParser().parse(frameHeaderObu(reducedStillPictureFrameHeaderPayload()), sequenceHeader, false);
 
         assertFalse(header.showExistingFrame());
-        assertEquals(FrameType.KEY, header.frameType());
+        assertEquals(Av1FrameType.KEY, header.frameType());
         assertTrue(header.showFrame());
         assertFalse(header.showableFrame());
         assertTrue(header.errorResilientMode());
@@ -97,7 +97,7 @@ final class FrameHeaderParserTest {
     void parsesShowExistingKeyFrameHeaderWithFullReferenceRefresh() throws IOException {
         FrameHeader[] references = new FrameHeader[8];
         references[0] = createReferenceFrameHeader(
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 9,
                 64,
                 64,
@@ -114,7 +114,7 @@ final class FrameHeaderParserTest {
 
         assertTrue(header.showExistingFrame());
         assertEquals(0, header.existingFrameIndex());
-        assertEquals(FrameType.KEY, header.frameType());
+        assertEquals(Av1FrameType.KEY, header.frameType());
         assertEquals(0xFF, header.refreshFrameFlags());
     }
 
@@ -124,7 +124,7 @@ final class FrameHeaderParserTest {
         byte[] payload = showExistingFrameHeaderPayload(0);
         ObuPacket obu = frameObu(payload);
 
-        DecodeException exception = assertThrows(DecodeException.class, () ->
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () ->
                 new FrameHeaderParser().parseFramePayload(
                         new BitReader(payload),
                         obu,
@@ -133,8 +133,8 @@ final class FrameHeaderParserTest {
                         new FrameHeader[8]
                 )
         );
-        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
-        assertEquals(DecodeStage.FRAME_HEADER_PARSE, exception.stage());
+        assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_HEADER_PARSE, exception.stage());
         assertEquals("Combined frame OBUs must not signal show_existing_frame", exception.getMessage());
     }
 
@@ -178,7 +178,7 @@ final class FrameHeaderParserTest {
         );
 
         assertFalse(header.showExistingFrame());
-        assertEquals(FrameType.INTER, header.frameType());
+        assertEquals(Av1FrameType.INTER, header.frameType());
         assertTrue(header.showFrame());
         assertTrue(header.showableFrame());
         assertFalse(header.errorResilientMode());
@@ -264,7 +264,7 @@ final class FrameHeaderParserTest {
                 references
         );
 
-        assertEquals(FrameType.INTER, header.frameType());
+        assertEquals(Av1FrameType.INTER, header.frameType());
         assertEquals(0, header.primaryRefFrame());
         assertTrue(header.segmentation().enabled());
         assertFalse(header.segmentation().updateMap());
@@ -434,7 +434,7 @@ final class FrameHeaderParserTest {
     /// @param references the refreshed reference headers exposed to the parser
     /// @param expectedMessage the expected validation message
     private static void assertFilmGrainParseFailure(byte[] payload, FrameHeader[] references, String expectedMessage) {
-        DecodeException exception = assertThrows(DecodeException.class, () ->
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () ->
                 new FrameHeaderParser().parse(
                         frameHeaderObu(payload),
                         fullInterSequenceHeader(true),
@@ -442,8 +442,8 @@ final class FrameHeaderParserTest {
                         references
                 )
         );
-        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
-        assertEquals(DecodeStage.FRAME_HEADER_PARSE, exception.stage());
+        assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_HEADER_PARSE, exception.stage());
         assertEquals(expectedMessage, exception.getMessage());
     }
 
@@ -748,7 +748,7 @@ final class FrameHeaderParserTest {
     /// @param renderHeight the render height
     /// @return a refreshed reference-frame header
     private static FrameHeader createReferenceFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int frameOffset,
             int upscaledWidth,
             int height,
@@ -821,7 +821,7 @@ final class FrameHeaderParserTest {
             FrameHeader.FilmGrainParams filmGrain
     ) {
         return createReferenceFrameHeader(
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 frameOffset,
                 upscaledWidth,
                 height,
@@ -847,7 +847,7 @@ final class FrameHeaderParserTest {
     /// @param filmGrain the normalized film grain state stored in the refreshed reference
     /// @return a refreshed reference-frame header
     private static FrameHeader createReferenceFrameHeader(
-            FrameType frameType,
+            Av1FrameType frameType,
             int frameOffset,
             int upscaledWidth,
             int height,

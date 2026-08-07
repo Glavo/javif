@@ -15,7 +15,7 @@
  */
 package org.glavo.avif.internal.av1.parse;
 
-import org.glavo.avif.decode.DecodeException;
+import org.glavo.avif.av1.Av1DecodeException;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
 import org.glavo.avif.internal.av1.model.FrameHeader;
 import org.glavo.avif.internal.av1.model.TileBitstream;
@@ -38,13 +38,13 @@ public final class TileBitstreamParser {
     /// @param tileGroupHeader the parsed tile-group header
     /// @param tileDataOffset the byte offset of the tile-data section inside the OBU payload
     /// @return the parsed per-tile bitstream views
-    /// @throws DecodeException if the tile-data layout is malformed
+    /// @throws Av1DecodeException if the tile-data layout is malformed
     public TileBitstream[] parse(
             ObuPacket obu,
             FrameHeader frameHeader,
             TileGroupHeader tileGroupHeader,
             int tileDataOffset
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         Objects.requireNonNull(obu, "obu");
         Objects.requireNonNull(frameHeader, "frameHeader");
         Objects.requireNonNull(tileGroupHeader, "tileGroupHeader");

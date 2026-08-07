@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.glavo.avif.DecodedPlanes;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
@@ -62,9 +62,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/// High-level sequential reader for raw AV1 low-overhead and Annex B streams.
+/// High-level sequential decoder for raw AV1 low-overhead and Annex B streams.
 @NotNullByDefault
-public final class Av1ImageReader implements AutoCloseable {
+public final class Av1Decoder implements AutoCloseable {
     /// Maximum number of decoded Large Scale Tile syntax trees retained for near-term reuse.
     private static final int LARGE_SCALE_TILE_SYNTAX_CACHE_SIZE = 8;
 
@@ -72,7 +72,7 @@ public final class Av1ImageReader implements AutoCloseable {
     private final BufferedInput source;
     /// The immutable decoder configuration.
     private final Av1DecoderConfig config;
-    /// The sequential OBU reader used by this image reader.
+    /// The sequential OBU reader used by this decoder.
     private final ObuStreamReader obuReader;
     /// The parser used for sequence header OBUs.
     private final SequenceHeaderParser sequenceHeaderParser;
@@ -110,14 +110,15 @@ public final class Av1ImageReader implements AutoCloseable {
     private final FilmGrainSynthesizer filmGrainSynthesizer;
     /// The zero-based presentation index assigned to the next returned frame.
     private long nextPresentationIndex;
-    /// Whether this reader has already been closed.
+    /// Whether this decoder has already been closed.
     private boolean closed;
-    /// Creates a sequential image reader.
+
+    /// Creates a sequential decoder.
     ///
     /// @param source the forward-only buffered byte source
     /// @param config the immutable decoder configuration
     /// @param annexB whether the source uses Annex B temporal-unit and frame-unit framing
-    private Av1ImageReader(BufferedInput source, Av1DecoderConfig config, boolean annexB) {
+    private Av1Decoder(BufferedInput source, Av1DecoderConfig config, boolean annexB) {
         this.source = Objects.requireNonNull(source, "source");
         this.config = Objects.requireNonNull(config, "config");
         this.obuReader = annexB ? ObuStreamReader.forAnnexB(source) : new ObuStreamReader(source);
@@ -134,98 +135,98 @@ public final class Av1ImageReader implements AutoCloseable {
         this.filmGrainSynthesizer = new FilmGrainSynthesizer();
     }
 
-    /// Opens a low-overhead AV1 image reader over a byte channel.
+    /// Opens a low-overhead AV1 decoder over a byte channel.
     ///
-    /// The returned reader owns and closes `source`.
+    /// The returned decoder owns and closes `source`.
     ///
     /// @param source the channel to read
-    /// @return the new AV1 image reader
-    public static Av1ImageReader open(ReadableByteChannel source) {
+    /// @return the new AV1 decoder
+    public static Av1Decoder open(ReadableByteChannel source) {
         return open(source, Av1DecoderConfig.DEFAULT);
     }
 
-    /// Opens a low-overhead AV1 image reader over a byte channel.
+    /// Opens a low-overhead AV1 decoder over a byte channel.
     ///
-    /// The returned reader owns and closes `source`.
+    /// The returned decoder owns and closes `source`.
     ///
     /// @param source the channel to read
     /// @param config the immutable decoder configuration
-    /// @return the new AV1 image reader
-    public static Av1ImageReader open(ReadableByteChannel source, Av1DecoderConfig config) {
-        return new Av1ImageReader(bufferedInput(source), config, false);
+    /// @return the new AV1 decoder
+    public static Av1Decoder open(ReadableByteChannel source, Av1DecoderConfig config) {
+        return new Av1Decoder(bufferedInput(source), config, false);
     }
 
-    /// Opens a low-overhead AV1 image reader over a byte buffer.
+    /// Opens a low-overhead AV1 decoder over a byte buffer.
     ///
-    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// The decoder starts at the buffer's current position without changing its position or limit.
     /// It reads the remaining content without copying, so that content must not be modified until
-    /// the reader is closed.
+    /// the decoder is closed.
     ///
     /// @param source the buffer to read
-    /// @return the new AV1 image reader
-    public static Av1ImageReader open(ByteBuffer source) {
+    /// @return the new AV1 decoder
+    public static Av1Decoder open(ByteBuffer source) {
         return open(source, Av1DecoderConfig.DEFAULT);
     }
 
-    /// Opens a low-overhead AV1 image reader over a byte buffer.
+    /// Opens a low-overhead AV1 decoder over a byte buffer.
     ///
-    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// The decoder starts at the buffer's current position without changing its position or limit.
     /// It reads the remaining content without copying, so that content must not be modified until
-    /// the reader is closed.
+    /// the decoder is closed.
     ///
     /// @param source the buffer to read
     /// @param config the immutable decoder configuration
-    /// @return the new AV1 image reader
-    public static Av1ImageReader open(ByteBuffer source, Av1DecoderConfig config) {
-        return new Av1ImageReader(new BufferedInput.OfByteBuffer(source), config, false);
+    /// @return the new AV1 decoder
+    public static Av1Decoder open(ByteBuffer source, Av1DecoderConfig config) {
+        return new Av1Decoder(new BufferedInput.OfByteBuffer(source), config, false);
     }
 
-    /// Opens an Annex B AV1 image reader using the default decoder configuration.
+    /// Opens an Annex B AV1 decoder using the default decoder configuration.
     ///
     /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
-    /// Annex B of the AV1 bitstream specification. The returned reader owns and closes `source`.
+    /// Annex B of the AV1 bitstream specification. The returned decoder owns and closes `source`.
     ///
     /// @param source the channel to read
-    /// @return the new Annex B AV1 image reader
-    public static Av1ImageReader openAnnexB(ReadableByteChannel source) {
+    /// @return the new Annex B AV1 decoder
+    public static Av1Decoder openAnnexB(ReadableByteChannel source) {
         return openAnnexB(source, Av1DecoderConfig.DEFAULT);
     }
 
-    /// Opens an Annex B AV1 image reader using the supplied decoder configuration.
+    /// Opens an Annex B AV1 decoder using the supplied decoder configuration.
     ///
     /// The source must contain temporal-unit, frame-unit, and OBU length fields as specified by
-    /// Annex B of the AV1 bitstream specification. The returned reader owns and closes `source`.
+    /// Annex B of the AV1 bitstream specification. The returned decoder owns and closes `source`.
     ///
     /// @param source the channel to read
     /// @param config the immutable decoder configuration
-    /// @return the new Annex B AV1 image reader
-    public static Av1ImageReader openAnnexB(ReadableByteChannel source, Av1DecoderConfig config) {
-        return new Av1ImageReader(bufferedInput(source), config, true);
+    /// @return the new Annex B AV1 decoder
+    public static Av1Decoder openAnnexB(ReadableByteChannel source, Av1DecoderConfig config) {
+        return new Av1Decoder(bufferedInput(source), config, true);
     }
 
-    /// Opens an Annex B AV1 image reader over a byte buffer.
+    /// Opens an Annex B AV1 decoder over a byte buffer.
     ///
-    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// The decoder starts at the buffer's current position without changing its position or limit.
     /// It reads the remaining content without copying, so that content must not be modified until
-    /// the reader is closed.
+    /// the decoder is closed.
     ///
     /// @param source the buffer to read
-    /// @return the new Annex B AV1 image reader
-    public static Av1ImageReader openAnnexB(ByteBuffer source) {
+    /// @return the new Annex B AV1 decoder
+    public static Av1Decoder openAnnexB(ByteBuffer source) {
         return openAnnexB(source, Av1DecoderConfig.DEFAULT);
     }
 
-    /// Opens an Annex B AV1 image reader over a byte buffer.
+    /// Opens an Annex B AV1 decoder over a byte buffer.
     ///
-    /// The reader starts at the buffer's current position without changing its position or limit.
+    /// The decoder starts at the buffer's current position without changing its position or limit.
     /// It reads the remaining content without copying, so that content must not be modified until
-    /// the reader is closed.
+    /// the decoder is closed.
     ///
     /// @param source the buffer to read
     /// @param config the immutable decoder configuration
-    /// @return the new Annex B AV1 image reader
-    public static Av1ImageReader openAnnexB(ByteBuffer source, Av1DecoderConfig config) {
-        return new Av1ImageReader(new BufferedInput.OfByteBuffer(source), config, true);
+    /// @return the new Annex B AV1 decoder
+    public static Av1Decoder openAnnexB(ByteBuffer source, Av1DecoderConfig config) {
+        return new Av1Decoder(new BufferedInput.OfByteBuffer(source), config, true);
     }
 
     /// Returns a buffered decoder input over a channel.
@@ -246,12 +247,12 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @return the next decoded frame, or `null` at end-of-stream
     /// @throws IOException if the source is unreadable or the bitstream is malformed
-    public @Nullable DecodedFrame readFrame() throws IOException {
+    public @Nullable Av1DecodedFrame readFrame() throws IOException {
         @Nullable PendingOutput output = readNextOutput();
         if (output == null) {
             return null;
         }
-        DecodedFrame frame;
+        Av1DecodedFrame frame;
         try {
             frame = output.createOutput().toFrame();
         } catch (UnsupportedOperationException exception) {
@@ -283,7 +284,7 @@ public final class Av1ImageReader implements AutoCloseable {
     /// This method applies the same operating-point, frame-output, and film-grain policies as
     /// [#readFrame()]. It may be interleaved with `readFrame`; each successful call consumes one
     /// presentation frame. The returned immutable snapshot retains its own sample storage and does
-    /// not depend on subsequent reader operations.
+    /// not depend on subsequent decoder operations.
     ///
     /// @return the next decoded plane snapshot, or `null` at end-of-stream
     /// @throws IOException if the source is unreadable or the bitstream is malformed
@@ -424,12 +425,12 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @return all decoded frames from the source
     /// @throws IOException if the source is unreadable or the bitstream is malformed
-    public @Unmodifiable List<DecodedFrame> readAllFrames() throws IOException {
+    public @Unmodifiable List<Av1DecodedFrame> readAllFrames() throws IOException {
         ensureOpen();
 
-        List<DecodedFrame> frames = new ArrayList<>();
+        List<Av1DecodedFrame> frames = new ArrayList<>();
         while (true) {
-            DecodedFrame frame = readFrame();
+            Av1DecodedFrame frame = readFrame();
             if (frame == null) {
                 return List.copyOf(frames);
             }
@@ -437,7 +438,7 @@ public final class Av1ImageReader implements AutoCloseable {
         }
     }
 
-    /// Closes this reader and the underlying byte source.
+    /// Closes this decoder and the underlying byte source.
     ///
     /// @throws IOException if the underlying source fails to close
     @Override
@@ -449,7 +450,7 @@ public final class Av1ImageReader implements AutoCloseable {
         source.close();
     }
 
-    /// Returns the immutable decoder configuration for this reader.
+    /// Returns the immutable decoder configuration for this decoder.
     ///
     /// @return the immutable decoder configuration
     public Av1DecoderConfig config() {
@@ -529,12 +530,12 @@ public final class Av1ImageReader implements AutoCloseable {
         referenceSlot.refresh(Objects.requireNonNull(referenceSurfaceSnapshot, "referenceSurfaceSnapshot"));
     }
 
-    /// Ensures that this reader has not already been closed.
+    /// Ensures that this decoder has not already been closed.
     ///
-    /// @throws IOException if this reader has already been closed
+    /// @throws IOException if this decoder has already been closed
     private void ensureOpen() throws IOException {
         if (closed) {
-            throw new IOException("Av1ImageReader is closed");
+            throw new IOException("Av1Decoder is closed");
         }
     }
 
@@ -542,9 +543,9 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param parsedSequenceHeader the parsed sequence header
     /// @param packet the packet carrying the sequence header
-    /// @throws DecodeException if the configured operating point is absent
+    /// @throws Av1DecodeException if the configured operating point is absent
     private void validateSelectedOperatingPoint(SequenceHeader parsedSequenceHeader, ObuPacket packet)
-            throws DecodeException {
+            throws Av1DecodeException {
         selectedOperatingPoint(parsedSequenceHeader, packet);
     }
 
@@ -552,8 +553,8 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param packet the OBU packet to test
     /// @return whether the packet should be decoded for the configured operating point
-    /// @throws DecodeException if the configured operating point is absent from the active sequence
-    private boolean matchesSelectedOperatingPoint(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if the configured operating point is absent from the active sequence
+    private boolean matchesSelectedOperatingPoint(ObuPacket packet) throws Av1DecodeException {
         SequenceHeader activeSequenceHeader = sequenceHeader;
         if (activeSequenceHeader == null) {
             return true;
@@ -573,8 +574,8 @@ public final class Av1ImageReader implements AutoCloseable {
     /// Validates the extension-header requirement imposed by non-zero operating-point masks.
     ///
     /// @param packet the current OBU packet
-    /// @throws DecodeException if strict mode requires an extension header that is absent
-    private void validateRequiredObuExtension(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if strict mode requires an extension header that is absent
+    private void validateRequiredObuExtension(ObuPacket packet) throws Av1DecodeException {
         SequenceHeader activeSequenceHeader = sequenceHeader;
         if (!config.strictStdCompliance() || activeSequenceHeader == null) {
             return;
@@ -614,8 +615,8 @@ public final class Av1ImageReader implements AutoCloseable {
     /// Validates the leading LEB128 metadata type in one metadata OBU.
     ///
     /// @param packet the metadata OBU packet
-    /// @throws DecodeException if the type is truncated, wider than 32 bits, or uses a ninth byte
-    private static void validateMetadataType(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if the type is truncated, wider than 32 bits, or uses a ninth byte
+    private static void validateMetadataType(ObuPacket packet) throws Av1DecodeException {
         byte[] payload = packet.payload();
         long value = 0;
         for (int index = 0; index < 8; index++) {
@@ -639,16 +640,16 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param activeSequenceHeader the active sequence header
     /// @param packet the packet used for error context
     /// @return the configured operating point
-    /// @throws DecodeException if the configured operating point is absent
+    /// @throws Av1DecodeException if the configured operating point is absent
     private SequenceHeader.OperatingPoint selectedOperatingPoint(
             SequenceHeader activeSequenceHeader,
             ObuPacket packet
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         int operatingPoint = config.operatingPoint();
         if (operatingPoint >= activeSequenceHeader.operatingPointCount()) {
-            throw new DecodeException(
-                    DecodeErrorCode.INVALID_BITSTREAM,
-                    DecodeStage.SEQUENCE_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeStage.SEQUENCE_HEADER_PARSE,
                     "Configured operating point is not declared by the sequence header: " + operatingPoint,
                     packet.streamOffset(),
                     packet.obuIndex(),
@@ -742,7 +743,7 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param assembly the completed frame assembly
     /// @param packet the OBU that completed the frame assembly
     /// @return the pending presentation output, or `null` when current output filtering suppresses it
-    private @Nullable PendingOutput completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws DecodeException {
+    private @Nullable PendingOutput completeFrameAssembly(FrameAssembly assembly, ObuPacket packet) throws Av1DecodeException {
         FrameHeader frameHeader = assembly.frameHeader();
         if (config.strictStdCompliance()) {
             validateReferenceState(assembly, packet);
@@ -756,9 +757,9 @@ public final class Av1ImageReader implements AutoCloseable {
                     config.strictStdCompliance()
             ).decode(assembly);
         } catch (InvalidFrameSyntaxException exception) {
-            throw new DecodeException(
-                    DecodeErrorCode.INVALID_BITSTREAM,
-                    DecodeStage.FRAME_DECODE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.INVALID_BITSTREAM,
+                    Av1DecodeStage.FRAME_DECODE,
                     exception.getMessage(),
                     assembly.streamOffset(),
                     assembly.obuIndex(),
@@ -784,9 +785,9 @@ public final class Av1ImageReader implements AutoCloseable {
                         config.strictStdCompliance()
                 );
             } catch (InvalidFrameReconstructionException exception) {
-                throw new DecodeException(
-                        DecodeErrorCode.INVALID_BITSTREAM,
-                        DecodeStage.FRAME_DECODE,
+                throw new Av1DecodeException(
+                        Av1DecodeErrorCode.INVALID_BITSTREAM,
+                        Av1DecodeStage.FRAME_DECODE,
                         exception.getMessage(),
                         assembly.streamOffset(),
                         assembly.obuIndex(),
@@ -835,12 +836,12 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param assembly the completed current frame assembly
     /// @param packet the OBU that completed the frame assembly
-    /// @throws DecodeException if a selected reference is unavailable or incompatible with the current sequence
+    /// @throws Av1DecodeException if a selected reference is unavailable or incompatible with the current sequence
     private void validateReferenceState(FrameAssembly assembly, ObuPacket packet)
-            throws DecodeException {
+            throws Av1DecodeException {
         SequenceHeader currentSequence = assembly.sequenceHeader();
         FrameHeader frameHeader = assembly.frameHeader();
-        if (frameHeader.frameType() != FrameType.INTER && frameHeader.frameType() != FrameType.SWITCH) {
+        if (frameHeader.frameType() != Av1FrameType.INTER && frameHeader.frameType() != Av1FrameType.SWITCH) {
             return;
         }
         for (int referenceIndex = 0; referenceIndex < 7; referenceIndex++) {
@@ -904,8 +905,8 @@ public final class Av1ImageReader implements AutoCloseable {
     /// temporal-unit boundary.
     ///
     /// @param packet the temporal delimiter that ended the camera-header temporal unit
-    /// @throws DecodeException if a partially tiled frame reached the boundary
-    private void retainLargeScaleTileCameraHeaderAtBoundary(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if a partially tiled frame reached the boundary
+    private void retainLargeScaleTileCameraHeaderAtBoundary(ObuPacket packet) throws Av1DecodeException {
         if (pendingFrameAssembly == null) {
             return;
         }
@@ -923,8 +924,8 @@ public final class Av1ImageReader implements AutoCloseable {
     /// Retains a header-only pending camera frame immediately before a tile-list OBU.
     ///
     /// @param packet the tile-list OBU requiring the camera frame
-    /// @throws DecodeException if the pending frame contains tile data or no camera header exists
-    private void retainLargeScaleTileCameraHeader(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if the pending frame contains tile data or no camera header exists
+    private void retainLargeScaleTileCameraHeader(ObuPacket packet) throws Av1DecodeException {
         if (pendingFrameAssembly != null) {
             if (pendingFrameAssembly.tileGroupCount() != 0) {
                 throw invalidBitstream(packet, "Tile-list OBU appeared while a tiled frame was incomplete");
@@ -941,11 +942,11 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param assembly the header-only camera-frame assembly
     /// @param packet the OBU used for error context
-    /// @throws DecodeException if strict conformance validation rejects the camera frame
+    /// @throws Av1DecodeException if strict conformance validation rejects the camera frame
     private void retainLargeScaleTileCameraAssembly(
             FrameAssembly assembly,
             ObuPacket packet
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         tileListParser.validateCameraFrame(
                 packet,
                 assembly.sequenceHeader(),
@@ -968,8 +969,8 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param packet the tile-list OBU
     /// @return the assembled presentation output
-    /// @throws DecodeException if the list references unavailable anchors or contains invalid tile syntax
-    private PendingOutput decodeLargeScaleTileList(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if the list references unavailable anchors or contains invalid tile syntax
+    private PendingOutput decodeLargeScaleTileList(ObuPacket packet) throws Av1DecodeException {
         FrameAssembly cameraAssembly = Objects.requireNonNull(
                 largeScaleTileCameraAssembly,
                 "largeScaleTileCameraAssembly"
@@ -1092,9 +1093,9 @@ public final class Av1ImageReader implements AutoCloseable {
                             config.strictStdCompliance()
                     ).decodeTile(tileAssembly, sourceTileIndex);
                 } catch (InvalidFrameSyntaxException exception) {
-                    throw new DecodeException(
-                            DecodeErrorCode.INVALID_BITSTREAM,
-                            DecodeStage.FRAME_DECODE,
+                    throw new Av1DecodeException(
+                            Av1DecodeErrorCode.INVALID_BITSTREAM,
+                            Av1DecodeStage.FRAME_DECODE,
                             exception.getMessage(),
                             packet.streamOffset(),
                             packet.obuIndex(),
@@ -1126,9 +1127,9 @@ public final class Av1ImageReader implements AutoCloseable {
                         config.strictStdCompliance()
                 );
             } catch (InvalidFrameReconstructionException exception) {
-                throw new DecodeException(
-                        DecodeErrorCode.INVALID_BITSTREAM,
-                        DecodeStage.FRAME_DECODE,
+                throw new Av1DecodeException(
+                        Av1DecodeErrorCode.INVALID_BITSTREAM,
+                        Av1DecodeStage.FRAME_DECODE,
                         exception.getMessage(),
                         packet.streamOffset(),
                         packet.obuIndex(),
@@ -1198,12 +1199,12 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param syntaxDecodeResult the decoded camera-tile syntax
     /// @param tileIndex the decoded source tile index
     /// @param packet the source tile-list OBU
-    /// @throws DecodeException if a block selects another reference frame
+    /// @throws Av1DecodeException if a block selects another reference frame
     private static void validateLargeScaleTileReferences(
             FrameSyntaxDecodeResult syntaxDecodeResult,
             int tileIndex,
             ObuPacket packet
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         for (TilePartitionTreeReader.Node root : syntaxDecodeResult.tileRoots(tileIndex)) {
             validateLargeScaleTileReferences(root, packet);
         }
@@ -1213,11 +1214,11 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param node the decoded partition node
     /// @param packet the source tile-list OBU
-    /// @throws DecodeException if an inter leaf does not use `LAST_FRAME`
+    /// @throws Av1DecodeException if an inter leaf does not use `LAST_FRAME`
     private static void validateLargeScaleTileReferences(
             TilePartitionTreeReader.Node node,
             ObuPacket packet
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         if (node instanceof TilePartitionTreeReader.LeafNode leafNode) {
             int referenceFrame = leafNode.header().referenceFrame0();
             if (referenceFrame >= 0 && referenceFrame != 0) {
@@ -1254,13 +1255,13 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param packet the source OBU that carried the tile group
     /// @param tileGroupHeader the parsed tile-group header
     /// @param tileDataOffset the byte offset of the tile data inside the OBU payload
-    /// @throws DecodeException if the tile group is out of order or inconsistent with the frame layout
+    /// @throws Av1DecodeException if the tile group is out of order or inconsistent with the frame layout
     private void appendTileGroup(
             FrameAssembly assembly,
             ObuPacket packet,
             TileGroupHeader tileGroupHeader,
             int tileDataOffset
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         if (tileGroupHeader.totalTileCount() != assembly.totalTiles()) {
             throw invalidBitstream(packet, "Tile-group header does not match the active frame tile layout");
         }
@@ -1281,12 +1282,12 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param packet the source OBU packet
     /// @return the active sequence header
-    /// @throws DecodeException if no sequence header has been seen yet
-    private SequenceHeader requireSequenceHeader(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if no sequence header has been seen yet
+    private SequenceHeader requireSequenceHeader(ObuPacket packet) throws Av1DecodeException {
         if (sequenceHeader == null) {
-            throw new DecodeException(
-                    DecodeErrorCode.STATE_VIOLATION,
-                    DecodeStage.FRAME_ASSEMBLY,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.STATE_VIOLATION,
+                    Av1DecodeStage.FRAME_ASSEMBLY,
                     "Frame data appeared before a sequence header OBU",
                     packet.streamOffset(),
                     packet.obuIndex(),
@@ -1300,12 +1301,12 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param packet the source OBU packet
     /// @return the current in-progress frame assembly
-    /// @throws DecodeException if no frame header has started a frame assembly yet
-    private FrameAssembly requirePendingFrameAssembly(ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if no frame header has started a frame assembly yet
+    private FrameAssembly requirePendingFrameAssembly(ObuPacket packet) throws Av1DecodeException {
         if (pendingFrameAssembly == null) {
-            throw new DecodeException(
-                    DecodeErrorCode.STATE_VIOLATION,
-                    DecodeStage.FRAME_ASSEMBLY,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.STATE_VIOLATION,
+                    Av1DecodeStage.FRAME_ASSEMBLY,
                     "Tile-group OBU appeared before a frame header OBU",
                     packet.streamOffset(),
                     packet.obuIndex(),
@@ -1319,12 +1320,12 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param packet the source OBU packet
     /// @param message the detailed state-violation message
-    /// @throws DecodeException if a previous frame assembly is still in progress
-    private void ensureNoPendingFrameAssembly(ObuPacket packet, String message) throws DecodeException {
+    /// @throws Av1DecodeException if a previous frame assembly is still in progress
+    private void ensureNoPendingFrameAssembly(ObuPacket packet, String message) throws Av1DecodeException {
         if (pendingFrameAssembly != null) {
-            throw new DecodeException(
-                    DecodeErrorCode.STATE_VIOLATION,
-                    DecodeStage.FRAME_ASSEMBLY,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.STATE_VIOLATION,
+                    Av1DecodeStage.FRAME_ASSEMBLY,
                     message,
                     packet.streamOffset(),
                     packet.obuIndex(),
@@ -1337,12 +1338,12 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param packet the source OBU packet
     /// @param existingFrameIndex the referenced frame slot
-    /// @throws DecodeException if the referenced frame slot has not been populated yet
-    private void requireExistingFrameState(ObuPacket packet, int existingFrameIndex) throws DecodeException {
+    /// @throws Av1DecodeException if the referenced frame slot has not been populated yet
+    private void requireExistingFrameState(ObuPacket packet, int existingFrameIndex) throws Av1DecodeException {
         if (existingFrameIndex < 0 || existingFrameIndex >= referenceSlots.length) {
-            throw new DecodeException(
-                    DecodeErrorCode.STATE_VIOLATION,
-                    DecodeStage.FRAME_DECODE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.STATE_VIOLATION,
+                    Av1DecodeStage.FRAME_DECODE,
                     "show_existing_frame references an invalid frame slot",
                     packet.streamOffset(),
                     packet.obuIndex(),
@@ -1350,9 +1351,9 @@ public final class Av1ImageReader implements AutoCloseable {
             );
         }
         if (!referenceSlots[existingFrameIndex].isPopulated()) {
-            throw new DecodeException(
-                    DecodeErrorCode.STATE_VIOLATION,
-                    DecodeStage.FRAME_DECODE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.STATE_VIOLATION,
+                    Av1DecodeStage.FRAME_DECODE,
                     "show_existing_frame references a frame slot that has not been populated",
                     packet.streamOffset(),
                     packet.obuIndex(),
@@ -1370,11 +1371,11 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param packet the source OBU packet that requested `show_existing_frame`
     /// @param outputRequestHeader the current show-existing-frame request header
     /// @return one pending `show_existing_frame` output, or `null` when output filtering suppresses it
-    /// @throws DecodeException if the referenced slot is invalid or missing complete reference state
+    /// @throws Av1DecodeException if the referenced slot is invalid or missing complete reference state
     private @Nullable PendingOutput outputExistingFrame(
             ObuPacket packet,
             FrameHeader outputRequestHeader
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         int existingFrameIndex = outputRequestHeader.existingFrameIndex();
         requireExistingFrameState(packet, existingFrameIndex);
         RuntimeReferenceSlot slot = referenceSlots[existingFrameIndex];
@@ -1414,11 +1415,11 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param snapshot the immutable anchor surface
     /// @param packet the OBU that produced or showed the anchor
-    /// @throws DecodeException if the AV1 maximum of 128 anchor frames is exceeded
+    /// @throws Av1DecodeException if the AV1 maximum of 128 anchor frames is exceeded
     private void addLargeScaleTileAnchorFrame(
             ReferenceSurfaceSnapshot snapshot,
             ObuPacket packet
-    ) throws DecodeException {
+    ) throws Av1DecodeException {
         if (largeScaleTileAnchorFrames.size() >= 128) {
             throw invalidBitstream(packet, "Large Scale Tile anchor-frame count exceeds 128");
         }
@@ -1454,10 +1455,10 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param packet the source OBU packet
     /// @param message the detailed validation message
     /// @return the contextual invalid-bitstream exception
-    private static DecodeException invalidBitstream(ObuPacket packet, String message) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_BITSTREAM,
-                DecodeStage.FRAME_ASSEMBLY,
+    private static Av1DecodeException invalidBitstream(ObuPacket packet, String message) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_BITSTREAM,
+                Av1DecodeStage.FRAME_ASSEMBLY,
                 message,
                 packet.streamOffset(),
                 packet.obuIndex(),
@@ -1470,13 +1471,13 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param packet the OBU whose frame reached output conversion
     /// @param exception the unsupported conversion failure
     /// @return the contextual unsupported-feature exception
-    private static DecodeException unsupportedOutputConversion(
+    private static Av1DecodeException unsupportedOutputConversion(
             ObuPacket packet,
             UnsupportedOperationException exception
     ) {
-        return new DecodeException(
-                DecodeErrorCode.UNSUPPORTED_FEATURE,
-                DecodeStage.OUTPUT_CONVERSION,
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.UNSUPPORTED_FEATURE,
+                Av1DecodeStage.OUTPUT_CONVERSION,
                 exception.getMessage() != null
                         ? exception.getMessage()
                         : "AV1 output uses an unsupported color conversion",
@@ -1491,10 +1492,10 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param assembly the incomplete frame assembly
     /// @return the contextual invalid-bitstream exception
-    private static DecodeException incompleteFrameAtEndOfStream(FrameAssembly assembly) {
-        return new DecodeException(
-                DecodeErrorCode.INVALID_BITSTREAM,
-                DecodeStage.FRAME_ASSEMBLY,
+    private static Av1DecodeException incompleteFrameAtEndOfStream(FrameAssembly assembly) {
+        return new Av1DecodeException(
+                Av1DecodeErrorCode.INVALID_BITSTREAM,
+                Av1DecodeStage.FRAME_ASSEMBLY,
                 "End of stream was reached before the current frame tile groups were completed",
                 assembly.streamOffset(),
                 assembly.obuIndex(),
@@ -1506,8 +1507,8 @@ public final class Av1ImageReader implements AutoCloseable {
     ///
     /// @param frameHeader the parsed frame header
     /// @param packet the source OBU packet
-    /// @throws DecodeException if the configured frame size limit is exceeded
-    private void enforceFrameSizeLimit(FrameHeader frameHeader, ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if the configured frame size limit is exceeded
+    private void enforceFrameSizeLimit(FrameHeader frameHeader, ObuPacket packet) throws Av1DecodeException {
         long frameSizeLimit = config.frameSizeLimit();
         if (frameSizeLimit == 0 || frameHeader.showExistingFrame()) {
             return;
@@ -1524,17 +1525,17 @@ public final class Av1ImageReader implements AutoCloseable {
     /// @param width the output luma width
     /// @param height the output luma height
     /// @param packet the source OBU packet
-    /// @throws DecodeException if the configured frame size limit is exceeded
-    private void enforceFrameSizeLimit(int width, int height, ObuPacket packet) throws DecodeException {
+    /// @throws Av1DecodeException if the configured frame size limit is exceeded
+    private void enforceFrameSizeLimit(int width, int height, ObuPacket packet) throws Av1DecodeException {
         long frameSizeLimit = config.frameSizeLimit();
         if (frameSizeLimit == 0) {
             return;
         }
         long pixelCount = (long) width * height;
         if (pixelCount > frameSizeLimit) {
-            throw new DecodeException(
-                    DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED,
-                    DecodeStage.FRAME_HEADER_PARSE,
+            throw new Av1DecodeException(
+                    Av1DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED,
+                    Av1DecodeStage.FRAME_HEADER_PARSE,
                     "Frame size exceeds the configured limit: " + width + "x" + height,
                     packet.streamOffset(),
                     packet.obuIndex(),

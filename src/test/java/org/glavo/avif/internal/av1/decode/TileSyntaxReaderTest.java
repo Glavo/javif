@@ -15,8 +15,8 @@
  */
 package org.glavo.avif.internal.av1.decode;
 
-import org.glavo.avif.decode.Av1ColorConfig;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1ColorConfig;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -72,7 +72,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsInterFrameBlockSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -103,7 +103,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsInterFrameSkipModeSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -118,7 +118,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsInterFrameReferenceSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -159,7 +159,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsInterPredictionModeSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -201,7 +201,7 @@ final class TileSyntaxReaderTest {
                 tileContext.cdfContext().mutableObmcCdf(BlockSize.SIZE_16X16.cdfIndex())
         );
 
-        TileDecodeContext singleModeTileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext singleModeTileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader singleModeReader = new TileSyntaxReader(singleModeTileContext);
         assertEquals(expectedSingleInterMode, singleModeReader.readSingleInterMode(4, 1, 3, false, false));
     }
@@ -210,7 +210,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsCompoundBlendTypeSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -233,7 +233,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsInterIntraSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -259,7 +259,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsInterpolationFilterSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -291,7 +291,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsMotionVectorResidualSyntax() {
         byte[] payload = MOTION_VECTOR_RESIDUAL_PAYLOAD;
-        TileDecodeContext tileContext = createTileContext(FrameType.INTER, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.INTER, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
         MotionVector predictor = new MotionVector(8, -4);
 
@@ -323,7 +323,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsIntrabcMotionVectorResidualSyntax() {
         byte[] payload = HexFixtureResources.readNamedBytes(TILE_BLOCK_HEADER_FIXTURE_RESOURCE, "intrabc");
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, true, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, true, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
         MotionVector predictor = MotionVector.zero();
 
@@ -358,7 +358,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsKeyFrameYAndUvModes() {
         byte[] payload = new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -395,7 +395,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsIntrabcAndInterFrameYMode() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, true, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, true, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -415,7 +415,7 @@ final class TileSyntaxReaderTest {
     @Test
     void disallowedIntrabcReturnsFalseWithoutConsumingBits() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -433,7 +433,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsDirectionalAngleDeltas() {
         byte[] payload = new byte[]{(byte) 0xE1, 0x00, 0x7F, 0x55, (byte) 0xC3, 0x18};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -463,7 +463,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsCflAlpha() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -489,7 +489,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsFilterIntraSyntax() {
         byte[] payload = FILTER_INTRA_PAYLOAD;
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -515,7 +515,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsSegmentationSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -536,7 +536,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsPaletteSyntax() {
         byte[] payload = PALETTE_PAYLOAD;
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -562,7 +562,7 @@ final class TileSyntaxReaderTest {
     @Test
     void readsPaletteColorMapSyntax() {
         byte[] payload = new byte[]{0x12, 0x34, 0x56, 0x78, (byte) 0x9A};
-        TileDecodeContext tileContext = createTileContext(FrameType.KEY, false, payload);
+        TileDecodeContext tileContext = createTileContext(Av1FrameType.KEY, false, payload);
         TileSyntaxReader reader = new TileSyntaxReader(tileContext);
 
         CdfContext oracleCdf = CdfContext.createDefault();
@@ -580,7 +580,7 @@ final class TileSyntaxReaderTest {
     void strictModeRejectsOversizedCoefficientGolombCode() {
         byte[] payload = new byte[16];
         TileSyntaxReader reader = new TileSyntaxReader(
-                createTileContext(FrameType.INTER, false, payload),
+                createTileContext(Av1FrameType.INTER, false, payload),
                 true
         );
 
@@ -723,7 +723,7 @@ final class TileSyntaxReaderTest {
     /// @param allowIntrabc whether the synthetic frame allows `intrabc`
     /// @param payload the collected tile entropy payload
     /// @return a synthetic tile-local decode context backed by one collected tile payload
-    private static TileDecodeContext createTileContext(FrameType frameType, boolean allowIntrabc, byte[] payload) {
+    private static TileDecodeContext createTileContext(Av1FrameType frameType, boolean allowIntrabc, byte[] payload) {
         SequenceHeader sequenceHeader = new SequenceHeader(
                 0,
                 64,

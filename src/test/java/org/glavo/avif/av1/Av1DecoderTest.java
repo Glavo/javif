@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.avif.decode;
+package org.glavo.avif.av1;
 
 import org.glavo.avif.internal.av1.image.DecodedSurface;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
@@ -76,14 +76,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests for `Av1ImageReader`.
+/// Tests for `Av1Decoder`.
 @NotNullByDefault
-final class Av1ImageReaderTest {
+final class Av1DecoderTest {
     /// One fixed single-tile opaque-gray key-frame payload.
     ///
     /// This payload decodes as one reduced still-picture key frame whose luma and chroma blocks are
     /// fully intra-predicted with zero residuals, so the reader returns a stable opaque
-    /// gray `DecodedFrame` without relying on runtime brute-force search.
+    /// gray `Av1DecodedFrame` without relying on runtime brute-force search.
     private static final byte @Unmodifiable [] SUPPORTED_SINGLE_TILE_PAYLOAD = new byte[]{
             (byte) 0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
@@ -154,7 +154,7 @@ final class Av1ImageReaderTest {
     /// @throws IOException if the reader cannot be closed
     @Test
     void readFrameReturnsNullAtEndOfStream() throws IOException {
-        try (Av1ImageReader reader = Av1ImageReader.open(ByteBuffer.allocate(0))) {
+        try (Av1Decoder reader = Av1Decoder.open(ByteBuffer.allocate(0))) {
             assertNull(reader.readFrame());
         }
     }
@@ -175,7 +175,7 @@ final class Av1ImageReaderTest {
         int originalPosition = source.position();
         int originalLimit = source.limit();
 
-        try (Av1ImageReader reader = Av1ImageReader.open(source)) {
+        try (Av1Decoder reader = Av1Decoder.open(source)) {
             assertNull(reader.readFrame());
         }
 
@@ -189,7 +189,7 @@ final class Av1ImageReaderTest {
     @Test
     void channelEntryPointTransfersCloseOwnership() throws IOException {
         TrackingChannel channel = new TrackingChannel(new byte[0]);
-        Av1ImageReader reader = Av1ImageReader.open(channel);
+        Av1Decoder reader = Av1Decoder.open(channel);
 
         reader.close();
 
@@ -201,7 +201,7 @@ final class Av1ImageReaderTest {
     /// @throws IOException if the reader cannot be closed
     @Test
     void closeIsIdempotent() throws IOException {
-        Av1ImageReader reader = Av1ImageReader.open(
+        Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN))
         );
         reader.close();
@@ -213,7 +213,7 @@ final class Av1ImageReaderTest {
     /// @throws IOException if the reader cannot be closed
     @Test
     void readFrameFailsAfterClose() throws IOException {
-        Av1ImageReader reader = Av1ImageReader.open(
+        Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN))
         );
         reader.close();
@@ -238,16 +238,16 @@ final class Av1ImageReaderTest {
         byte[] stream = obu(1, fullSequenceHeaderPayload());
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withOperatingPoint(1);
 
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                     config
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
-        assertEquals(DecodeStage.SEQUENCE_HEADER_PARSE, exception.stage());
+        assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(Av1DecodeStage.SEQUENCE_HEADER_PARSE, exception.stage());
     }
 
     /// Verifies that OBUs outside the selected operating point are skipped instead of decoded.
@@ -261,7 +261,7 @@ final class Av1ImageReaderTest {
         );
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withOperatingPoint(0);
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
@@ -285,10 +285,10 @@ final class Av1ImageReaderTest {
                 obu(2, new byte[0])
         );
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
-            DecodedFrame frame = reader.readFrame();
+            Av1DecodedFrame frame = reader.readFrame();
             assertNotNull(frame);
             assertEquals(1, frame.spatialId());
             assertNull(reader.readFrame());
@@ -305,7 +305,7 @@ final class Av1ImageReaderTest {
                 obu(6, reducedStillPictureCombinedFramePayload())
         ));
 
-        try (Av1ImageReader reader = Av1ImageReader.openAnnexB(ByteBuffer.wrap(stream))) {
+        try (Av1Decoder reader = Av1Decoder.openAnnexB(ByteBuffer.wrap(stream))) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
             assertNull(reader.readFrame());
         }
@@ -327,14 +327,14 @@ final class Av1ImageReaderTest {
                 annexBTemporalUnit(annexBFrameUnit(obu(6, 0, 0, framePayload)))
         );
 
-        try (Av1ImageReader reader = Av1ImageReader.openAnnexB(
+        try (Av1Decoder reader = Av1Decoder.openAnnexB(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
-            DecodedFrame firstTemporalUnit = reader.readFrame();
+            Av1DecodedFrame firstTemporalUnit = reader.readFrame();
             assertNotNull(firstTemporalUnit);
             assertEquals(1, firstTemporalUnit.spatialId());
 
-            DecodedFrame secondTemporalUnit = reader.readFrame();
+            Av1DecodedFrame secondTemporalUnit = reader.readFrame();
             assertNotNull(secondTemporalUnit);
             assertEquals(0, secondTemporalUnit.spatialId());
             assertNull(reader.readFrame());
@@ -356,14 +356,14 @@ final class Av1ImageReaderTest {
         );
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withOutputAllLayers(true);
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
-            DecodedFrame lowerLayer = reader.readFrame();
+            Av1DecodedFrame lowerLayer = reader.readFrame();
             assertNotNull(lowerLayer);
             assertEquals(0, lowerLayer.spatialId());
-            DecodedFrame upperLayer = reader.readFrame();
+            Av1DecodedFrame upperLayer = reader.readFrame();
             assertNotNull(upperLayer);
             assertEquals(1, upperLayer.spatialId());
             assertNull(reader.readFrame());
@@ -376,10 +376,10 @@ final class Av1ImageReaderTest {
     @Test
     void readAllFramesReturnsEmptyListForSequenceHeaderOnlyStream() throws IOException {
         byte[] stream = obu(1, reducedStillPicturePayload());
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
-            List<DecodedFrame> frames = reader.readAllFrames();
+            List<Av1DecodedFrame> frames = reader.readAllFrames();
             assertTrue(frames.isEmpty());
             assertNull(reader.lastFrameSyntaxDecodeResult());
         }
@@ -389,14 +389,14 @@ final class Av1ImageReaderTest {
     @Test
     void readFrameRejectsFrameDataBeforeSequenceHeader() {
         byte[] stream = obu(3, new byte[]{0});
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
+        assertEquals(Av1DecodeErrorCode.STATE_VIOLATION, exception.code());
     }
 
     /// Verifies that the legacy reduced still-picture combined fixture now reconstructs
@@ -407,7 +407,7 @@ final class Av1ImageReaderTest {
                 obu(1, reducedStillPicturePayload()),
                 obu(6, reducedStillPictureCombinedFramePayload())
         );
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -443,15 +443,15 @@ final class Av1ImageReaderTest {
                 obu(1, reducedStillPicturePayload()),
                 obu(3, reducedStillPictureFrameHeaderPayload())
         );
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
-        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+        assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_ASSEMBLY, exception.stage());
     }
 
     /// Verifies that the legacy reduced still-picture standalone fixture now reconstructs
@@ -463,7 +463,7 @@ final class Av1ImageReaderTest {
                 obu(3, reducedStillPictureFrameHeaderPayload()),
                 obu(4, singleTileGroupPayload())
         );
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -482,7 +482,7 @@ final class Av1ImageReaderTest {
                 obu(6, reducedStillPictureCombinedFramePayload())
         );
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -501,7 +501,7 @@ final class Av1ImageReaderTest {
                 obu(1, reducedStillPicturePayload())
         );
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -516,7 +516,7 @@ final class Av1ImageReaderTest {
         }
     }
 
-    /// Verifies that a supported reduced still-picture combined stream returns one opaque `DecodedFrame`.
+    /// Verifies that a supported reduced still-picture combined stream returns one opaque `Av1DecodedFrame`.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
@@ -546,7 +546,7 @@ final class Av1ImageReaderTest {
 
     /// Verifies that parsed still pictures decode successfully for
     /// `10-bit` and `12-bit` combined streams across all supported public chroma layouts and
-    /// returns `DecodedFrame`.
+    /// returns `Av1DecodedFrame`.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
@@ -574,7 +574,7 @@ final class Av1ImageReaderTest {
     }
 
     /// Verifies that parsed combined still-picture streams can enable normative horizontal
-    /// super-resolution and still return one public `DecodedFrame`.
+    /// super-resolution and still return one public `Av1DecodedFrame`.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
@@ -586,7 +586,7 @@ final class Av1ImageReaderTest {
     }
 
     /// Verifies that parsed standalone still-picture streams can enable normative horizontal
-    /// super-resolution and still return one public `DecodedFrame`.
+    /// super-resolution and still return one public `Av1DecodedFrame`.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
     @Test
@@ -642,7 +642,7 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame firstFrame = reader.readFrame();
+            Av1DecodedFrame firstFrame = reader.readFrame();
             FrameSyntaxDecodeResult firstSyntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(firstSyntaxResult);
             FrameHeader firstFrameHeader = firstSyntaxResult.assembly().frameHeader();
@@ -656,7 +656,7 @@ final class Av1ImageReaderTest {
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface");
             assertStillPictureFrameMatchesReferenceSurface(firstFrame, referenceSurfaceSnapshot, 0);
 
-            DecodedFrame reusedFrame = reader.readFrame();
+            Av1DecodedFrame reusedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 1);
             assertSame(firstSyntaxResult, reader.lastFrameSyntaxDecodeResult());
             assertSame(storedSyntaxState, reader.referenceFrameSyntaxState(0));
@@ -677,7 +677,7 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            List<DecodedFrame> frames = reader.readAllFrames();
+            List<Av1DecodedFrame> frames = reader.readAllFrames();
             assertEquals(1, frames.size());
             assertOpaqueGrayStillPictureFrame(frames.get(0), 0);
             assertReferenceStateStoredForLastSyntaxResult(reader);
@@ -696,7 +696,7 @@ final class Av1ImageReaderTest {
                 obu(4, SUPPORTED_SINGLE_TILE_PAYLOAD)
         );
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
@@ -782,7 +782,7 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject real palette reference state", exception);
             }
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
@@ -799,12 +799,12 @@ final class Av1ImageReaderTest {
         ReferenceSurfaceSnapshot referenceSurfaceSnapshot = Objects.requireNonNull(referenceState.referenceSurfaceSnapshot());
         byte[] stream = obu(6, showExistingFrameHeaderPayload(0));
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             injectShowExistingReferenceState(reader, referenceState);
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
@@ -845,7 +845,7 @@ final class Av1ImageReaderTest {
         );
     }
 
-    /// Verifies that direct parsed standalone palette still pictures reach public `DecodedFrame`
+    /// Verifies that direct parsed standalone palette still pictures reach public `Av1DecodedFrame`
     /// output without injected reference state for every supported non-monochrome layout.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
@@ -856,7 +856,7 @@ final class Av1ImageReaderTest {
         assertDirectParsedPaletteStillPictureRoundTrip(Av1ChromaFormat.YUV444, false);
     }
 
-    /// Verifies that direct parsed combined-frame palette still pictures reach public `DecodedFrame`
+    /// Verifies that direct parsed combined-frame palette still pictures reach public `Av1DecodedFrame`
     /// output without injected reference state for every supported non-monochrome layout.
     ///
     /// @throws IOException if one buffered-input adapter cannot consume the test stream
@@ -954,15 +954,15 @@ final class Av1ImageReaderTest {
                 obu(1, reducedStillPicturePayload()),
                 obu(4, singleTileGroupPayload())
         );
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
-        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+        assertEquals(Av1DecodeErrorCode.STATE_VIOLATION, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_ASSEMBLY, exception.stage());
     }
 
     /// Verifies that a new sequence header is rejected while a standalone frame assembly is still waiting for tile groups.
@@ -973,15 +973,15 @@ final class Av1ImageReaderTest {
                 obu(3, reducedStillPictureFrameHeaderPayload()),
                 obu(1, reducedStillPicturePayload())
         );
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
-        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+        assertEquals(Av1DecodeErrorCode.STATE_VIOLATION, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_ASSEMBLY, exception.stage());
         assertEquals("Sequence header OBU appeared before the current frame was completed", exception.getMessage());
     }
 
@@ -993,16 +993,16 @@ final class Av1ImageReaderTest {
                 obu(3, reducedStillPictureFrameHeaderPayload())
         );
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withFrameSizeLimit(4095);
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                     config
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
-        assertEquals(DecodeStage.FRAME_HEADER_PARSE, exception.stage());
+        assertEquals(Av1DecodeErrorCode.FRAME_SIZE_LIMIT_EXCEEDED, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_HEADER_PARSE, exception.stage());
         assertEquals("Frame size exceeds the configured limit: 64x64", exception.getMessage());
     }
 
@@ -1013,15 +1013,15 @@ final class Av1ImageReaderTest {
                 obu(1, fullSequenceHeaderPayload()),
                 obu(3, showExistingFrameHeaderPayload(0))
         );
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.STATE_VIOLATION, exception.code());
-        assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+        assertEquals(Av1DecodeErrorCode.STATE_VIOLATION, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_DECODE, exception.stage());
         assertEquals("show_existing_frame references a frame slot that has not been populated", exception.getMessage());
     }
 
@@ -1039,7 +1039,7 @@ final class Av1ImageReaderTest {
 
         assertAcrossBufferedInputs(stream, reader -> {
             Av1DecodedOutput firstOutput = Objects.requireNonNull(reader.readOutput(), "first output");
-            DecodedFrame firstFrame = firstOutput.toFrame();
+            Av1DecodedFrame firstFrame = firstOutput.toFrame();
             assertSame(firstFrame, firstOutput.toFrame());
             assertFullRangeOpaqueGrayStillPictureFrame(firstFrame, 0);
             assertEquals(firstOutput.colorConfig().bitDepth(), firstOutput.planes().bitDepth());
@@ -1100,9 +1100,9 @@ final class Av1ImageReaderTest {
         assertAcrossBufferedInputs(stream, config, reader -> {
             injectShowExistingReferenceState(reader, referenceState);
 
-            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
-            assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+            Av1DecodeException exception = assertThrows(Av1DecodeException.class, reader::readFrame);
+            assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+            assertEquals(Av1DecodeStage.FRAME_ASSEMBLY, exception.stage());
             assertEquals(
                     "show_existing_frame references a frame that is not showable",
                     exception.getMessage()
@@ -1156,12 +1156,12 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame referencedFrame = reader.readFrame();
+            Av1DecodedFrame referencedFrame = reader.readFrame();
             assertNotNull(referencedFrame);
             assertEquals(0, referencedFrame.temporalId());
             assertEquals(0, referencedFrame.spatialId());
 
-            DecodedFrame existingFrame = reader.readFrame();
+            Av1DecodedFrame existingFrame = reader.readFrame();
             assertNotNull(existingFrame);
             assertEquals(referencedFrame.frameType(), existingFrame.frameType());
             assertEquals(5, existingFrame.temporalId());
@@ -1183,7 +1183,7 @@ final class Av1ImageReaderTest {
                 obu(6, showExistingFrameHeaderPayload(0))
         );
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertFullRangeOpaqueDirectionalStillPictureFrame(reader.readFrame(), 0);
@@ -1216,7 +1216,7 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            List<DecodedFrame> frames = reader.readAllFrames();
+            List<Av1DecodedFrame> frames = reader.readAllFrames();
             assertEquals(2, frames.size());
             assertFullRangeOpaqueGrayStillPictureFrame(frames.get(0), 0);
             assertFullRangeOpaqueGrayStillPictureFrame(frames.get(1), 1);
@@ -1277,7 +1277,7 @@ final class Av1ImageReaderTest {
         int expectedTileGroupCount = splitTileGroups ? 2 : 1;
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxResult =
                     Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot =
@@ -1295,7 +1295,7 @@ final class Av1ImageReaderTest {
                     codedWidth,
                     codedHeight,
                     chromaFormat,
-                    FrameType.KEY,
+                    Av1FrameType.KEY,
                     0
             );
             assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
@@ -1373,7 +1373,7 @@ final class Av1ImageReaderTest {
     /// @param tileColumns the number of tile columns in the frame
     /// @param tileRows the number of tile rows in the frame
     private static void assertTileFirstPixelsMatchReference(
-            DecodedFrame frame,
+            Av1DecodedFrame frame,
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot,
             int tileColumns,
             int tileRows
@@ -1413,9 +1413,9 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject synthetic multi-tile reference state", exception);
             }
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertFullRangeOpaqueGrayStillPictureFrame(decodedFrame, 0);
-            DecodedFrame frame = decodedFrame;
+            Av1DecodedFrame frame = decodedFrame;
             int secondTileFirstPixelIndex = frame.width() / referenceState.frameHeader().tiling().columns();
             assertEquals(OPAQUE_FULL_RANGE_MID_GRAY, frame.intPixels()[secondTileFirstPixelIndex]);
             assertNull(reader.lastFrameSyntaxDecodeResult());
@@ -1459,7 +1459,7 @@ final class Av1ImageReaderTest {
     /// @throws Exception if synthetic reference-state injection fails
     @Test
     void readFrameReturnsStoredInterSuperResolvedReferenceSurfaceForStandaloneShowExistingFrame() throws Exception {
-        assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(FrameType.INTER, false);
+        assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(Av1FrameType.INTER, false);
     }
 
     /// Verifies that one combined `FRAME` `show_existing_frame` OBU can expose one synthetic stored
@@ -1469,7 +1469,7 @@ final class Av1ImageReaderTest {
     /// @throws Exception if synthetic reference-state injection fails
     @Test
     void readFrameReturnsStoredSwitchSuperResolvedReferenceSurfaceForCombinedShowExistingFrame() throws Exception {
-        assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(FrameType.SWITCH, true);
+        assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(Av1FrameType.SWITCH, true);
     }
 
     /// Verifies that disabling film grain synthesis still exposes one stored reconstructed
@@ -1493,7 +1493,7 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject film-grain-bearing reference state", exception);
             }
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
@@ -1520,14 +1520,14 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject film-grain-bearing reference state", exception);
             }
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesGrainAppliedReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
         });
     }
 
-    /// Verifies that one stored high-bit-depth reference surface is exposed as an `DecodedFrame`
+    /// Verifies that one stored high-bit-depth reference surface is exposed as an `Av1DecodedFrame`
     /// through the public `show_existing_frame` path.
     ///
     /// @throws Exception if synthetic reference-state injection fails
@@ -1546,7 +1546,7 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject synthetic high-bit-depth reference state", exception);
             }
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertTrue(decodedFrame.bitDepth().isHighBitDepth());
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
@@ -1560,7 +1560,7 @@ final class Av1ImageReaderTest {
     /// @throws Exception if synthetic reference-state injection fails
     @Test
     void readFrameSuppressesStoredNonKeySurfaceWhenFrameSelectionIsKey() throws Exception {
-        InjectedReferenceState referenceState = createSyntheticStoredReferenceStateForDecodeFilter(FrameType.INTER, 0xFF);
+        InjectedReferenceState referenceState = createSyntheticStoredReferenceStateForDecodeFilter(Av1FrameType.INTER, 0xFF);
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withFrameSelection(Av1FrameSelection.KEY);
         assertStoredShowExistingFrameIsSuppressedByFrameSelection(referenceState, config);
     }
@@ -1571,7 +1571,7 @@ final class Av1ImageReaderTest {
     /// @throws Exception if synthetic reference-state injection fails
     @Test
     void readFrameSuppressesStoredNonReferenceSurfaceWhenFrameSelectionIsReference() throws Exception {
-        InjectedReferenceState referenceState = createSyntheticStoredReferenceStateForDecodeFilter(FrameType.INTRA, 0);
+        InjectedReferenceState referenceState = createSyntheticStoredReferenceStateForDecodeFilter(Av1FrameType.INTRA, 0);
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withFrameSelection(Av1FrameSelection.REFERENCE);
         assertStoredShowExistingFrameIsSuppressedByFrameSelection(referenceState, config);
     }
@@ -1583,15 +1583,15 @@ final class Av1ImageReaderTest {
                 obu(1, fullSequenceHeaderPayload()),
                 obu(6, concat(showExistingFrameHeaderPayload(0), new byte[]{0x00}))
         );
-        DecodeException exception = assertThrows(DecodeException.class, () -> {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+        Av1DecodeException exception = assertThrows(Av1DecodeException.class, () -> {
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 reader.readFrame();
             }
         });
-        assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
-        assertEquals(DecodeStage.FRAME_ASSEMBLY, exception.stage());
+        assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+        assertEquals(Av1DecodeStage.FRAME_ASSEMBLY, exception.stage());
         assertEquals("Combined frame OBU must not carry tile data when show_existing_frame is set", exception.getMessage());
     }
 
@@ -1599,7 +1599,7 @@ final class Av1ImageReaderTest {
     @Test
     void configReturnsSuppliedConfiguration() {
         Av1DecoderConfig config = Av1DecoderConfig.DEFAULT.withApplyFilmGrain(false);
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
@@ -1630,19 +1630,19 @@ final class Av1ImageReaderTest {
             Av1DecoderConfig config,
             ReaderAssertion assertion
     ) throws IOException {
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN)),
                 config
         )) {
             assertion.accept(reader);
         }
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfInputStream(new ByteArrayInputStream(stream)),
                 config
         )) {
             assertion.accept(reader);
         }
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteChannel(Channels.newChannel(new ByteArrayInputStream(stream))),
                 config
         )) {
@@ -1686,7 +1686,7 @@ final class Av1ImageReaderTest {
                 obu(6, reducedStillPictureCombinedFramePayload(SUPPORTED_SINGLE_TILE_PAYLOAD))
         );
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(sourceStream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             assertOpaqueGrayStillPictureFrame(reader.readFrame(), 0);
@@ -1783,7 +1783,7 @@ final class Av1ImageReaderTest {
     /// @param reader the fresh reader that should expose the injected reference slots
     /// @param referenceStates the parser-compatible reference-slot states
     private static void injectInterReferenceStates(
-            Av1ImageReader reader,
+            Av1Decoder reader,
             InjectedReferenceState[] referenceStates
     ) {
         for (int i = 0; i < referenceStates.length; i++) {
@@ -1890,7 +1890,7 @@ final class Av1ImageReaderTest {
                 0,
                 0,
                 0,
-                FrameType.INTER,
+                Av1FrameType.INTER,
                 true,
                 true,
                 false,
@@ -2032,7 +2032,7 @@ final class Av1ImageReaderTest {
                 0,
                 0,
                 0,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 true,
                 false,
                 true,
@@ -2230,7 +2230,7 @@ final class Av1ImageReaderTest {
     /// @return one synthetic stored reference slot with the requested filter-relevant header fields
     /// @throws Exception if the base still-picture metadata cannot be captured
     private static InjectedReferenceState createSyntheticStoredReferenceStateForDecodeFilter(
-            FrameType frameType,
+            Av1FrameType frameType,
             int refreshFrameFlags
     ) throws Exception {
         InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
@@ -2256,9 +2256,9 @@ final class Av1ImageReaderTest {
     /// @return one synthetic stored reference slot for inter super-resolution public reuse tests
     /// @throws Exception if the base still-picture metadata cannot be captured
     private static InjectedReferenceState createSyntheticStoredReferenceStateWithInterSuperResolution(
-            FrameType frameType
+            Av1FrameType frameType
     ) throws Exception {
-        if (frameType != FrameType.INTER && frameType != FrameType.SWITCH) {
+        if (frameType != Av1FrameType.INTER && frameType != Av1FrameType.SWITCH) {
             throw new IllegalArgumentException("Inter super-resolution helper expects INTER or SWITCH: " + frameType);
         }
         InjectedReferenceState baseReferenceState = captureReferenceStateFromSupportedStillPicture();
@@ -2343,7 +2343,7 @@ final class Av1ImageReaderTest {
     }
 
     /// Asserts that the supported minimal real tile payload round-trips through the public reader
-    /// with one parsed high-bit-depth still-picture sequence header and returns `DecodedFrame`.
+    /// with one parsed high-bit-depth still-picture sequence header and returns `Av1DecodedFrame`.
     ///
     /// @param chromaFormat the parsed chroma layout to expose
     /// @param bitDepth the parsed decoded bit depth to expose
@@ -2365,7 +2365,7 @@ final class Av1ImageReaderTest {
                 );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxDecodeResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(syntaxDecodeResult);
             assertOpaqueGrayStillPictureLongFrame(
@@ -2403,7 +2403,7 @@ final class Av1ImageReaderTest {
                 );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxDecodeResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(syntaxDecodeResult);
             assertFullRangeOpaqueGrayStillPictureFrame(decodedFrame, chromaFormat, 0);
@@ -2473,7 +2473,7 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame firstFrame = reader.readFrame();
+            Av1DecodedFrame firstFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxDecodeResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(syntaxDecodeResult);
             assertOpaqueGrayStillPictureLongFrame(
@@ -2485,8 +2485,8 @@ final class Av1ImageReaderTest {
             );
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
-            DecodedFrame reusedFrame = reader.readFrame();
-            assertDecodedStillPictureFrameMetadata(reusedFrame, bitDepth, chromaFormat, FrameType.KEY, 1);
+            Av1DecodedFrame reusedFrame = reader.readFrame();
+            assertDecodedStillPictureFrameMetadata(reusedFrame, bitDepth, chromaFormat, Av1FrameType.KEY, 1);
             assertNotNull(firstFrame);
             assertNotNull(reusedFrame);
             assertTrue(firstFrame.bitDepth().isHighBitDepth());
@@ -2513,11 +2513,11 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame firstFrame = reader.readFrame();
+            Av1DecodedFrame firstFrame = reader.readFrame();
             assertFullRangeOpaqueGrayStillPictureFrame(firstFrame, chromaFormat, 0);
             assertReferenceStateStoredForLastSyntaxResult(reader);
 
-            DecodedFrame reusedFrame = reader.readFrame();
+            Av1DecodedFrame reusedFrame = reader.readFrame();
             assertFullRangeOpaqueGrayStillPictureFrame(reusedFrame, chromaFormat, 1);
             assertNotNull(firstFrame);
             assertNotNull(reusedFrame);
@@ -2552,7 +2552,7 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject real " + chromaFormat + " palette reference state", exception);
             }
 
-            DecodedFrame reusedFrame = reader.readFrame();
+            Av1DecodedFrame reusedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(reusedFrame, referenceSurfaceSnapshot, 0);
             assertSame(referenceState.syntaxState(), reader.referenceFrameSyntaxState(0));
                 assertNull(reader.lastFrameSyntaxDecodeResult());
@@ -2583,11 +2583,11 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
             assertNotNull(syntaxResult);
             requireFirstPaletteLeaf(syntaxResult);
-            assertDecodedStillPictureFrameMetadata(decodedFrame, 8, codedWidth, codedHeight, chromaFormat, FrameType.KEY, 0);
+            assertDecodedStillPictureFrameMetadata(decodedFrame, 8, codedWidth, codedHeight, chromaFormat, Av1FrameType.KEY, 0);
             assertStillPictureFrameMatchesReferenceSurface(
                     decodedFrame,
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "reference surface"),
@@ -2623,7 +2623,7 @@ final class Av1ImageReaderTest {
 
             ReferenceSurfaceSnapshot[] referenceSurfaceSlots = new ReferenceSurfaceSnapshot[referenceStates.length];
             referenceSurfaceSlots[0] = primaryReferenceSurfaceSnapshot;
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxResult = Objects.requireNonNull(
                     reader.lastFrameSyntaxDecodeResult(),
                     "syntax result"
@@ -2677,7 +2677,7 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodedFrame referenceFrame = reader.readFrame();
+            Av1DecodedFrame referenceFrame = reader.readFrame();
             assertReferenceStateStoredForLastSyntaxResult(reader);
             ReferenceSurfaceSnapshot parsedPrimaryReferenceSurface =
                     Objects.requireNonNull(reader.referenceSurfaceSnapshot(0), "parsed primary reference surface");
@@ -2686,7 +2686,7 @@ final class Av1ImageReaderTest {
             ReferenceSurfaceSnapshot[] referenceSurfaceSlots = new ReferenceSurfaceSnapshot[8];
             referenceSurfaceSlots[0] = parsedPrimaryReferenceSurface;
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             FrameSyntaxDecodeResult syntaxResult =
                     Objects.requireNonNull(reader.lastFrameSyntaxDecodeResult(), "syntax result");
             ReferenceSurfaceSnapshot expectedOutputSnapshot = new ReferenceSurfaceSnapshot(
@@ -2719,9 +2719,9 @@ final class Av1ImageReaderTest {
         );
 
         assertAcrossBufferedInputs(stream, reader -> {
-            DecodeException exception = assertThrows(DecodeException.class, reader::readFrame);
-            assertEquals(DecodeErrorCode.INVALID_BITSTREAM, exception.code());
-            assertEquals(DecodeStage.FRAME_DECODE, exception.stage());
+            Av1DecodeException exception = assertThrows(Av1DecodeException.class, reader::readFrame);
+            assertEquals(Av1DecodeErrorCode.INVALID_BITSTREAM, exception.code());
+            assertEquals(Av1DecodeStage.FRAME_DECODE, exception.stage());
             assertTrue(exception.getMessage().contains("Invalid intrabc displacement vector"));
             assertNull(reader.lastFrameSyntaxDecodeResult());
         });
@@ -2749,7 +2749,7 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject synthetic " + chromaFormat + " reference state", exception);
             }
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
@@ -2770,12 +2770,12 @@ final class Av1ImageReaderTest {
                 Objects.requireNonNull(referenceState.referenceSurfaceSnapshot(), "reference surface");
         byte[] stream = obu(6, showExistingFrameHeaderPayload(0));
 
-        try (Av1ImageReader reader = Av1ImageReader.open(
+        try (Av1Decoder reader = Av1Decoder.open(
                 new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
         )) {
             injectShowExistingReferenceState(reader, referenceState);
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
@@ -2789,7 +2789,7 @@ final class Av1ImageReaderTest {
     /// @param combinedShowExisting whether the follow-up `show_existing_frame` uses one combined `FRAME` OBU
     /// @throws Exception if synthetic reference-state injection fails
     private static void assertSyntheticStoredInterSuperResolvedReferenceSurfaceShowExistingFrameRoundTrip(
-            FrameType frameType,
+            Av1FrameType frameType,
             boolean combinedShowExisting
     ) throws Exception {
         InjectedReferenceState referenceState = createSyntheticStoredReferenceStateWithInterSuperResolution(frameType);
@@ -2803,12 +2803,12 @@ final class Av1ImageReaderTest {
         assertEquals(64, referenceSurfaceSnapshot.decodedPlanes().codedWidth());
 
         if (combinedShowExisting) {
-            try (Av1ImageReader reader = Av1ImageReader.open(
+            try (Av1Decoder reader = Av1Decoder.open(
                     new BufferedInput.OfByteBuffer(ByteBuffer.wrap(stream).order(ByteOrder.LITTLE_ENDIAN))
             )) {
                 injectShowExistingReferenceState(reader, referenceState);
 
-                DecodedFrame decodedFrame = reader.readFrame();
+                Av1DecodedFrame decodedFrame = reader.readFrame();
                 assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
                 assertNull(reader.readFrame());
@@ -2823,7 +2823,7 @@ final class Av1ImageReaderTest {
                 throw new IOException("Failed to inject synthetic inter super-resolution reference state", exception);
             }
 
-            DecodedFrame decodedFrame = reader.readFrame();
+            Av1DecodedFrame decodedFrame = reader.readFrame();
             assertStillPictureFrameMatchesReferenceSurface(decodedFrame, referenceSurfaceSnapshot, 0);
             assertNull(reader.lastFrameSyntaxDecodeResult());
             assertNull(reader.readFrame());
@@ -3205,7 +3205,7 @@ final class Av1ImageReaderTest {
     /// @return one copied frame header whose frame type and refresh flags match the requested values
     private static FrameHeader copyFrameHeaderWithFrameTypeAndRefreshFlags(
             FrameHeader baseFrameHeader,
-            FrameType frameType,
+            Av1FrameType frameType,
             int refreshFrameFlags
     ) {
         return new FrameHeader(
@@ -3255,7 +3255,7 @@ final class Av1ImageReaderTest {
     /// @return one copied frame header whose frame type and super-resolution state match the request
     private static FrameHeader copyFrameHeaderWithFrameTypeAndSuperResolution(
             FrameHeader baseFrameHeader,
-            FrameType frameType,
+            Av1FrameType frameType,
             int codedWidth,
             int upscaledWidth,
             int height
@@ -3301,7 +3301,7 @@ final class Av1ImageReaderTest {
     /// @param reader the fresh reader that should expose the injected state
     /// @param referenceState the reference state to inject into slot `0`
     private static void injectShowExistingReferenceState(
-            Av1ImageReader reader,
+            Av1Decoder reader,
             InjectedReferenceState referenceState
     ) {
         reader.injectReferenceStateForTest(
@@ -3339,7 +3339,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
-    private static void assertOpaqueGrayStillPictureFrame(@org.jetbrains.annotations.Nullable DecodedFrame decodedFrame, long expectedPresentationIndex) {
+    private static void assertOpaqueGrayStillPictureFrame(@org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame, long expectedPresentationIndex) {
         assertOpaqueGrayStillPictureFrame(decodedFrame, Av1ChromaFormat.YUV420, expectedPresentationIndex);
     }
 
@@ -3350,7 +3350,7 @@ final class Av1ImageReaderTest {
     /// @param expectedChromaFormat the expected chroma layout exposed by the public frame
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertOpaqueGrayStillPictureFrame(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             Av1ChromaFormat expectedChromaFormat,
             long expectedPresentationIndex
     ) {
@@ -3367,7 +3367,7 @@ final class Av1ImageReaderTest {
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertFullRangeOpaqueGrayStillPictureFrame(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             long expectedPresentationIndex
     ) {
         assertFullRangeOpaqueGrayStillPictureFrame(decodedFrame, Av1ChromaFormat.YUV420, expectedPresentationIndex);
@@ -3380,7 +3380,7 @@ final class Av1ImageReaderTest {
     /// @param expectedChromaFormat the expected chroma layout exposed by the public frame
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertFullRangeOpaqueGrayStillPictureFrame(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             Av1ChromaFormat expectedChromaFormat,
             long expectedPresentationIndex
     ) {
@@ -3393,7 +3393,7 @@ final class Av1ImageReaderTest {
     }
 
     /// Asserts that one parsed high-bit-depth still-picture frame matches the expected constant
-    /// midpoint decoded planes and therefore exposes `DecodedFrame`.
+    /// midpoint decoded planes and therefore exposes `Av1DecodedFrame`.
     ///
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param frameHeader the parsed still-picture frame header
@@ -3401,7 +3401,7 @@ final class Av1ImageReaderTest {
     /// @param expectedChromaFormat the expected chroma layout exposed by the public frame
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertOpaqueGrayStillPictureLongFrame(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             FrameHeader frameHeader,
             int expectedBitDepth,
             Av1ChromaFormat expectedChromaFormat,
@@ -3412,7 +3412,7 @@ final class Av1ImageReaderTest {
                 decodedFrame,
                 expectedBitDepth,
                 expectedChromaFormat,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 expectedPresentationIndex
         );
         assertTrue(decodedFrame.bitDepth().isHighBitDepth());
@@ -3431,12 +3431,12 @@ final class Av1ImageReaderTest {
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertOpaqueDirectionalStillPictureFrame(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
         assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
-        DecodedFrame frame = decodedFrame;
+        Av1DecodedFrame frame = decodedFrame;
         assertDecodedStillPictureFrameMetadata(frame, Av1ChromaFormat.YUV420, expectedPresentationIndex);
         assertArgbBlockEquals(frame, 0, 0, LIMITED_RANGE_LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
     }
@@ -3446,12 +3446,12 @@ final class Av1ImageReaderTest {
     /// @param decodedFrame the decoded frame returned by the public reader
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertFullRangeOpaqueDirectionalStillPictureFrame(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
         assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
-        DecodedFrame frame = decodedFrame;
+        Av1DecodedFrame frame = decodedFrame;
         assertDecodedStillPictureFrameMetadata(frame, Av1ChromaFormat.YUV420, expectedPresentationIndex);
         assertArgbBlockEquals(frame, 0, 0, FULL_RANGE_LEGACY_DIRECTIONAL_ARGB_TOP_LEFT_8X8);
     }
@@ -3463,7 +3463,7 @@ final class Av1ImageReaderTest {
     /// @param referenceSurfaceSnapshot the stored reconstructed reference surface that should be exposed
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertStillPictureFrameMatchesReferenceSurface(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot,
             long expectedPresentationIndex
     ) {
@@ -3497,7 +3497,7 @@ final class Av1ImageReaderTest {
     /// @param referenceSurfaceSnapshot the stored reconstructed reference surface that should be grain-applied
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertStillPictureFrameMatchesGrainAppliedReferenceSurface(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             ReferenceSurfaceSnapshot referenceSurfaceSnapshot,
             long expectedPresentationIndex
     ) {
@@ -3532,7 +3532,7 @@ final class Av1ImageReaderTest {
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     /// @param expectedPixel the expected constant packed ARGB pixel value
     private static void assertStillPictureFrameFilledWith(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             long expectedPresentationIndex,
             int expectedPixel
     ) {
@@ -3547,14 +3547,14 @@ final class Av1ImageReaderTest {
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     /// @param expectedPixel the expected constant packed ARGB pixel value
     private static void assertStillPictureFrameFilledWith(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             Av1ChromaFormat expectedChromaFormat,
             long expectedPresentationIndex,
             int expectedPixel
     ) {
         assertNotNull(decodedFrame);
         assertEquals(AvifBitDepth.EIGHT_BITS, decodedFrame.bitDepth());
-        DecodedFrame frame = decodedFrame;
+        Av1DecodedFrame frame = decodedFrame;
         assertDecodedStillPictureFrameMetadata(frame, expectedChromaFormat, expectedPresentationIndex);
 
         int[] pixels = frame.intPixels();
@@ -3570,7 +3570,7 @@ final class Av1ImageReaderTest {
     /// @param originX the zero-based horizontal block origin
     /// @param originY the zero-based vertical block origin
     /// @param expectedPixels the expected packed ARGB pixels in row-major order
-    private static void assertArgbBlockEquals(DecodedFrame frame, int originX, int originY, int[][] expectedPixels) {
+    private static void assertArgbBlockEquals(Av1DecodedFrame frame, int originX, int originY, int[][] expectedPixels) {
         int[] pixels = frame.intPixels();
         int frameWidth = frame.width();
         for (int y = 0; y < expectedPixels.length; y++) {
@@ -3587,7 +3587,7 @@ final class Av1ImageReaderTest {
     /// @param expectedChromaFormat the expected chroma layout exposed by the public frame
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertDecodedStillPictureFrameMetadata(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             Av1ChromaFormat expectedChromaFormat,
             long expectedPresentationIndex
     ) {
@@ -3595,7 +3595,7 @@ final class Av1ImageReaderTest {
                 decodedFrame,
                 8,
                 expectedChromaFormat,
-                FrameType.KEY,
+                Av1FrameType.KEY,
                 expectedPresentationIndex
         );
     }
@@ -3609,10 +3609,10 @@ final class Av1ImageReaderTest {
     /// @param expectedFrameType the expected AV1 frame type exposed by the public frame
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertDecodedStillPictureFrameMetadata(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             int expectedBitDepth,
             Av1ChromaFormat expectedChromaFormat,
-            FrameType expectedFrameType,
+            Av1FrameType expectedFrameType,
             long expectedPresentationIndex
     ) {
         assertDecodedStillPictureFrameMetadata(
@@ -3637,12 +3637,12 @@ final class Av1ImageReaderTest {
     /// @param expectedFrameType the expected AV1 frame type exposed by the public frame
     /// @param expectedPresentationIndex the zero-based presentation index expected for the frame
     private static void assertDecodedStillPictureFrameMetadata(
-            @org.jetbrains.annotations.Nullable DecodedFrame decodedFrame,
+            @org.jetbrains.annotations.Nullable Av1DecodedFrame decodedFrame,
             int expectedBitDepth,
             int expectedWidth,
             int expectedHeight,
             Av1ChromaFormat expectedChromaFormat,
-            FrameType expectedFrameType,
+            Av1FrameType expectedFrameType,
             long expectedPresentationIndex
     ) {
         assertNotNull(decodedFrame);
@@ -3985,7 +3985,7 @@ final class Av1ImageReaderTest {
     ///
     /// @param reader the reader whose stored reference surfaces should be copied
     /// @return one array containing every currently populated reference-surface slot
-    private static ReferenceSurfaceSnapshot[] capturedReferenceSurfaceSlots(Av1ImageReader reader) {
+    private static ReferenceSurfaceSnapshot[] capturedReferenceSurfaceSlots(Av1Decoder reader) {
         ReferenceSurfaceSnapshot[] slots = new ReferenceSurfaceSnapshot[8];
         for (int i = 0; i < slots.length; i++) {
             slots[i] = Objects.requireNonNull(reader.referenceSurfaceSnapshot(i), "reference surface slot " + i);
@@ -3999,7 +3999,7 @@ final class Av1ImageReaderTest {
     /// so this helper checks the shared frame assembly and tile count instead of object identity.
     ///
     /// @param reader the reader whose stored structural reference state should be validated
-    private static void assertReferenceStateStoredForLastSyntaxResult(Av1ImageReader reader) {
+    private static void assertReferenceStateStoredForLastSyntaxResult(Av1Decoder reader) {
         FrameSyntaxDecodeResult syntaxResult = reader.lastFrameSyntaxDecodeResult();
         assertNotNull(syntaxResult);
         for (int i = 0; i < 8; i++) {
@@ -5464,7 +5464,7 @@ final class Av1ImageReaderTest {
         ///
         /// @param reader the freshly opened reader
         /// @throws IOException if the reader cannot be consumed
-        void accept(Av1ImageReader reader) throws IOException;
+        void accept(Av1Decoder reader) throws IOException;
     }
 
     /// One injected reference-slot state used by `show_existing_frame` tests.

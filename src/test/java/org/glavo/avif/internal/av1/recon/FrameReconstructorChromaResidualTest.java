@@ -15,10 +15,10 @@
  */
 package org.glavo.avif.internal.av1.recon;
 
-import org.glavo.avif.decode.Av1ColorConfig;
+import org.glavo.avif.av1.Av1ColorConfig;
 import org.glavo.avif.internal.av1.image.PaddedPlane;
 import org.glavo.avif.internal.av1.image.DecodedSurface;
-import org.glavo.avif.decode.FrameType;
+import org.glavo.avif.av1.Av1FrameType;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.internal.av1.bitstream.ObuHeader;
 import org.glavo.avif.internal.av1.bitstream.ObuPacket;
@@ -72,10 +72,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 8, 8, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 8, 8, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -104,10 +104,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 8, 8, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, negativeChromaVLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 8, 8, negativeChromaVLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -137,10 +137,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 8, 8, baselineLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 8, 8, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -184,10 +184,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 7, 5, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 7, 5, baselineLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 7, 5, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 7, 5, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -214,7 +214,7 @@ final class FrameReconstructorChromaResidualTest {
         );
 
         DecodedSurface planes = new FrameReconstructor().reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 8, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 8, 8, residualLeaf)
         );
 
         assertPlaneEquals(
@@ -264,10 +264,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 10, 8, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 10, 8, baselineLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 10, 8, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 10, 8, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -308,10 +308,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 16, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 16, 16, baselineLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 16, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 16, 16, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -388,10 +388,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 14, 14, baselineLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 14, 14, baselineLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 14, 14, residualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 14, 14, residualLeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -431,10 +431,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 32, 32, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 32, 32, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 32, 32, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 32, 32, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -465,10 +465,10 @@ final class FrameReconstructorChromaResidualTest {
 
         FrameReconstructor reconstructor = new FrameReconstructor();
         DecodedSurface baseline = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 8, zeroResidualLeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 16, 8, zeroResidualLeaf)
         );
         DecodedSurface residualPlanes = reconstructor.reconstruct(
-                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, FrameType.INTRA, 16, 8, positiveChromaULeaf)
+                createFrameSyntaxDecodeResult(Av1ChromaFormat.YUV420, Av1FrameType.INTRA, 16, 8, positiveChromaULeaf)
         );
 
         assertPlanesEqual(baseline.lumaPlane(), residualPlanes.lumaPlane());
@@ -697,7 +697,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @return one structural frame result
     private static FrameSyntaxDecodeResult createFrameSyntaxDecodeResult(
             Av1ChromaFormat chromaFormat,
-            FrameType frameType,
+            Av1FrameType frameType,
             int width,
             int height,
             TilePartitionTreeReader.Node... roots
@@ -783,7 +783,7 @@ final class FrameReconstructorChromaResidualTest {
     /// @param width the coded and rendered frame width
     /// @param height the coded and rendered frame height
     /// @return one minimal frame header
-    private static FrameHeader createFrameHeader(FrameType frameType, int width, int height) {
+    private static FrameHeader createFrameHeader(Av1FrameType frameType, int width, int height) {
         return new FrameHeader(
                 0,
                 0,
@@ -1199,7 +1199,7 @@ final class FrameReconstructorChromaResidualTest {
         PaddedPlane baseline = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
                         Av1ChromaFormat.MONOCHROME,
-                        FrameType.INTRA,
+                        Av1FrameType.INTRA,
                         visibleWidthPixels,
                         visibleHeightPixels,
                         baselineLeaf
@@ -1208,7 +1208,7 @@ final class FrameReconstructorChromaResidualTest {
         PaddedPlane residual = reconstructor.reconstruct(
                 createFrameSyntaxDecodeResult(
                         Av1ChromaFormat.MONOCHROME,
-                        FrameType.INTRA,
+                        Av1FrameType.INTRA,
                         visibleWidthPixels,
                         visibleHeightPixels,
                         residualLeaf
