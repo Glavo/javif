@@ -23,8 +23,8 @@ import org.glavo.avif.AvifErrorCode;
 import org.glavo.avif.AvifGainMapInfo;
 import org.glavo.avif.AvifGainMapMetadata;
 import org.glavo.avif.AvifImageInfo;
-import org.glavo.avif.AvifImageItemProperty;
 import org.glavo.avif.AvifImageTransformInfo;
+import org.glavo.avif.AvifOpaqueItemProperty;
 import org.glavo.avif.AvifSequenceInfo;
 import org.glavo.avif.Av1ChromaFormat;
 import org.glavo.avif.AvifSignedFraction;
@@ -1188,14 +1188,14 @@ public final class AvifContainerParser {
     ///
     /// @param imageItem the color or grid image item
     /// @return the opaque item properties in association order
-    private static AvifImageItemProperty @Unmodifiable [] opaqueItemProperties(Item imageItem) {
-        ArrayList<AvifImageItemProperty> result = new ArrayList<>();
+    private static AvifOpaqueItemProperty @Unmodifiable [] opaqueItemProperties(Item imageItem) {
+        ArrayList<AvifOpaqueItemProperty> result = new ArrayList<>();
         for (Property property : imageItem.properties) {
             if (property instanceof OpaqueProperty opaqueProperty) {
-                result.add(opaqueProperty.toImageItemProperty());
+                result.add(opaqueProperty.toOpaqueItemProperty());
             }
         }
-        return result.toArray(AvifImageItemProperty[]::new);
+        return result.toArray(AvifOpaqueItemProperty[]::new);
     }
 
     /// Reads and normalizes an Exif metadata item.
@@ -4288,11 +4288,11 @@ public final class AvifContainerParser {
             this.payload = Objects.requireNonNull(payload, "payload").clone();
         }
 
-        /// Creates a public item property descriptor.
+        /// Creates a public opaque item property descriptor.
         ///
-        /// @return the public item property descriptor
-        private AvifImageItemProperty toImageItemProperty() {
-            return new AvifImageItemProperty(type, userType, payload);
+        /// @return the public opaque item property descriptor
+        private AvifOpaqueItemProperty toOpaqueItemProperty() {
+            return new AvifOpaqueItemProperty(type, userType, payload);
         }
     }
 

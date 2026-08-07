@@ -24,9 +24,9 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
-/// Immutable AVIF item property whose type is not interpreted by the reader.
+/// Immutable AVIF item property retained without interpreting its type-specific payload.
 @NotNullByDefault
-public final class AvifImageItemProperty {
+public final class AvifOpaqueItemProperty {
     /// The byte length of a UUID box user type.
     private static final int UUID_USER_TYPE_LENGTH = 16;
 
@@ -37,12 +37,12 @@ public final class AvifImageItemProperty {
     /// The property box payload after any UUID user type.
     private final @Unmodifiable ByteBuffer payload;
 
-    /// Creates an immutable item property descriptor.
+    /// Creates an immutable opaque item property descriptor.
     ///
     /// @param type the four-character property box type
     /// @param userType the UUID box user type, or `null` for non-UUID properties
     /// @param payload the property box payload after any UUID user type
-    public AvifImageItemProperty(String type, byte @Nullable [] userType, byte[] payload) {
+    public AvifOpaqueItemProperty(String type, byte @Nullable [] userType, byte[] payload) {
         this.type = validateType(type);
         if ("uuid".equals(type)) {
             if (userType == null || userType.length != UUID_USER_TYPE_LENGTH) {

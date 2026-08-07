@@ -63,7 +63,7 @@ public final class AvifImageInfo {
     /// The embedded XMP metadata payload, or `null`.
     private final @Nullable @Unmodifiable ByteBuffer xmp;
     /// Opaque item properties associated with the primary image item.
-    private final AvifImageItemProperty @Unmodifiable [] itemProperties;
+    private final AvifOpaqueItemProperty @Unmodifiable [] opaqueItemProperties;
 
     /// Creates immutable image metadata.
     ///
@@ -85,8 +85,8 @@ public final class AvifImageInfo {
     /// @param exif the embedded Exif metadata payload excluding the AVIF Exif header offset field, or `null`; the array
     /// is copied
     /// @param xmp the embedded XMP metadata payload, or `null`; the array is copied
-    /// @param itemProperties opaque item properties associated with the primary image item, or `null` when absent; the
-    /// array is copied
+    /// @param opaqueItemProperties opaque item properties associated with the primary image item, or `null` when
+    /// absent; the array is copied
     @SuppressWarnings("checkstyle:ParameterNumber")
     public AvifImageInfo(
             int width,
@@ -104,7 +104,7 @@ public final class AvifImageInfo {
             byte @Nullable [] iccProfile,
             byte @Nullable [] exif,
             byte @Nullable [] xmp,
-            AvifImageItemProperty @Nullable [] itemProperties
+            AvifOpaqueItemProperty @Nullable [] opaqueItemProperties
     ) {
         if (width <= 0) {
             throw new IllegalArgumentException("width <= 0: " + width);
@@ -132,7 +132,7 @@ public final class AvifImageInfo {
         this.iccProfile = immutableBytes(iccProfile);
         this.exif = immutableBytes(exif);
         this.xmp = immutableBytes(xmp);
-        this.itemProperties = immutableItemProperties(itemProperties);
+        this.opaqueItemProperties = immutableOpaqueItemProperties(opaqueItemProperties);
     }
 
     /// Returns the display width in pixels.
@@ -381,8 +381,8 @@ public final class AvifImageInfo {
     /// returned array is empty when no such properties are associated with the primary image item.
     ///
     /// @return opaque item properties associated with the primary image item
-    public AvifImageItemProperty @Unmodifiable [] itemProperties() {
-        return itemProperties.clone();
+    public AvifOpaqueItemProperty @Unmodifiable [] opaqueItemProperties() {
+        return opaqueItemProperties.clone();
     }
 
     /// Creates immutable byte-buffer storage for one optional payload.
@@ -430,17 +430,17 @@ public final class AvifImageInfo {
 
     /// Creates immutable storage for opaque item property descriptors.
     ///
-    /// @param itemProperties the source item property descriptors, or `null`
+    /// @param opaqueItemProperties the source opaque item property descriptors, or `null`
     /// @return immutable item property descriptor storage
-    private static AvifImageItemProperty @Unmodifiable [] immutableItemProperties(
-            AvifImageItemProperty @Nullable [] itemProperties
+    private static AvifOpaqueItemProperty @Unmodifiable [] immutableOpaqueItemProperties(
+            AvifOpaqueItemProperty @Nullable [] opaqueItemProperties
     ) {
-        if (itemProperties == null || itemProperties.length == 0) {
-            return new AvifImageItemProperty[0];
+        if (opaqueItemProperties == null || opaqueItemProperties.length == 0) {
+            return new AvifOpaqueItemProperty[0];
         }
-        AvifImageItemProperty[] result = itemProperties.clone();
-        for (AvifImageItemProperty itemProperty : result) {
-            Objects.requireNonNull(itemProperty, "itemProperties element");
+        AvifOpaqueItemProperty[] result = opaqueItemProperties.clone();
+        for (AvifOpaqueItemProperty opaqueItemProperty : result) {
+            Objects.requireNonNull(opaqueItemProperty, "opaqueItemProperties element");
         }
         return result;
     }
