@@ -148,7 +148,7 @@ final class AvifGainMapToneMapper {
                 toneMapped[row + x] = alpha | (red << 16) | (green << 8) | blue;
             }
         }
-        return new AvifFrame(
+        return AvifFrame.fromOwnedPixels(
                 width,
                 height,
                 baseFrame.bitDepth(),
@@ -203,7 +203,7 @@ final class AvifGainMapToneMapper {
                 toneMapped[row + x] = alpha | (red << 32) | (green << 16) | blue;
             }
         }
-        return new AvifFrame(
+        return AvifFrame.fromOwnedPixels(
                 width,
                 height,
                 baseFrame.bitDepth(),
@@ -290,13 +290,6 @@ final class AvifGainMapToneMapper {
             this.baseOutputConversion = AvifCicpColorTransforms.conversionMatrix(baseColorInfo, effectiveOutputColorInfo);
             this.outputColorConversionRequired =
                     !AvifCicpColorTransforms.sameEffectiveRgbColorSpace(baseColorInfo, effectiveOutputColorInfo);
-        }
-
-        /// Returns the gain-map application weight.
-        ///
-        /// @return the gain-map application weight
-        private double weight() {
-            return weight;
         }
 
         /// Returns whether the gain map must be sampled.

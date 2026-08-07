@@ -34,7 +34,7 @@ jobs:
       - name: Restore pinned Firefox AVIF resources
         uses: actions/cache@v5
         with:
-          path: build/firefox-avif-test-resources
+          path: external/test-corpora/firefox-avif-ac91bfcce1bf3240e2dce40f47c372e76bc4f26c
           key: firefox-avif-ac91bfcce1bf3240e2dce40f47c372e76bc4f26c
       - name: Run Firefox AVIF compatibility gate
         run: >-
@@ -55,7 +55,7 @@ jobs:
       - name: Restore pinned Chromium AVIF resources
         uses: actions/cache@v5
         with:
-          path: build/chromium-avif-test-resources
+          path: external/test-corpora/chromium-avif-ddb449c8c2536723346df7ea26ca13d99857c302
           key: chromium-avif-ddb449c8c2536723346df7ea26ca13d99857c302
       - name: Run Chromium AVIF compatibility gate
         run: >-
@@ -76,7 +76,7 @@ jobs:
       - name: Restore pinned AOMedia corpus archive
         uses: actions/cache@v5
         with:
-          path: build/downloads/av1-avif-bf4c18d1f3971069b75e87d6ee469790589f4f09.zip
+          path: external/test-corpora/av1-avif-bf4c18d1f3971069b75e87d6ee469790589f4f09.zip
           key: aom-avif-bf4c18d1f3971069b75e87d6ee469790589f4f09
       - name: Run AOMedia AVIF corpus gate
         run: >-
@@ -124,7 +124,7 @@ jobs:
       - name: Restore pinned Argon Streams archive
         uses: actions/cache@v5
         with:
-          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          path: external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
           key: argon-av1-v2.1.1
       - name: Run Argon Streams AV1 corpus gate
         run: >-
@@ -155,7 +155,7 @@ jobs:
       - name: Restore pinned Argon Streams archive
         uses: actions/cache@v5
         with:
-          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          path: external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
           key: argon-av1-v2.1.1
       - name: Run Argon operating-point and film-grain gate
         run: >-
@@ -192,7 +192,7 @@ jobs:
       - name: Restore pinned Argon Streams archive
         uses: actions/cache@v5
         with:
-          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          path: external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
           key: argon-av1-v2.1.1
       - name: Run sharded Argon special operating-point and film-grain gate
         run: >-
@@ -229,7 +229,7 @@ jobs:
       - name: Restore pinned Argon Streams archive
         uses: actions/cache@v5
         with:
-          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          path: external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
           key: argon-av1-v2.1.1
       - name: Run sharded Argon operating-point and film-grain gate
         run: >-
@@ -261,7 +261,7 @@ jobs:
       - name: Restore pinned Argon Streams archive
         uses: actions/cache@v5
         with:
-          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          path: external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
           key: argon-av1-v2.1.1
       - name: Run Argon Streams AV1 stress gate
         run: >-
@@ -291,7 +291,7 @@ jobs:
       - name: Restore pinned Argon Streams archive
         uses: actions/cache@v5
         with:
-          path: build/downloads/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
+          path: external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip
           key: argon-av1-v2.1.1
       - name: Run Argon film-grain stress gate
         run: >-

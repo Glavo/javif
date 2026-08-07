@@ -72,7 +72,6 @@ dependencies {
     javafx("base")
     javafx("controls")
     javafx("graphics")
-    javafx("swing") // For Benchmark
 
     compileOnlyApi("org.jetbrains:annotations:26.1.0")
 
@@ -164,16 +163,19 @@ tasks.test {
     }
 }
 
+val testCorpusCacheDirectory = providers.provider {
+    layout.projectDirectory.dir("external/test-corpora")
+}
 val libavifCommit = "b54eac58daf563e9150cc6abce7631ac71b999aa"
-val libavifZip = layout.buildDirectory.file("downloads/libavif-$libavifCommit.zip")
+val libavifZip = testCorpusCacheDirectory.map { it.file("libavif-$libavifCommit.zip") }
 val aomAvifCommit = "bf4c18d1f3971069b75e87d6ee469790589f4f09"
-val aomAvifZip = layout.buildDirectory.file("downloads/av1-avif-$aomAvifCommit.zip")
+val aomAvifZip = testCorpusCacheDirectory.map { it.file("av1-avif-$aomAvifCommit.zip") }
 val aomAvifTestResourcesDirectory = layout.buildDirectory.dir("aom-avif-test-resources")
 val argonAv1Version = "2.1.1"
 val argonAv1ArchiveName = "argon_coveragetool_av1_base_and_extended_profiles_v$argonAv1Version.zip"
-val argonAv1Zip = layout.buildDirectory.file("downloads/$argonAv1ArchiveName")
+val argonAv1Zip = testCorpusCacheDirectory.map { it.file(argonAv1ArchiveName) }
 val firefoxCommit = "ac91bfcce1bf3240e2dce40f47c372e76bc4f26c"
-val firefoxAvifTestResourcesDirectory = layout.buildDirectory.dir("firefox-avif-test-resources")
+val firefoxAvifTestResourcesDirectory = testCorpusCacheDirectory.map { it.dir("firefox-avif-$firefoxCommit") }
 val firefoxGtestResourcesDirectory = firefoxAvifTestResourcesDirectory.map {
     it.dir("firefox-avif-test-data/gtest")
 }
@@ -215,7 +217,7 @@ val firefoxCrashResourceNames = listOf(
     "1910211-1.avif",
 )
 val chromiumCommit = "ddb449c8c2536723346df7ea26ca13d99857c302"
-val chromiumAvifTestResourcesDirectory = layout.buildDirectory.dir("chromium-avif-test-resources")
+val chromiumAvifTestResourcesDirectory = testCorpusCacheDirectory.map { it.dir("chromium-avif-$chromiumCommit") }
 val chromiumAvifResourcesDirectory = chromiumAvifTestResourcesDirectory.map {
     it.dir("chromium-avif-test-data")
 }

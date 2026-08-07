@@ -127,7 +127,7 @@ public final class Av1Decoder implements AutoCloseable {
         this.tileGroupHeaderParser = new TileGroupHeaderParser();
         this.tileBitstreamParser = new TileBitstreamParser();
         this.tileListParser = new TileListParser();
-        this.referenceSlots = createReferenceSlots(8);
+        this.referenceSlots = createReferenceSlots();
         this.largeScaleTileCameraReferenceSyntaxStates = new ReferenceFrameSyntaxState[8];
         this.largeScaleTileAnchorFrames = new ArrayList<>();
         this.frameReconstructor = new FrameReconstructor();
@@ -1607,11 +1607,10 @@ public final class Av1Decoder implements AutoCloseable {
 
     /// Creates one fixed-size array of empty runtime reference slots.
     ///
-    /// @param slotCount the number of reference slots to allocate
     /// @return one fixed-size array of empty runtime reference slots
-    private static RuntimeReferenceSlot[] createReferenceSlots(int slotCount) {
-        RuntimeReferenceSlot[] slots = new RuntimeReferenceSlot[slotCount];
-        for (int i = 0; i < slotCount; i++) {
+    private static RuntimeReferenceSlot[] createReferenceSlots() {
+        RuntimeReferenceSlot[] slots = new RuntimeReferenceSlot[8];
+        for (int i = 0; i < slots.length; i++) {
             slots[i] = new RuntimeReferenceSlot();
         }
         return slots;

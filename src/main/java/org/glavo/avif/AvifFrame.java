@@ -115,6 +115,52 @@ public final class AvifFrame {
         this(width, height, bitDepth, chromaFormat, frameIndex, null, PixelBuffers.immutableLongPixels(pixels));
     }
 
+    /// Creates an AVIF frame by taking exclusive ownership of packed `int` ARGB pixels.
+    ///
+    /// The caller must not retain or mutate `pixels` after this method returns.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
+    /// @param frameIndex the zero-based frame index
+    /// @param pixels exclusively owned packed non-premultiplied ARGB pixels
+    /// @return a frame backed directly by `pixels`
+    static AvifFrame fromOwnedPixels(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            Av1ChromaFormat chromaFormat,
+            int frameIndex,
+            int @Unmodifiable [] pixels
+    ) {
+        IntBuffer storage = IntBuffer.wrap(Objects.requireNonNull(pixels, "pixels")).asReadOnlyBuffer();
+        return new AvifFrame(width, height, bitDepth, chromaFormat, frameIndex, storage, null);
+    }
+
+    /// Creates an AVIF frame by taking exclusive ownership of packed `long` ARGB pixels.
+    ///
+    /// The caller must not retain or mutate `pixels` after this method returns.
+    ///
+    /// @param width the frame width in pixels
+    /// @param height the frame height in pixels
+    /// @param bitDepth the decoded bit depth
+    /// @param chromaFormat the decoded AV1 chroma sampling layout
+    /// @param frameIndex the zero-based frame index
+    /// @param pixels exclusively owned packed non-premultiplied ARGB pixels
+    /// @return a frame backed directly by `pixels`
+    static AvifFrame fromOwnedPixels(
+            int width,
+            int height,
+            AvifBitDepth bitDepth,
+            Av1ChromaFormat chromaFormat,
+            int frameIndex,
+            long @Unmodifiable [] pixels
+    ) {
+        LongBuffer storage = LongBuffer.wrap(Objects.requireNonNull(pixels, "pixels")).asReadOnlyBuffer();
+        return new AvifFrame(width, height, bitDepth, chromaFormat, frameIndex, null, storage);
+    }
+
     /// Creates a decoded AVIF frame descriptor with one available pixel representation.
     ///
     /// @param width       the frame width in pixels

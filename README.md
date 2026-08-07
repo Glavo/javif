@@ -109,6 +109,10 @@ archives are available or can be downloaded:
 ./gradlew -g .gradle-user-home chromiumAvifTest
 ```
 
+Downloaded corpus archives and browser fixtures are cached under `external/test-corpora` so that
+`clean` does not discard them. To seed the Argon cache manually, place its pinned archive at
+`external/test-corpora/argon_coveragetool_av1_base_and_extended_profiles_v2.1.1.zip`.
+
 The Firefox and Chromium tasks download small, revision-pinned selections from the browser test
 suites and verify aggregate SHA-256 digests before running compatibility tests. They cover color
 conversion matrices, bit depths, chroma layouts, alpha, animation, transforms, grids, scalable

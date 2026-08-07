@@ -31,6 +31,47 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for shared parent-frame pixel-buffer storage and lazy conversion.
 @NotNullByDefault
 final class FramePixelBufferTest {
+    /// Verifies that public array constructors retain defensive-copy semantics.
+    @Test
+    void avifFrameArrayConstructorsCopyCallerStorage() {
+        int[] intPixels = {0xFF00_0000};
+        long[] longPixels = {0xFFFF_0000_0000_0000L};
+        AvifFrame intFrame = new AvifFrame(
+                1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME, 0, intPixels
+        );
+        AvifFrame longFrame = new AvifFrame(
+                1, 1, AvifBitDepth.TEN_BITS, Av1ChromaFormat.MONOCHROME, 0, longPixels
+        );
+
+        intPixels[0] = 0xFFFF_FFFF;
+        longPixels[0] = 0xFFFF_FFFF_FFFF_FFFFL;
+
+        assertEquals(0xFF00_0000, intFrame.intPixelBuffer().get(0));
+        assertEquals(0xFFFF_0000_0000_0000L, longFrame.longPixelBuffer().get(0));
+    }
+
+    /// Verifies that package-internal owned-pixel factories retain transferred storage directly.
+    @Test
+    void avifFrameOwnedPixelFactoriesAvoidDefensiveCopies() {
+        int[] intPixels = {0xFF00_0000};
+        long[] longPixels = {0xFFFF_0000_0000_0000L};
+        AvifFrame intFrame = AvifFrame.fromOwnedPixels(
+                1, 1, AvifBitDepth.EIGHT_BITS, Av1ChromaFormat.MONOCHROME, 0, intPixels
+        );
+        AvifFrame longFrame = AvifFrame.fromOwnedPixels(
+                1, 1, AvifBitDepth.TEN_BITS, Av1ChromaFormat.MONOCHROME, 0, longPixels
+        );
+
+        // Deliberately inspect the transferred arrays to guard the internal no-copy contract.
+        intPixels[0] = 0xFFFF_FFFF;
+        longPixels[0] = 0xFFFF_FFFF_FFFF_FFFFL;
+
+        assertEquals(0xFFFF_FFFF, intFrame.intPixelBuffer().get(0));
+        assertEquals(0xFFFF_FFFF_FFFF_FFFFL, longFrame.longPixelBuffer().get(0));
+        assertTrue(intFrame.intPixelBuffer().isReadOnly());
+        assertTrue(longFrame.longPixelBuffer().isReadOnly());
+    }
+
     /// Verifies that `AvifFrame` lazily expands `int` pixels into `long` pixels.
     @Test
     void avifFrameLazilyConvertsIntPixelsToLongPixels() {
