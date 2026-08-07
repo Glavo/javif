@@ -35,12 +35,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests memory, file-backed, and bounded progressive data sources.
 @NotNullByDefault
 final class RandomAccessDataSourceTest {
-    /// Verifies positional scalar and bulk reads over owned memory.
+    /// Verifies positional scalar and bulk reads over borrowed array memory.
     ///
     /// @throws IOException if the source cannot be read or closed
     @Test
-    void readsOwnedBytesAndRejectsReadsAfterClose() throws IOException {
-        RandomAccessDataSource source = RandomAccessDataSource.ofOwnedBytes(new byte[]{1, 2, 3, 4, 5});
+    void readsBorrowedBytesAndRejectsReadsAfterClose() throws IOException {
+        RandomAccessDataSource source = RandomAccessDataSource.ofBytes(new byte[]{1, 2, 3, 4, 5});
         assertEquals(5L, source.size());
         assertEquals(3, source.readByte(2));
 
@@ -50,6 +50,28 @@ final class RandomAccessDataSourceTest {
 
         source.close();
         assertThrows(IOException.class, () -> source.readByte(0));
+    }
+
+    /// Verifies a direct buffer's captured region is read without changing caller-visible bounds.
+    ///
+    /// @throws IOException if the source cannot be read or closed
+    @Test
+    void readsBorrowedDirectByteBufferRegionWithoutChangingCallerState() throws IOException {
+        ByteBuffer buffer = ByteBuffer.allocateDirect(6);
+        buffer.put(new byte[]{9, 1, 2, 3, 8, 7});
+        buffer.position(1);
+        buffer.limit(4);
+        RandomAccessDataSource source = RandomAccessDataSource.ofByteBuffer(buffer);
+
+        assertEquals(3L, source.size());
+        assertEquals(1, source.readByte(0));
+        assertArrayEquals(new byte[]{2, 3}, source.readBytes(1, 2));
+        assertEquals(1, buffer.position());
+        assertEquals(4, buffer.limit());
+
+        source.close();
+        buffer.put(1, (byte) 6);
+        assertEquals(6, buffer.get(1));
     }
 
     /// Verifies file-backed reads and release of the owned file handle.

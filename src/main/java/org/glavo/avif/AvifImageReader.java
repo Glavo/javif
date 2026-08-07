@@ -97,6 +97,7 @@ public final class AvifImageReader implements AutoCloseable {
     /// Opens an AVIF image reader over a byte array.
     ///
     /// This method is equivalent to `AvifImageReaderFactory.DEFAULT.open(source)`.
+    /// The reader borrows the array, which must not be modified until the reader is closed.
     ///
     /// @param source the complete AVIF source bytes
     /// @return a new AVIF image reader
@@ -108,6 +109,8 @@ public final class AvifImageReader implements AutoCloseable {
     /// Opens an AVIF image reader over a byte buffer.
     ///
     /// This method is equivalent to `AvifImageReaderFactory.DEFAULT.open(source)`.
+    /// The reader borrows the buffer's remaining region without changing its position or limit.
+    /// The region must not be modified through any alias until the reader is closed.
     ///
     /// @param source the source byte buffer, read from its current position to its limit
     /// @return a new AVIF image reader

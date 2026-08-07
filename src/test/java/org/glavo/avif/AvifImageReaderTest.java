@@ -341,31 +341,40 @@ final class AvifImageReaderTest {
         }
     }
 
-    /// Verifies that array and buffer inputs are retained independently of caller mutations.
+    /// Verifies borrowed array and buffer inputs decode without changing captured buffer bounds.
     ///
-    /// @throws IOException if either reader cannot parse or decode the copied input
+    /// @throws IOException if a reader cannot parse or decode the borrowed input
     @Test
-    void openCopiesCallerOwnedMemoryInputs() throws IOException {
+    void openBorrowsMemoryInputsAndPreservesBufferBounds() throws IOException {
         byte[] arrayBytes = minimalAvifStillImage();
         try (AvifImageReader reader = AvifImageReader.open(arrayBytes)) {
-            Arrays.fill(arrayBytes, (byte) 0);
             assertEquals(64, reader.readFrame().width());
         }
 
         byte[] bufferBytes = minimalAvifStillImage();
-        ByteBuffer buffer = ByteBuffer.allocate(bufferBytes.length + 3);
+        ByteBuffer buffer = ByteBuffer.allocate(bufferBytes.length + 7);
         buffer.put(new byte[]{1, 2, 3});
         buffer.put(bufferBytes);
-        buffer.flip();
+        buffer.put(new byte[]{4, 5, 6, 7});
         buffer.position(3);
+        buffer.limit(3 + bufferBytes.length);
         int originalPosition = buffer.position();
         int originalLimit = buffer.limit();
         try (AvifImageReader reader = AvifImageReader.open(buffer)) {
-            Arrays.fill(buffer.array(), (byte) 0);
+            assertEquals(originalPosition, buffer.position());
+            assertEquals(originalLimit, buffer.limit());
+            buffer.limit(buffer.capacity());
+            buffer.position(0);
             assertEquals(64, reader.readFrame().width());
+            assertEquals(0, buffer.position());
+            assertEquals(buffer.capacity(), buffer.limit());
         }
-        assertEquals(originalPosition, buffer.position());
-        assertEquals(originalLimit, buffer.limit());
+
+        ByteBuffer directBuffer = ByteBuffer.allocateDirect(bufferBytes.length);
+        directBuffer.put(bufferBytes).flip();
+        try (AvifImageReader reader = AvifImageReader.open(directBuffer.asReadOnlyBuffer())) {
+            assertEquals(64, reader.readFrame().height());
+        }
     }
 
     /// Verifies that a path-backed reader decodes lazily and releases its file handle on close.

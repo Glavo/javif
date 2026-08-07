@@ -43,7 +43,7 @@ public final class BoxInput {
     ///
     /// @param source the complete source bytes
     public BoxInput(byte[] source) {
-        this(RandomAccessDataSource.ofOwnedBytes(Objects.requireNonNull(source, "source")));
+        this(RandomAccessDataSource.ofBytes(Objects.requireNonNull(source, "source")));
     }
 
     /// Creates a bounded input over a retained positional source.

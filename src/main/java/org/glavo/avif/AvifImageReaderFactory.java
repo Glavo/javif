@@ -136,8 +136,8 @@ public final class AvifImageReaderFactory {
 
     /// Opens an AVIF image reader over a byte array.
     ///
-    /// The source is copied before this method returns. Subsequent source mutations do not affect
-    /// the reader.
+    /// The reader borrows the array without copying it. The caller must not modify the array until
+    /// the reader is closed. If this method fails, the array is no longer retained.
     ///
     /// @param source the complete AVIF source bytes
     /// @return a new AVIF image reader
@@ -146,24 +146,25 @@ public final class AvifImageReaderFactory {
     public AvifImageReader open(byte[] source) throws AvifDecodeException {
         byte[] checkedSource = Objects.requireNonNull(source, "source");
         validateInputSize(checkedSource.length);
-        return new AvifImageReader(RandomAccessDataSource.ofOwnedBytes(checkedSource.clone()), this);
+        return new AvifImageReader(RandomAccessDataSource.ofBytes(checkedSource), this);
     }
 
     /// Opens an AVIF image reader over a byte buffer.
     ///
-    /// Bytes from the source's current position to its limit are copied without changing the
-    /// source position or limit.
+    /// The reader borrows the region from the source's current position to its limit without
+    /// copying it. This method and subsequent reader operations do not change the source's position
+    /// or limit, and later changes to those bounds do not affect the captured region. The caller
+    /// must not modify that region through the source, a backing array, or another alias until the
+    /// reader is closed. If this method fails, the region is no longer retained.
     ///
     /// @param source the source byte buffer
     /// @return a new AVIF image reader
     /// @throws AvifDecodeException if the input exceeds the configured limit or is not a supported
     ///                              AVIF container
     public AvifImageReader open(ByteBuffer source) throws AvifDecodeException {
-        ByteBuffer copy = Objects.requireNonNull(source, "source").slice();
-        validateInputSize(copy.remaining());
-        byte[] bytes = new byte[copy.remaining()];
-        copy.get(bytes);
-        return new AvifImageReader(RandomAccessDataSource.ofOwnedBytes(bytes), this);
+        ByteBuffer checkedSource = Objects.requireNonNull(source, "source");
+        validateInputSize(checkedSource.remaining());
+        return new AvifImageReader(RandomAccessDataSource.ofByteBuffer(checkedSource), this);
     }
 
     /// Opens an AVIF image reader over an input stream.

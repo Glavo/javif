@@ -19,7 +19,7 @@ import org.glavo.avif.AvifDecodeException;
 import org.glavo.avif.AvifErrorCode;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
 import java.io.Closeable;
 import java.io.EOFException;
@@ -31,20 +31,22 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 
-/// Provides bounded positional reads over owned memory, an open file, or a borrowed forward-only stream.
+/// Provides bounded positional reads over borrowed memory, an open file, or a borrowed forward-only stream.
 ///
-/// Instances are not thread-safe. A file-backed source owns its channel. An array-backed source
-/// takes ownership of its array without copying it. A forward-only source borrows its stream and
-/// never closes it; reads behind its bounded cache fail with
+/// Instances are not thread-safe. A file-backed source owns its channel. A memory-backed source
+/// retains its array or buffer region without copying its contents. A forward-only source borrows
+/// its stream and never closes it; reads behind its bounded cache fail with
 /// [AvifErrorCode#SEEKABLE_SOURCE_REQUIRED].
 @NotNullByDefault
 public final class RandomAccessDataSource implements Closeable {
     /// The byte count retained for cached and forward-only reads.
     private static final int READ_CACHE_SIZE = 64 * 1024;
 
-    /// The owned array, or `null` for a file-backed source.
-    private final byte @Nullable @Unmodifiable [] bytes;
-    /// The owned file channel, or `null` for an array-backed source.
+    /// The borrowed array, or `null` when the source is not array-backed.
+    private final byte @Nullable [] bytes;
+    /// The borrowed read-only buffer region, or `null` when the source is not buffer-backed.
+    private final @Nullable @UnmodifiableView ByteBuffer memoryBuffer;
+    /// The owned file channel, or `null` when the source is not file-backed.
     private final @Nullable FileChannel channel;
     /// The borrowed forward-only stream, or `null` for a random-access source.
     private final @Nullable InputStream stream;
@@ -62,14 +64,27 @@ public final class RandomAccessDataSource implements Closeable {
     /// Whether this source has been closed.
     private boolean closed;
 
-    /// Creates an array-backed source that takes ownership of the supplied bytes.
+    /// Creates an array-backed source that retains the supplied bytes.
     ///
-    /// @param bytes the bytes whose ownership is transferred to the source
+    /// @param bytes the borrowed source bytes
     private RandomAccessDataSource(byte[] bytes) {
         this.bytes = Objects.requireNonNull(bytes, "bytes");
+        this.memoryBuffer = null;
         this.channel = null;
         this.stream = null;
         this.size = bytes.length;
+        this.readCache = null;
+    }
+
+    /// Creates a buffer-backed source that retains the supplied buffer's remaining region.
+    ///
+    /// @param buffer the borrowed source buffer
+    private RandomAccessDataSource(ByteBuffer buffer) {
+        this.bytes = null;
+        this.memoryBuffer = Objects.requireNonNull(buffer, "buffer").slice().asReadOnlyBuffer();
+        this.channel = null;
+        this.stream = null;
+        this.size = memoryBuffer.remaining();
         this.readCache = null;
     }
 
@@ -79,6 +94,7 @@ public final class RandomAccessDataSource implements Closeable {
     /// @throws IOException if the channel size cannot be queried
     private RandomAccessDataSource(FileChannel channel) throws IOException {
         this.bytes = null;
+        this.memoryBuffer = null;
         this.channel = Objects.requireNonNull(channel, "channel");
         this.stream = null;
         this.size = channel.size();
@@ -94,20 +110,34 @@ public final class RandomAccessDataSource implements Closeable {
             throw new IllegalArgumentException("maximumSize <= 0: " + maximumSize);
         }
         this.bytes = null;
+        this.memoryBuffer = null;
         this.channel = null;
         this.stream = Objects.requireNonNull(stream, "stream");
         this.size = maximumSize;
         this.readCache = new byte[READ_CACHE_SIZE];
     }
 
-    /// Creates a source that takes ownership of a byte array.
+    /// Creates a source that borrows a byte array without copying it.
     ///
-    /// The caller must not access or modify the array after this method returns.
+    /// The caller must not modify the array while the source is in use.
     ///
-    /// @param bytes the bytes whose ownership is transferred
-    /// @return the owned random-access source
-    public static RandomAccessDataSource ofOwnedBytes(byte[] bytes) {
+    /// @param bytes the bytes to retain
+    /// @return the borrowed memory source
+    public static RandomAccessDataSource ofBytes(byte[] bytes) {
         return new RandomAccessDataSource(bytes);
+    }
+
+    /// Creates a source that borrows a byte buffer's remaining region without copying it.
+    ///
+    /// The captured region starts at the buffer's current position and ends at its current limit.
+    /// Creating and reading the source does not change the supplied buffer's position or limit.
+    /// The caller must not modify the region through the buffer, its backing storage, or another
+    /// alias while the source is in use.
+    ///
+    /// @param buffer the buffer whose remaining region is retained
+    /// @return the borrowed memory source
+    public static RandomAccessDataSource ofByteBuffer(ByteBuffer buffer) {
+        return new RandomAccessDataSource(buffer);
     }
 
     /// Opens a persistent file for positional reads.
@@ -178,6 +208,9 @@ public final class RandomAccessDataSource implements Closeable {
         if (bytes != null) {
             return bytes[(int) position];
         }
+        if (memoryBuffer != null) {
+            return memoryBuffer.get((int) position);
+        }
 
         byte[] cache = Objects.requireNonNull(readCache, "readCache");
         if (position < readCacheOffset || position >= readCacheOffset + readCacheLength) {
@@ -209,6 +242,16 @@ public final class RandomAccessDataSource implements Closeable {
         }
         if (bytes != null) {
             checkedDestination.put(bytes, (int) position, length);
+            return;
+        }
+        if (memoryBuffer != null) {
+            int start = (int) position;
+            memoryBuffer.limit(start + length).position(start);
+            try {
+                checkedDestination.put(memoryBuffer);
+            } finally {
+                memoryBuffer.clear();
+            }
             return;
         }
 
@@ -377,7 +420,7 @@ public final class RandomAccessDataSource implements Closeable {
 
     /// Closes an owned file channel.
     ///
-    /// Closing an array-backed or borrowed-stream source has no external effect. Repeated calls
+    /// Closing a memory-backed or borrowed-stream source has no external effect. Repeated calls
     /// have no effect.
     ///
     /// @throws IOException if an owned channel cannot be closed

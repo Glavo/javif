@@ -102,7 +102,7 @@ public final class AvifPayload {
     /// @return the independently owned payload
     public static AvifPayload copyOf(byte[] bytes) {
         byte[] copy = Objects.requireNonNull(bytes, "bytes").clone();
-        RandomAccessDataSource source = RandomAccessDataSource.ofOwnedBytes(copy);
+        RandomAccessDataSource source = RandomAccessDataSource.ofBytes(copy);
         return new AvifPayload(source, new long[]{0L}, new int[]{copy.length});
     }
 

@@ -82,7 +82,7 @@ public final class AvifContainerParser {
     /// @return parsed AVIF container data
     /// @throws AvifDecodeException if the container is malformed or unsupported
     public static AvifContainer parse(byte[] source) throws AvifDecodeException {
-        return parse(RandomAccessDataSource.ofOwnedBytes(Objects.requireNonNull(source, "source")));
+        return parse(RandomAccessDataSource.ofBytes(Objects.requireNonNull(source, "source")));
     }
 
     /// Parses AVIF container data from a retained positional source.
